@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Player cmmz6lv5i000n3enxtjwyiyq8 Stats</title>
+  <style>
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #101828;
+      background: #f7f7f7;
+      margin: 0;
+    }
+    .page {
+      max-width: 960px;
+      margin: 40px auto;
+      padding: 32px 36px;
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(14, 24, 44, 0.1);
+    }
+    h1 {
+      margin-bottom: 0.4rem;
+    }
+    .meta {
+      font-size: 0.9rem;
+      color: #475467;
+      margin-bottom: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+    }
+    .metric {
+      padding: 16px;
+      border-radius: 16px;
+      background: #f4f6fb;
+      border: 1px solid #e4e7ec;
+    }
+    .metric-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #667085;
+      margin-bottom: 6px;
+    }
+    .metric-value {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: #101828;
+    }
+    .actions {
+      margin-top: 30px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 10px 20px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.fetch {
+      background: #1d4ed8;
+      color: white;
+    }
+    button.reset {
+      background: #e5e7eb;
+      color: #111827;
+    }
+    pre {
+      margin-top: 24px;
+      padding: 16px;
+      border-radius: 16px;
+      background: #0f172a;
+      color: #f8fafc;
+      overflow-x: auto;
+      max-height: 320px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Player Stats Snapshot</h1>
+    <div class="meta">Player <strong>cmmz6lv5i000n3enxtjwyiyq8</strong> — live stats from <code>/v1/elite/player/:id/stats-extended</code></div>
+    <div class="actions">
+      <button class="fetch" id="fetchBtn">Fetch latest data</button>
+      <button class="reset" id="resetBtn">Clear</button>
+    </div>
+    <div class="grid" id="metricsGrid">
+      <div class="metric"><div class="metric-title">Matches Played</div><div class="metric-value" data-key="matchesPlayed">—</div></div>
+      <div class="metric"><div class="metric-title">Matches Won</div><div class="metric-value" data-key="matchesWon">—</div></div>
+      <div class="metric"><div class="metric-title">Win %</div><div class="metric-value" data-key="winPct">—</div></div>
+      <div class="metric"><div class="metric-title">Chase Matches</div><div class="metric-value" data-key="chaseMatches">—</div></div>
+      <div class="metric"><div class="metric-title">Chase Wins</div><div class="metric-value" data-key="chaseWins">—</div></div>
+      <div class="metric"><div class="metric-title">Defend Matches</div><div class="metric-value" data-key="defendMatches">—</div></div>
+      <div class="metric"><div class="metric-title">Defend Wins</div><div class="metric-value" data-key="defendWins">—</div></div>
+    </div>
+    <pre id="debug">No data yet.</pre>
+  </div>
+
+  <script>
+    const fetchBtn = document.getElementById('fetchBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const debugPre = document.getElementById('debug');
+    const metricsGrid = document.getElementById('metricsGrid');
+    const url = 'https://swing-backend-nbid5gga4q-el.a.run.app/v1/elite/player/cmmz6lv5i000n3enxtjwyiyq8/stats-extended';
+
+    fetchBtn.addEventListener('click', async () => {
+      updateDebug('fetching...');
+      try {
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (!payload.success || !payload.data) throw new Error('missing data');
+        const metrics = payload.data.metrics || {};
+        metricsGrid.querySelectorAll('[data-key]').forEach((node) => {
+          const key = node.getAttribute('data-key');
+          node.textContent = metrics[key] ?? '—';
+        });
+        updateDebug(JSON.stringify(payload, null, 2));
+      } catch (err) {
+        updateDebug('error: ' + (err.message || err));
+      }
+    });
+
+    resetBtn.addEventListener('click', () => {
+      metricsGrid.querySelectorAll('[data-key]').forEach((node) => {
+        node.textContent = '—';
+      });
+      updateDebug('cleared');
+    });
+
+    function updateDebug(message) {
+      debugPre.textContent = typeof message === 'string' ? message : JSON.stringify(message, null, 2);
+    }
+  </script>
+</body>
+</html>

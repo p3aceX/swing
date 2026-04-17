@@ -1,0 +1,36 @@
+{
+  "name": "swing-backend",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "start:api": "npm run start --workspace=@swing/api",
+    "start:worker": "npm run start:worker --workspace=@swing/api",
+    "db:generate": "turbo db:generate",
+    "db:migrate": "turbo db:migrate",
+    "db:studio": "cd packages/db && npx prisma studio",
+    "perf:reconcile": "npx tsx scripts/reconcile-performance-state.ts",
+    "perf:smoke": "npx tsx scripts/smoke-performance-read-cutover.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "prettier": "^3.2.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "npm@10.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^8.3.1",
+    "@supabase/supabase-js": "^2.103.0"
+  }
+}

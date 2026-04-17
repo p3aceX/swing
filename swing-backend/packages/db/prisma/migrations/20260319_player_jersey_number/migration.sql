@@ -1,0 +1,1 @@
+ALTER TABLE "PlayerProfile" ADD COLUMN IF NOT EXISTS "jerseyNumber" INTEGER;

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@swing/contracts": ["../../packages/contracts/dist"],
+      "@swing/db": ["../../packages/db/dist"],
+      "@swing/types": ["../../packages/types/dist"],
+      "@swing/utils": ["../../packages/utils/dist"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

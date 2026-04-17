@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "594513906251",
+    "project_id": "swing-35d52",
+    "storage_bucket": "swing-35d52.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:594513906251:android:bb4fb751232fff7ce41bce",
+        "android_client_info": {
+          "package_name": "com.app.swing"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDa9s9t5nGb_RZqsYrhcFdpJMJB_3XbF0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:594513906251:android:7d54725cccf39b08e41bce",
+        "android_client_info": {
+          "package_name": "com.swing.swing_b2b"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDa9s9t5nGb_RZqsYrhcFdpJMJB_3XbF0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

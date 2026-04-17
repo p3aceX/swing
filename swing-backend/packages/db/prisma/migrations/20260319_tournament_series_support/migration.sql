@@ -1,0 +1,4 @@
+ALTER TYPE "TournamentFormat" ADD VALUE IF NOT EXISTS 'SERIES';
+
+ALTER TABLE "Tournament"
+ADD COLUMN IF NOT EXISTS "seriesMatchCount" INTEGER;

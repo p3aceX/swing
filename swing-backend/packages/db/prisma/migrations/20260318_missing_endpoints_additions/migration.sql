@@ -1,0 +1,16 @@
+ALTER TABLE "Match"
+  ADD COLUMN IF NOT EXISTS "teamACaptainId" TEXT,
+  ADD COLUMN IF NOT EXISTS "teamBCaptainId" TEXT;
+
+ALTER TABLE "MatchmakingQueue"
+  ADD COLUMN IF NOT EXISTS "latitude" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "longitude" DOUBLE PRECISION;
+
+ALTER TABLE "MatchmakingRequest"
+  ADD COLUMN IF NOT EXISTS "opponentPlayerProfileId" TEXT,
+  ADD COLUMN IF NOT EXISTS "initiatorQueueId" TEXT,
+  ADD COLUMN IF NOT EXISTS "opponentQueueId" TEXT,
+  ADD COLUMN IF NOT EXISTS "proposedArenaId" TEXT,
+  ADD COLUMN IF NOT EXISTS "proposedDateTime" TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS "costPerPlayerPaise" INTEGER,
+  ADD COLUMN IF NOT EXISTS "confirmedByPlayerProfileIds" TEXT[] NOT NULL DEFAULT '{}';

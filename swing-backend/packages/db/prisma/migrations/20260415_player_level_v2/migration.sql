@@ -1,0 +1,20 @@
+DO $$ BEGIN
+  ALTER TYPE "PlayerLevel" ADD VALUE 'DIVISION' AFTER 'CORPORATE';
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  ALTER TYPE "PlayerLevel" ADD VALUE 'IPL' AFTER 'STATE';
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  ALTER TYPE "PlayerLevel" ADD VALUE 'INTERNATIONAL' AFTER 'IPL';
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+ALTER TABLE "PlayerProfile"
+ALTER COLUMN "level" SET DEFAULT 'CLUB';

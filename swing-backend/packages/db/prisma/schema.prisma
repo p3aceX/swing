@@ -1,0 +1,4170 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// SECTION 1 — ENUMS
+// ============================================================
+
+enum UserRole {
+  BUSINESS_OWNER
+  PLAYER
+  COACH
+  ACADEMY_OWNER
+  ARENA_OWNER
+  ARENA_MANAGER
+  PARENT
+  STORE_OWNER
+  DELIVERY_PARTNER
+  SWING_ADMIN
+  SWING_SUPPORT
+}
+
+enum VerificationLevel {
+  UNVERIFIED
+  LEVEL_1
+  LEVEL_2
+  LEVEL_3
+}
+
+enum BattingStyle {
+  RIGHT_HAND
+  LEFT_HAND
+}
+
+enum BowlingStyle {
+  RIGHT_ARM_FAST
+  RIGHT_ARM_MEDIUM
+  RIGHT_ARM_OFFBREAK
+  RIGHT_ARM_LEGBREAK
+  LEFT_ARM_FAST
+  LEFT_ARM_MEDIUM
+  LEFT_ARM_ORTHODOX
+  LEFT_ARM_CHINAMAN
+  NOT_A_BOWLER
+}
+
+enum PlayerRole {
+  BATSMAN
+  BOWLER
+  ALL_ROUNDER
+  WICKET_KEEPER
+  WICKET_KEEPER_BATSMAN
+}
+
+enum PlayerLevel {
+  BEGINNER
+  CLUB
+  CORPORATE
+  DIVISION
+  IPL
+  INTERNATIONAL
+  ACADEMY
+  DISTRICT
+  STATE
+  NATIONAL
+}
+
+enum MatchFormat {
+  T10
+  T20
+  ONE_DAY
+  TWO_INNINGS
+  BOX_CRICKET
+  CUSTOM
+  TEST
+}
+
+enum MatchType {
+  ACADEMY
+  TOURNAMENT
+  CORPORATE
+  RANKED
+  FRIENDLY
+}
+
+enum MatchStatus {
+  SCHEDULED
+  TOSS_DONE
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+  CANCELLED
+}
+
+enum CompetitiveRankKey {
+  ROOKIE
+  STRIKER
+  VANGUARD
+  PHANTOM
+  DOMINION
+  ASCENDANT
+  IMMORTAL
+  APEX
+}
+
+enum PlayerIndexSnapshotType {
+  MATCH
+  LAST_5
+  LAST_10
+  SEASON
+  LIFETIME
+  DAILY
+}
+
+enum PhysicalSampleSourceType {
+  MATCH_PROXY
+  WEARABLE
+  MANUAL
+  TRAINING_DEVICE
+}
+
+enum CompetitiveResult {
+  WIN
+  LOSS
+  TIE
+  NO_RESULT
+}
+
+enum ChatConversationType {
+  DIRECT
+  TEAM_CHAT
+}
+
+enum FollowTargetType {
+  PLAYER
+  TEAM
+  TOURNAMENT
+}
+
+enum ChatMessageKind {
+  TEXT
+  SYSTEM
+}
+
+enum ProfileShowcaseItemType {
+  INSTAGRAM_REEL
+  YOUTUBE_SHORT
+  VIDEO
+  IMAGE
+  MATCH_HIGHLIGHT
+  LINK
+}
+
+enum BallOutcome {
+  DOT
+  SINGLE
+  DOUBLE
+  TRIPLE
+  FOUR
+  FIVE
+  SIX
+  WIDE
+  NO_BALL
+  WICKET
+  BYE
+  LEG_BYE
+}
+
+enum DismissalType {
+  BOWLED
+  CAUGHT
+  CAUGHT_BEHIND
+  CAUGHT_AND_BOWLED
+  LBW
+  RUN_OUT
+  STUMPED
+  HIT_WICKET
+  HIT_BALL_TWICE
+  RETIRED_HURT
+  RETIRED_OUT
+  OBSTRUCTING_FIELD
+  NOT_OUT
+}
+
+enum SceneType {
+  PRE_MATCH
+  LIVE_SCORE
+  OVER_BREAK
+  INNINGS_BREAK
+  AD_BREAK
+  POST_MATCH
+  CUSTOM
+}
+
+enum TriggerEventType {
+  MATCH_STARTED
+  TOSS_DONE
+  OVER_COMPLETED
+  INNINGS_COMPLETED
+  MATCH_COMPLETED
+  WICKET_FALLEN
+}
+
+enum AdSlotType {
+  IMAGE
+  VIDEO
+  BRAND
+}
+
+enum OverlayPackKind {
+  DEFAULT
+  TOURNAMENT
+  CUSTOM
+}
+
+enum SessionType {
+  PACE_NETS
+  SPIN_NETS
+  THROWDOWN
+  POWER_HITTING
+  FITNESS
+  FIELDING
+  MATCH_PRACTICE
+  VIDEO_REVIEW
+  CUSTOM
+}
+
+enum PracticeSessionStatus {
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+  WALK_IN
+  EARLY_EXIT
+}
+
+enum AttendanceJoinMethod {
+  QR
+  SELF_APP
+  COACH_MARKED
+}
+
+enum SlotStatus {
+  AVAILABLE
+  HELD
+  PENDING_PAYMENT
+  CONFIRMED
+  CHECKED_IN
+  CANCELLED
+  COMPLETED
+  MAINTENANCE
+  BLOCKED
+}
+
+enum FacilityUnitType {
+  FULL_GROUND
+  HALF_GROUND
+  TURF
+  CRICKET_NET
+  INDOOR_NET
+  BADMINTON_COURT
+  PICKLEBALL_COURT
+  FUTSAL_COURT
+  MULTI_SPORT
+  OTHER
+}
+
+enum Sport {
+  CRICKET
+  FUTSAL
+  PICKLEBALL
+  BADMINTON
+  FOOTBALL
+  BASKETBALL
+  TENNIS
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUND_PENDING
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PlanTier {
+  FREE
+  PLAYER_PRO
+  CLUB_BASIC
+  CLUB_PRO
+  CLUB_ELITE
+  ARENA_BASIC
+  ARENA_PRO
+}
+
+enum QueueStatus {
+  WAITING
+  MATCHED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  WHATSAPP
+  EMAIL
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
+
+enum DrillDifficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  ELITE
+}
+
+enum RoleTag {
+  BATSMAN
+  BOWLER
+  ALL_ROUNDER
+  FIELDER
+  WICKET_KEEPER
+}
+
+enum WatchSeverity {
+  MONITOR
+  URGENT
+}
+
+enum DrillCategory {
+  TECHNIQUE
+  FITNESS
+  MENTAL
+  MATCH_SIMULATION
+}
+
+enum DrillTargetUnit {
+  BALLS
+  OVERS
+  MINUTES
+  REPS
+  SESSIONS
+}
+
+enum SignalOverall {
+  LOOKING_GOOD
+  NEEDS_WORK
+  WATCH_CLOSELY
+}
+
+enum ItemCondition {
+  NEW
+  GOOD
+  FAIR
+  POOR
+  RETIRED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+enum GigSessionType {
+  IN_PERSON
+  ONLINE
+  HYBRID
+}
+
+enum GigBookingStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  RESCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW_PLAYER
+  NO_SHOW_COACH
+  DISPUTED
+}
+
+enum TournamentFormat {
+  LEAGUE
+  KNOCKOUT
+  GROUP_STAGE_KNOCKOUT
+  DOUBLE_ELIMINATION
+  SUPER_LEAGUE
+  SERIES
+}
+
+enum TeamType {
+  CLUB
+  CORPORATE
+  ACADEMY
+  SCHOOL
+  COLLEGE
+  DISTRICT
+  STATE
+  NATIONAL
+  FRIENDLY
+  GULLY
+}
+
+enum BodyTransformDirection {
+  CUT
+  BULK
+  RECOMPOSE
+  MAINTAIN
+}
+
+enum NutritionObjective {
+  FAT_LOSS
+  MAINTENANCE
+  MUSCLE_GAIN
+  PERFORMANCE_FUELING
+}
+
+// ============================================================
+// SECTION 2 — USERS & AUTH
+// ============================================================
+
+model User {
+  id            String     @id @default(cuid())
+  phone         String     @unique
+  email         String?    @unique
+  name          String
+  avatarUrl     String?
+  roles         UserRole[]
+  activeRole    UserRole   @default(PLAYER)
+  isVerified    Boolean    @default(false)
+  isActive      Boolean    @default(true)
+  isBanned      Boolean    @default(false)
+  banReason     String?
+  isBlocked     Boolean    @default(false)
+  blockedReason String?
+  language      String     @default("en")
+  deviceTokens  String[]
+  fcmTokens     String[]
+  lastLoginAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  playerProfile          PlayerProfile?
+  coachProfile           CoachProfile?
+  academyOwnerProfile    AcademyOwnerProfile?
+  arenaOwnerProfile      ArenaOwnerProfile?
+  arenaManagerProfiles   ArenaManager[]
+  parentProfile          ParentProfile?
+  otpVerifications       OtpVerification[]
+  notifications          Notification[]
+  payments               Payment[]
+  supportTickets         SupportTicket[]
+  reviews                Review[]
+  hostedTournaments      Tournament[]
+  hostedEvents           Event[]
+  refreshTokens          RefreshToken[]
+  notificationPreference NotificationPreference?
+  businessAccount        BusinessAccount?
+
+  storeOwnerProfile      StoreOwnerProfile?
+  deliveryPartnerProfile DeliveryPartnerProfile?
+  storeOrders            StoreOrder[]
+  deliveryJobs           DeliveryJob[]
+
+  @@index([phone])
+}
+
+model BusinessAccount {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  businessName       String
+  contactName        String?
+  phone              String?
+  email              String?
+  city               String?
+  state              String?
+  address            String?
+  pincode            String?
+  gstNumber          String?
+  panNumber          String?
+  onboardingComplete Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coachProfile CoachProfile?
+  academies    Academy[]
+  arenas       Arena[]
+  stores       Store[]
+
+  @@index([city])
+  @@map("business_accounts")
+}
+
+model OtpVerification {
+  id        String    @id @default(cuid())
+  userId    String
+  phone     String
+  code      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([phone, code])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// ============================================================
+// SECTION 3 — PLAYER PROFILE
+// ============================================================
+
+model PlayerProfile {
+  id             String       @id @default(cuid())
+  userId         String       @unique
+  username       String?      @unique // public @handle — shown in app as the player's Swing ID
+  dateOfBirth    DateTime?
+  gender         String?
+  heightCm       Float?
+  weightKg       Float?
+  waistCircumferenceCm Float?
+  neckCircumferenceCm  Float?
+  hipCircumferenceCm   Float?
+  city           String?
+  state          String?
+  playerRole     PlayerRole   @default(BATSMAN)
+  battingStyle   BattingStyle @default(RIGHT_HAND)
+  bowlingStyle   BowlingStyle @default(NOT_A_BOWLER)
+  level          PlayerLevel  @default(CLUB)
+  goals          String?
+  jerseyNumber   Int?
+  bio            String?
+  availableDays  String[]
+  preferredTimes String[]
+  locationRadius Int          @default(10)
+  isPublic       Boolean      @default(true)
+  showStats      Boolean      @default(true)
+  showLocation   Boolean      @default(false)
+  scoutingOptIn  Boolean      @default(false)
+
+  followersCount Int @default(0) // denormalised — updated on follow / unfollow
+  followingCount Int @default(0)
+
+  swingIndex       Float @default(0)
+  battingScore     Float @default(0)
+  bowlingScore     Float @default(0)
+  fieldingScore    Float @default(0)
+  fitnessScore     Float @default(0)
+  gameIntelligence Float @default(0)
+  coachability     Float @default(0)
+
+  matchesPlayed Int @default(0)
+  matchesWon    Int @default(0)
+  noShowCount   Int @default(0)
+
+  totalRuns       Int   @default(0)
+  totalBallsFaced Int   @default(0)
+  highestScore    Int   @default(0)
+  fifties         Int   @default(0)
+  hundreds        Int   @default(0)
+  fours           Int   @default(0)
+  sixes           Int   @default(0)
+  battingAverage  Float @default(0)
+  strikeRate      Float @default(0)
+
+  totalWickets      Int     @default(0)
+  totalOversBowled  Float   @default(0)
+  bestBowling       String?
+  fiveWicketHauls   Int     @default(0)
+  bowlingAverage    Float   @default(0)
+  economyRate       Float   @default(0)
+  bowlingStrikeRate Float   @default(0)
+
+  catches   Int @default(0)
+  stumpings Int @default(0)
+  runOuts   Int @default(0)
+
+  verificationLevel VerificationLevel @default(UNVERIFIED)
+  verifiedAt        DateTime?
+  verifiedById      String?
+
+  // Academy registration fields
+  bloodGroup            String?
+  aadhaarLast4          String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+
+  hasActiveInjury Boolean  @default(false)
+  injuryNote      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  playerMatchStats         PlayerMatchStats[]
+  battingEvents            BallEvent[]                   @relation("BatterEvents")
+  bowlingEvents            BallEvent[]                   @relation("BowlerEvents")
+  sessionAttendances       SessionAttendance[]
+  drillAssignments         DrillAssignment[]
+  drillProgressLogs        DrillProgressLog[]
+  trainingPlans            TrainingPlan[]
+  metricSnapshots          MetricSnapshot[]
+  reportCards              ReportCard[]
+  feedbackTimeline         CoachFeedback[]
+  sessionSignals           PlayerSessionSignal[]
+  playerGoal               PlayerGoal?
+  queueEntries             MatchmakingQueue[]
+  matchmakingRequests      MatchmakingRequest[]
+  playerBadges             PlayerBadge[]
+  playerMilestones         PlayerMilestone[]
+  academyEnrollments       AcademyEnrollment[]
+  slotBookings             SlotBooking[]                 @relation("SlotBookingBookedBy")
+  gigBookings              GigBooking[]
+  studentSessionLogs       StudentSessionLog[]
+  ipTransactions           IpTransaction[]
+  skillMatrixSnapshot      SkillMatrixSnapshot[]
+  oneOnOneBookings         OneOnOneBooking[]
+  competitiveProfile       PlayerCompetitiveProfile?
+  seasonProgress           PlayerSeasonProgress[]
+  matchFacts               MatchPlayerFact[]
+  matchMetrics             MatchPlayerMetric[]
+  matchIndexScores         MatchPlayerIndexScore[]
+  indexAggregate           PlayerIndexAggregate?
+  indexSnapshots           PlayerIndexSnapshot[]
+  physicalSamples          PlayerPhysicalSample[]
+  leadershipSamples        PlayerLeadershipSample[]
+  wellnessCheckins         PlayerWellnessCheckin[]
+  workloadEvents           PlayerWorkloadEvent[]
+  journalStreakDays        PlayerJournalStreakDay[]
+  followers                PlayerFollow[]                @relation("PlayerFollowTarget")
+  following                PlayerFollow[]                @relation("PlayerFollowSource")
+  entityFollows            Follow[]
+  eliteInsights            EliteInsight[]
+  chatConversationsCreated ChatConversation[]            @relation("ChatConversationCreatedBy")
+  chatParticipants         ChatConversationParticipant[] @relation("ChatConversationParticipantPlayer")
+  chatMessagesSent         ChatMessage[]                 @relation("ChatMessageSender")
+  showcaseItems            ProfileShowcaseItem[]
+  performanceDayLogs       PerformanceDayLog[]
+  performanceWeeklyReviews PerformanceWeeklyReview[]
+  performanceAmbition      PerformanceAmbition?
+  weeklyPlanTemplates      WeeklyPlanTemplate[]
+  performancePlan          PerformancePlan?
+
+  @@index([city, level])
+}
+
+model MetricSnapshot {
+  id                 String             @id @default(cuid())
+  playerProfileId    String
+  date               DateTime           @db.Date
+  swingIndex         Float
+  battingScore       Float
+  bowlingScore       Float
+  fieldingScore      Float
+  fitnessScore       Float
+  rankKey            CompetitiveRankKey
+  rankDivision       Int
+  rankProgressPoints Int
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+
+  @@unique([playerProfileId, date])
+  @@index([playerProfileId, date])
+}
+
+// ============================================================
+// SECTION 4A — COMPETITIVE / DIAGNOSTIC PROGRESSION
+// ============================================================
+
+model CompetitiveSeason {
+  id        String   @id @default(cuid())
+  name      String
+  startAt   DateTime
+  endAt     DateTime
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  currentPlayers PlayerCompetitiveProfile[]
+  progress       PlayerSeasonProgress[]
+
+  @@index([isActive, startAt, endAt])
+  @@map("competitive_seasons")
+}
+
+model PlayerCompetitiveProfile {
+  playerId             String             @id
+  playerName           String? // denormalised display name for leaderboards / ranked lists
+  lifetimeImpactPoints Int                @default(0) // never decreases — career legacy
+  currentRankKey       CompetitiveRankKey @default(ROOKIE)
+  currentDivision      Int                @default(3)
+  rankProgressPoints   Int                @default(0) // can go up AND down
+  currentDivisionFloor Int                @default(0) // IP floor when this division was entered (for demotion calc)
+  winStreak            Int                @default(0)
+  mvpCount             Int                @default(0)
+  lastRankedMatchAt    DateTime? // for inactivity decay
+  hasPremiumPass       Boolean            @default(false)
+  premiumPassExpiresAt DateTime?
+  currentSeasonId      String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  player        PlayerProfile      @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  currentSeason CompetitiveSeason? @relation(fields: [currentSeasonId], references: [id], onDelete: SetNull)
+
+  @@index([currentRankKey, currentDivision])
+  @@index([currentSeasonId])
+  @@map("player_competitive_profile")
+}
+
+model PlayerSeasonProgress {
+  id                         String   @id @default(cuid())
+  playerId                   String
+  seasonId                   String
+  seasonPoints               Int      @default(0)
+  mvpCount                   Int      @default(0)
+  matchesPlayed              Int      @default(0)
+  currentLeaderboardPosition Int?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  player PlayerProfile     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  season CompetitiveSeason @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, seasonId])
+  @@index([seasonId, seasonPoints])
+  @@map("player_season_progress")
+}
+
+model PlayerFollow {
+  followerPlayerId  String
+  followingPlayerId String
+  createdAt         DateTime @default(now())
+
+  follower  PlayerProfile @relation("PlayerFollowSource", fields: [followerPlayerId], references: [id], onDelete: Cascade)
+  following PlayerProfile @relation("PlayerFollowTarget", fields: [followingPlayerId], references: [id], onDelete: Cascade)
+
+  @@id([followerPlayerId, followingPlayerId])
+  @@index([followingPlayerId, createdAt])
+  @@index([followerPlayerId, createdAt])
+  @@map("player_follows")
+}
+
+// General follow for teams and tournaments (player→entity)
+model Follow {
+  id         String           @id @default(cuid())
+  followerId String // PlayerProfile.id
+  targetId   String // Team.id or Tournament.id
+  targetType FollowTargetType
+  createdAt  DateTime         @default(now())
+
+  follower PlayerProfile @relation(fields: [followerId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, targetId, targetType])
+  @@index([targetId, targetType, createdAt])
+  @@index([followerId, createdAt])
+  @@map("follows")
+}
+
+// ── View tracking ─────────────────────────────────────────────────────────────
+
+model ProfileView {
+  id        String   @id @default(cuid())
+  profileId String // PlayerProfile.id being viewed
+  viewerId  String? // PlayerProfile.id of viewer (null = anonymous)
+  viewedAt  DateTime @default(now())
+
+  @@index([profileId, viewedAt])
+  @@index([viewerId, viewedAt])
+  @@map("profile_views")
+}
+
+model MatchView {
+  id       String   @id @default(cuid())
+  matchId  String
+  viewerId String? // PlayerProfile.id (null = anonymous)
+  viewedAt DateTime @default(now())
+
+  @@index([matchId, viewedAt])
+  @@map("match_views")
+}
+
+model TournamentView {
+  id           String   @id @default(cuid())
+  tournamentId String
+  viewerId     String? // PlayerProfile.id (null = anonymous)
+  viewedAt     DateTime @default(now())
+
+  @@index([tournamentId, viewedAt])
+  @@map("tournament_views")
+}
+
+model ChatConversation {
+  id                  String               @id @default(cuid())
+  type                ChatConversationType @default(DIRECT)
+  directKey           String?              @unique
+  teamId              String?              @unique // for TEAM_CHAT — one chat per team
+  title               String?
+  avatarUrl           String?
+  createdByPlayerId   String?
+  lastMessageAt       DateTime?
+  lastMessagePreview  String?
+  lastMessageSenderId String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  createdBy    PlayerProfile?                @relation("ChatConversationCreatedBy", fields: [createdByPlayerId], references: [id], onDelete: SetNull)
+  participants ChatConversationParticipant[]
+  messages     ChatMessage[]
+
+  @@index([lastMessageAt, updatedAt])
+  @@map("chat_conversations")
+}
+
+model ChatConversationParticipant {
+  id             String    @id @default(cuid())
+  conversationId String
+  playerId       String
+  joinedAt       DateTime  @default(now())
+  lastReadAt     DateTime?
+  mutedAt        DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  player       PlayerProfile    @relation("ChatConversationParticipantPlayer", fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, playerId])
+  @@index([playerId, joinedAt])
+  @@map("chat_conversation_participants")
+}
+
+model ChatMessage {
+  id             String          @id @default(cuid())
+  conversationId String
+  senderPlayerId String
+  kind           ChatMessageKind @default(TEXT)
+  body           String
+  attachmentUrl  String?
+  createdAt      DateTime        @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       PlayerProfile    @relation("ChatMessageSender", fields: [senderPlayerId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderPlayerId, createdAt])
+  @@map("chat_messages")
+}
+
+model ProfileShowcaseItem {
+  id              String                  @id @default(cuid())
+  playerProfileId String
+  type            ProfileShowcaseItemType
+  title           String?
+  caption         String?
+  url             String
+  thumbnailUrl    String?
+  matchId         String?
+  isPinned        Boolean                 @default(false)
+  isActive        Boolean                 @default(true)
+  sortOrder       Int                     @default(0)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id], onDelete: Cascade)
+  match         Match?        @relation(fields: [matchId], references: [id], onDelete: SetNull)
+
+  @@index([playerProfileId, isPinned, sortOrder, createdAt])
+  @@index([playerProfileId, isActive, createdAt])
+  @@map("profile_showcase_items")
+}
+
+// ============================================================
+// SECTION 4 — COACH PROFILE
+// ============================================================
+
+model CoachProfile {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  businessAccountId    String?   @unique
+  bio                  String?
+  specializations      String[]
+  certifications       String[]
+  experienceYears      Int       @default(0)
+  city                 String?
+  state                String?
+  gigEnabled           Boolean   @default(false)
+  hourlyRate           Int?
+  rating               Float     @default(0)
+  totalRatings         Int       @default(0)
+  totalSessions        Int       @default(0)
+  onTimeSessions       Int       @default(0)
+  punctualityScore     Float     @default(100)
+  isVerified           Boolean   @default(false)
+  verifiedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  oneOnOneEnabled      Boolean   @default(false)
+  publicProfileVisible Boolean   @default(true)
+
+  user               User                  @relation(fields: [userId], references: [id])
+  businessAccount    BusinessAccount?      @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  academies          AcademyCoach[]
+  sessions           PracticeSession[]
+  sessionSchedules   SessionSchedule[]
+  drillsCreated      Drill[]
+  assignedDrills     DrillAssignment[]
+  feedbackGiven      CoachFeedback[]
+  gigListings        GigListing[]
+  reportCards        ReportCard[]
+  sessionLogs        SessionLog[]
+  studentSessionLogs StudentSessionLog[]
+  sessionSignals     PlayerSessionSignal[]
+  compensation       CoachCompensation[]
+  payoutRecords      CoachPayoutRecord[]
+  oneOnOneProfile    OneOnOneProfile?
+  oneOnOneBookings   OneOnOneBooking[]
+}
+
+// ============================================================
+// SECTION 5 — ACADEMY / B2B
+// ============================================================
+
+model AcademyOwnerProfile {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id])
+  academies Academy[]
+}
+
+model Academy {
+  id                String    @id @default(cuid())
+  ownerId           String
+  businessAccountId String?
+  name              String
+  description       String?
+  logoUrl           String?
+  city              String
+  state             String
+  address           String?
+  pincode           String?
+  latitude          Float?
+  longitude         Float?
+  phone             String?
+  email             String?
+  websiteUrl        String?
+  tagline           String?
+  foundedYear       Int?
+  planTier          PlanTier  @default(FREE)
+  planExpiresAt     DateTime?
+  maxStudents       Int       @default(50)
+  isVerified        Boolean   @default(false)
+  verifiedAt        DateTime?
+  totalStudents     Int       @default(0)
+  totalCoaches      Int       @default(0)
+  totalBatches      Int       @default(0)
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  owner                AcademyOwnerProfile   @relation(fields: [ownerId], references: [id])
+  businessAccount      BusinessAccount?      @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  coaches              AcademyCoach[]
+  batches              Batch[]
+  enrollments          AcademyEnrollment[]
+  sessions             PracticeSession[]
+  feeStructures        FeeStructure[]
+  feePayments          FeePayment[]
+  announcements        Announcement[]
+  inventory            InventoryItem[]
+  tournaments          Tournament[]
+  sessionLogs          SessionLog[]
+  curriculums          Curriculum[]
+  coachCompensations   CoachCompensation[]
+  coachPayoutRecords   CoachPayoutRecord[]
+  skillMatrixSnapshots SkillMatrixSnapshot[]
+  sessionSchedules     SessionSchedule[]
+  sessionTypeConfigs   SessionTypeConfig[]
+  skillAreas           SkillArea[]
+  watchFlags           WatchFlag[]
+
+  @@index([businessAccountId])
+  @@index([city, isVerified])
+}
+
+model AcademyCoach {
+  id          String   @id @default(cuid())
+  academyId   String
+  coachId     String
+  isHeadCoach Boolean  @default(false)
+  joinedAt    DateTime @default(now())
+  isActive    Boolean  @default(true)
+
+  academy Academy      @relation(fields: [academyId], references: [id])
+  coach   CoachProfile @relation(fields: [coachId], references: [id])
+
+  @@unique([academyId, coachId])
+}
+
+// Recurring session template — e.g. "Mon+Tue Pace Nets at 8am"
+model SessionSchedule {
+  id           String      @id @default(cuid())
+  coachId      String
+  academyId    String?
+  batchId      String?
+  sessionType  SessionType
+  daysOfWeek   Int[] // 0=Sun 1=Mon … 6=Sat
+  startTime    String // "HH:MM"
+  durationMins Int         @default(90)
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  coach    CoachProfile      @relation(fields: [coachId], references: [id])
+  academy  Academy?          @relation(fields: [academyId], references: [id])
+  batch    Batch?            @relation(fields: [batchId], references: [id])
+  sessions PracticeSession[]
+}
+
+model Batch {
+  id             String   @id @default(cuid())
+  academyId      String
+  name           String
+  ageGroup       String?
+  maxStudents    Int      @default(20)
+  sport          Sport    @default(CRICKET)
+  description    String?
+  skillLevel     String? // Beginner | Intermediate | Advanced | Elite
+  venueNote      String?
+  primaryCoachId String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  academy              Academy                    @relation(fields: [academyId], references: [id])
+  enrollments          AcademyEnrollment[]
+  sessions             PracticeSession[]
+  schedules            BatchSchedule[]
+  sessionSchedules     SessionSchedule[]
+  sessionLogs          SessionLog[]
+  curriculumAssignment BatchCurriculumAssignment?
+}
+
+model BatchSchedule {
+  id         String  @id @default(cuid())
+  batchId    String
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+  groundNote String?
+  coachId    String?
+  isActive   Boolean @default(true)
+
+  batch Batch @relation(fields: [batchId], references: [id])
+}
+
+model AcademyEnrollment {
+  id                   String    @id @default(cuid())
+  academyId            String
+  playerProfileId      String
+  batchId              String?
+  enrolledAt           DateTime  @default(now())
+  isActive             Boolean   @default(true)
+  isTrial              Boolean   @default(false)
+  trialEndsAt          DateTime?
+  feePaidPaise         Int?
+  feeAmountPaise       Int?
+  feeFrequency         String?
+  feeStatus            String    @default("UNPAID")
+  registrationNo       String?
+  notes                String?
+  enrollmentStatus     String    @default("ACTIVE") // ACTIVE | TRIAL | PAUSED | INACTIVE
+  primaryCoachId       String?
+  lastInsightDate      DateTime?
+  coachEngagementScore Int       @default(0)
+  oneOnOneFlagged      Boolean   @default(false)
+  parentName           String?
+  parentPhone          String?
+  parentEmail          String?
+  internalRemarks      String?
+
+  academy            Academy             @relation(fields: [academyId], references: [id])
+  playerProfile      PlayerProfile       @relation(fields: [playerProfileId], references: [id])
+  batch              Batch?              @relation(fields: [batchId], references: [id])
+  studentSessionLogs StudentSessionLog[]
+  feePayments        FeePayment[]
+
+  @@unique([academyId, playerProfileId])
+}
+
+model ParentProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  playerProfileId String
+  relationship    String   @default("Parent")
+  phone           String
+  name            String
+  isVerified      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ============================================================
+// SECTION 6 — ATTENDANCE & QR
+// ============================================================
+
+model PracticeSession {
+  id                  String                @id @default(cuid())
+  academyId           String?
+  batchId             String?
+  coachId             String
+  status              PracticeSessionStatus @default(LIVE)
+  sessionType         SessionType
+  sessionTypeConfigId String?
+  scheduledAt         DateTime
+  durationMins        Int                   @default(90)
+  locationName        String?
+  latitude            Float?
+  longitude           Float?
+  notes               String?
+  drillPlanId         String?
+
+  sessionQrCode String?   @unique
+  qrGeneratedAt DateTime?
+  qrExpiresAt   DateTime?
+  qrClosedAt    DateTime?
+
+  coachCheckedInAt DateTime?
+  coachLatitude    Float?
+  coachLongitude   Float?
+  isCoachLate      Boolean   @default(false)
+
+  isCompleted  Boolean  @default(false)
+  isCancelled  Boolean  @default(false)
+  cancelReason String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  academy           Academy?              @relation(fields: [academyId], references: [id])
+  batch             Batch?                @relation(fields: [batchId], references: [id])
+  coach             CoachProfile          @relation(fields: [coachId], references: [id])
+  sessionTypeConfig SessionTypeConfig?    @relation(fields: [sessionTypeConfigId], references: [id])
+  drillPlan         DrillPlan?            @relation(fields: [drillPlanId], references: [id])
+  attendances       SessionAttendance[]
+  feedbacks         CoachFeedback[]
+  playerSignals     PlayerSessionSignal[]
+  drillAssignments  DrillAssignment[]
+  scheduleId        String?
+  sessionLog        SessionLog?
+  schedule          SessionSchedule?      @relation(fields: [scheduleId], references: [id])
+
+  @@index([academyId, scheduledAt])
+}
+
+model SessionAttendance {
+  id              String                @id @default(cuid())
+  sessionId       String
+  playerProfileId String
+  status          AttendanceStatus      @default(ABSENT)
+  scannedAt       DateTime?
+  scanMethod      String?
+  joinMethod      AttendanceJoinMethod?
+  markedAt        DateTime?
+  exitAt          DateTime?
+  lateMinutes     Int                   @default(0)
+  notes           String?
+
+  session       PracticeSession @relation(fields: [sessionId], references: [id])
+  playerProfile PlayerProfile   @relation(fields: [playerProfileId], references: [id])
+
+  @@unique([sessionId, playerProfileId])
+}
+
+// ============================================================
+// SECTION 7 — FEE MANAGEMENT
+// ============================================================
+
+model FeeStructure {
+  id            String   @id @default(cuid())
+  academyId     String
+  batchId       String?
+  name          String
+  amountPaise   Int
+  frequency     String
+  dueDayOfMonth Int      @default(1)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  academy  Academy      @relation(fields: [academyId], references: [id])
+  payments FeePayment[]
+}
+
+model FeePayment {
+  id              String        @id @default(cuid())
+  academyId       String
+  playerProfileId String
+  enrollmentId    String?
+  feeStructureId  String?
+  amountPaise     Int
+  dueDate         DateTime
+  paidAt          DateTime?
+  status          PaymentStatus @default(PENDING)
+  paymentMode     String? // CASH | UPI | CARD | BANK_TRANSFER | CHEQUE
+  razorpayOrderId String?
+  receiptUrl      String?
+  notes           String?
+  remindersSent   Int           @default(0)
+  lastReminderAt  DateTime?
+  createdAt       DateTime      @default(now())
+
+  academy      Academy            @relation(fields: [academyId], references: [id])
+  enrollment   AcademyEnrollment? @relation(fields: [enrollmentId], references: [id])
+  feeStructure FeeStructure?      @relation(fields: [feeStructureId], references: [id])
+
+  @@index([academyId, status])
+}
+
+// ============================================================
+// SECTION 8 — MATCHES & SCORING
+// ============================================================
+
+model Match {
+  id                  String            @id @default(cuid())
+  matchType           MatchType
+  format              MatchFormat
+  status              MatchStatus       @default(SCHEDULED)
+  teamAName           String
+  teamBName           String
+  teamAPlayerIds      String[]
+  teamBPlayerIds      String[]
+  teamACaptainId      String?
+  teamBCaptainId      String?
+  teamAViceCaptainId  String?
+  teamBViceCaptainId  String?
+  teamAWicketKeeperId String?
+  teamBWicketKeeperId String?
+  tossWonBy           String?
+  tossDecision        String?
+  scheduledAt         DateTime
+  startedAt           DateTime?
+  completedAt         DateTime?
+  venueName           String?
+  venueId             String?
+  ballType            String?
+  customOvers         Int?
+  testDays            Int?
+  oversPerDay         Int?
+  currentDay          Int               @default(1)
+  round               String?
+  facilityId          String?
+  slotBookingId       String?
+  academyId           String?
+  tournamentId        String?
+  winnerId            String?
+  winMargin           String?
+  scorerId            String?
+  overlayPackId       String?
+  verificationLevel   VerificationLevel @default(UNVERIFIED)
+  verifiedAt          DateTime?
+  isRanked            Boolean           @default(false)
+  hasImpactPlayer     Boolean           @default(false)
+  matchmakingId       String?
+  highlights          Json              @default("[]")
+  youtubeUrl          String?
+  liveCode            String?           @unique
+  livePin             String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  innings                 Innings[]
+  overlayPack             OverlayPack?             @relation(fields: [overlayPackId], references: [id])
+  overlayStudio           OverlayStudio?
+  playerMatchStats        PlayerMatchStats[]
+  matchFacts              MatchPlayerFact[]
+  matchMetrics            MatchPlayerMetric[]
+  indexScores             MatchPlayerIndexScore[]
+  leadershipSamples       PlayerLeadershipSample[]
+  showcaseItems           ProfileShowcaseItem[]
+  performanceMatchReviews PerformanceMatchReview[]
+  venue                   Venue?                   @relation(fields: [venueId], references: [id])
+
+  @@index([academyId, scheduledAt])
+  @@index([overlayPackId])
+  @@index([tournamentId])
+  @@index([venueId])
+}
+
+model Innings {
+  id            String  @id @default(cuid())
+  matchId       String
+  inningsNumber Int
+  battingTeam   String
+  totalRuns     Int     @default(0)
+  totalWickets  Int     @default(0)
+  totalOvers    Float   @default(0)
+  extras        Int     @default(0)
+  isDeclared    Boolean @default(false)
+  isCompleted   Boolean @default(false)
+  isSuperOver   Boolean @default(false)
+
+  // Live scoring state — persisted so any device can resume
+  currentStrikerId    String?
+  currentNonStrikerId String?
+  currentBowlerId     String?
+
+  match      Match       @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  ballEvents BallEvent[]
+
+  @@unique([matchId, inningsNumber])
+}
+
+model OverlayStudio {
+  id                     String   @id @default(cuid())
+  matchId                String   @unique
+  activeSceneId          String?
+  adBreakEnabled         Boolean  @default(false)
+  adBreakDurationSeconds Int      @default(30)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  match                  Match                        @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  activeScene            OverlayScene?                @relation("ActiveStudioScene", fields: [activeSceneId], references: [id], onDelete: SetNull)
+  scenes                 OverlayScene[]               @relation("StudioScenes")
+  triggers               OverlayTrigger[]
+  adSlots                AdSlot[]
+  adQueue                StudioAdQueue[]
+  scheduledSceneSwitches StudioScheduledSceneSwitch[]
+
+  @@index([matchId])
+}
+
+model OverlayPack {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  name        String
+  kind        OverlayPackKind @default(CUSTOM)
+  description String?
+  isActive    Boolean         @default(true)
+  isDefault   Boolean         @default(false)
+  config      Json            @default("{}")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  matches     Match[]
+  tournaments Tournament[]
+
+  @@index([isDefault])
+  @@index([kind])
+}
+
+model OverlayScene {
+  id            String    @id @default(cuid())
+  studioId      String
+  name          String
+  sceneType     SceneType
+  templateId    String
+  dataOverrides Json      @default("{}")
+  isAutomatic   Boolean   @default(true)
+  displayOrder  Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  studio                 OverlayStudio                @relation("StudioScenes", fields: [studioId], references: [id], onDelete: Cascade)
+  activeInStudios        OverlayStudio[]              @relation("ActiveStudioScene")
+  targetTriggers         OverlayTrigger[]             @relation("TriggerTargetScene")
+  scheduledSceneSwitches StudioScheduledSceneSwitch[]
+
+  @@index([studioId, displayOrder])
+}
+
+model OverlayTrigger {
+  id            String           @id @default(cuid())
+  studioId      String
+  eventType     TriggerEventType
+  targetSceneId String
+  delaySeconds  Int              @default(0)
+  isEnabled     Boolean          @default(true)
+
+  studio      OverlayStudio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  targetScene OverlayScene  @relation("TriggerTargetScene", fields: [targetSceneId], references: [id], onDelete: Cascade)
+
+  @@index([studioId, eventType])
+}
+
+model AdSlot {
+  id              String     @id @default(cuid())
+  studioId        String
+  type            AdSlotType
+  title           String
+  mediaUrl        String?
+  brandName       String?
+  brandLogoUrl    String?
+  durationSeconds Int
+  displayOrder    Int        @default(0)
+
+  studio     OverlayStudio   @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  queueItems StudioAdQueue[]
+
+  @@index([studioId, displayOrder])
+}
+
+model StudioAdQueue {
+  id           String   @id @default(cuid())
+  studioId     String
+  adSlotId     String
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  studio OverlayStudio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  adSlot AdSlot        @relation(fields: [adSlotId], references: [id], onDelete: Cascade)
+
+  @@unique([studioId, adSlotId])
+  @@index([studioId, displayOrder])
+}
+
+model StudioScheduledSceneSwitch {
+  id            String    @id @default(cuid())
+  studioId      String
+  targetSceneId String
+  scheduledAt   DateTime
+  executedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  studio      OverlayStudio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  targetScene OverlayScene  @relation(fields: [targetSceneId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledAt, executedAt])
+  @@index([studioId, scheduledAt])
+}
+
+model BallEvent {
+  id                String         @id @default(cuid())
+  inningsId         String
+  overNumber        Int
+  ballNumber        Int
+  batterId          String
+  nonBatterId       String?
+  bowlerId          String
+  fielderId         String?
+  outcome           BallOutcome
+  runs              Int            @default(0)
+  extras            Int            @default(0)
+  totalRuns         Int            @default(0)
+  isWicket          Boolean        @default(false)
+  dismissalType     DismissalType?
+  dismissedPlayerId String?
+  tags              String[]
+  wagonZone         String?
+  scoreAfterBall    String?
+  scoredAt          DateTime       @default(now())
+  isOfflineEntry    Boolean        @default(false)
+
+  innings Innings       @relation(fields: [inningsId], references: [id], onDelete: Cascade)
+  batter  PlayerProfile @relation("BatterEvents", fields: [batterId], references: [id])
+  bowler  PlayerProfile @relation("BowlerEvents", fields: [bowlerId], references: [id])
+
+  @@index([inningsId, overNumber, ballNumber])
+  @@index([batterId])
+  @@index([nonBatterId])
+  @@index([bowlerId])
+}
+
+model PlayerMatchStats {
+  id              String         @id @default(cuid())
+  matchId         String
+  playerProfileId String
+  team            String
+  runs            Int            @default(0)
+  balls           Int            @default(0)
+  fours           Int            @default(0)
+  sixes           Int            @default(0)
+  strikeRate      Float          @default(0)
+  isOut           Boolean        @default(false)
+  dismissalType   DismissalType?
+  battingPosition Int?
+  oversBowled     Float          @default(0)
+  wickets         Int            @default(0)
+  runsConceded    Int            @default(0)
+  wides           Int            @default(0)
+  noBalls         Int            @default(0)
+  economy         Float          @default(0)
+  catches         Int            @default(0)
+  stumpings       Int            @default(0)
+  runOuts         Int            @default(0)
+  isManOfMatch    Boolean        @default(false)
+  // ipAwarded       Int            @default(0)
+  // rankXpAwarded   Int            @default(0)
+
+  match         Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, playerProfileId])
+}
+
+model MatchPlayerFact {
+  id               String            @id @default(cuid())
+  matchId          String
+  playerId         String
+  teamId           String
+  opponentTeamId   String
+  inningsNo        Int?
+  battingPosition  Int?
+  didBat           Boolean           @default(false)
+  runs             Int               @default(0)
+  ballsFaced       Int               @default(0)
+  fours            Int               @default(0)
+  sixes            Int               @default(0)
+  dismissalType    DismissalType?
+  wasNotOut        Boolean           @default(false)
+  didBowl          Boolean           @default(false)
+  ballsBowled      Int               @default(0)
+  oversBowled      Float?
+  maidens          Int               @default(0)
+  wickets          Int               @default(0)
+  runsConceded     Int               @default(0)
+  dotBalls         Int               @default(0)
+  wides            Int               @default(0)
+  noBalls          Int               @default(0)
+  catches          Int               @default(0)
+  runOuts          Int               @default(0)
+  stumpings        Int               @default(0)
+  fieldTimeSeconds Int?
+  oversFielded     Float?
+  isCaptain        Boolean           @default(false)
+  result           CompetitiveResult
+  matchFormat      MatchFormat?
+  ballType         String?
+  matchDate        DateTime
+  createdAt        DateTime          @default(now())
+
+  match  Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, playerId])
+  @@index([playerId, matchDate])
+  @@map("match_player_facts")
+}
+
+model MatchPlayerMetric {
+  id                        String   @id @default(cuid())
+  matchId                   String
+  playerId                  String
+  strikeRate                Float?
+  boundaryRatePerBall       Float?
+  boundaryRunsPct           Float?
+  scoringContributionPct    Float?
+  dismissalStabilityMetric  Float?
+  pressureBattingMetric     Float?
+  economyRate               Float?
+  ballsPerWicket            Float?
+  dotBallPct                Float?
+  wicketContributionPct     Float?
+  spellQualityMetric        Float?
+  phaseDifficultyMetric     Float?
+  fieldingInvolvementMetric Float?
+  physicalWorkloadMetric    Float?
+  captaincyInfluenceMetric  Float?
+  createdAt                 DateTime @default(now())
+
+  match  Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, playerId])
+  @@index([playerId, createdAt])
+  @@map("match_player_metrics")
+}
+
+model MatchPlayerIndexScore {
+  id                      String   @id @default(cuid())
+  matchId                 String
+  playerId                String
+  battingIndex            Float?
+  bowlingIndex            Float?
+  fieldingIndex           Float?
+  consistencyContribution Float?
+  clutchIndex             Float?
+  physicalIndex           Float?
+  captaincyIndex          Float?
+  gameInfluenceIndex      Float?
+  performanceScore        Float
+  impactPoints            Int
+  seasonPoints            Int
+  passMultiplierApplied   Float    @default(1)
+  isMvp                   Boolean  @default(false)
+  createdAt               DateTime @default(now())
+
+  match  Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, playerId])
+  @@index([playerId, createdAt])
+  @@index([matchId, impactPoints])
+  @@map("match_player_index_scores")
+}
+
+model PlayerIndexAggregate {
+  playerId                String             @id
+  currentBattingIndex     Float              @default(0)
+  currentBowlingIndex     Float              @default(0)
+  currentFieldingIndex    Float              @default(0)
+  currentConsistencyIndex Float              @default(0)
+  currentClutchIndex      Float              @default(0)
+  currentPhysicalIndex    Float              @default(0)
+  currentCaptaincyIndex   Float?
+  currentSwingIndex       Float              @default(0)
+  currentSwingIndexScore  Float              @default(0)
+  swingFormulaVersion     String             @default("swing-index-v2")
+  swingBatScore           Float              @default(0)
+  swingBowlScore          Float              @default(0)
+  swingFieldingImpact     Float              @default(0)
+  swingPowerScore         Float              @default(0)
+  swingImpactScore        Float              @default(0)
+  swingAxes               Json               @default("{}")
+  swingSubScores          Json               @default("{}")
+  swingDerivedMetrics     Json               @default("{}")
+  swingWeightingMeta      Json               @default("{}")
+  lifetimeImpactPoints    Int                @default(0)
+  currentRankKey          CompetitiveRankKey @default(ROOKIE)
+  currentDivision         Int                @default(3)
+  rankProgressPoints      Int                @default(0)
+  mvpCount                Int                @default(0)
+  updatedAt               DateTime           @updatedAt
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("player_index_aggregate")
+}
+
+model PlayerIndexSnapshot {
+  id               String                  @id @default(cuid())
+  playerId         String
+  snapshotType     PlayerIndexSnapshotType
+  snapshotDate     DateTime
+  reliabilityIndex Float?
+  powerIndex       Float?
+  bowlingIndex     Float?
+  fieldingIndex    Float?
+  impactIndex      Float?
+  captaincyIndex   Float?
+  swingIndex       Float?
+  impactPoints     Int?
+  seasonPoints     Int?
+  rankKey          CompetitiveRankKey?
+  division         Int?
+  createdAt        DateTime                @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, snapshotType, snapshotDate])
+  @@map("player_index_snapshot")
+}
+
+model PlayerPhysicalSample {
+  id               String                   @id @default(cuid())
+  playerId         String
+  sourceType       PhysicalSampleSourceType
+  sourceRefId      String?
+  sampleStartAt    DateTime
+  sampleEndAt      DateTime
+  caloriesBurned   Float?
+  averageHeartRate Float?
+  maxHeartRate     Float?
+  distanceMeters   Float?
+  sprintCount      Int?
+  activeMinutes    Float?
+  workloadScore    Float?
+  recoveryScore    Float?
+  sleepHours       Float?
+  hydrationMetric  Float?
+  steps            Int?
+  hrv              Float?
+  sleepStartAt     DateTime?
+  sleepEndAt       DateTime?
+  weightKg         Float?
+  source           String?
+  rawPayload       Json?
+  createdAt        DateTime                 @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, sourceType, sampleStartAt])
+  @@index([sourceRefId])
+  @@map("player_physical_samples")
+}
+
+model PlayerWellnessCheckin {
+  id              String   @id @default(cuid())
+  playerId        String
+  date            DateTime @db.Date
+  soreness        Int
+  fatigue         Int
+  mood            Int
+  stress          Int
+  painTightness   Int
+  sleepQuality    Int
+  // Apex Elite Mental Pillar
+  confidence      Int?     @default(5)
+  focus           Int?     @default(5)
+  resilience      Int?     @default(5)
+  // Apex Elite Physical Context
+  hydrationLiters Float?   @default(0)
+  caloriesConsumed Int?
+  waistCircumferenceCm Float?
+  neckCircumferenceCm  Float?
+  hipCircumferenceCm   Float?
+  bodyFatPercent       Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, date])
+  @@map("player_wellness_checkins")
+}
+
+model PlayerWorkloadEvent {
+  id              String   @id @default(cuid())
+  playerId        String
+  type            String
+  date            DateTime
+  durationMinutes Int
+  intensity       Int?
+  oversBowled     Float?
+  ballsBowled     Int?
+  battingMinutes  Int?
+  ballsFaced      Int?
+  spellCount      Int?
+  // Apex Elite: Link to technical drills
+  drillIds        String[] @default([])
+  isCheatDay      Boolean  @default(false)
+  source          String?
+  sourceRefId     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, date])
+  @@map("player_workload_events")
+}
+
+model PlayerJournalStreakDay {
+  id                 String   @id @default(cuid())
+  playerId           String
+  date               DateTime @db.Date
+  hasWorkload        Boolean  @default(false)
+  hasWellness        Boolean  @default(false)
+  isActive           Boolean  @default(false)
+  streakCount        Int      @default(0)
+  activeDaysInWindow Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, date])
+  @@index([playerId, date])
+  @@map("player_journal_streak_days")
+}
+
+model EliteInsight {
+  id        String   @id @default(cuid())
+  playerId  String
+  category  String // TACTICAL | PHYSICAL | MENTAL
+  title     String
+  message   String
+  priority  Int      @default(1) // 1 (Low) to 3 (High)
+  isRead    Boolean  @default(false)
+  matchId   String? // Optional: The match that triggered this insight
+  createdAt DateTime @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, createdAt])
+  @@map("elite_insights")
+}
+
+model PlayerLeadershipSample {
+  id                      String   @id @default(cuid())
+  playerId                String
+  matchId                 String
+  wasCaptain              Boolean  @default(false)
+  teamWin                 Boolean  @default(false)
+  closeMatch              Boolean  @default(false)
+  chaseMatch              Boolean  @default(false)
+  captaincyInfluenceScore Float?
+  createdAt               DateTime @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  match  Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, playerId])
+  @@index([playerId, createdAt])
+  @@map("player_leadership_samples")
+}
+
+// ============================================================
+// SECTION 9 — TRAINING & DRILLS
+// ============================================================
+
+model Drill {
+  id           String          @id @default(cuid())
+  createdById  String?
+  name         String
+  description  String?
+  skillArea    String
+  subSkill     String?
+  difficulty   DrillDifficulty @default(BEGINNER)
+  durationMins Int             @default(20)
+  videoUrl     String?
+  thumbnailUrl String?
+  tags         String[]
+  roleTags     RoleTag[]
+  category     DrillCategory?
+  targetUnit   DrillTargetUnit @default(REPS)
+  isActive     Boolean         @default(true)
+  isPublic     Boolean         @default(false)
+  usageCount   Int             @default(0)
+  createdAt    DateTime        @default(now())
+
+  createdBy   CoachProfile?     @relation(fields: [createdById], references: [id])
+  assignments DrillAssignment[]
+  planItems   DrillPlanItem[]
+
+  @@index([skillArea, difficulty])
+}
+
+model DrillPlan {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  coachId     String
+  createdAt   DateTime @default(now())
+
+  items    DrillPlanItem[]
+  sessions PracticeSession[]
+}
+
+model DrillPlanItem {
+  id      String  @id @default(cuid())
+  planId  String
+  drillId String
+  order   Int
+  reps    Int?
+  sets    Int?
+  notes   String?
+
+  plan  DrillPlan @relation(fields: [planId], references: [id])
+  drill Drill     @relation(fields: [drillId], references: [id])
+}
+
+model DrillAssignment {
+  id                 String           @id @default(cuid())
+  sessionId          String?
+  drillId            String
+  playerProfileId    String
+  assignedById       String
+  coachId            String?
+  targetQuantity     Int?
+  targetUnit         DrillTargetUnit?
+  dueDate            DateTime?
+  status             String           @default("ACTIVE")
+  assignedAt         DateTime         @default(now())
+  completedAt        DateTime?
+  completionNote     String?
+  completionVideoUrl String?
+  createdAt          DateTime         @default(now())
+
+  drill         Drill              @relation(fields: [drillId], references: [id])
+  playerProfile PlayerProfile      @relation(fields: [playerProfileId], references: [id])
+  session       PracticeSession?   @relation(fields: [sessionId], references: [id])
+  coach         CoachProfile?      @relation(fields: [coachId], references: [id])
+  progressLogs  DrillProgressLog[]
+}
+
+model SessionTypeConfig {
+  id                     String   @id @default(cuid())
+  academyId              String?
+  name                   String   @unique
+  color                  String
+  defaultDurationMinutes Int      @default(90)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  academy  Academy?          @relation(fields: [academyId], references: [id])
+  sessions PracticeSession[]
+}
+
+model SkillArea {
+  id        String   @id @default(cuid())
+  academyId String?
+  name      String
+  roleTag   RoleTag
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  academy Academy? @relation(fields: [academyId], references: [id])
+}
+
+model WatchFlag {
+  id          String        @id @default(cuid())
+  academyId   String?
+  name        String
+  roleTag     RoleTag
+  severity    WatchSeverity @default(MONITOR)
+  description String?
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  academy Academy? @relation(fields: [academyId], references: [id])
+}
+
+model PlayerSessionSignal {
+  id               String         @id @default(cuid())
+  sessionId        String
+  playerProfileId  String
+  coachId          String
+  overallSignal    SignalOverall?
+  strengthSkillIds String[]
+  workOnSkillIds   String[]
+  watchFlagIds     String[]
+  followUpInDays   Int?
+  coachNote        String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  session       PracticeSession @relation(fields: [sessionId], references: [id])
+  playerProfile PlayerProfile   @relation(fields: [playerProfileId], references: [id])
+  coach         CoachProfile    @relation(fields: [coachId], references: [id])
+
+  @@unique([sessionId, playerProfileId])
+  @@index([playerProfileId, createdAt])
+}
+
+model DrillProgressLog {
+  id                String   @id @default(cuid())
+  drillAssignmentId String
+  playerProfileId   String
+  loggedAt          DateTime @default(now())
+  quantityDone      Int
+
+  drillAssignment DrillAssignment @relation(fields: [drillAssignmentId], references: [id])
+  playerProfile   PlayerProfile   @relation(fields: [playerProfileId], references: [id])
+
+  @@index([drillAssignmentId, loggedAt])
+}
+
+model PlayerGoal {
+  id              String   @id @default(cuid())
+  playerProfileId String   @unique
+  goalText        String
+  progressPercent Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+}
+
+model TrainingPlan {
+  id              String    @id @default(cuid())
+  playerProfileId String
+  coachId         String?
+  title           String
+  description     String?
+  startDate       DateTime
+  endDate         DateTime?
+  goals           String[]
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  playerProfile PlayerProfile   @relation(fields: [playerProfileId], references: [id])
+  milestones    PlanMilestone[]
+}
+
+model PlanMilestone {
+  id          String    @id @default(cuid())
+  planId      String
+  title       String
+  targetDate  DateTime?
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+
+  plan TrainingPlan @relation(fields: [planId], references: [id])
+}
+
+model CoachFeedback {
+  id                String   @id @default(cuid())
+  playerProfileId   String
+  coachId           String
+  sessionId         String?
+  feedbackText      String?
+  voiceNoteUrl      String?
+  videoClipUrl      String?
+  videoTimestamp    Int?
+  tags              String[]
+  isVisibleToParent Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  playerProfile PlayerProfile    @relation(fields: [playerProfileId], references: [id])
+  coach         CoachProfile     @relation(fields: [coachId], references: [id])
+  session       PracticeSession? @relation(fields: [sessionId], references: [id])
+
+  @@index([playerProfileId, createdAt])
+}
+
+model ReportCard {
+  id              String    @id @default(cuid())
+  playerProfileId String
+  coachId         String
+  periodMonth     Int
+  periodYear      Int
+  swingIndexStart Float
+  swingIndexEnd   Float
+  attendanceRate  Float
+  drillCompletion Float
+  coachNarrative  String?
+  strengthsNote   String?
+  focusAreasNote  String?
+  goalsNextMonth  String?
+  isPublished     Boolean   @default(false)
+  publishedAt     DateTime?
+  parentViewedAt  DateTime?
+  createdAt       DateTime  @default(now())
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+  coach         CoachProfile  @relation(fields: [coachId], references: [id])
+
+  @@unique([playerProfileId, periodMonth, periodYear])
+}
+
+// ============================================================
+// SECTION 10 — TOURNAMENTS
+// ============================================================
+
+model Tournament {
+  id                String           @id @default(cuid())
+  createdByUserId   String?
+  academyId         String?
+  name              String
+  description       String?
+  format            MatchFormat
+  sport             Sport            @default(CRICKET)
+  startDate         DateTime
+  endDate           DateTime?
+  venueName         String?
+  city              String?
+  maxTeams          Int              @default(8)
+  entryFee          Int?
+  prizePool         String?
+  rules             String?
+  logoUrl           String?
+  coverUrl          String?
+  slug              String?          @unique
+  highlights        Json?
+  isPublic          Boolean          @default(true)
+  isVerified        Boolean          @default(false)
+  status            String           @default("UPCOMING")
+  tournamentFormat  TournamentFormat @default(LEAGUE)
+  seriesMatchCount  Int?
+  groupCount        Int              @default(1)
+  pointsForWin      Int              @default(2)
+  pointsForLoss     Int              @default(0)
+  pointsForTie      Int              @default(1)
+  pointsForNoResult Int              @default(1)
+  ballType          String           @default("LEATHER")
+  earlyBirdDeadline DateTime?
+  earlyBirdFee      Int?
+  organiserName     String?
+  organiserPhone    String?
+  livePin           String?
+  overlayPackId     String?
+  createdAt         DateTime         @default(now())
+
+  createdBy   User?                @relation(fields: [createdByUserId], references: [id])
+  academy     Academy?             @relation(fields: [academyId], references: [id])
+  overlayPack OverlayPack?         @relation(fields: [overlayPackId], references: [id])
+  teams       TournamentTeam[]
+  groups      TournamentGroup[]
+  standings   TournamentStanding[]
+
+  @@index([overlayPackId])
+  @@index([createdByUserId])
+}
+
+model TournamentTeam {
+  id           String   @id @default(cuid())
+  tournamentId String
+  teamId       String?
+  teamName     String
+  captainId    String?
+  playerIds    String[]
+  isConfirmed  Boolean  @default(false)
+  groupId      String?
+  seed         Int?
+  registeredAt DateTime @default(now())
+
+  tournament Tournament          @relation(fields: [tournamentId], references: [id])
+  team       Team?               @relation(fields: [teamId], references: [id])
+  group      TournamentGroup?    @relation(fields: [groupId], references: [id])
+  standing   TournamentStanding?
+}
+
+model Team {
+  id                  String    @id @default(cuid())
+  name                String
+  shortName           String?
+  logoUrl             String?
+  city                String?
+  teamType            TeamType  @default(FRIENDLY)
+  captainId           String?
+  viceCaptainId       String?
+  wicketKeeperId      String?
+  playerIds           String[]  @default([])
+  supportStaff        Json?
+  powerScore          Float     @default(0) // weighted avg IP of players — used for matchmaking
+  powerScoreUpdatedAt DateTime?
+  createdByUserId     String
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  tournamentTeams TournamentTeam[]
+
+  @@index([city])
+  @@index([powerScore])
+}
+
+model TournamentGroup {
+  id           String @id @default(cuid())
+  tournamentId String
+  name         String
+  groupOrder   Int    @default(0)
+
+  tournament Tournament           @relation(fields: [tournamentId], references: [id])
+  teams      TournamentTeam[]
+  standings  TournamentStanding[]
+
+  @@unique([tournamentId, name])
+}
+
+model TournamentStanding {
+  id               String  @id @default(cuid())
+  tournamentId     String
+  groupId          String?
+  tournamentTeamId String  @unique
+  position         Int     @default(0)
+  played           Int     @default(0)
+  won              Int     @default(0)
+  lost             Int     @default(0)
+  tied             Int     @default(0)
+  noResult         Int     @default(0)
+  points           Int     @default(0)
+  runsScored       Int     @default(0)
+  ballsFaced       Int     @default(0)
+  runsConceded     Int     @default(0)
+  ballsBowled      Int     @default(0)
+  nrr              Float   @default(0)
+
+  tournament Tournament       @relation(fields: [tournamentId], references: [id])
+  group      TournamentGroup? @relation(fields: [groupId], references: [id])
+  team       TournamentTeam   @relation(fields: [tournamentTeamId], references: [id])
+
+  @@unique([tournamentId, tournamentTeamId])
+  @@index([tournamentId, points])
+}
+
+// ============================================================
+// SECTION 11 — ARENA
+// ============================================================
+
+model ArenaOwnerProfile {
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  businessName String?
+  gstNumber    String?
+  panNumber    String?
+
+  user   User    @relation(fields: [userId], references: [id])
+  arenas Arena[]
+}
+
+model ArenaManager {
+  id        String   @id @default(cuid())
+  arenaId   String
+  userId    String
+  name      String
+  phone     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  arena Arena @relation(fields: [arenaId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([arenaId, userId])
+  @@index([arenaId])
+}
+
+model Arena {
+  id                 String    @id @default(cuid())
+  ownerId            String
+  businessAccountId  String?
+  name               String
+  description        String?
+  photoUrls          String[]
+  city               String
+  state              String
+  address            String
+  pincode            String
+  latitude           Float
+  longitude          Float
+  phone              String?
+  sports             Sport[]
+  hasParking         Boolean   @default(false)
+  hasLights          Boolean   @default(false)
+  hasWashrooms       Boolean   @default(false)
+  hasCanteen         Boolean   @default(false)
+  hasCCTV            Boolean   @default(false)
+  hasScorer          Boolean   @default(false)
+  openTime           String    @default("06:00")
+  closeTime          String    @default("22:00")
+  operatingDays      Int[]     @default([1, 2, 3, 4, 5, 6, 7])
+  advanceBookingDays Int       @default(7)
+  bufferMins         Int       @default(15)
+  cancellationHours  Int       @default(24)
+  planTier           PlanTier  @default(FREE)
+  planExpiresAt      DateTime?
+  isVerified         Boolean   @default(false)
+  isSwingArena       Boolean   @default(false)
+  arenaGrade         String?
+  verifiedAt         DateTime?
+  rating             Float     @default(0)
+  totalRatings       Int       @default(0)
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  owner           ArenaOwnerProfile @relation(fields: [ownerId], references: [id])
+  businessAccount BusinessAccount?  @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  units           ArenaUnit[]
+  addons          ArenaAddon[]
+  bookings        SlotBooking[]
+  timeBlocks      ArenaTimeBlock[]
+  reviews         Review[]
+  managers        ArenaManager[]
+
+  @@index([businessAccountId])
+  @@index([city, isVerified])
+  @@index([latitude, longitude])
+}
+
+model ArenaUnit {
+  id                String           @id @default(cuid())
+  arenaId           String
+  name              String
+  unitType          FacilityUnitType
+  sport             Sport            @default(CRICKET)
+  capacity          Int              @default(22)
+  description       String?
+  photoUrls         String[]
+  pricePerHourPaise Int
+  peakPricePaise    Int?
+  peakHoursStart    String?
+  peakHoursEnd      String?
+  price4HrPaise     Int?
+  price8HrPaise     Int?
+  priceFullDayPaise Int?
+  boundarySize      Int?
+  weekendMultiplier Float            @default(1.0)
+  minSlotMins       Int              @default(60)
+  maxSlotMins       Int              @default(240)
+  slotIncrementMins Int              @default(60)
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+
+  arena        Arena            @relation(fields: [arenaId], references: [id])
+  bookings     SlotBooking[]
+  timeBlocks   ArenaTimeBlock[]
+  pricingRules PricingRule[]
+}
+
+model PricingRule {
+  id          String  @id @default(cuid())
+  unitId      String
+  name        String
+  discountPct Int     @default(0)
+  premiumPct  Int     @default(0)
+  appliesTo   String  @default("ALL")
+  dayOfWeek   Int?
+  startTime   String?
+  endTime     String?
+  isActive    Boolean @default(true)
+
+  unit ArenaUnit @relation(fields: [unitId], references: [id])
+}
+
+model ArenaTimeBlock {
+  id          String    @id @default(cuid())
+  arenaId     String
+  unitId      String
+  date        DateTime? @db.Date
+  startTime   String
+  endTime     String
+  reason      String?
+  isRecurring Boolean   @default(false)
+  weekdays    Int[]     @default([])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  arena Arena     @relation(fields: [arenaId], references: [id])
+  unit  ArenaUnit @relation(fields: [unitId], references: [id])
+
+  @@index([arenaId, unitId, date])
+  @@index([arenaId, unitId, isRecurring])
+}
+
+model ArenaAddon {
+  id          String  @id @default(cuid())
+  arenaId     String
+  name        String
+  description String?
+  pricePaise  Int
+  unit        String  @default("per_session")
+  isAvailable Boolean @default(true)
+
+  arena         Arena              @relation(fields: [arenaId], references: [id])
+  bookingAddons SlotBookingAddon[]
+}
+
+model SlotBooking {
+  id                 String       @id @default(cuid())
+  arenaId            String
+  unitId             String
+  arenaUnitId        String?
+  bookedById         String
+  playerProfileId    String?
+  bookingDate        DateTime?    @db.Date
+  date               DateTime     @db.Date
+  startTime          String
+  endTime            String
+  durationMins       Int
+  sport              Sport        @default(CRICKET)
+  format             MatchFormat?
+  teamSize           Int          @default(11)
+  baseAmountPaise    Int          @default(0)
+  addonAmountPaise   Int          @default(0)
+  discountPaise      Int          @default(0)
+  totalAmountPaise   Int
+  totalPricePaise    Int          @default(0)
+  status             SlotStatus   @default(HELD)
+  heldUntil          DateTime?
+  checkInQrCode      String?      @unique
+  checkedInAt        DateTime?
+  paidAt             DateTime?
+  matchId            String?
+  matchmakingId      String?
+  academyId          String?
+  notes              String?
+  cancellationReason String?
+  cancelledAt        DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  arena    Arena              @relation(fields: [arenaId], references: [id])
+  unit     ArenaUnit          @relation(fields: [unitId], references: [id])
+  bookedBy PlayerProfile      @relation("SlotBookingBookedBy", fields: [bookedById], references: [id])
+  addons   SlotBookingAddon[]
+  payment  Payment?
+
+  @@index([arenaId, date, status])
+  @@index([unitId, date])
+}
+
+model SlotBookingAddon {
+  id         String @id @default(cuid())
+  bookingId  String
+  addonId    String
+  quantity   Int    @default(1)
+  pricePaise Int
+
+  booking SlotBooking @relation(fields: [bookingId], references: [id])
+  addon   ArenaAddon  @relation(fields: [addonId], references: [id])
+}
+
+// ============================================================
+// SECTION 12 — MATCHMAKING
+// ============================================================
+
+model MatchmakingQueue {
+  id              String      @id @default(cuid())
+  playerProfileId String
+  sport           Sport       @default(CRICKET)
+  format          MatchFormat @default(T20)
+  teamSize        Int         @default(11)
+  isTeamCaptain   Boolean     @default(true)
+  preformedTeam   String[]
+  preferredDate   DateTime?
+  availableFrom   DateTime
+  availableUntil  DateTime
+  maxDistanceKm   Int         @default(10)
+  latitude        Float?
+  longitude       Float?
+  ipAtQueue       Float       @default(0) // player's rankProgressPoints at time of queuing
+  teamPowerScore  Float? // set when queuing as a team captain
+  status          QueueStatus @default(WAITING)
+  matchedWith     String?
+  matchId         String?
+  bookingId       String?
+  expiresAt       DateTime
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+
+  @@index([sport, format, status])
+  @@index([ipAtQueue, status])
+}
+
+model MatchmakingRequest {
+  id                          String      @id @default(cuid())
+  playerProfileId             String
+  opponentPlayerProfileId     String?
+  initiatorQueueId            String?
+  opponentQueueId             String?
+  format                      MatchFormat
+  matchType                   MatchType
+  preferredDate               DateTime?
+  preferredVenueName          String?
+  proposedArenaId             String?
+  proposedDateTime            DateTime?
+  costPerPlayerPaise          Int?
+  latitude                    Float?
+  longitude                   Float?
+  radiusKm                    Int         @default(25)
+  ipAtRequest                 Float       @default(0)
+  notes                       String?
+  confirmedByPlayerProfileIds String[]    @default([])
+  status                      String      @default("OPEN")
+  matchedAt                   DateTime?
+  expiresAt                   DateTime
+  createdAt                   DateTime    @default(now())
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+
+  @@index([format, matchType, status])
+  @@index([ipAtRequest, status])
+}
+
+// ============================================================
+// SECTION 13 — GAMIFICATION
+// ============================================================
+
+model Badge {
+  id          String   @id @default(cuid())
+  key         String?  @unique
+  name        String   @unique
+  description String
+  iconUrl     String?
+  category    String
+  ipBonus     Int      @default(0)
+  isRare      Boolean  @default(false)
+  triggerRule String?
+  createdAt   DateTime @default(now())
+
+  playerBadges PlayerBadge[]
+}
+
+model PlayerBadge {
+  id              String   @id @default(cuid())
+  playerProfileId String
+  badgeId         String
+  awardedAt       DateTime @default(now())
+  awardedReason   String?
+  matchId         String?
+  isDisplayed     Boolean  @default(true)
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+  badge         Badge         @relation(fields: [badgeId], references: [id])
+
+  @@unique([playerProfileId, badgeId])
+}
+
+model PlayerMilestone {
+  id              String   @id @default(cuid())
+  playerProfileId String
+  title           String
+  description     String?
+  achievedAt      DateTime @default(now())
+  ipAwarded       Int      @default(0)
+  matchId         String?
+  badgeId         String?
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+}
+
+model IpTransaction {
+  id              String   @id @default(cuid())
+  playerProfileId String
+  ipDelta         Int // positive = earned, negative = lost
+  reason          String // e.g. "BATTING_PERFORMANCE", "WIN_BONUS", "LOSS_PENALTY", "RANK_DECAY"
+  matchId         String?
+  referenceId     String?
+  rankBefore      String? // CompetitiveRankKey:division snapshot
+  rankAfter       String?
+  createdAt       DateTime @default(now())
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+
+  @@index([playerProfileId, createdAt])
+}
+
+// ============================================================
+// SECTION 14 — GIG MARKETPLACE
+// ============================================================
+
+model GigListing {
+  id                   String         @id @default(cuid())
+  coachId              String
+  title                String
+  description          String?
+  gigType              String         @default("CUSTOM")
+  sessionType          GigSessionType @default(IN_PERSON)
+  sport                Sport          @default(CRICKET)
+  skillFocus           String[]
+  durationMins         Int            @default(60)
+  pricePaise           Int            @default(0)
+  pricePerSessionPaise Int            @default(0)
+  platformFeePaise     Int            @default(0)
+  coachPayoutPaise     Int            @default(0)
+  maxStudents          Int            @default(1)
+  availableDays        Int[]
+  availableFrom        String         @default("06:00")
+  availableUntil       String         @default("22:00")
+  availableDates       DateTime[]
+  targetBattingStyle   String[]
+  targetBowlingStyle   String[]
+  targetAgeMin         Int?
+  targetAgeMax         Int?
+  isOnline             Boolean        @default(false)
+  locationName         String?
+  city                 String?
+  latitude             Float?
+  longitude            Float?
+  targetLevels         PlayerLevel[]
+  tags                 String[]
+  advanceBookingDays   Int            @default(7)
+  minNoticeHours       Int            @default(4)
+  cancellationHours    Int            @default(24)
+  isActive             Boolean        @default(true)
+  isFeatured           Boolean        @default(false)
+  totalBookings        Int            @default(0)
+  rating               Float          @default(0)
+  totalRatings         Int            @default(0)
+  createdAt            DateTime       @default(now())
+
+  coach    CoachProfile @relation(fields: [coachId], references: [id])
+  bookings GigBooking[]
+  packages GigPackage[]
+  slots    GigSlot[]
+
+  @@index([city, sport])
+}
+
+model GigPackage {
+  id              String   @id @default(cuid())
+  gigListingId    String
+  name            String
+  description     String?
+  sessionCount    Int
+  validityDays    Int      @default(90)
+  totalPricePaise Int
+  perSessionPaise Int
+  savingsPaise    Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  gigListing GigListing @relation(fields: [gigListingId], references: [id])
+}
+
+model GigSlot {
+  id           String         @id @default(cuid())
+  coachId      String
+  gigListingId String?
+  isTemplate   Boolean        @default(false)
+  dayOfWeek    Int?
+  slotDate     DateTime?      @db.Date
+  startTime    String
+  endTime      String
+  durationMins Int
+  sessionType  GigSessionType @default(IN_PERSON)
+  locationName String?
+  isAvailable  Boolean        @default(true)
+  isBlocked    Boolean        @default(false)
+  blockReason  String?
+  bookingId    String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  gigListing GigListing? @relation(fields: [gigListingId], references: [id])
+
+  @@index([coachId, slotDate, isAvailable])
+}
+
+model GigBooking {
+  id                   String           @id @default(cuid())
+  gigListingId         String
+  coachId              String
+  playerProfileId      String
+  slotId               String?
+  packageId            String?
+  packageSessionNumber Int?
+  sessionType          GigSessionType
+  scheduledAt          DateTime
+  durationMins         Int
+  locationName         String?
+  meetingLink          String?
+  amountPaise          Int
+  platformFeePaise     Int              @default(0)
+  coachPayoutPaise     Int              @default(0)
+  paymentId            String?
+  status               GigBookingStatus @default(PENDING_PAYMENT)
+  bookingReference     String?          @unique
+  playerGoals          String?
+  coachPreNotes        String?
+  coachPostNotes       String?
+  sessionVideoUrl      String?
+  paidAt               DateTime?
+  completedAt          DateTime?
+  cancelledAt          DateTime?
+  cancellationReason   String?
+  refundEligible       Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  gigListing    GigListing    @relation(fields: [gigListingId], references: [id])
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+  payment       Payment?
+
+  @@index([playerProfileId, scheduledAt])
+  @@index([coachId, scheduledAt])
+}
+
+// ============================================================
+// SECTION 15 — PAYMENTS
+// ============================================================
+
+model Payment {
+  id                String        @id @default(cuid())
+  userId            String
+  amountPaise       Int
+  currency          String        @default("INR")
+  status            PaymentStatus @default(PENDING)
+  gateway           String        @default("RAZORPAY")
+  gatewayOrderId    String?       @unique
+  gatewayPaymentId  String?       @unique
+  gatewaySignature  String?
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+
+  entityType  String?
+  entityId    String?
+  description String?
+
+  slotBookingId  String? @unique
+  gigBookingId   String? @unique
+  subscriptionId String?
+  feePaymentId   String?
+
+  splitGroupId String?
+  splitPart    Int?
+
+  method            String?
+  failureReason     String?
+  completedAt       DateTime?
+  refundedAt        DateTime?
+  refundReason      String?
+  refundAmountPaise Int?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  slotBooking SlotBooking? @relation(fields: [slotBookingId], references: [id])
+  gigBooking  GigBooking?  @relation(fields: [gigBookingId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model Subscription {
+  id            String    @id @default(cuid())
+  userId        String
+  entityId      String
+  entityType    String
+  planTier      PlanTier
+  status        String    @default("ACTIVE")
+  startedAt     DateTime  @default(now())
+  expiresAt     DateTime
+  razorpaySubId String?
+  autoRenew     Boolean   @default(true)
+  cancelledAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([entityId, entityType, status])
+}
+
+// ============================================================
+// SECTION 16 — NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id          String              @id @default(cuid())
+  userId      String
+  type        String              @default("SYSTEM")
+  channel     NotificationChannel @default(PUSH)
+  status      NotificationStatus  @default(QUEUED)
+  title       String?
+  body        String
+  data        Json?
+  entityType  String?
+  entityId    String?
+  isRead      Boolean             @default(false)
+  toPhone     String?
+  provider    String?
+  providerId  String?
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
+  failReason  String?
+  createdAt   DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
+}
+
+model NotificationPreference {
+  userId               String   @id
+  pushEnabled          Boolean  @default(true)
+  chatMessages         Boolean  @default(true)
+  newFollowers         Boolean  @default(true)
+  rankUpdates          Boolean  @default(true)
+  matchResults         Boolean  @default(true)
+  productAnnouncements Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// ============================================================
+// SECTION 17 — REVIEWS
+// ============================================================
+
+model Review {
+  id         String   @id @default(cuid())
+  reviewerId String
+  arenaId    String?
+  coachId    String?
+  gigId      String?
+  rating     Int
+  comment    String?
+  isVerified Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  reviewer User   @relation(fields: [reviewerId], references: [id])
+  arena    Arena? @relation(fields: [arenaId], references: [id])
+}
+
+// ============================================================
+// SECTION 18 — INVENTORY
+// ============================================================
+
+model InventoryItem {
+  id          String        @id @default(cuid())
+  academyId   String
+  name        String
+  category    String
+  quantity    Int           @default(1)
+  condition   ItemCondition @default(GOOD)
+  purchasedAt DateTime?
+  cost        Int?
+  notes       String?
+  isAssigned  Boolean       @default(false)
+  assignedTo  String?
+  assignedAt  DateTime?
+
+  academy Academy @relation(fields: [academyId], references: [id])
+}
+
+// ============================================================
+// SECTION 19 — ANNOUNCEMENTS
+// ============================================================
+
+model Announcement {
+  id          String   @id @default(cuid())
+  academyId   String
+  authorId    String
+  title       String
+  body        String
+  targetGroup String   @default("ALL")
+  isPinned    Boolean  @default(false)
+  sentVia     String[] @default(["PUSH"])
+  createdAt   DateTime @default(now())
+
+  academy Academy @relation(fields: [academyId], references: [id])
+}
+
+// ============================================================
+// SECTION 20 — ADMIN & PLATFORM
+// ============================================================
+
+model SupportTicket {
+  id          String       @id @default(cuid())
+  userId      String
+  category    String
+  subject     String
+  description String
+  status      TicketStatus @default(OPEN)
+  priority    String       @default("NORMAL")
+  assignedTo  String?
+  resolvedAt  DateTime?
+  resolution  String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id])
+  messages TicketMessage[]
+}
+
+model TicketMessage {
+  id            String   @id @default(cuid())
+  ticketId      String
+  authorId      String
+  isFromSupport Boolean  @default(false)
+  message       String
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id])
+}
+
+model PlatformConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  actorRole  UserRole
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+}
+
+model Venue {
+  id        String   @id @default(cuid())
+  name      String
+  aliases   String[]
+  city      String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  matches Match[]
+
+  @@index([name])
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("SWING_ADMIN")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ============================================================
+// SECTION 21 — SESSION LOGS & DEVELOPMENT TRACKING
+// ============================================================
+
+enum CompensationType {
+  FIXED_MONTHLY
+  PER_SESSION
+  PER_BATCH
+  FIXED_PLUS_INCENTIVE
+  REVENUE_SHARE
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSED
+  PAID
+}
+
+// Coach logs one SessionLog per practice session
+// Each SessionLog has one StudentSessionLog per student present
+model SessionLog {
+  id          String   @id @default(cuid())
+  academyId   String
+  batchId     String?
+  coachId     String // CoachProfile.id
+  sessionId   String?  @unique // links to PracticeSession if exists
+  sessionDate DateTime
+  sessionType String   @default("BATCH_PRACTICE")
+  overallNote String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  academy     Academy             @relation(fields: [academyId], references: [id])
+  batch       Batch?              @relation(fields: [batchId], references: [id])
+  coach       CoachProfile        @relation(fields: [coachId], references: [id])
+  session     PracticeSession?    @relation(fields: [sessionId], references: [id])
+  studentLogs StudentSessionLog[]
+
+  @@index([academyId, sessionDate])
+  @@index([coachId, sessionDate])
+  @@index([batchId, sessionDate])
+}
+
+model StudentSessionLog {
+  id              String   @id @default(cuid())
+  sessionLogId    String
+  enrollmentId    String // AcademyEnrollment.id
+  playerProfileId String // PlayerProfile.id (for future player app)
+  coachId         String // CoachProfile.id (for easy lookup)
+  academyId       String // for scoping
+  batchId         String?
+  sessionDate     DateTime
+
+  strengthChips       String[] @default([])
+  weaknessChips       String[] @default([])
+  currentFocusArea    String?
+  effortRating        Int? // 1-5
+  coachNote           String?
+  drillRecommended    String?
+  followUpNeeded      Boolean  @default(false)
+  oneOnOneRecommended Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessionLog    SessionLog        @relation(fields: [sessionLogId], references: [id], onDelete: Cascade)
+  enrollment    AcademyEnrollment @relation(fields: [enrollmentId], references: [id])
+  playerProfile PlayerProfile     @relation(fields: [playerProfileId], references: [id])
+  coach         CoachProfile      @relation(fields: [coachId], references: [id])
+
+  @@unique([sessionLogId, enrollmentId])
+  @@index([playerProfileId, sessionDate])
+  @@index([enrollmentId, sessionDate])
+  @@index([academyId, sessionDate])
+}
+
+// Computed skill matrix — regenerated on demand, stored as JSON
+model SkillMatrixSnapshot {
+  id              String   @id @default(cuid())
+  playerProfileId String
+  academyId       String
+  computedAt      DateTime @default(now())
+  dataPoints      Int      @default(0)
+  // JSON shape: { [dimensionKey]: { score: number, trend: "IMPROVING"|"STABLE"|"DECLINING", count: number, lastUpdated: string } }
+  dimensions      Json     @default("{}")
+
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+  academy       Academy       @relation(fields: [academyId], references: [id])
+
+  @@unique([playerProfileId, academyId])
+}
+
+// ============================================================
+// SECTION 22 — CURRICULUM
+// ============================================================
+
+model Curriculum {
+  id               String   @id @default(cuid())
+  academyId        String? // null = Swing platform template
+  name             String
+  targetAgeGroup   String? // e.g. "U-14", "U-19", "Senior"
+  targetSkillLevel String? // Beginner | Intermediate | Advanced | Elite
+  sportFocus       String? // BATTING | BOWLING | ALL_ROUND | FITNESS
+  description      String?
+  totalWeeks       Int?
+  isActive         Boolean  @default(true)
+  isTemplate       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  academy          Academy?                    @relation(fields: [academyId], references: [id])
+  phases           CurriculumPhase[]
+  batchAssignments BatchCurriculumAssignment[]
+}
+
+model CurriculumPhase {
+  id            String  @id @default(cuid())
+  curriculumId  String
+  phaseNumber   Int
+  name          String
+  durationWeeks Int     @default(4)
+  description   String?
+
+  curriculum Curriculum        @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  topics     CurriculumTopic[]
+
+  @@unique([curriculumId, phaseNumber])
+}
+
+model CurriculumTopic {
+  id              String   @id @default(cuid())
+  phaseId         String
+  sequence        Int
+  name            String
+  skillArea       String? // BATTING | BOWLING | FIELDING | FITNESS | MENTAL | KEEPING
+  subSkill        String?
+  description     String?
+  suggestedDrills String[] @default([])
+
+  phase       CurriculumPhase   @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  completions TopicCompletion[]
+
+  @@unique([phaseId, sequence])
+}
+
+model BatchCurriculumAssignment {
+  id           String   @id @default(cuid())
+  batchId      String   @unique
+  curriculumId String
+  startDate    DateTime
+  currentPhase Int      @default(1)
+  currentTopic Int      @default(1)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  batch       Batch             @relation(fields: [batchId], references: [id])
+  curriculum  Curriculum        @relation(fields: [curriculumId], references: [id])
+  completions TopicCompletion[]
+}
+
+model TopicCompletion {
+  id           String   @id @default(cuid())
+  assignmentId String
+  topicId      String
+  coachId      String // CoachProfile.id
+  completedAt  DateTime @default(now())
+  coachNote    String?
+
+  assignment BatchCurriculumAssignment @relation(fields: [assignmentId], references: [id])
+  topic      CurriculumTopic           @relation(fields: [topicId], references: [id])
+
+  @@unique([assignmentId, topicId])
+}
+
+// ============================================================
+// SECTION 23 — COACH COMPENSATION & PAYROLL
+// ============================================================
+
+model CoachCompensation {
+  id                    String           @id @default(cuid())
+  academyId             String
+  coachId               String // CoachProfile.id
+  compensationType      CompensationType @default(FIXED_MONTHLY)
+  fixedAmountPaise      Int? // for FIXED_MONTHLY, FIXED_PLUS_INCENTIVE
+  perSessionAmountPaise Int? // for PER_SESSION
+  perBatchAmountPaise   Int? // for PER_BATCH
+  incentiveRules        Json? // flexible: { type, threshold, bonusPaise }
+  revenueSharePercent   Int? // 0-100, for 1-on-1 revenue share
+  payoutCycle           String           @default("MONTHLY") // MONTHLY | FORTNIGHTLY
+  payoutDay             Int              @default(1) // day of month
+  isActive              Boolean          @default(true)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  academy Academy             @relation(fields: [academyId], references: [id])
+  coach   CoachProfile        @relation(fields: [coachId], references: [id])
+  payouts CoachPayoutRecord[]
+
+  @@unique([academyId, coachId])
+}
+
+model CoachPayoutRecord {
+  id                   String       @id @default(cuid())
+  compensationId       String
+  academyId            String
+  coachId              String // CoachProfile.id
+  periodStart          DateTime
+  periodEnd            DateTime
+  sessionsCount        Int          @default(0)
+  batchesCount         Int          @default(0)
+  attendanceCompliance Float        @default(0) // 0-100%
+  baseAmountPaise      Int          @default(0)
+  incentiveAmountPaise Int          @default(0)
+  oneOnOneSharePaise   Int          @default(0)
+  deductionPaise       Int          @default(0)
+  totalAmountPaise     Int          @default(0)
+  status               PayoutStatus @default(PENDING)
+  paidAt               DateTime?
+  paymentRef           String?
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  compensation CoachCompensation @relation(fields: [compensationId], references: [id])
+  academy      Academy           @relation(fields: [academyId], references: [id])
+  coach        CoachProfile      @relation(fields: [coachId], references: [id])
+
+  @@index([academyId, status])
+  @@index([coachId, periodStart])
+}
+
+// ============================================================
+// SECTION 24 — 1-ON-1 COACHING
+// ============================================================
+
+model OneOnOneProfile {
+  id              String   @id @default(cuid())
+  coachId         String   @unique // CoachProfile.id
+  isEnabled       Boolean  @default(false)
+  expertiseTags   String[] @default([])
+  bio             String?
+  // pricePerSession in paise: { mins60, mins90, mins120 }
+  pricePerSession Json     @default("{}")
+  locationTypes   String[] @default([]) // COACH_GROUND | STUDENT_GROUND | ONLINE
+  maxPerWeek      Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  coach    CoachProfile      @relation(fields: [coachId], references: [id])
+  slots    OneOnOneSlot[]
+  bookings OneOnOneBooking[]
+}
+
+model OneOnOneSlot {
+  id        String  @id @default(cuid())
+  profileId String
+  dayOfWeek Int // 0=Sunday, 1=Monday ... 6=Saturday
+  startTime String // "HH:MM" 24h
+  endTime   String
+  isActive  Boolean @default(true)
+
+  profile OneOnOneProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+}
+
+model OneOnOneBooking {
+  id               String    @id @default(cuid())
+  profileId        String
+  coachId          String // CoachProfile.id
+  playerProfileId  String
+  academyId        String? // if booked via academy context
+  requestedAt      DateTime  @default(now())
+  sessionDate      DateTime
+  startTime        String // "HH:MM"
+  durationMins     Int // 60 | 90 | 120
+  locationType     String // COACH_GROUND | STUDENT_GROUND | ONLINE
+  locationDetails  String?
+  priceAmountPaise Int
+  platformFeePaise Int       @default(0)
+  academyCutPaise  Int       @default(0)
+  coachPayoutPaise Int
+  status           String    @default("REQUESTED") // REQUESTED | ACCEPTED | REJECTED | COMPLETED | CANCELLED | NO_SHOW
+  studentNote      String?
+  coachNote        String?
+  rejectReason     String?
+  rating           Int?
+  review           String?
+  razorpayOrderId  String?
+  paidAt           DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  profile       OneOnOneProfile @relation(fields: [profileId], references: [id])
+  coach         CoachProfile    @relation(fields: [coachId], references: [id])
+  playerProfile PlayerProfile   @relation(fields: [playerProfileId], references: [id])
+
+  @@index([coachId, sessionDate])
+  @@index([playerProfileId, sessionDate])
+}
+
+// ============================================================
+// SECTION 16 — EVENTS
+// ============================================================
+
+model Event {
+  id              String    @id @default(cuid())
+  createdByUserId String
+  name            String
+  eventType       String    @default("CUSTOM") // SIXER_KING | FASTEST_50 | CUSTOM
+  description     String?
+  venueName       String?
+  city            String?
+  scheduledAt     DateTime?
+  status          String    @default("UPCOMING") // UPCOMING | LIVE | COMPLETED | CANCELLED
+  isPublic        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  createdBy User @relation(fields: [createdByUserId], references: [id])
+
+  @@index([createdByUserId])
+  @@index([status])
+}
+
+// ============================================================
+// SECTION 21 — STOREFRONT
+// ============================================================
+
+model StoreOwnerProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stores Store[]
+
+  @@map("store_owner_profiles")
+}
+
+model DeliveryPartnerProfile {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  vehicleType  String? // BIKE, SCOOTER, CYCLE
+  vehicleRegNo String?
+  isActive     Boolean  @default(true)
+  isAvailable  Boolean  @default(false)
+  currentLat   Float?
+  currentLng   Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs DeliveryJob[]
+
+  @@map("delivery_partner_profiles")
+}
+
+model Store {
+  id                String   @id @default(cuid())
+  ownerId           String
+  businessAccountId String?
+  academyId         String? // Optional link to academy
+  name              String
+  description       String?
+  logoUrl           String?
+  address           String
+  city              String
+  state             String
+  pincode           String
+  latitude          Float?
+  longitude         Float?
+  isActive          Boolean  @default(true)
+  isFeatured        Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  owner           StoreOwnerProfile @relation(fields: [ownerId], references: [id])
+  businessAccount BusinessAccount?  @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  inventory       StoreInventory[]
+  orders          StoreOrder[]
+
+  @@index([businessAccountId])
+  @@index([city, isActive])
+  @@map("stores")
+}
+
+model ProductCategory {
+  id           String   @id @default(cuid())
+  parentId     String?
+  name         String
+  description  String?
+  iconUrl      String?
+  displayOrder Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  parent   ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children ProductCategory[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@index([parentId, displayOrder])
+  @@map("product_categories")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  categoryId  String
+  name        String
+  description String?
+  brand       String?
+  basePrice   Int? // Optional base price if consistent across stores
+  imageUrl    String?
+  tags        String[]
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category ProductCategory  @relation(fields: [categoryId], references: [id])
+  variants ProductVariant[]
+
+  @@index([categoryId, isActive])
+  @@map("products")
+}
+
+model ProductVariant {
+  id         String   @id @default(cuid())
+  productId  String
+  name       String // e.g. "1kg", "Choco", "Small"
+  sku        String?  @unique
+  imageUrl   String?
+  attributes Json? // e.g. { weight: "1kg", color: "Red" }
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  product    Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventory  StoreInventory[]
+  orderItems StoreOrderItem[]
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model StoreInventory {
+  id                 String   @id @default(cuid())
+  storeId            String
+  productVariantId   String
+  quantity           Int      @default(0)
+  pricePaise         Int // Local store price
+  discountPricePaise Int?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  store          Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, productVariantId])
+  @@index([storeId])
+  @@map("store_inventory")
+}
+
+model StoreOrder {
+  id                  String   @id @default(cuid())
+  storeId             String
+  userId              String
+  status              String   @default("PENDING") // PENDING, PAID, PREPARING, READY, DISPATCHED, DELIVERED, CANCELLED
+  totalAmountPaise    Int
+  deliveryFeePaise    Int      @default(0)
+  taxAmountPaise      Int      @default(0)
+  discountAmountPaise Int      @default(0)
+  finalAmountPaise    Int
+  paymentId           String?  @unique
+  deliveryAddress     String
+  deliveryLat         Float?
+  deliveryLng         Float?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  store    Store            @relation(fields: [storeId], references: [id])
+  user     User             @relation(fields: [userId], references: [id])
+  items    StoreOrderItem[]
+  delivery DeliveryJob?
+  invoice  StoreInvoice?
+
+  @@index([storeId, status])
+  @@index([userId, status])
+  @@map("store_orders")
+}
+
+model StoreOrderItem {
+  id               String   @id @default(cuid())
+  orderId          String
+  productVariantId String
+  quantity         Int
+  pricePaise       Int // Snapshot of price at time of order
+  totalPricePaise  Int
+  createdAt        DateTime @default(now())
+
+  order          StoreOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+
+  @@map("store_order_items")
+}
+
+model DeliveryJob {
+  id                String    @id @default(cuid())
+  orderId           String    @unique
+  partnerId         String?
+  userId            String? // Link to customer for easy tracking
+  status            String    @default("PENDING") // PENDING, ASSIGNED, PICKED_UP, NEAR_CUSTOMER, DELIVERED, RETURNED
+  assignedAt        DateTime?
+  pickedUpAt        DateTime?
+  deliveredAt       DateTime?
+  estimatedDelivery DateTime?
+  trackingUrl       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  order   StoreOrder              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  partner DeliveryPartnerProfile? @relation(fields: [partnerId], references: [id])
+  user    User?                   @relation(fields: [userId], references: [id])
+
+  @@index([partnerId, status])
+  @@index([userId])
+  @@map("delivery_jobs")
+}
+
+model StoreInvoice {
+  id            String   @id @default(cuid())
+  orderId       String   @unique
+  invoiceNumber String   @unique
+  invoiceUrl    String?
+  issuedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  order StoreOrder @relation(fields: [orderId], references: [id])
+
+  @@map("store_invoices")
+}
+
+// --- PERFORMANCE DOMAIN (APEX ELITE) ---
+
+enum PerformanceDayType {
+  TRAINING
+  MATCH
+  RECOVERY
+}
+
+enum PerformanceSessionType {
+  NETS
+  SKILL_WORK
+  CONDITIONING
+  GYM
+  MATCH
+  RECOVERY
+}
+
+enum PlanWeekday {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum PerformanceDayActivityType {
+  NETS
+  SKILL_WORK
+  GYM
+  CONDITIONING
+  MATCH
+  RECOVERY
+  PROPER_DIET
+}
+
+enum PerformanceActivityDomain {
+  BATTING
+  BOWLING
+  FIELDING
+  FITNESS
+  RECOVERY
+  NUTRITION
+  MATCH
+}
+
+model PerformancePlan {
+  id                    String   @id @default(cuid())
+  playerId              String   @unique
+  name                  String
+  isActive              Boolean  @default(true)
+  sleepTargetHours      Float    @default(8.0)
+  hydrationTargetLiters Float    @default(3.0)
+  dailyCalorieTarget    Int?
+  isAlignedWithAmbition Boolean  @default(true)
+  lastSyncedAt          DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  activities PerformancePlanActivity[]
+  days       PerformancePlanDay[]
+  player     PlayerProfile             @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("performance_plans")
+}
+
+model PerformancePlanActivity {
+  id           String                 @id @default(cuid())
+  planId       String
+  category     PerformanceSessionType
+  timesPerWeek Int
+
+  plan PerformancePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, category])
+  @@map("performance_plan_activities")
+}
+
+model PerformancePlanDay {
+  id                    String      @id @default(cuid())
+  planId                String
+  weekday               PlanWeekday
+  hasNets               Boolean     @default(false)
+  hasSkillWork          Boolean     @default(false)
+  hasGym                Boolean     @default(false)
+  hasConditioning       Boolean     @default(false)
+  hasMatch              Boolean     @default(false)
+  hasRecovery           Boolean     @default(false)
+  hasProperDiet         Boolean     @default(false)
+  netsMinutes           Int         @default(0)
+  drillsMinutes         Int         @default(0)
+  fitnessMinutes        Int         @default(0)
+  recoveryMinutes       Int         @default(0)
+  sleepTargetHours      Float       @default(8.0)
+  hydrationTargetLiters Float       @default(3.5)
+
+  plan PerformancePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, weekday])
+  @@index([planId, weekday])
+  @@map("performance_plan_days")
+}
+
+enum PerformanceSource {
+  MANUAL
+  WEARABLE
+  COACH
+  SYSTEM
+  MATCH_ENGINE
+}
+
+enum MatchSourceType {
+  APP_MATCH
+  MANUAL_MATCH
+}
+
+model PerformanceDrill {
+  id            String                 @id @default(cuid())
+  code          String                 @unique
+  name          String
+  sessionType   PerformanceSessionType
+  primarySkill  String
+  secondaryTags String[]               @default([])
+  difficulty    Int                    @default(1)
+  isActive      Boolean                @default(true)
+  createdAt     DateTime               @default(now())
+
+  sessionDrills PerformanceSessionDrill[]
+
+  @@map("performance_drills")
+}
+
+model PerformanceMetricDefinition {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  label       String
+  category    String
+  description String?
+  isActive    Boolean @default(true)
+
+  sessionRatings PerformanceSessionRating[]
+
+  @@map("performance_metric_definitions")
+}
+
+model PerformanceAreaDefinition {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  label       String
+  category    String
+  description String?
+
+  @@map("performance_area_definitions")
+}
+
+model PerformanceDayLog {
+  id          String             @id @default(cuid())
+  playerId    String
+  date        DateTime           @db.Date
+  type        PerformanceDayType
+  dayTakeaway String?            @db.Text
+  note        String?            @db.Text
+
+  // Plan vs Execution State
+  isLocked       Boolean  @default(false)
+  cheatDay       Boolean  @default(false)
+  oneThingToday  String?  @db.Text
+  tookProperDiet Boolean?
+  skippedMeal    Boolean?
+  whatDidWell    String?  @db.Text
+  whatDidBadly   String?  @db.Text
+  executionScore Float? // The calculated EE% (0-100)
+
+  // Daily Targets (The "Plan")
+  targetNetsMinutes     Int?   @default(0)
+  targetDrillsMinutes   Int?   @default(0)
+  targetGymMinutes      Int?   @default(0)
+  targetRecoveryMinutes Int?   @default(0)
+  targetSleep           Float? @default(8.0)
+  targetHydration       Float? @default(3.5)
+
+  // Actuals (The "Execution" - derived or stored)
+  actualNetsMinutes     Int @default(0)
+  actualDrillsMinutes   Int @default(0)
+  actualFitnessMinutes  Int @default(0)
+  actualRecoveryMinutes Int @default(0)
+
+  // Shared Day State (Wellness/Vitals)
+  sleepHours      Float?
+  sleepQuality    Int? // 1-10
+  hydrationLiters Float?
+  soreness        Int? // 1-10
+  fatigue         Int? // 1-10
+  stress          Int? // 1-10
+  motivation      Int? // 1-10
+  mentalFreshness Int? // 1-10
+  readinessRating Int? // 1-10
+
+  // Body & Nutrition Actuals
+  caloriesConsumed     Int?
+  waistCircumferenceCm Float?
+  neckCircumferenceCm  Float?
+  hipCircumferenceCm   Float?
+  bodyFatPercent       Float?
+
+  source          PerformanceSource @default(MANUAL)
+  confidenceScore Float             @default(1.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  player         PlayerProfile              @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  activities     PerformanceDayActivity[]
+  sessions       PerformanceSession[]
+  matchReview    PerformanceMatchReview?
+  recoveryDetail PerformanceRecoveryDetail?
+
+  @@unique([playerId, date])
+  @@index([playerId, date])
+  @@map("performance_day_logs")
+}
+
+model PerformanceDayActivity {
+  id           String                     @id @default(cuid())
+  dayLogId     String
+  activityType PerformanceDayActivityType
+  wasPlanned   Boolean                    @default(false)
+  wasCompleted Boolean                    @default(false)
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+
+  dayLog  PerformanceDayLog              @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  details PerformanceDayActivityDetail[]
+
+  @@unique([dayLogId, activityType])
+  @@index([dayLogId, activityType])
+  @@map("performance_day_activities")
+}
+
+model PerformanceDayActivityDetail {
+  id               String                    @id @default(cuid())
+  activityId       String
+  domain           PerformanceActivityDomain
+  primaryFocus     String?
+  secondaryFocuses String[]                  @default([])
+  whatLearned      String?                   @db.Text
+  whatMissed       String?                   @db.Text
+  notes            String?                   @db.Text
+  metadata         Json?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  activity PerformanceDayActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@index([activityId])
+  @@map("performance_day_activity_details")
+}
+
+model WeeklyPlanTemplate {
+  id        String   @id @default(cuid())
+  playerId  String
+  name      String // e.g. "Normal Training Week"
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  days   WeeklyPlanDay[]
+  player PlayerProfile   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId])
+  @@map("weekly_plan_templates")
+}
+
+model WeeklyPlanDay {
+  id         String @id @default(cuid())
+  templateId String
+  dayOfWeek  Int // 0 (Sun) to 6 (Sat)
+
+  // Targets for this specific day of the week
+  targetNetsMinutes     Int?   @default(0)
+  targetDrillsMinutes   Int?   @default(0)
+  targetGymMinutes      Int?   @default(0)
+  targetRecoveryMinutes Int?   @default(0)
+  targetSleep           Float? @default(8.0)
+  targetHydration       Float? @default(3.5)
+
+  template WeeklyPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, dayOfWeek])
+  @@map("weekly_plan_days")
+}
+
+model PerformanceSession {
+  id        String                 @id @default(cuid())
+  dayLogId  String
+  type      PerformanceSessionType
+  startTime DateTime?
+
+  plannedDuration Int?
+  actualDuration  Int?
+
+  plannedIntensity Int?
+  actualIntensity  Int?
+
+  objective String? @db.Text
+  takeaway  String? @db.Text
+
+  source PerformanceSource @default(MANUAL)
+
+  dayLog  PerformanceDayLog          @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  drills  PerformanceSessionDrill[]
+  ratings PerformanceSessionRating[]
+
+  @@index([dayLogId])
+  @@map("performance_sessions")
+}
+
+model PerformanceSessionDrill {
+  id        String @id @default(cuid())
+  sessionId String
+  drillId   String
+
+  plannedReps Int?
+  actualReps  Int?
+
+  executionQuality Int? // 1-10
+
+  session PerformanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  drill   PerformanceDrill   @relation(fields: [drillId], references: [id])
+
+  @@index([sessionId])
+  @@map("performance_session_drills")
+}
+
+model PerformanceSessionRating {
+  id         String @id @default(cuid())
+  sessionId  String
+  metricCode String
+  value      Int // 1-10
+
+  session    PerformanceSession          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  definition PerformanceMetricDefinition @relation(fields: [metricCode], references: [code])
+
+  @@index([sessionId])
+  @@map("performance_session_ratings")
+}
+
+model PerformanceMatchReview {
+  id          String          @id @default(cuid())
+  dayLogId    String          @unique
+  matchSource MatchSourceType
+
+  // If APP_MATCH
+  matchId String?
+
+  // If MANUAL_MATCH
+  manualMatchName String?
+  manualRuns      Int?
+  manualBalls     Int?
+  manualWickets   Int?
+  manualOvers     Float?
+  manualResult    String?
+
+  role              String?
+  intentCodes       String[]
+  successDefinition String?  @db.Text
+
+  selfRating    Int? // 1-10
+  tacticalPivot String? @db.Text
+  turningPoint  String? @db.Text
+
+  dayLog PerformanceDayLog @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  match  Match?            @relation(fields: [matchId], references: [id], onDelete: SetNull)
+
+  @@index([dayLogId])
+  @@index([matchId])
+  @@map("performance_match_reviews")
+}
+
+model PerformanceRecoveryDetail {
+  id       String @id @default(cuid())
+  dayLogId String @unique
+
+  primaryActivity String
+  notes           String? @db.Text
+
+  dayLog PerformanceDayLog @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+
+  @@map("performance_recovery_details")
+}
+
+model PerformanceWeeklyReview {
+  id            String   @id @default(cuid())
+  playerId      String
+  weekStartDate DateTime @db.Date
+
+  systemInsights   Json?
+  playerReflection String? @db.Text
+
+  agreedWeaknesses String[]
+  nextWeekFocus    String[]
+
+  isConfirmed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, weekStartDate])
+  @@index([playerId, weekStartDate])
+  @@map("performance_weekly_reviews")
+}
+
+model PerformanceAmbition {
+  id                  String   @id @default(cuid())
+  playerId            String   @unique
+  targetRole          String
+  targetFormat        String
+  styleIdentity       String
+  targetLevel         String
+  timeline            String
+  focusAreas          String[]
+  commitmentStatement String?  @db.Text
+
+  // Health & Body Transformation
+  gender                 String?
+  targetWeight           Float?
+  bodyTransformDirection BodyTransformDirection?
+  targetBodyFatPercent   Float?
+  waistCircumferenceCm   Float?
+  neckCircumferenceCm    Float?
+  hipCircumferenceCm     Float?
+  bodyFatPercent         Float?
+  trainingDaysPerWeek    Int?
+  fitnessFocuses         String[]                @default([])
+  nutritionObjective     NutritionObjective?
+  dailySleepHoursGoal    Float?
+  dailyHydrationLitresGoal Float?
+  morningWakeUpTime      String?
+  habitsToQuit           String[]                @default([])
+  disciplineGoals        String[]                @default([])
+
+  // Computed Health Metrics (Stored)
+  dailyCalorieTarget     Int?
+  bmi                    Float?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("performance_ambitions")
+}
+
+// ============================================================
+// SECTION — CONTENT LIBRARY (Drill / Fitness / Nutrition)
+// ============================================================
+
+enum LibraryStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+model DrillLibraryItem {
+  id          String  @id @default(cuid())
+  createdById String?
+  updatedById String?
+  name        String
+  slug        String  @unique
+  description String? @db.Text
+
+  // Taxonomy
+  category        String? // TECHNIQUE | FITNESS | MENTAL | MATCH_SIMULATION
+  skillArea       String?
+  subSkill        String?
+  roleTags        String[] @default([])
+  goalTags        String[] @default([])
+  formatTags      String[] @default([])
+  equipmentTags   String[] @default([])
+  bodyAreaTags    String[] @default([])
+  levelTags       String[] @default([])
+  roleSpecificity String?
+  recommendedFor  String[] @default([])
+
+  // Volume & Load
+  difficulty     String  @default("BEGINNER") // BEGINNER | INTERMEDIATE | ADVANCED | ELITE
+  durationMins   Int?
+  targetUnit     String? // BALLS | OVERS | MINUTES | REPS | SESSIONS
+  targetValue    Float?
+  sets           Int?
+  repsPerSet     Int?
+  restSeconds    Int?
+  intensityLevel String? // LOW | MODERATE | HIGH | MAXIMAL
+  recoveryLoad   String? // LOW | MODERATE | HIGH
+  fatigueImpact  String? // LOW | MODERATE | HIGH
+
+  // Constraints
+  handedness String? // BOTH | RIGHT | LEFT
+  minAge     Int?
+  maxAge     Int?
+
+  // Instructions
+  instructions    Json?
+  coachingCues    String[] @default([])
+  commonMistakes  String[] @default([])
+  successCriteria String[] @default([])
+  contraNotes     String[] @default([])
+
+  // Media
+  videoUrl     String?
+  thumbnailUrl String?
+
+  // Source
+  sourceType String? @default("SWING") // SWING | COACH | EXTERNAL
+  sourceRef  String?
+
+  // Metadata
+  status      LibraryStatus @default(DRAFT)
+  isPublic    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  sortOrder   Int           @default(0)
+  usageCount  Int           @default(0)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status, category])
+  @@index([slug])
+  @@map("drill_library_items")
+}
+
+model FitnessExercise {
+  id          String  @id @default(cuid())
+  createdById String?
+  updatedById String?
+  name        String
+  slug        String  @unique
+  description String? @db.Text
+
+  // Taxonomy
+  category       String?
+  subCategory    String?
+  goalTags       String[] @default([])
+  bodyAreaTags   String[] @default([])
+  roleTags       String[] @default([])
+  levelTags      String[] @default([])
+  formatTags     String[] @default([])
+  equipmentTags  String[] @default([])
+  recommendedFor String[] @default([])
+  avoidIfTags    String[] @default([])
+
+  // Volume
+  durationMins    Int?
+  sets            Int?
+  reps            Int?
+  repsPerSide     Int?
+  holdSeconds     Int?
+  restSeconds     Int?
+  coolDownSeconds Int?
+  targetUnit      String?
+  targetValue     Float?
+
+  // Load
+  intensityLevel String?
+  readinessMin   Int?
+  readinessMax   Int?
+  fatigueImpact  String?
+  recoveryLoad   String?
+
+  // Instructions
+  instructions     Json?
+  coachingCues     String[] @default([])
+  commonMistakes   String[] @default([])
+  contraNotes      String[] @default([])
+  progressionNotes String?  @db.Text
+  regressionNotes  String?  @db.Text
+
+  // Media
+  videoUrl     String?
+  thumbnailUrl String?
+
+  // Metadata
+  status      LibraryStatus @default(DRAFT)
+  isPublic    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  sortOrder   Int           @default(0)
+  usageCount  Int           @default(0)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status, category])
+  @@index([slug])
+  @@map("fitness_exercises")
+}
+
+model NutritionItem {
+  id          String  @id @default(cuid())
+  createdById String?
+  updatedById String?
+  name        String
+  slug        String  @unique
+  description String? @db.Text
+
+  // Taxonomy
+  category       String?
+  subCategory    String?
+  goalTags       String[] @default([])
+  timingTags     String[] @default([])
+  dietTags       String[] @default([])
+  allergenTags   String[] @default([])
+  cuisineTags    String[] @default([])
+  recommendedFor String[] @default([])
+  avoidIfTags    String[] @default([])
+
+  // Serving
+  servingQty           Float?
+  servingUnit          String?
+  frequencyNote        String?
+  prepTimeMins         Int?
+  bestWindowMinsBefore Int?
+  bestWindowMinsAfter  Int?
+
+  // Macros
+  calories    Float?
+  proteinG    Float?
+  carbsG      Float?
+  fatG        Float?
+  fiberG      Float?
+  sugarG      Float?
+  sodiumMg    Float?
+  potassiumMg Float?
+  waterMl     Float?
+
+  // Scores
+  hydrationScore Float?
+  recoveryScore  Float?
+  energyScore    Float?
+  digestibility  String? // LIGHT | MODERATE | HEAVY
+
+  // Flags
+  matchDaySafe     Boolean @default(false)
+  heavyMeal        Boolean @default(false)
+  suitabilityNotes String?
+
+  // Metadata
+  status      LibraryStatus @default(DRAFT)
+  isPublic    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  sortOrder   Int           @default(0)
+  usageCount  Int           @default(0)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  recipes NutritionRecipe[]
+
+  @@index([status, category])
+  @@index([slug])
+  @@map("nutrition_items")
+}
+
+model NutritionRecipe {
+  id              String        @id @default(cuid())
+  nutritionItemId String
+  title           String
+  description     String?       @db.Text
+  ingredients     Json?
+  instructions    Json?
+  prepTimeMins    Int?
+  cookTimeMins    Int?
+  totalTimeMins   Int?
+  serves          Int?
+  videoUrl        String?
+  thumbnailUrl    String?
+  isPrimary       Boolean       @default(false)
+  status          LibraryStatus @default(DRAFT)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  nutritionItem NutritionItem @relation(fields: [nutritionItemId], references: [id], onDelete: Cascade)
+
+  @@index([nutritionItemId])
+  @@map("nutrition_recipes")
+}
