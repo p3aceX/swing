@@ -8,6 +8,9 @@ export 'src/repositories/host_team_repository.dart';
 export 'src/repositories/host_tournament_repository.dart';
 export 'src/theme/host_colors.dart';
 
+export 'src/biz/biz_models.dart';
+export 'src/biz/host_biz_repository.dart';
+
 export 'src/features/arena_booking/domain/arena_booking_models.dart';
 export 'src/features/create_event/presentation/create_event_screen.dart';
 export 'src/features/create_match/controller/create_match_controller.dart';

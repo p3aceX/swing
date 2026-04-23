@@ -27,4 +27,14 @@ class HostContracts {
   static String teamPlayer(String teamId, String playerId) =>
       '/teams/$teamId/players/$playerId';
   static String createEvent() => '/events';
+
+  // Biz (swing-biz app)
+  static const bizLogin = '/auth/biz/login';
+  static const authRefresh = '/auth/refresh';
+  static const bizMe = '/biz/me';
+  static const bizBusinessDetails = '/biz/business-details';
+  static const bizAcademy = '/biz/academy';
+  static const bizCoach = '/biz/coach';
+  static const bizArena = '/biz/arena';
+  static const bizStores = '/biz/stores';
 }
