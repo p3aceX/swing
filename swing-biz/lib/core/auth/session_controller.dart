@@ -21,7 +21,8 @@ class SessionState {
   }) =>
       SessionState(
         status: status ?? this.status,
-        activeProfile: clearActiveProfile ? null : (activeProfile ?? this.activeProfile),
+        activeProfile:
+            clearActiveProfile ? null : (activeProfile ?? this.activeProfile),
       );
 }
 
@@ -33,9 +34,11 @@ class SessionController extends StateNotifier<SessionState> {
   Future<void> _bootstrap() async {
     final token = await TokenStorage.getAccessToken();
     final profileRaw = await TokenStorage.getActiveProfile();
-    final profile = profileRaw == null ? null : bizProfileTypeFromString(profileRaw);
+    final profile =
+        profileRaw == null ? null : bizProfileTypeFromString(profileRaw);
     state = SessionState(
-      status: token == null ? AuthStatus.unauthenticated : AuthStatus.authenticated,
+      status:
+          token == null ? AuthStatus.unauthenticated : AuthStatus.authenticated,
       activeProfile: profile,
     );
   }
@@ -48,12 +51,17 @@ class SessionController extends StateNotifier<SessionState> {
       accessToken: accessToken,
       refreshToken: refreshToken,
     );
-    state = state.copyWith(status: AuthStatus.authenticated);
+    await TokenStorage.saveActiveProfile(null);
+    state = state.copyWith(
+      status: AuthStatus.authenticated,
+      clearActiveProfile: true,
+    );
   }
 
   Future<void> setActiveProfile(BizProfileType? profile) async {
     await TokenStorage.saveActiveProfile(_nameOf(profile));
-    state = state.copyWith(activeProfile: profile, clearActiveProfile: profile == null);
+    state = state.copyWith(
+        activeProfile: profile, clearActiveProfile: profile == null);
   }
 
   Future<void> signOut() async {
