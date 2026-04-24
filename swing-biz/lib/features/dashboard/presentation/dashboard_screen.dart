@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/me_providers.dart';
-import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
 import '../data/academy_dashboard_data.dart';
 
@@ -21,36 +20,78 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final meAsync = ref.watch(meProvider);
-
     return Scaffold(
       backgroundColor: _ownerBg,
       appBar: AppBar(
         backgroundColor: _ownerBg,
         foregroundColor: _ownerText,
-        title: const Text('Owner Dashboard'),
+        title: const Text('Academy Manager'),
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 12),
+          child: Icon(Icons.sports_cricket_rounded),
+        ),
+        leadingWidth: 42,
         actions: [
           IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: () async {
-              await ref.read(sessionControllerProvider.notifier).signOut();
-            },
+            onPressed: () => context.push(AppRoutes.ownerSearch),
+            icon: const Icon(Icons.search_rounded),
           ),
+          Stack(
+            children: [
+              IconButton(
+                onPressed: () => context.push(AppRoutes.ownerNotifications),
+                icon: const Icon(Icons.notifications_none_rounded),
+              ),
+              Positioned(
+                right: 10,
+                top: 10,
+                child: Container(
+                  width: 18,
+                  height: 18,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Text('3',
+                        style: TextStyle(color: Colors.white, fontSize: 10)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          PopupMenuButton<String>(
+            icon: const CircleAvatar(
+              radius: 16,
+              child: Text('OM'),
+            ),
+            onSelected: (value) {
+              if (value == 'profile') {
+                context.push(AppRoutes.academyProfile);
+              } else if (value == 'settings') {
+                context.push(AppRoutes.settings);
+              } else if (value == 'logout') {
+                context.push(AppRoutes.ownerLogoutConfirm);
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'profile', child: Text('Account')),
+              PopupMenuItem(value: 'settings', child: Text('Settings')),
+              PopupMenuItem(value: 'logout', child: Text('Logout')),
+            ],
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: meAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'Could not load your account: $err',
-              style: const TextStyle(color: _ownerText),
-            ),
-          ),
+          child: Text('Could not load owner dashboard: $err',
+              style: const TextStyle(color: _ownerText)),
         ),
         data: (me) => _OwnerDashboardBody(me: me),
       ),
+      bottomNavigationBar: const _OwnerBottomNav(index: 0),
     );
   }
 }
@@ -62,127 +103,100 @@ class _OwnerDashboardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final business = me?.businessAccount;
-    final academyName = business?.businessName ?? 'Swing Academy';
-    final location = [
-      business?.city,
-      business?.state,
-    ].where((item) => item != null && item.trim().isNotEmpty).join(', ');
+    final name = me?.user.name ?? 'Owner';
+    final academyName = me?.businessAccount?.businessName ?? 'Swing Academy';
+    final modules = [
+      _ModuleItem('Academy Overview', Icons.apartment_rounded,
+          AppRoutes.academyOverview),
+      _ModuleItem('Players', Icons.groups_rounded, AppRoutes.students),
+      _ModuleItem('Coaches', Icons.sports_rounded, AppRoutes.coaches),
+      _ModuleItem('Batches', Icons.calendar_month_rounded, AppRoutes.batches),
+      _ModuleItem('Fee Management', Icons.account_balance_wallet_rounded,
+          AppRoutes.fees),
+      _ModuleItem(
+          'Salary Management', Icons.payments_rounded, AppRoutes.payroll),
+      _ModuleItem('Inventory', Icons.inventory_2_rounded, AppRoutes.inventory),
+      _ModuleItem('Reports', Icons.bar_chart_rounded, AppRoutes.reports),
+      _ModuleItem('Settings', Icons.settings_rounded, AppRoutes.settings),
+    ];
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        _AcademyHeader(
-          academyName: academyName,
-          location: location.isEmpty ? 'Mumbai, Maharashtra' : location,
-        ),
-        const _OwnerSectionTitle('Summary'),
-        const _SummaryGrid(),
-        const _OwnerSectionTitle('Manage'),
-        const _MainNavigationGrid(
-          items: [
-            _NavItem(
-              label: 'Students',
-              caption: 'Fees & profiles',
-              icon: Icons.groups_rounded,
-              route: AppRoutes.students,
-            ),
-            _NavItem(
-              label: 'Batches',
-              caption: 'Timing & coach',
-              icon: Icons.calendar_month_rounded,
-              route: AppRoutes.batches,
-            ),
-            _NavItem(
-              label: 'Coaches',
-              caption: 'Salary & batches',
-              icon: Icons.sports_rounded,
-              route: AppRoutes.coaches,
-            ),
-          ],
-        ),
-        const _OwnerSectionTitle('Quick Actions'),
-        const _QuickActionGrid(),
-      ],
-    );
-  }
-}
-
-class _AcademyHeader extends StatelessWidget {
-  const _AcademyHeader({
-    required this.academyName,
-    required this.location,
-  });
-
-  final String academyName;
-  final String location;
-
-  @override
-  Widget build(BuildContext context) {
-    return _OwnerPanel(
-      padding: const EdgeInsets.all(18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _OwnerIcon(
-            icon: Icons.school_rounded,
-            size: 48,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  academyName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: _ownerText,
-                      ),
-                ),
-                const SizedBox(height: 5),
-                Row(
+        _panel(
+          child: Row(
+            children: [
+              const _OwnerIcon(Icons.waving_hand_rounded),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.location_on_outlined,
-                      size: 16,
-                      color: _ownerMuted,
+                    Text('Welcome back, $name',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: _ownerText,
+                              fontWeight: FontWeight.w900,
+                            )),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$academyName • 23 Apr 2026 • 6:30 PM',
+                      style: const TextStyle(color: _ownerMuted),
                     ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        location,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _ownerMuted),
-                      ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'You have 3 unpaid fees pending',
+                      style: TextStyle(color: _ownerBlue),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          InkWell(
-            borderRadius: BorderRadius.circular(999),
-            onTap: () => context.push(AppRoutes.planUpgrade),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: _ownerBlue.withValues(alpha: .12),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: _ownerBlue.withValues(alpha: .42)),
               ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: const [
+            Expanded(child: _MetricCard('Rs 1,45,000', 'Total Revenue')),
+            SizedBox(width: 10),
+            Expanded(child: _MetricCard('48', 'Total Players')),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: const [
+            Expanded(child: _MetricCard('5', 'Total Coaches')),
+            SizedBox(width: 10),
+            Expanded(child: _MetricCard('Rs 32,500', 'Pending Fees')),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const _SectionTitle('Quick Access'),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: modules.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: .92,
+          ),
+          itemBuilder: (context, index) {
+            final item = modules[index];
+            return _panel(
+              onTap: () => context.push(item.route),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.star_rounded, size: 15, color: _ownerBlue),
-                  SizedBox(width: 4),
+                  _OwnerIcon(item.icon, size: 42),
+                  const SizedBox(height: 10),
                   Text(
-                    'Free',
-                    style: TextStyle(
+                    item.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
                       color: _ownerText,
                       fontWeight: FontWeight.w800,
                       fontSize: 12,
@@ -190,293 +204,55 @@ class _AcademyHeader extends StatelessWidget {
                   ),
                 ],
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryGrid extends StatelessWidget {
-  const _SummaryGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    final metrics = [
-      const DashboardMetric(
-        label: 'Total Fee Collection',
-        amount: 'Rs 2.8L',
-        icon: Icons.account_balance_wallet_rounded,
-        color: _ownerBlue,
-      ),
-      const DashboardMetric(
-        label: 'Pending Fees',
-        amount: 'Rs 42k',
-        icon: Icons.pending_actions_rounded,
-        color: _ownerBlue,
-      ),
-      const DashboardMetric(
-        label: 'Salary Paid',
-        amount: 'Rs 98k',
-        icon: Icons.payments_rounded,
-        color: _ownerBlue,
-      ),
-      const DashboardMetric(
-        label: 'Gross Revenue',
-        amount: 'Rs 3.9L',
-        icon: Icons.trending_up_rounded,
-        color: _ownerBlue,
-      ),
-    ];
-
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: metrics.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.12,
-      ),
-      itemBuilder: (context, index) => _MetricCard(metric: metrics[index]),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.metric});
-
-  final DashboardMetric metric;
-
-  @override
-  Widget build(BuildContext context) {
-    return _OwnerPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _OwnerIcon(icon: metric.icon),
-          const Spacer(),
-          Text(
-            metric.amount,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: _ownerText,
-                ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            metric.label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _ownerMuted, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MainNavigationGrid extends StatelessWidget {
-  const _MainNavigationGrid({required this.items});
-
-  final List<_NavItem> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: items
-          .map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _OwnerPanel(
-                onTap: () => context.push(item.route),
-                child: Row(
-                  children: [
-                    _OwnerIcon(icon: item.icon),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.label,
+            );
+          },
+        ),
+        const SizedBox(height: 18),
+        const _SectionTitle('Recent Activity'),
+        ...academyActivities.map(
+          (activity) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _panel(
+              child: Row(
+                children: [
+                  const _OwnerIcon(Icons.history_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(activity.text,
                             style: const TextStyle(
-                              fontWeight: FontWeight.w800,
                               color: _ownerText,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            item.caption,
-                            style: const TextStyle(color: _ownerMuted),
-                          ),
-                        ],
-                      ),
+                              fontWeight: FontWeight.w700,
+                            )),
+                        const SizedBox(height: 4),
+                        Text(activity.time,
+                            style: const TextStyle(color: _ownerMuted)),
+                      ],
                     ),
-                    const Icon(
-                      Icons.chevron_right_rounded,
-                      color: _ownerMuted,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          )
-          .toList(),
-    );
-  }
-}
-
-class _QuickActionGrid extends StatelessWidget {
-  const _QuickActionGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    const actions = [
-      QuickAction(
-        label: 'Add Student',
-        icon: Icons.person_add_alt_1_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.createStudent,
-      ),
-      QuickAction(
-        label: 'New Batch',
-        icon: Icons.add_box_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.createBatch,
-      ),
-      QuickAction(
-        label: 'Fees',
-        icon: Icons.receipt_long_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.fees,
-      ),
-      QuickAction(
-        label: 'Coaches',
-        icon: Icons.sports_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.coaches,
-      ),
-      QuickAction(
-        label: 'Announce',
-        icon: Icons.campaign_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.announcements,
-      ),
-      QuickAction(
-        label: 'Inventory',
-        icon: Icons.inventory_2_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.inventory,
-      ),
-      QuickAction(
-        label: 'Profile',
-        icon: Icons.storefront_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.academyProfile,
-      ),
-      QuickAction(
-        label: 'Payroll',
-        icon: Icons.account_balance_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.payroll,
-      ),
-      QuickAction(
-        label: 'Settings',
-        icon: Icons.settings_rounded,
-        color: _ownerBlue,
-        route: AppRoutes.settings,
-      ),
-    ];
-
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: actions.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: .86,
-      ),
-      itemBuilder: (context, index) {
-        final action = actions[index];
-        return _OwnerPanel(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          onTap: () => context.push(action.route),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _OwnerIcon(icon: action.icon, size: 44),
-              const SizedBox(height: 10),
-              Text(
-                action.label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: _ownerText,
-                  fontSize: 12,
-                ),
-              ),
-            ],
           ),
-        );
-      },
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () => context.push(AppRoutes.academyOverview),
+            child: const Text('View More Metrics'),
+          ),
+        ),
+      ],
     );
   }
-}
 
-class _NavItem {
-  const _NavItem({
-    required this.label,
-    required this.caption,
-    required this.icon,
-    required this.route,
-  });
-
-  final String label;
-  final String caption;
-  final IconData icon;
-  final String route;
-}
-
-class _OwnerSectionTitle extends StatelessWidget {
-  const _OwnerSectionTitle(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 10),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: _ownerText,
-            ),
-      ),
-    );
-  }
-}
-
-class _OwnerPanel extends StatelessWidget {
-  const _OwnerPanel({
-    required this.child,
-    this.padding = const EdgeInsets.all(16),
-    this.onTap,
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _panel({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(16),
+    VoidCallback? onTap,
+  }) {
     final content = Container(
       padding: padding,
       decoration: BoxDecoration(
@@ -505,11 +281,72 @@ class _OwnerPanel extends StatelessWidget {
   }
 }
 
+class _MetricCard extends StatelessWidget {
+  const _MetricCard(this.value, this.label);
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _ownerCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _ownerBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: _ownerText,
+                    fontWeight: FontWeight.w900,
+                  )),
+          const SizedBox(height: 4),
+          Text(label, style: const TextStyle(color: _ownerMuted)),
+        ],
+      ),
+    );
+  }
+}
+
+class _OwnerBottomNav extends StatelessWidget {
+  const _OwnerBottomNav({required this.index});
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    const items = [
+      _NavTarget('Home', Icons.home_rounded, AppRoutes.dashboard),
+      _NavTarget('Players', Icons.groups_rounded, AppRoutes.students),
+      _NavTarget('Coaches', Icons.sports_rounded, AppRoutes.coaches),
+      _NavTarget(
+          'Finance', Icons.account_balance_wallet_rounded, AppRoutes.fees),
+      _NavTarget('Settings', Icons.settings_rounded, AppRoutes.settings),
+    ];
+    return NavigationBar(
+      backgroundColor: _ownerCard,
+      indicatorColor: _ownerBlue.withValues(alpha: .2),
+      selectedIndex: index,
+      onDestinationSelected: (value) => context.go(items[value].route),
+      destinations: items
+          .map(
+            (item) => NavigationDestination(
+              icon: Icon(item.icon, color: _ownerMuted),
+              selectedIcon: Icon(item.icon, color: _ownerBlue),
+              label: item.label,
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
 class _OwnerIcon extends StatelessWidget {
-  const _OwnerIcon({
-    required this.icon,
-    this.size = 42,
-  });
+  const _OwnerIcon(this.icon, {this.size = 42});
 
   final IconData icon;
   final double size;
@@ -526,4 +363,40 @@ class _OwnerIcon extends StatelessWidget {
       child: Icon(icon, color: _ownerBlue, size: size * .52),
     );
   }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: _ownerText,
+              fontWeight: FontWeight.w900,
+            ),
+      ),
+    );
+  }
+}
+
+class _ModuleItem {
+  const _ModuleItem(this.label, this.icon, this.route);
+
+  final String label;
+  final IconData icon;
+  final String route;
+}
+
+class _NavTarget {
+  const _NavTarget(this.label, this.icon, this.route);
+
+  final String label;
+  final IconData icon;
+  final String route;
 }

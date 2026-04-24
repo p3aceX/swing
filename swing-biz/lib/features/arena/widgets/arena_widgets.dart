@@ -51,13 +51,12 @@ class ArenaBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     const items = [
       _ArenaNavItem('Home', Icons.home_rounded, AppRoutes.arenaHome),
+      _ArenaNavItem('Courts', Icons.stadium_rounded, AppRoutes.arenaAssets),
       _ArenaNavItem(
           'Bookings', Icons.book_online_rounded, AppRoutes.arenaBookings),
-      _ArenaNavItem('Slots', Icons.schedule_rounded, AppRoutes.arenaSlots),
-      _ArenaNavItem('Payments', Icons.account_balance_wallet_rounded,
-          AppRoutes.arenaPayments),
-      _ArenaNavItem(
-          'Profile', Icons.storefront_rounded, AppRoutes.arenaProfile),
+      _ArenaNavItem('Earnings', Icons.account_balance_wallet_rounded,
+          AppRoutes.arenaEarnings),
+      _ArenaNavItem('Settings', Icons.settings_rounded, AppRoutes.arenaProfile),
     ];
 
     return NavigationBar(
@@ -203,6 +202,7 @@ Color bookingStatusColor(BookingStatus status) {
     BookingStatus.confirmed => arenaGreen,
     BookingStatus.pending => const Color(0xFFF59E0B),
     BookingStatus.cancelled => const Color(0xFFEF4444),
+    BookingStatus.completed => const Color(0xFF3B82F6),
   };
 }
 

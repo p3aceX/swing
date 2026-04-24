@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
+import '../controller/auth_controller.dart';
 
 class RoleSelectionScreen extends ConsumerWidget {
   const RoleSelectionScreen({super.key});
@@ -12,13 +13,23 @@ class RoleSelectionScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select role')),
+      appBar: AppBar(
+        title: const Text('Choose Your Role'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () async {
+            ref.read(authControllerProvider.notifier).resetToPhone();
+            await ref.read(sessionControllerProvider.notifier).signOut();
+            if (context.mounted) context.go(AppRoutes.login);
+          },
+        ),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
             Text(
-              'Continue as',
+              'Select how you\'ll use the app',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: const Color(0xFF0F172A),
@@ -32,7 +43,7 @@ class RoleSelectionScreen extends ConsumerWidget {
             const SizedBox(height: 24),
             _RoleCard(
               title: 'Academy Owner',
-              subtitle: 'Manage students, fees, batches, coaches, and payroll.',
+              subtitle: 'Manage academy, players, coaches, finances',
               icon: Icons.school_rounded,
               color: const Color(0xFF38BDF8),
               onTap: () => _selectRole(
@@ -44,7 +55,7 @@ class RoleSelectionScreen extends ConsumerWidget {
             ),
             _RoleCard(
               title: 'Coach',
-              subtitle: 'Open coach workspace.',
+              subtitle: 'Track students, conduct sessions, manage training',
               icon: Icons.sports_rounded,
               color: const Color(0xFFF59E0B),
               onTap: () => _selectRole(
@@ -55,8 +66,8 @@ class RoleSelectionScreen extends ConsumerWidget {
               ),
             ),
             _RoleCard(
-              title: 'Arena',
-              subtitle: 'Open arena workspace.',
+              title: 'Arena Manager',
+              subtitle: 'Manage courts, bookings, pricing, revenue',
               icon: Icons.stadium_rounded,
               color: const Color(0xFF34D399),
               onTap: () => _selectRole(

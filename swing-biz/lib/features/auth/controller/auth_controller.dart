@@ -62,7 +62,8 @@ class AuthController extends StateNotifier<AuthFlowState> {
           await _signInWithCredential(credential);
         },
         verificationFailed: (e) {
-          state = state.copyWith(loading: false, error: e.message ?? 'Verification failed');
+          state = state.copyWith(
+              loading: false, error: e.message ?? 'Verification failed');
         },
         codeSent: (verificationId, _) {
           _verificationId = verificationId;
@@ -110,14 +111,16 @@ class AuthController extends StateNotifier<AuthFlowState> {
   Future<void> submitName(String name) async {
     final token = state.firebaseIdToken;
     if (token == null) {
-      state = state.copyWith(error: 'Session expired — restart login', step: AuthStep.phone);
+      state = state.copyWith(
+          error: 'Session expired — restart login', step: AuthStep.phone);
       return;
     }
     state = state.copyWith(loading: true, clearError: true);
     await _exchangeWithBackend(idToken: token, name: name);
   }
 
-  Future<void> _exchangeWithBackend({required String idToken, String? name}) async {
+  Future<void> _exchangeWithBackend(
+      {required String idToken, String? name}) async {
     try {
       final repo = _ref.read(hostBizRepositoryProvider);
       final result = await repo.bizLogin(idToken: idToken, name: name);
@@ -129,7 +132,8 @@ class AuthController extends StateNotifier<AuthFlowState> {
     } catch (e) {
       final msg = e.toString();
       if (msg.contains('NAME_REQUIRED')) {
-        state = state.copyWith(step: AuthStep.name, loading: false, clearError: true);
+        state = state.copyWith(
+            step: AuthStep.name, loading: false, clearError: true);
         return;
       }
       state = state.copyWith(loading: false, error: _humanize(msg));
@@ -157,6 +161,6 @@ class AuthController extends StateNotifier<AuthFlowState> {
 }
 
 final authControllerProvider =
-    StateNotifierProvider.autoDispose<AuthController, AuthFlowState>(
+    StateNotifierProvider<AuthController, AuthFlowState>(
   (ref) => AuthController(ref),
 );
