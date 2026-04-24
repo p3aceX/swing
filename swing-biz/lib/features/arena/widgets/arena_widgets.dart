@@ -28,16 +28,44 @@ class ArenaScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: arenaBg,
-      appBar: AppBar(
+    final canReturn = GoRouter.of(context).canPop();
+    return PopScope(
+      canPop: canReturn,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (currentIndex != 0) {
+          context.go(AppRoutes.arenaHome);
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Use arena navigation to continue')),
+        );
+      },
+      child: Scaffold(
         backgroundColor: arenaBg,
-        foregroundColor: arenaText,
-        title: Text(title),
-        actions: actions,
+        appBar: AppBar(
+          backgroundColor: arenaBg,
+          foregroundColor: arenaText,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () {
+              if (GoRouter.of(context).canPop()) {
+                context.pop();
+              } else if (currentIndex != 0) {
+                context.go(AppRoutes.arenaHome);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Already on Arena Home')),
+                );
+              }
+            },
+          ),
+          title: Text(title),
+          actions: actions,
+        ),
+        body: child,
+        bottomNavigationBar: ArenaBottomNav(currentIndex: currentIndex),
       ),
-      body: child,
-      bottomNavigationBar: ArenaBottomNav(currentIndex: currentIndex),
     );
   }
 }

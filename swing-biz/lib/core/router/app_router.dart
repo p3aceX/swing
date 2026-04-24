@@ -48,21 +48,39 @@ class AppRoutes {
   static const arenaBookings = '/arena-home/bookings';
   static const arenaManageSlots = '/arena-home/manage-slots';
   static const arenaPricingManual = '/arena-home/pricing-manual';
+  static const arenaPricingEdit = '/arena-home/pricing-manual/edit';
   static const arenaCalendar = '/arena-home/calendar';
   static const arenaBlockSlot = '/arena-home/block-slot';
   static const arenaMaintenance = '/arena-home/maintenance';
   static const arenaAssets = '/arena-home/assets';
   static const arenaCourtDetail = '/arena-home/assets/detail';
   static const arenaAddEditAsset = '/arena-home/assets/edit';
+  static const arenaCourtPhotoSource = '/arena-home/assets/photo-source';
   static const arenaEarnings = '/arena-home/earnings';
+  static const arenaExportReport = '/arena-home/earnings/export';
+  static const arenaPaymentActions = '/arena-home/earnings/payment-actions';
+  static const arenaAnalytics = '/arena-home/earnings/analytics';
   static const arenaTodaySchedule = '/arena-home/today-schedule';
   static const arenaSlots = '/arena-home/slots';
   static const arenaSlotDetail = '/arena-home/slots/detail';
   static const arenaSlotForm = '/arena-home/slots/form';
+  static const arenaBulkSlotForm = '/arena-home/slots/bulk';
+  static const arenaSlotDelete = '/arena-home/slots/delete';
   static const arenaPayments = '/arena-home/payments';
   static const arenaBookingForm = '/arena-home/bookings/new';
+  static const arenaBookingEdit = '/arena-home/bookings/edit';
+  static const arenaBookingCancel = '/arena-home/bookings/cancel';
+  static const arenaBookingReminder = '/arena-home/bookings/reminder';
   static const arenaReviews = '/arena-home/reviews';
+  static const arenaReviewDetail = '/arena-home/reviews/detail';
   static const arenaProfile = '/arena-home/profile';
+  static const arenaProfileMenu = '/arena-home/profile-menu';
+  static const arenaAccount = '/arena-home/account';
+  static const arenaNotifications = '/arena-home/notifications';
+  static const arenaNotificationPrefs = '/arena-home/notifications/preferences';
+  static const arenaLogoutConfirm = '/arena-home/logout';
+  static const arenaMaintenanceTask = '/arena-home/maintenance/task';
+  static const arenaMaintenanceComplete = '/arena-home/maintenance/complete';
   static const students = '/dashboard/students';
   static const editStudent = '/dashboard/students/edit';
   static const deleteStudent = '/dashboard/students/delete';
@@ -85,10 +103,18 @@ class AppRoutes {
   static const feeReceipt = '/dashboard/fees/receipt';
   static const feeReminderList = '/dashboard/fees/reminders';
   static const feeReminderForm = '/dashboard/fees/reminders/form';
+  static const feeReminderHistory = '/dashboard/fees/reminders/history';
+  static const feePlanDetails = '/dashboard/fees/plan/details';
+  static const feePlanDelete = '/dashboard/fees/plan/delete';
   static const planUpgrade = '/dashboard/plan-upgrade';
   static const announcements = '/dashboard/announcements';
+  static const documents = '/dashboard/documents';
+  static const documentAdd = '/dashboard/documents/add';
+  static const documentView = '/dashboard/documents/view';
+  static const documentDelete = '/dashboard/documents/delete';
   static const inventory = '/dashboard/inventory';
   static const inventoryItem = '/dashboard/inventory/item';
+  static const inventoryBilling = '/dashboard/inventory/billing';
   static const inventoryIssue = '/dashboard/inventory/issue';
   static const inventoryIssueHistory = '/dashboard/inventory/issue-history';
   static const academyProfile = '/dashboard/academy-profile';
@@ -98,6 +124,7 @@ class AppRoutes {
   static const payrollAddIncentive = '/dashboard/payroll/incentives/add';
   static const payrollReport = '/dashboard/payroll/report';
   static const reports = '/dashboard/reports';
+  static const studentSchedule = '/dashboard/students/schedule';
   static const settings = '/dashboard/settings';
   static const ownerNotifications = '/dashboard/notifications';
   static const ownerNotificationDetail = '/dashboard/notifications/detail';
@@ -276,12 +303,22 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ArenaPricingManualScreen(),
       ),
       GoRoute(
+        path: AppRoutes.arenaPricingEdit,
+        builder: (_, __) => const ArenaEditPricingScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.arenaCalendar,
         builder: (_, __) => const ArenaCalendarScreen(),
       ),
       GoRoute(
         path: AppRoutes.arenaBlockSlot,
         builder: (_, __) => const ArenaBlockSlotScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaBlockSlot}/:slotId',
+        builder: (_, state) => ArenaBlockSlotScreen(
+          slotId: state.pathParameters['slotId'],
+        ),
       ),
       GoRoute(
         path: AppRoutes.arenaMaintenance,
@@ -301,8 +338,33 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ArenaAddEditAssetScreen(),
       ),
       GoRoute(
+        path: '${AppRoutes.arenaAddEditAsset}/:courtId',
+        builder: (_, state) => ArenaAddEditAssetScreen(
+          courtId: state.pathParameters['courtId'],
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaCourtPhotoSource,
+        builder: (_, __) => const ArenaCourtPhotoSourceScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.arenaEarnings,
         builder: (_, __) => const ArenaEarningsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaExportReport,
+        builder: (_, __) => const ArenaExportReportScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaPaymentActions,
+        builder: (_, state) => ArenaPaymentActionScreen(
+          bookingId: state.uri.queryParameters['bookingId'],
+          initialTab: state.uri.queryParameters['tab'],
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaAnalytics,
+        builder: (_, __) => const ArenaAnalyticsDashboardScreen(),
       ),
       GoRoute(
         path: AppRoutes.arenaTodaySchedule,
@@ -328,6 +390,22 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ArenaSlotFormScreen(),
       ),
       GoRoute(
+        path: AppRoutes.arenaBulkSlotForm,
+        builder: (_, __) => const ArenaBulkSlotFormScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaSlotForm}/:slotId',
+        builder: (_, state) => ArenaSlotFormScreen(
+          slotId: state.pathParameters['slotId'],
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaSlotDelete}/:slotId',
+        builder: (_, state) => ArenaDeleteSlotScreen(
+          slotId: state.pathParameters['slotId']!,
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.arenaPayments,
         builder: (_, __) => const ArenaPaymentsScreen(),
       ),
@@ -336,12 +414,66 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ArenaBookingFormScreen(),
       ),
       GoRoute(
+        path: '${AppRoutes.arenaBookingEdit}/:bookingId',
+        builder: (_, state) => ArenaEditBookingScreen(
+          bookingId: state.pathParameters['bookingId']!,
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaBookingCancel}/:bookingId',
+        builder: (_, state) => ArenaCancelBookingScreen(
+          bookingId: state.pathParameters['bookingId']!,
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaBookingReminder}/:bookingId',
+        builder: (_, state) => ArenaResendReminderScreen(
+          bookingId: state.pathParameters['bookingId']!,
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.arenaReviews,
         builder: (_, __) => const ArenaReviewsScreen(),
       ),
       GoRoute(
+        path: '${AppRoutes.arenaReviewDetail}/:reviewId',
+        builder: (_, state) => ArenaReviewDetailScreen(
+          reviewId: state.pathParameters['reviewId']!,
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.arenaProfile,
         builder: (_, __) => const ArenaProfileScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaProfileMenu,
+        builder: (_, __) => const ArenaProfileMenuScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaAccount,
+        builder: (_, __) => const ArenaAccountScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaNotifications,
+        builder: (_, __) => const ArenaNotificationsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaNotificationPrefs,
+        builder: (_, __) => const ArenaNotificationPreferencesScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaLogoutConfirm,
+        builder: (_, __) => const ArenaLogoutConfirmScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.arenaMaintenanceTask,
+        builder: (_, __) => const ArenaMaintenanceTaskScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaMaintenanceComplete}/:taskId',
+        builder: (_, state) => ArenaMaintenanceCompleteScreen(
+          taskId: state.pathParameters['taskId']!,
+        ),
       ),
       GoRoute(
         path: AppRoutes.students,
@@ -472,6 +604,22 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ReminderFormScreen(),
       ),
       GoRoute(
+        path: AppRoutes.feeReminderHistory,
+        builder: (_, __) => const ReminderHistoryScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.feePlanDetails}/:planName',
+        builder: (_, state) => FeePlanDetailsScreen(
+          planName: Uri.decodeComponent(state.pathParameters['planName']!),
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.feePlanDelete}/:planName',
+        builder: (_, state) => FeePlanDeleteScreen(
+          planName: Uri.decodeComponent(state.pathParameters['planName']!),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.planUpgrade,
         builder: (_, __) => const PlanUpgradeScreen(),
       ),
@@ -480,12 +628,35 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const AnnouncementsScreen(),
       ),
       GoRoute(
+        path: AppRoutes.documents,
+        builder: (_, __) => const DocumentsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.documentAdd,
+        builder: (_, __) => const AddDocumentScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.documentView,
+        builder: (_, __) => const ViewDocumentsScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.documentDelete}/:documentName',
+        builder: (_, state) => DeleteDocumentScreen(
+          documentName:
+              Uri.decodeComponent(state.pathParameters['documentName']!),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.inventory,
         builder: (_, __) => const InventoryScreen(),
       ),
       GoRoute(
         path: AppRoutes.inventoryItem,
         builder: (_, __) => const InventoryItemScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.inventoryBilling,
+        builder: (_, __) => const InventoryBillingScreen(),
       ),
       GoRoute(
         path: AppRoutes.inventoryIssue,
@@ -536,6 +707,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => ReportDetailScreen(
           reportId: state.pathParameters['reportId']!,
         ),
+      ),
+      GoRoute(
+        path: AppRoutes.studentSchedule,
+        builder: (_, __) => const StudentScheduleScreen(),
       ),
       GoRoute(
         path: AppRoutes.settings,

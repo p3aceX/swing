@@ -113,6 +113,9 @@ class _OwnerDashboardBody extends StatelessWidget {
       _ModuleItem('Batches', Icons.calendar_month_rounded, AppRoutes.batches),
       _ModuleItem('Fee Management', Icons.account_balance_wallet_rounded,
           AppRoutes.fees),
+      _ModuleItem('Reminders', Icons.notifications_active_rounded,
+          AppRoutes.feeReminderList),
+      _ModuleItem('Documents', Icons.folder_open_rounded, AppRoutes.documents),
       _ModuleItem(
           'Salary Management', Icons.payments_rounded, AppRoutes.payroll),
       _ModuleItem('Inventory', Icons.inventory_2_rounded, AppRoutes.inventory),
@@ -139,7 +142,7 @@ class _OwnerDashboardBody extends StatelessWidget {
                             )),
                     const SizedBox(height: 4),
                     Text(
-                      '$academyName • 23 Apr 2026 • 6:30 PM',
+                      '$academyName â€¢ 23 Apr 2026 â€¢ 6:30 PM',
                       style: const TextStyle(color: _ownerMuted),
                     ),
                     const SizedBox(height: 6),

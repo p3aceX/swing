@@ -1,11 +1,135 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
 import '../data/academy_dashboard_data.dart';
 import '../widgets/dashboard_widgets.dart';
+
+AppBar ownerAppBar(BuildContext context, String title) {
+  return AppBar(
+    leading: IconButton(
+      onPressed: () {
+        if (Navigator.of(context).canPop()) {
+          context.pop();
+          return;
+        }
+        debugPrint('Owner back fallback for $title');
+        context.go(AppRoutes.dashboard);
+      },
+      icon: const Icon(Icons.arrow_back_rounded),
+    ),
+    title: Text(title),
+  );
+}
+
+void ownerPush(BuildContext context, String route) {
+  try {
+    context.push(route);
+  } catch (error, stackTrace) {
+    debugPrint('Owner navigation failed for $route: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to open this screen right now')),
+    );
+  }
+}
+
+void ownerGo(BuildContext context, String route) {
+  try {
+    context.go(route);
+  } catch (error, stackTrace) {
+    debugPrint('Owner navigation failed for $route: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to open this screen right now')),
+    );
+  }
+}
+
+Future<File> _writeOwnerFile(
+  String fileName,
+  String content,
+) async {
+  final file = File('${Directory.systemTemp.path}\\$fileName');
+  await file.writeAsString(content);
+  return file;
+}
+
+Future<void> _showGeneratedFile(
+  BuildContext context,
+  String label,
+  File file,
+) async {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('$label saved to ${file.path}')),
+  );
+}
+
+Future<void> _generatePdfDocument(
+  BuildContext context, {
+  required String title,
+  required List<String> lines,
+  bool printAfterCreate = false,
+}) async {
+  final document = pw.Document();
+  document.addPage(
+    pw.Page(
+      build: (_) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(title, style: pw.TextStyle(fontSize: 20)),
+          pw.SizedBox(height: 12),
+          ...lines.map((line) => pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 6),
+                child: pw.Text(line),
+              )),
+        ],
+      ),
+    ),
+  );
+  final bytes = await document.save();
+  final file = await File(
+    '${Directory.systemTemp.path}\\${title.toLowerCase().replaceAll(' ', '_')}.pdf',
+  ).writeAsBytes(bytes, flush: true);
+  if (printAfterCreate) {
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+  if (!context.mounted) return;
+  await _showGeneratedFile(context, '$title PDF', file);
+}
+
+Future<void> _generateCsvFile(
+  BuildContext context, {
+  required String fileName,
+  required String content,
+}) async {
+  final file = await _writeOwnerFile(fileName, content);
+  if (!context.mounted) return;
+  await _showGeneratedFile(context, 'Excel-ready CSV', file);
+}
+
+Future<void> _openWhatsAppShare(
+  BuildContext context, {
+  required String message,
+}) async {
+  final uri = Uri.parse(
+    'https://wa.me/?text=${Uri.encodeComponent(message)}',
+  );
+  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!launched && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to open WhatsApp')),
+    );
+  }
+}
 
 class AcademyOverviewScreen extends StatelessWidget {
   const AcademyOverviewScreen({super.key});
@@ -54,6 +178,25 @@ class _StudentsScreenState extends State<StudentsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonal(
+                onPressed: () => ownerPush(context, AppRoutes.students),
+                child: const Text('View Students'),
+              ),
+              FilledButton.tonal(
+                onPressed: () => ownerPush(context, AppRoutes.createStudent),
+                child: const Text('Add Students'),
+              ),
+              FilledButton.tonal(
+                onPressed: () => ownerPush(context, AppRoutes.studentSchedule),
+                child: const Text('Edit Schedule'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Text('48 Players',
               style: Theme.of(context)
                   .textTheme
@@ -244,10 +387,13 @@ class StudentProfileScreen extends StatelessWidget {
                     _actionButtons([
                       _ActionConfig(
                         'Send Fee Reminder',
-                        () => context.push(AppRoutes.feeReminderForm),
+                        () => ownerPush(context, AppRoutes.feeReminderForm),
                       ),
                       _ActionConfig('Mark Attendance', () {}),
-                      _ActionConfig('Add Document', () {}),
+                      _ActionConfig(
+                        'Add Document',
+                        () => ownerPush(context, AppRoutes.documentAdd),
+                      ),
                     ]),
                   ]),
                   _tabList([
@@ -344,7 +490,13 @@ class StudentProfileScreen extends StatelessWidget {
         ),
       );
 
-  Widget _historyTile(String title, String subtitle) => RoundedPanel(
+  Widget _historyTile(
+    String title,
+    String subtitle, {
+    VoidCallback? onTap,
+  }) =>
+      RoundedPanel(
+        onTap: onTap,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -366,8 +518,11 @@ class StudentProfileScreen extends StatelessWidget {
             .toList(),
       );
 
-  Widget _downloadButton(String label) =>
-      ElevatedButton(onPressed: () {}, child: Text(label));
+  Widget _downloadButton(
+    String label, {
+    VoidCallback? onPressed,
+  }) =>
+      ElevatedButton(onPressed: onPressed ?? () {}, child: Text(label));
 }
 
 class CreateStudentScreen extends StatelessWidget {
@@ -918,7 +1073,9 @@ class BatchDetailsScreen extends StatelessWidget {
                     _batchCard('Fee Structure', money(batch.fee)),
                     _batchCard('Created Date', batch.createdDate),
                     _buttonWrap(
-                        ['View Students', 'Add Student', 'Edit Schedule']),
+                      context,
+                      ['View Students', 'Add Student', 'Edit Schedule'],
+                    ),
                   ]),
                   _batchList([
                     ...students.map(
@@ -937,7 +1094,8 @@ class BatchDetailsScreen extends StatelessWidget {
                     _batchCard('Wednesday', batch.time),
                     _batchCard('Friday', batch.time),
                     ElevatedButton(
-                      onPressed: () {},
+                      onPressed: () =>
+                          ownerPush(context, AppRoutes.studentSchedule),
                       child: const Text('Edit Schedule'),
                     ),
                   ]),
@@ -977,12 +1135,31 @@ class BatchDetailsScreen extends StatelessWidget {
         ),
       );
 
-  Widget _buttonWrap(List<String> labels) => Wrap(
+  Widget _buttonWrap(BuildContext context, List<String> labels) => Wrap(
         spacing: 8,
         runSpacing: 8,
         children: labels
-            .map((label) =>
-                FilledButton.tonal(onPressed: () {}, child: Text(label)))
+            .map(
+              (label) => FilledButton.tonal(
+                onPressed: () {
+                  switch (label) {
+                    case 'View Students':
+                      ownerPush(context, AppRoutes.students);
+                      return;
+                    case 'Add Student':
+                      ownerPush(context, AppRoutes.createStudent);
+                      return;
+                    case 'Edit Schedule':
+                      ownerPush(context, AppRoutes.studentSchedule);
+                      return;
+                    default:
+                      debugPrint('Unhandled batch action: $label');
+                      return;
+                  }
+                },
+                child: Text(label),
+              ),
+            )
             .toList(),
       );
 }
@@ -1117,10 +1294,12 @@ class FeeManagementScreen extends StatelessWidget {
                                             context.push(AppRoutes.feePlan),
                                         child: const Text('Edit')),
                                     TextButton(
-                                        onPressed: () {},
+                                        onPressed: () => ownerPush(context,
+                                            '${AppRoutes.feePlanDetails}/${Uri.encodeComponent(plan.name)}'),
                                         child: const Text('View Details')),
                                     TextButton(
-                                        onPressed: () {},
+                                        onPressed: () => ownerPush(context,
+                                            '${AppRoutes.feePlanDelete}/${Uri.encodeComponent(plan.name)}'),
                                         child: const Text('Delete')),
                                   ],
                                 ),
@@ -1242,15 +1421,15 @@ class FeeManagementScreen extends StatelessWidget {
                         children: [
                           OutlinedButton(
                               onPressed: () =>
-                                  context.push(AppRoutes.feeReminderForm),
+                                  ownerPush(context, AppRoutes.feeReminderForm),
                               child: const Text('Edit')),
                           OutlinedButton(
                               onPressed: () =>
-                                  context.push(AppRoutes.feeReminderList),
+                                  ownerPush(context, AppRoutes.feeReminderList),
                               child: const Text('Disable')),
                           ElevatedButton(
                               onPressed: () =>
-                                  context.push(AppRoutes.feeReminderForm),
+                                  ownerPush(context, AppRoutes.feeReminderForm),
                               child: const Text('Create New Reminder')),
                         ],
                       ),
@@ -1400,7 +1579,7 @@ class FeeInvoiceScreen extends StatelessWidget {
       orElse: () => academyStudents.first,
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Invoice & Receipt')),
+      appBar: ownerAppBar(context, 'Invoice & Receipt'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1440,10 +1619,40 @@ class FeeInvoiceScreen extends StatelessWidget {
             runSpacing: 8,
             children: [
               ElevatedButton(
-                  onPressed: () {}, child: const Text('Download PDF')),
-              OutlinedButton(onPressed: () {}, child: const Text('Print')),
+                  onPressed: () => _generatePdfDocument(
+                        context,
+                        title: 'Invoice ${student.name}',
+                        lines: [
+                          'Student: ${student.name}',
+                          'Batch: ${student.batch}',
+                          'Amount: ${money(student.fee)}',
+                        ],
+                      ),
+                  child: const Text('Download PDF')),
               OutlinedButton(
-                  onPressed: () {}, child: const Text('Share via WhatsApp')),
+                  onPressed: () => _generatePdfDocument(
+                        context,
+                        title: 'Invoice ${student.name}',
+                        lines: [
+                          'Student: ${student.name}',
+                          'Batch: ${student.batch}',
+                          'Amount: ${money(student.fee)}',
+                        ],
+                        printAfterCreate: true,
+                      ),
+                  child: const Text('Print')),
+              OutlinedButton(
+                  onPressed: () => _openWhatsAppShare(
+                        context,
+                        message:
+                            'Invoice for ${student.name}: ${money(student.fee)} due for ${student.batch}.',
+                      ),
+                  child: const Text('Share via WhatsApp')),
+              OutlinedButton(
+                onPressed: () =>
+                    ownerPush(context, '${AppRoutes.feeReceipt}/$studentId'),
+                child: const Text('Receipt'),
+              ),
             ],
           ),
         ],
@@ -1813,12 +2022,16 @@ class InventoryScreen extends StatelessWidget {
                             spacing: 8,
                             children: [
                               OutlinedButton(
-                                  onPressed: () =>
-                                      context.push(AppRoutes.inventoryItem),
+                                  onPressed: () => ownerPush(
+                                      context, AppRoutes.inventoryItem),
                                   child: const Text('Edit')),
                               OutlinedButton(
-                                  onPressed: () =>
-                                      context.push(AppRoutes.inventoryIssue),
+                                  onPressed: () => ownerPush(
+                                      context, AppRoutes.inventoryBilling),
+                                  child: const Text('Billing Create')),
+                              OutlinedButton(
+                                  onPressed: () => ownerPush(
+                                      context, AppRoutes.inventoryIssue),
                                   child: const Text('Issue Item')),
                             ],
                           ),
@@ -1846,7 +2059,7 @@ class InventoryScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: () =>
-                      context.push(AppRoutes.inventoryIssueHistory),
+                      ownerPush(context, AppRoutes.inventoryIssueHistory),
                   child: const Text('View Issue History'),
                 ),
               ],
@@ -1880,7 +2093,7 @@ class InventoryItemScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add / Edit Inventory Item')),
+      appBar: ownerAppBar(context, 'Add / Edit Inventory Item'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1909,7 +2122,8 @@ class InventoryItemScreen extends StatelessWidget {
                   children: [
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: () => context.pop(),
+                        onPressed: () =>
+                            ownerGo(context, AppRoutes.inventoryBilling),
                         child: const Text('Save'),
                       ),
                     ),
@@ -1937,7 +2151,7 @@ class ReportsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Reports')),
+      appBar: ownerAppBar(context, 'Reports'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1950,7 +2164,9 @@ class ReportsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           ElevatedButton(
-              onPressed: () {}, child: const Text('Generate Report')),
+              onPressed: () => ownerPush(
+                  context, '${AppRoutes.reports}/${reportTypes.first.id}'),
+              child: const Text('Generate Report')),
           const SizedBox(height: 14),
           GridView.builder(
             shrinkWrap: true,
@@ -1987,10 +2203,32 @@ class ReportsScreen extends StatelessWidget {
             runSpacing: 8,
             children: [
               OutlinedButton(
-                  onPressed: () {}, child: const Text('Download as PDF')),
+                  onPressed: () => _generatePdfDocument(
+                        context,
+                        title: 'Academy Report',
+                        lines: reportTypes
+                            .map((item) => '${item.title}: ${item.description}')
+                            .toList(),
+                      ),
+                  child: const Text('Download as PDF')),
               OutlinedButton(
-                  onPressed: () {}, child: const Text('Download as Excel')),
-              OutlinedButton(onPressed: () {}, child: const Text('Print')),
+                  onPressed: () => _generateCsvFile(
+                        context,
+                        fileName: 'academy_report.csv',
+                        content:
+                            'Report,Description\n${reportTypes.map((item) => '${item.title},${item.description}').join('\n')}',
+                      ),
+                  child: const Text('Download as Excel')),
+              OutlinedButton(
+                  onPressed: () => _generatePdfDocument(
+                        context,
+                        title: 'Academy Report',
+                        lines: reportTypes
+                            .map((item) => '${item.title}: ${item.description}')
+                            .toList(),
+                        printAfterCreate: true,
+                      ),
+                  child: const Text('Print')),
             ],
           ),
         ],
@@ -2011,7 +2249,7 @@ class ReportDetailScreen extends StatelessWidget {
       orElse: () => reportTypes.first,
     );
     return Scaffold(
-      appBar: AppBar(title: Text(report.title)),
+      appBar: ownerAppBar(context, report.title),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2033,9 +2271,28 @@ class ReportDetailScreen extends StatelessWidget {
                     OutlinedButton(
                         onPressed: () {}, child: const Text('Edit Filter')),
                     OutlinedButton(
-                        onPressed: () {}, child: const Text('Export')),
+                        onPressed: () => _generatePdfDocument(
+                              context,
+                              title: report.title,
+                              lines: [
+                                'Date range: Jan 1 - Mar 31, 2024',
+                                'Total revenue: Rs 4.35L',
+                                'Average monthly: Rs 1.45L',
+                              ],
+                            ),
+                        child: const Text('Export')),
                     OutlinedButton(
-                        onPressed: () {}, child: const Text('Print')),
+                        onPressed: () => _generatePdfDocument(
+                              context,
+                              title: report.title,
+                              lines: [
+                                'Date range: Jan 1 - Mar 31, 2024',
+                                'Total revenue: Rs 4.35L',
+                                'Average monthly: Rs 1.45L',
+                              ],
+                              printAfterCreate: true,
+                            ),
+                        child: const Text('Print')),
                   ],
                 ),
               ],
@@ -2494,7 +2751,7 @@ class RecordPaymentScreen extends StatelessWidget {
       orElse: () => academyStudents.first,
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Record Payment')),
+      appBar: ownerAppBar(context, 'Record Payment'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2518,6 +2775,23 @@ class RecordPaymentScreen extends StatelessWidget {
                   ),
                   child: const Text('Record Payment'),
                 ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => ownerPush(
+                          context, '${AppRoutes.feeInvoice}/$studentId'),
+                      child: const Text('View Invoice'),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => ownerPush(
+                          context, '${AppRoutes.feeReceipt}/$studentId'),
+                      child: const Text('Receipt'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -2539,7 +2813,7 @@ class PaymentStatusScreen extends StatelessWidget {
       orElse: () => academyStudents.first,
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Payment Status')),
+      appBar: ownerAppBar(context, 'Payment Status'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2553,6 +2827,23 @@ class PaymentStatusScreen extends StatelessWidget {
                 Text('Current status: ${feeStatusLabel(student.status)}'),
                 Text('Paid: ${money(student.totalPaid)}'),
                 Text('Balance: ${money(student.balance)}'),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => ownerPush(
+                          context, '${AppRoutes.feeInvoice}/$studentId'),
+                      child: const Text('View Invoice'),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => ownerPush(
+                          context, '${AppRoutes.feeReceipt}/$studentId'),
+                      child: const Text('Receipt'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -2616,7 +2907,7 @@ class ReminderManagementScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Reminders Management')),
+      appBar: ownerAppBar(context, 'Reminders Management'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2640,12 +2931,19 @@ class ReminderManagementScreen extends StatelessWidget {
                 child: const Text('Edit Reminder'),
               ),
               OutlinedButton(
-                onPressed: () => context.pop(),
+                onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Reminder disabled')),
+                ),
                 child: const Text('Disable Reminder'),
               ),
               ElevatedButton(
                 onPressed: () => context.push(AppRoutes.feeReminderForm),
                 child: const Text('Add Reminder'),
+              ),
+              ElevatedButton(
+                onPressed: () =>
+                    ownerPush(context, AppRoutes.feeReminderHistory),
+                child: const Text('Reminder History'),
               ),
             ],
           ),
@@ -2661,7 +2959,7 @@ class ReminderFormScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Reminder')),
+      appBar: ownerAppBar(context, 'Add Reminder'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2678,13 +2976,330 @@ class ReminderFormScreen extends StatelessWidget {
                     initialValue: 'Fee payment reminder for current month'),
                 const SizedBox(height: 12),
                 ElevatedButton(
-                  onPressed: () => context.go(AppRoutes.feeReminderList),
+                  onPressed: () => ownerGo(context, AppRoutes.feeReminderList),
                   child: const Text('Save Reminder'),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class ReminderHistoryScreen extends StatelessWidget {
+  const ReminderHistoryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Reminder History'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: const [
+          RoundedPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('15 Apr 2026',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                SizedBox(height: 4),
+                Text('Sent to 5 students for Cricket Monthly'),
+              ],
+            ),
+          ),
+          SizedBox(height: 10),
+          RoundedPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('01 Apr 2026',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                SizedBox(height: 4),
+                Text('Sent to 8 students for Cricket Quarterly'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DocumentsScreen extends StatelessWidget {
+  const DocumentsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Documents'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton(
+                onPressed: () => ownerPush(context, AppRoutes.documentAdd),
+                child: const Text('Add Document'),
+              ),
+              OutlinedButton(
+                onPressed: () => ownerPush(context, AppRoutes.documentView),
+                child: const Text('View Documents'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...academyStudents.first.documents.map(
+            (document) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: RoundedPanel(
+                onTap: () => ownerPush(context, AppRoutes.documentView),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(document,
+                        style: const TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 4),
+                    const Text('Tap to view or delete'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AddDocumentScreen extends StatelessWidget {
+  const AddDocumentScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Add Document'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          RoundedPanel(
+            child: Column(
+              children: [
+                const SimpleFormField(label: 'Document name'),
+                const _InlineDropdown(
+                    label: 'Category', value: 'Admission Form'),
+                const SimpleFormField(label: 'Notes'),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: () => ownerGo(context, AppRoutes.documentView),
+                  child: const Text('Save Document'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ViewDocumentsScreen extends StatelessWidget {
+  const ViewDocumentsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'View Documents'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: academyStudents.first.documents
+            .map(
+              (document) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: RoundedPanel(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(document,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                      TextButton(
+                        onPressed: () => ownerPush(
+                          context,
+                          '${AppRoutes.documentDelete}/${Uri.encodeComponent(document)}',
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class DeleteDocumentScreen extends StatelessWidget {
+  const DeleteDocumentScreen({super.key, required this.documentName});
+
+  final String documentName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Delete Document'),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: RoundedPanel(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Delete $documentName?',
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () =>
+                            ownerGo(context, AppRoutes.documentView),
+                        child: const Text('Delete'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => context.pop(),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class StudentScheduleScreen extends StatelessWidget {
+  const StudentScheduleScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Student Schedule'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: academyBatches
+            .map(
+              (batch) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: RoundedPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(batch.name,
+                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 4),
+                      Text('${batch.schedule} • ${batch.time}'),
+                    ],
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class FeePlanDetailsScreen extends StatelessWidget {
+  const FeePlanDetailsScreen({super.key, required this.planName});
+
+  final String planName;
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = academyFeePlans.firstWhere(
+      (item) => item.name == planName,
+      orElse: () => academyFeePlans.first,
+    );
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Fee Plan Details'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          RoundedPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(plan.name,
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Text('Sport: ${plan.sport}'),
+                Text('Duration: ${plan.duration}'),
+                Text('Amount: ${money(plan.amount)}'),
+                Text('Discount: ${plan.discountPercent}%'),
+                Text('Students enrolled: ${plan.studentsCount}'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class FeePlanDeleteScreen extends StatelessWidget {
+  const FeePlanDeleteScreen({super.key, required this.planName});
+
+  final String planName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Delete Fee Plan'),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: RoundedPanel(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Delete $planName?',
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => ownerGo(context, AppRoutes.fees),
+                        child: const Text('Delete'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => context.pop(),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2824,13 +3439,48 @@ class PayrollReportScreen extends StatelessWidget {
   }
 }
 
+class InventoryBillingScreen extends StatelessWidget {
+  const InventoryBillingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ownerAppBar(context, 'Inventory Billing'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          RoundedPanel(
+            child: Column(
+              children: [
+                const SimpleFormField(
+                    label: 'Item', initialValue: 'Cricket Ball'),
+                const SimpleFormField(label: 'Quantity', initialValue: '12'),
+                const SimpleFormField(
+                  label: 'Bill amount',
+                  initialValue: '3600',
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: () => ownerGo(context, AppRoutes.inventoryIssue),
+                  child: const Text('Continue to Issue Items'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class IssueInventoryItemScreen extends StatelessWidget {
   const IssueInventoryItemScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Issue Item')),
+      appBar: ownerAppBar(context, 'Issue Item'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2866,7 +3516,7 @@ class IssuedItemsHistoryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Issued Items History')),
+      appBar: ownerAppBar(context, 'Issued Items History'),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: const [
