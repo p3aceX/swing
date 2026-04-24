@@ -58,9 +58,7 @@ export class ArenaService {
         longitude: data.longitude || 0,
         phone: data.phone || null,
         sports: data.sports || ['CRICKET'],
-        photoUrls: data.photoUrls && data.photoUrls.length > 0 
-          ? data.photoUrls 
-          : ['https://pdlqotoyxpzrylxvrmdm.supabase.co/storage/v1/object/public/swing-media/arenas/cmnd808fw0005eqnnlk55lzl0/photos/photo_1774945069298.jpg'],
+        photoUrls: data.photoUrls && data.photoUrls.length > 0 ? data.photoUrls : [],
         isActive: true,
       },
     })

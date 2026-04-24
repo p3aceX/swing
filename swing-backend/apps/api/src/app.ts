@@ -6,6 +6,7 @@ import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import jwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
+import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 
@@ -43,6 +44,7 @@ import { growthInsightsRoutes } from './modules/performance/growth-insights.rout
 import { libraryRoutes } from './modules/library/library.routes'
 import { startSeasonScheduler } from './modules/performance/ip-engine'
 import { bizRoutes } from './modules/biz/biz.routes'
+import { mediaRoutes } from './modules/media/media.routes'
 
 export async function buildApp() {
   const app = Fastify({
@@ -64,6 +66,11 @@ export async function buildApp() {
     max: 500,
     timeWindow: '1 minute',
     redis,
+  })
+  await app.register(multipart, {
+    limits: {
+      fileSize: 15 * 1024 * 1024,
+    },
   })
   await app.register(jwt, {
     secret: process.env.JWT_SECRET!,
@@ -125,6 +132,7 @@ export async function buildApp() {
   await app.register(paymentRoutes, { prefix: '/payments' })
   await app.register(notificationRoutes, { prefix: '/notifications' })
   await app.register(adminRoutes, { prefix: '/admin' })
+  await app.register(mediaRoutes, { prefix: '/admin' })
   await app.register(adminSupportRoutes, { prefix: '/admin' })
   await app.register(publicRoutes, { prefix: '/public' })
   await app.register(sessionLogRoutes, { prefix: '/session-logs' })
