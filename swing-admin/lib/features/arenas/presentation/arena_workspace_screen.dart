@@ -442,6 +442,44 @@ class _ArenaWorkspaceScreenState extends ConsumerState<ArenaWorkspaceScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            Widget field(
+              TextEditingController controller,
+              String label, {
+              double width = double.infinity,
+              int maxLines = 1,
+              TextInputType? keyboardType,
+            }) {
+              return SizedBox(
+                width: width == double.infinity ? null : width,
+                child: TextField(
+                  controller: controller,
+                  maxLines: maxLines,
+                  keyboardType: keyboardType,
+                  decoration: InputDecoration(labelText: label),
+                ),
+              );
+            }
+
+            Widget sectionCard({
+              required String title,
+              String? subtitle,
+              required List<Widget> children,
+            }) {
+              return AdminSurfaceCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AdminSectionHeader(title: title, subtitle: subtitle),
+                    const SizedBox(height: 14),
+                    ...children,
+                  ],
+                ),
+              );
+            }
+
+            Widget gap([double height = 12]) => SizedBox(height: height);
+
             Future<void> save() async {
               setDialogState(() => saving = true);
               try {
@@ -485,7 +523,7 @@ class _ArenaWorkspaceScreenState extends ConsumerState<ArenaWorkspaceScreen> {
                 };
                 await ref
                     .read(arenasRepositoryProvider)
-                    .updateArena(arena.id, payload);
+                    .updateArenaAdmin(arena.id, payload);
                 ref.invalidate(arenaDetailProvider(widget.arenaId));
                 ref.invalidate(arenasListProvider);
                 if (mounted) {
@@ -505,259 +543,214 @@ class _ArenaWorkspaceScreenState extends ConsumerState<ArenaWorkspaceScreen> {
             }
 
             return AlertDialog(
-              title: const Text('Edit core details'),
+              title: const Text('Edit arena'),
               content: SizedBox(
-                width: 760,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: name,
-                        decoration: const InputDecoration(labelText: 'Name'),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: description,
-                        maxLines: 3,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
+                width: 940,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const AdminInfoPill(
+                          label: 'Photos are managed in the Photos tab',
+                          icon: Icons.photo_library_outlined,
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: address,
-                        decoration: const InputDecoration(labelText: 'Address'),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: city,
-                              decoration: const InputDecoration(
-                                labelText: 'City',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: state,
-                              decoration: const InputDecoration(
-                                labelText: 'State',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: pincode,
-                              decoration: const InputDecoration(
-                                labelText: 'Pincode',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: phone,
-                              decoration: const InputDecoration(
-                                labelText: 'Phone',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: latitude,
-                              decoration: const InputDecoration(
-                                labelText: 'Latitude',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: longitude,
-                              decoration: const InputDecoration(
-                                labelText: 'Longitude',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: openTime,
-                              decoration: const InputDecoration(
-                                labelText: 'Open time',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: closeTime,
-                              decoration: const InputDecoration(
-                                labelText: 'Close time',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: advanceBookingDays,
-                              decoration: const InputDecoration(
-                                labelText: 'Advance booking days',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: bufferMins,
-                              decoration: const InputDecoration(
-                                labelText: 'Buffer mins',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: cancellationHours,
-                              decoration: const InputDecoration(
-                                labelText: 'Cancellation hours',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
+                        gap(14),
+                        sectionCard(
+                          title: 'Basics',
+                          subtitle: 'Identity and public description.',
                           children: [
-                            for (final sport in _sportOptions)
-                              FilterChip(
-                                label: Text(sport),
-                                selected: selectedSports.contains(sport),
-                                onSelected: (selected) => setDialogState(() {
-                                  if (selected) {
-                                    selectedSports.add(sport);
-                                  } else {
-                                    selectedSports.remove(sport);
-                                  }
-                                  if (selectedSports.isEmpty) {
-                                    selectedSports.add('CRICKET');
-                                  }
-                                }),
-                              ),
+                            field(name, 'Name'),
+                            gap(10),
+                            field(description, 'Description', maxLines: 3),
+                            gap(10),
+                            field(address, 'Address'),
+                            gap(10),
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 12,
+                              children: [
+                                field(city, 'City', width: 200),
+                                field(state, 'State', width: 200),
+                                field(pincode, 'Pincode', width: 180),
+                                field(phone, 'Phone', width: 180),
+                              ],
+                            ),
+                            gap(10),
+                            field(latitude, 'Latitude', width: 200),
+                            gap(10),
+                            field(longitude, 'Longitude', width: 200),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
+                        gap(12),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
                           children: [
-                            for (final entry in _weekdays.entries)
-                              FilterChip(
-                                label: Text(entry.value),
-                                selected: operatingDays.contains(entry.key),
-                                onSelected: (selected) => setDialogState(() {
-                                  if (selected) {
-                                    operatingDays.add(entry.key);
-                                  } else {
-                                    operatingDays.remove(entry.key);
-                                  }
-                                  if (operatingDays.isEmpty) {
-                                    operatingDays.addAll(_weekdays.keys);
-                                  }
-                                }),
+                            SizedBox(
+                              width: 432,
+                              child: sectionCard(
+                                title: 'Operations',
+                                subtitle: 'Hours and booking rules.',
+                                children: [
+                                  Wrap(
+                                    spacing: 12,
+                                    runSpacing: 12,
+                                    children: [
+                                      field(openTime, 'Open time', width: 200),
+                                      field(closeTime, 'Close time', width: 200),
+                                      field(
+                                        advanceBookingDays,
+                                        'Advance days',
+                                        width: 132,
+                                      ),
+                                      field(bufferMins, 'Buffer mins', width: 132),
+                                      field(
+                                        cancellationHours,
+                                        'Cancel hrs',
+                                        width: 132,
+                                      ),
+                                    ],
+                                  ),
+                                  gap(12),
+                                  SwitchListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    value: isActive,
+                                    onChanged: (v) =>
+                                        setDialogState(() => isActive = v),
+                                    title: const Text('Arena active'),
+                                    subtitle: const Text(
+                                      'Disable if the venue is closed or temporarily offline.',
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            SizedBox(
+                              width: 432,
+                              child: sectionCard(
+                                title: 'Facilities',
+                                subtitle: 'Sports and amenities.',
+                                children: [
+                                  const Text(
+                                    'Sports',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final sport in _sportOptions)
+                                        FilterChip(
+                                          label: Text(sport),
+                                          selected: selectedSports.contains(sport),
+                                          onSelected: (selected) =>
+                                              setDialogState(() {
+                                                if (selected) {
+                                                  selectedSports.add(sport);
+                                                } else {
+                                                  selectedSports.remove(sport);
+                                                }
+                                                if (selectedSports.isEmpty) {
+                                                  selectedSports.add('CRICKET');
+                                                }
+                                              }),
+                                        ),
+                                    ],
+                                  ),
+                                  gap(12),
+                                  const Text(
+                                    'Operating days',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final entry in _weekdays.entries)
+                                        FilterChip(
+                                          label: Text(entry.value),
+                                          selected:
+                                              operatingDays.contains(entry.key),
+                                          onSelected: (selected) =>
+                                              setDialogState(() {
+                                                if (selected) {
+                                                  operatingDays.add(entry.key);
+                                                } else {
+                                                  operatingDays.remove(entry.key);
+                                                }
+                                                if (operatingDays.isEmpty) {
+                                                  operatingDays.addAll(
+                                                    _weekdays.keys,
+                                                  );
+                                                }
+                                              }),
+                                        ),
+                                    ],
+                                  ),
+                                  gap(12),
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    children: [
+                                      FilterChip(
+                                        label: const Text('Parking'),
+                                        selected: hasParking,
+                                        onSelected: (v) =>
+                                            setDialogState(() => hasParking = v),
+                                      ),
+                                      FilterChip(
+                                        label: const Text('Lights'),
+                                        selected: hasLights,
+                                        onSelected: (v) =>
+                                            setDialogState(() => hasLights = v),
+                                      ),
+                                      FilterChip(
+                                        label: const Text('Washrooms'),
+                                        selected: hasWashrooms,
+                                        onSelected: (v) => setDialogState(
+                                          () => hasWashrooms = v,
+                                        ),
+                                      ),
+                                      FilterChip(
+                                        label: const Text('Canteen'),
+                                        selected: hasCanteen,
+                                        onSelected: (v) =>
+                                            setDialogState(() => hasCanteen = v),
+                                      ),
+                                      FilterChip(
+                                        label: const Text('CCTV'),
+                                        selected: hasCCTV,
+                                        onSelected: (v) =>
+                                            setDialogState(() => hasCCTV = v),
+                                      ),
+                                      FilterChip(
+                                        label: const Text('Scorer'),
+                                        selected: hasScorer,
+                                        onSelected: (v) =>
+                                            setDialogState(() => hasScorer = v),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 10,
-                        children: [
-                          FilterChip(
-                            label: const Text('Parking'),
-                            selected: hasParking,
-                            onSelected: (v) =>
-                                setDialogState(() => hasParking = v),
-                          ),
-                          FilterChip(
-                            label: const Text('Lights'),
-                            selected: hasLights,
-                            onSelected: (v) =>
-                                setDialogState(() => hasLights = v),
-                          ),
-                          FilterChip(
-                            label: const Text('Washrooms'),
-                            selected: hasWashrooms,
-                            onSelected: (v) =>
-                                setDialogState(() => hasWashrooms = v),
-                          ),
-                          FilterChip(
-                            label: const Text('Canteen'),
-                            selected: hasCanteen,
-                            onSelected: (v) =>
-                                setDialogState(() => hasCanteen = v),
-                          ),
-                          FilterChip(
-                            label: const Text('CCTV'),
-                            selected: hasCCTV,
-                            onSelected: (v) =>
-                                setDialogState(() => hasCCTV = v),
-                          ),
-                          FilterChip(
-                            label: const Text('Scorer'),
-                            selected: hasScorer,
-                            onSelected: (v) =>
-                                setDialogState(() => hasScorer = v),
-                          ),
-                          FilterChip(
-                            label: const Text('Active'),
-                            selected: isActive,
-                            onSelected: (v) =>
-                                setDialogState(() => isActive = v),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Manage arena photos from the Photos tab using uploads.',
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -909,7 +902,7 @@ class _ArenaWorkspaceScreenState extends ConsumerState<ArenaWorkspaceScreen> {
                           try {
                             await ref
                                 .read(arenasRepositoryProvider)
-                                .updateArena(arena.id, {
+                                .updateArenaAdmin(arena.id, {
                                   'photoUrls': photoUrls,
                                 });
                             ref.invalidate(arenaDetailProvider(widget.arenaId));

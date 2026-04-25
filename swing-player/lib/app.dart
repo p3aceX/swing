@@ -7,7 +7,7 @@ import 'features/auth/controller/auth_controller.dart';
 import 'features/profile/controller/profile_controller.dart';
 import 'features/profile/domain/rank_visual_theme.dart';
 
-final themeModeProvider = StateProvider<ThemeMode>((_) => ThemeMode.dark);
+final themeModeProvider = StateProvider<ThemeMode>((_) => ThemeMode.light);
 
 class SwingPlayerApp extends ConsumerStatefulWidget {
   const SwingPlayerApp({super.key});

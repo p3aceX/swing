@@ -564,10 +564,35 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.send({ success: true });
   });
 
+  app.patch("/arenas/:id", auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string };
+    const { id } = request.params as { id: string };
+    return reply.send({
+      success: true,
+      data: await svc.updateArena(user.userId, id, request.body as Record<string, any>),
+    });
+  });
+
   app.patch("/arenas/:id/toggle-swing", auth, async (request, reply) => {
     const user = (request as any).user as { userId: string };
     const { id } = request.params as { id: string };
     await svc.toggleSwingArena(user.userId, id);
+    return reply.send({ success: true });
+  });
+
+  app.patch("/arena-units/:unitId", auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string };
+    const { unitId } = request.params as { unitId: string };
+    return reply.send({
+      success: true,
+      data: await svc.updateArenaUnit(user.userId, unitId, request.body as Record<string, any>),
+    });
+  });
+
+  app.delete("/arena-units/:unitId", auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string };
+    const { unitId } = request.params as { unitId: string };
+    await svc.deleteArenaUnit(user.userId, unitId);
     return reply.send({ success: true });
   });
 

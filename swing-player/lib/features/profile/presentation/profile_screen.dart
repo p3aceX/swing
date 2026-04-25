@@ -332,7 +332,7 @@ class _OverviewTab extends StatelessWidget {
                   child: Text(
                     identity.bio.isEmpty ? 'No bio added yet.' : identity.bio,
                     style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
+                        color: context.fg.withValues(alpha: 0.85),
                         fontSize: 14,
                         height: 1.5),
                   ),
@@ -409,10 +409,10 @@ class _InfoTile extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
-              style: const TextStyle(color: Colors.white38, fontSize: 13)),
+              style: TextStyle(color: context.fgSub, fontSize: 13)),
           Text(value.isEmpty ? '-' : value,
-              style: const TextStyle(
-                  color: Colors.white,
+              style: TextStyle(
+                  color: context.fg,
                   fontSize: 13,
                   fontWeight: FontWeight.w600)),
         ],
@@ -449,7 +449,7 @@ class _SkillPill extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.68),
+              color: context.fgSub,
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.2,
@@ -1472,8 +1472,8 @@ class _SectionHeader extends StatelessWidget {
           Container(width: 4, height: 16, color: rankTheme.primary),
           const SizedBox(width: 8),
           Text(title,
-              style: const TextStyle(
-                  color: Colors.white70,
+              style: TextStyle(
+                  color: context.fg.withValues(alpha: 0.8),
                   fontSize: 11,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1.5)),

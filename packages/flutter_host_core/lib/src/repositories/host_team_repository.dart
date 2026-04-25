@@ -1,20 +1,36 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../contracts/host_contracts.dart';
+import '../contracts/host_path_config.dart';
 import '../providers/host_dio_provider.dart';
 
+/// Roster view used when preparing Playing 11 for a match.
+class HostTeamRoster {
+  const HostTeamRoster({
+    required this.players,
+    this.captainId,
+    this.viceCaptainId,
+    this.wicketKeeperId,
+  });
+
+  final List<Map<String, dynamic>> players;
+  final String? captainId;
+  final String? viceCaptainId;
+  final String? wicketKeeperId;
+}
+
 class HostTeamRepository {
-  HostTeamRepository(this._dio);
+  HostTeamRepository(this._dio, this._paths);
 
   final Dio _dio;
+  final HostPathConfig _paths;
 
   Future<List<Map<String, dynamic>>> searchTeams(String query) async {
     if (query.trim().isEmpty) {
       return getMyTeams();
     }
     final response = await _dio.get(
-      HostContracts.teamSearch,
+      _paths.teamSearch,
       queryParameters: {
         'q': query.trim(),
         'limit': 20,
@@ -24,13 +40,44 @@ class HostTeamRepository {
   }
 
   Future<List<Map<String, dynamic>>> getMyTeams() async {
-    final response = await _dio.get(HostContracts.myTeams);
+    final response = await _dio.get(_paths.myTeams);
     return _normalizeList(response.data);
   }
 
   Future<List<Map<String, dynamic>>> getTeamPlayers(String teamId) async {
-    final response = await _dio.get(HostContracts.teamPlayers(teamId));
+    final response = await _dio.get(_paths.teamPlayers(teamId));
     return _normalizeList(response.data);
+  }
+
+  /// Full roster detail — players plus the team's preferred captain, vice
+  /// captain and wicket keeper. Useful for pre-filling match role pickers.
+  Future<HostTeamRoster> getTeamRoster(String teamId) async {
+    final response = await _dio.get(_paths.teamPlayers(teamId));
+    final root = _normalizeMap(response.data);
+    final data = root['data'] is Map
+        ? Map<String, dynamic>.from(root['data'] as Map)
+        : root;
+    final rawPlayers = (data['players'] ?? const []) as Object?;
+    final players = rawPlayers is List
+        ? rawPlayers
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList()
+        : const <Map<String, dynamic>>[];
+    final roles = data['roleAssignments'] is Map
+        ? Map<String, dynamic>.from(data['roleAssignments'] as Map)
+        : <String, dynamic>{};
+    String? stringOrNull(Object? value) {
+      final s = '${value ?? ''}'.trim();
+      return s.isEmpty ? null : s;
+    }
+
+    return HostTeamRoster(
+      players: players,
+      captainId: stringOrNull(roles['captainId']),
+      viceCaptainId: stringOrNull(roles['viceCaptainId']),
+      wicketKeeperId: stringOrNull(roles['wicketKeeperId']),
+    );
   }
 
   Future<Map<String, dynamic>> quickAddPlayer(
@@ -41,7 +88,7 @@ class HostTeamRepository {
     String? swingId,
   }) async {
     final response = await _dio.post(
-      HostContracts.teamQuickAdd(teamId),
+      _paths.teamQuickAdd(teamId),
       data: {
         if ((profileId ?? '').trim().isNotEmpty) 'profileId': profileId!.trim(),
         if ((name ?? '').trim().isNotEmpty) 'name': name!.trim(),
@@ -53,7 +100,7 @@ class HostTeamRepository {
   }
 
   Future<void> removePlayer(String teamId, String playerId) async {
-    await _dio.delete(HostContracts.teamPlayer(teamId, playerId));
+    await _dio.delete(_paths.teamPlayer(teamId, playerId));
   }
 
   List<Map<String, dynamic>> _normalizeList(Object? data) {
@@ -81,5 +128,8 @@ class HostTeamRepository {
 }
 
 final hostTeamRepositoryProvider = Provider<HostTeamRepository>(
-  (ref) => HostTeamRepository(ref.watch(hostDioProvider)),
+  (ref) => HostTeamRepository(
+    ref.watch(hostDioProvider),
+    ref.watch(hostPathConfigProvider),
+  ),
 );

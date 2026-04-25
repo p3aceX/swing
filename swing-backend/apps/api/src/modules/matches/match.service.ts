@@ -950,6 +950,9 @@ export class MatchService {
         dismissalType: candidateBall.dismissalType,
         dismissedPlayerId: candidateBall.dismissedPlayerId,
         wagonZone: candidateBall.wagonZone,
+        shotType: candidateBall.shotType,
+        ballLine: candidateBall.ballLine,
+        ballLength: candidateBall.ballLength,
         tags: [
           ...(candidateBall.tags || []),
           ...(candidateBall.switchEnds ? ['transition:switch-ends'] : []),
@@ -1070,6 +1073,9 @@ export class MatchService {
         wagonZone: data.wagonZone === undefined
           ? normalizeWagonZone(ball.wagonZone)
           : normalizeWagonZone(data.wagonZone),
+        shotType: data.shotType === undefined ? ball.shotType : data.shotType,
+        ballLine: data.ballLine === undefined ? ball.ballLine : data.ballLine,
+        ballLength: data.ballLength === undefined ? ball.ballLength : data.ballLength,
       },
     })
     const { innings: updated } = await this.rebuildInningsState(ball.inningsId)

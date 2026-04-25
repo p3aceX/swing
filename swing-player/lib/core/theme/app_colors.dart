@@ -43,6 +43,8 @@ class SwingPalette extends ThemeExtension<SwingPalette> {
     required this.gold,
     required this.sky,
     required this.match,
+    required this.ctaBg,
+    required this.ctaFg,
   });
 
   final Color bg;
@@ -60,6 +62,8 @@ class SwingPalette extends ThemeExtension<SwingPalette> {
   final Color gold;
   final Color sky;
   final Color match;
+  final Color ctaBg;
+  final Color ctaFg;
 
   @override
   SwingPalette copyWith({
@@ -78,6 +82,8 @@ class SwingPalette extends ThemeExtension<SwingPalette> {
     Color? gold,
     Color? sky,
     Color? match,
+    Color? ctaBg,
+    Color? ctaFg,
   }) {
     return SwingPalette(
       bg: bg ?? this.bg,
@@ -95,6 +101,8 @@ class SwingPalette extends ThemeExtension<SwingPalette> {
       gold: gold ?? this.gold,
       sky: sky ?? this.sky,
       match: match ?? this.match,
+      ctaBg: ctaBg ?? this.ctaBg,
+      ctaFg: ctaFg ?? this.ctaFg,
     );
   }
 
@@ -117,6 +125,8 @@ class SwingPalette extends ThemeExtension<SwingPalette> {
       gold: Color.lerp(gold, other.gold, t)!,
       sky: Color.lerp(sky, other.sky, t)!,
       match: Color.lerp(match, other.match, t)!,
+      ctaBg: Color.lerp(ctaBg, other.ctaBg, t)!,
+      ctaFg: Color.lerp(ctaFg, other.ctaFg, t)!,
     );
   }
 }
@@ -141,6 +151,8 @@ extension SwingColors on BuildContext {
         gold: AppColors.gold,
         sky: AppColors.blue,
         match: AppColors.match,
+        ctaBg: AppColors.accent,
+        ctaFg: Color(0xFF050505),
       );
 
   Color get bg => _palette.bg;
@@ -158,4 +170,10 @@ extension SwingColors on BuildContext {
   Color get gold => _palette.gold;
   Color get sky => _palette.sky;
   Color get match => _palette.match;
+  Color get ctaBg => _palette.ctaBg;
+  Color get ctaFg => _palette.ctaFg;
+
+  /// True when the current theme is dark — use this to pick dark variants
+  /// of hardcoded gradients / decorative colors.
+  bool get isDark => Theme.of(this).brightness == Brightness.dark;
 }

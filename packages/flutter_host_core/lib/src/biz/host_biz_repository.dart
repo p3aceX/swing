@@ -36,6 +36,18 @@ class HostBizRepository {
     return BizLoginResponse.fromJson(_unwrap(response.data));
   }
 
+  Future<PhoneCheckResult> checkPhone(String phone) async {
+    final response = await _dio.post(
+      HostContracts.bizCheckPhone,
+      data: {'phone': phone},
+    );
+    final data = _unwrap(response.data);
+    return PhoneCheckResult(
+      exists: data['exists'] as bool? ?? false,
+      normalizedPhone: data['normalizedPhone'] as String? ?? phone,
+    );
+  }
+
   Future<BizMeResponse> getMe() async {
     final response = await _dio.get(HostContracts.bizMe);
     return BizMeResponse.fromJson(_unwrap(response.data));

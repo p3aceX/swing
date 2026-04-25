@@ -5,14 +5,20 @@ class ArenaListing {
     required this.id,
     required this.name,
     required this.address,
+    this.city = '',
+    this.state = '',
+    this.pincode = '',
     required this.openTime,
     required this.closeTime,
     required this.units,
     this.photoUrls = const [],
     this.description = '',
+    this.phone,
     this.sports = const ['Cricket'],
+    this.advanceBookingDays = 0,
     this.bufferMins = 0,
     this.cancellationHours = 0,
+    this.operatingDays = const [],
     this.hasParking = false,
     this.hasLights = false,
     this.hasWashrooms = false,
@@ -26,13 +32,19 @@ class ArenaListing {
   final String id;
   final String name;
   final String address;
+  final String city;
+  final String state;
+  final String pincode;
   final String openTime;
   final String closeTime;
   final List<String> photoUrls;
   final String description;
+  final String? phone;
   final List<String> sports;
+  final int advanceBookingDays;
   final int bufferMins;
   final int cancellationHours;
+  final List<int> operatingDays;
   final bool hasParking;
   final bool hasLights;
   final bool hasWashrooms;
@@ -49,6 +61,9 @@ class ArenaListing {
       id: '${json['id'] ?? ''}',
       name: '${json['name'] ?? 'Arena'}',
       address: '${json['address'] ?? json['location'] ?? ''}',
+      city: '${json['city'] ?? ''}',
+      state: '${json['state'] ?? ''}',
+      pincode: '${json['pincode'] ?? ''}',
       openTime: '${json['openTime'] ?? '06:00'}',
       closeTime: '${json['closeTime'] ?? '23:00'}',
       photoUrls: ((json['photoUrls'] as List?) ?? const [])
@@ -56,12 +71,18 @@ class ArenaListing {
           .where((e) => e.isNotEmpty)
           .toList(),
       description: '${json['description'] ?? ''}',
+      phone: _stringOrNull(json['phone']),
       sports: ((json['sports'] as List?) ?? const ['Cricket'])
           .map((e) => '$e')
           .where((e) => e.isNotEmpty)
           .toList(),
+      advanceBookingDays: _intValue(json['advanceBookingDays']),
       bufferMins: _intValue(json['bufferMins']),
       cancellationHours: _intValue(json['cancellationHours']),
+      operatingDays: ((json['operatingDays'] as List?) ?? const [])
+          .map((e) => _intValue(e))
+          .where((e) => e >= 1 && e <= 7)
+          .toList(),
       hasParking: json['hasParking'] == true,
       hasLights: json['hasLights'] == true,
       hasWashrooms: json['hasWashrooms'] == true,

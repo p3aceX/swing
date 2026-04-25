@@ -12,24 +12,27 @@ import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/create_event/presentation/create_event_screen.dart';
 import 'package:flutter_host_core/flutter_host_core.dart'
     show
-        CreateMatchScreen,
         TossScreen,
         ScoringScreen,
-        HostTournamentDetailScreen;
+        HostTournamentDetailScreen,
+        HostTeamDetailScreen,
+        TeamDetailCallbacks,
+        HostMatchDetailScreen,
+        MatchDetailCallbacks,
+        HostCreateTeamScreen;
+import '../../features/create_match/presentation/create_match_screen.dart';
 import '../../features/create_tournament/presentation/create_tournament_screen.dart';
 import '../../features/create_tournament/presentation/tournament_detail_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/home/presentation/recommended_connections_screen.dart';
 import '../../features/host/presentation/host_screen.dart';
-import '../../features/create_team/presentation/create_team_screen.dart';
-import '../../features/matches/domain/match_models.dart';
-import '../../features/matches/presentation/match_detail_screen.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../features/teams/controller/teams_controller.dart';
+import '../../core/storage/supabase_storage_service.dart';
 import '../../features/profile/controller/profile_controller.dart';
 import '../../features/profile/presentation/academy_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/profile/presentation/player_follow_list_screen.dart';
-import '../../features/teams/presentation/team_detail_screen.dart';
-import '../../features/teams/domain/team_models.dart';
 import '../../features/elite/presentation/my_plan_screen.dart';
 import '../../features/health/presentation/health_module_screen.dart';
 import '../../features/health/presentation/wellness_checkin_screen.dart';
@@ -214,10 +217,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/match/:id',
-        builder: (_, state) => MatchDetailScreen(
+        builder: (context, state) => HostMatchDetailScreen(
           matchId: state.pathParameters['id'] ?? '',
-          initialMatch:
-              state.extra is PlayerMatch ? state.extra as PlayerMatch : null,
+          currentUserId: ref.read(currentPlayerIdProvider),
+          callbacks: MatchDetailCallbacks(
+            onScoreMatch: (ctx, id) => ctx.push('/score-match/$id'),
+            onNavigateToPlayer: (ctx, playerId) =>
+                ctx.push('/player/$playerId'),
+            onNavigateBack: (ctx) =>
+                Navigator.of(ctx).canPop() ? Navigator.of(ctx).pop() : ctx.go('/home'),
+          ),
         ),
       ),
       GoRoute(
@@ -256,22 +265,56 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/create-team',
-        builder: (_, __) => const CreateTeamScreen(),
+        builder: (_, __) => HostCreateTeamScreen(
+          onPickLogo: () async {
+            final picker = ImagePicker();
+            final file = await picker.pickImage(
+                source: ImageSource.gallery,
+                imageQuality: 85,
+                maxWidth: 1200);
+            if (file == null) return null;
+            final bytes = await file.readAsBytes();
+            final dot = file.name.lastIndexOf('.');
+            final ext = (dot != -1 && dot < file.name.length - 1)
+                ? file.name.substring(dot + 1).toLowerCase()
+                : 'jpg';
+            return (bytes: bytes, extension: ext);
+          },
+          onUploadLogo: (bytes, ext) =>
+              SupabaseStorageService().uploadTeamLogoBytes(bytes, ext),
+          onSuccess: () => ref.invalidate(teamsControllerProvider),
+        ),
       ),
       GoRoute(
         path: '/team/:id',
-        builder: (_, state) => TeamDetailScreen(
+        builder: (context, state) => HostTeamDetailScreen(
           teamId: state.pathParameters['id'] ?? '',
-          initialTeam:
-              state.extra is PlayerTeam ? state.extra as PlayerTeam : null,
+          currentUserId: ref.read(currentPlayerIdProvider),
+          callbacks: TeamDetailCallbacks(
+            onNavigateToMatch: (ctx, matchId) => ctx.push('/match/$matchId'),
+            onScoreMatch: (ctx, matchId) => ctx.push('/score-match/$matchId'),
+            onNavigateToPlayer: (ctx, playerId) =>
+                ctx.push('/player/$playerId'),
+            onUploadLogo: (ctx) async {
+              // Image upload handled by swing-player via its own storage service
+              return null;
+            },
+            onNavigateBack: (ctx) =>
+                Navigator.of(ctx).canPop() ? Navigator.of(ctx).pop() : null,
+          ),
         ),
       ),
       // Deep-link route shared via WhatsApp — auto-shows join sheet on load
       GoRoute(
         path: '/team/:id/join',
-        builder: (_, state) => TeamDetailScreen(
+        builder: (context, state) => HostTeamDetailScreen(
           teamId: state.pathParameters['id'] ?? '',
+          currentUserId: ref.read(currentPlayerIdProvider),
           autoJoin: true,
+          callbacks: TeamDetailCallbacks(
+            onNavigateBack: (ctx) =>
+                Navigator.of(ctx).canPop() ? Navigator.of(ctx).pop() : null,
+          ),
         ),
       ),
       GoRoute(

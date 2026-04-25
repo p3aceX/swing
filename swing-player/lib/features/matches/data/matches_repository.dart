@@ -560,6 +560,14 @@ class MatchesRepository extends BaseRepository {
         'B' => _nullIfEmpty(_string(match['teamAShortName'])),
         _ => _nullIfEmpty(_string(match['teamBShortName'])),
       },
+      tossWinner: _nullIfEmpty(_firstNonEmpty([
+        _string(match['tossWonBy']),
+        _string(match['tossWinner']),
+      ])),
+      tossDecision: _nullIfEmpty(_firstNonEmpty([
+        _string(match['tossDecision']),
+        _string(match['tossBattingTeam']).isNotEmpty ? 'BAT' : '',
+      ])),
     );
   }
 

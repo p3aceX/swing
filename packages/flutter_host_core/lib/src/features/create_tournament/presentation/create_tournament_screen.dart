@@ -117,7 +117,10 @@ class _HostCreateTournamentScreenState
                 organiserPhone: _organiserPhoneController.text,
               );
       if (!mounted) return;
-      widget.onTournamentCreated?.call(context, tournament);
+      if (widget.onTournamentCreated != null) {
+        widget.onTournamentCreated!(context, tournament);
+        return;
+      }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => HostTournamentDetailScreen(

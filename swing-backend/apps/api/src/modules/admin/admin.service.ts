@@ -1842,6 +1842,41 @@ export class AdminService {
     });
   }
 
+  async updateArena(adminId: string, arenaId: string, data: Record<string, any>) {
+    await this.verifyAdmin(adminId);
+    const allowed: Record<string, any> = {};
+    const fields = [
+      "name",
+      "description",
+      "phone",
+      "address",
+      "city",
+      "state",
+      "pincode",
+      "latitude",
+      "longitude",
+      "photoUrls",
+      "sports",
+      "hasParking",
+      "hasLights",
+      "hasWashrooms",
+      "hasCanteen",
+      "hasCCTV",
+      "hasScorer",
+      "openTime",
+      "closeTime",
+      "operatingDays",
+      "advanceBookingDays",
+      "bufferMins",
+      "cancellationHours",
+      "isActive",
+    ];
+    for (const field of fields) {
+      if (field in data) allowed[field] = data[field];
+    }
+    return prisma.arena.update({ where: { id: arenaId }, data: allowed });
+  }
+
   async toggleSwingArena(adminId: string, arenaId: string) {
     await this.verifyAdmin(adminId);
     const arena = await prisma.arena.findUnique({ where: { id: arenaId } });
@@ -1850,6 +1885,45 @@ export class AdminService {
     return prisma.arena.update({
       where: { id: arenaId },
       data: { isSwingArena: !arena.isSwingArena },
+    });
+  }
+
+  async updateArenaUnit(adminId: string, unitId: string, data: Record<string, any>) {
+    await this.verifyAdmin(adminId);
+    const allowed: Record<string, any> = {};
+    const fields = [
+      "name",
+      "description",
+      "unitType",
+      "photoUrls",
+      "pricePerHourPaise",
+      "peakPricePaise",
+      "peakHoursStart",
+      "peakHoursEnd",
+      "price4HrPaise",
+      "price8HrPaise",
+      "priceFullDayPaise",
+      "weekendMultiplier",
+      "minSlotMins",
+      "maxSlotMins",
+      "slotIncrementMins",
+      "boundarySize",
+      "isActive",
+    ];
+    for (const field of fields) {
+      if (field in data) allowed[field] = data[field];
+    }
+    if ("boundarySize" in allowed && allowed.boundarySize !== null) {
+      allowed.boundarySize = Number(allowed.boundarySize);
+    }
+    return prisma.arenaUnit.update({ where: { id: unitId }, data: allowed });
+  }
+
+  async deleteArenaUnit(adminId: string, unitId: string) {
+    await this.verifyAdmin(adminId);
+    return prisma.arenaUnit.update({
+      where: { id: unitId },
+      data: { isActive: false },
     });
   }
 

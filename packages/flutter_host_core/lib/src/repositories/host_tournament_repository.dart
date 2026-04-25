@@ -1,16 +1,17 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../contracts/host_contracts.dart';
+import '../contracts/host_path_config.dart';
 import '../providers/host_dio_provider.dart';
 
 class SharedTournamentRepository {
-  SharedTournamentRepository(this._dio);
+  SharedTournamentRepository(this._dio, this._paths);
 
   final Dio _dio;
+  final HostPathConfig _paths;
 
   Future<List<Map<String, dynamic>>> listMine() async {
-    final response = await _dio.get(HostContracts.myTournaments);
+    final response = await _dio.get(_paths.myTournaments);
     final root = _asMap(response.data);
     final rows =
         (root['tournaments'] ?? root['data'] ?? const []) as List? ?? const [];
@@ -21,7 +22,7 @@ class SharedTournamentRepository {
   }
 
   Future<Map<String, dynamic>> getTournament(String id) async {
-    final response = await _dio.get(HostContracts.tournament(id));
+    final response = await _dio.get(_paths.tournament(id));
     final root = _asMap(response.data);
     final data = root['data'];
     if (data is Map) return Map<String, dynamic>.from(data);
@@ -49,7 +50,7 @@ class SharedTournamentRepository {
     String? organiserPhone,
   }) async {
     final response = await _dio.post(
-      HostContracts.myTournaments,
+      _paths.myTournaments,
       data: {
         'name': name.trim(),
         'format': format,
@@ -81,20 +82,20 @@ class SharedTournamentRepository {
 
   Future<List<Map<String, dynamic>>> listTeams(String tournamentId) async {
     final response =
-        await _dio.get('${HostContracts.tournament(tournamentId)}/teams');
+        await _dio.get('${_paths.tournament(tournamentId)}/teams');
     return _asList(response.data);
   }
 
   Future<List<Map<String, dynamic>>> listGroups(String tournamentId) async {
     final response =
-        await _dio.get('${HostContracts.tournament(tournamentId)}/groups');
+        await _dio.get('${_paths.tournament(tournamentId)}/groups');
     return _asList(response.data);
   }
 
   Future<Map<String, List<Map<String, dynamic>>>> getStandings(
       String tournamentId) async {
     final response =
-        await _dio.get('${HostContracts.tournament(tournamentId)}/standings');
+        await _dio.get('${_paths.tournament(tournamentId)}/standings');
     final root = _asMap(response.data);
     final data = root['data'];
     if (data is! Map) return const {};
@@ -111,7 +112,7 @@ class SharedTournamentRepository {
 
   Future<List<Map<String, dynamic>>> getSchedule(String tournamentId) async {
     final response =
-        await _dio.get('${HostContracts.tournament(tournamentId)}/schedule');
+        await _dio.get('${_paths.tournament(tournamentId)}/schedule');
     return _asList(response.data);
   }
 
@@ -123,7 +124,7 @@ class SharedTournamentRepository {
     List<String> playerIds = const [],
   }) async {
     final response = await _dio.post(
-      '${HostContracts.tournament(tournamentId)}/teams',
+      '${_paths.tournament(tournamentId)}/teams',
       data: {
         if ((teamId ?? '').trim().isNotEmpty) 'teamId': teamId!.trim(),
         if ((teamName ?? '').trim().isNotEmpty) 'teamName': teamName!.trim(),
@@ -136,7 +137,7 @@ class SharedTournamentRepository {
 
   Future<void> removeTeam(String tournamentId, String tournamentTeamId) async {
     await _dio.delete(
-        '${HostContracts.tournament(tournamentId)}/teams/$tournamentTeamId');
+        '${_paths.tournament(tournamentId)}/teams/$tournamentTeamId');
   }
 
   Future<Map<String, dynamic>> confirmTeam(
@@ -145,7 +146,7 @@ class SharedTournamentRepository {
     bool isConfirmed,
   ) async {
     final response = await _dio.patch(
-      '${HostContracts.tournament(tournamentId)}/teams/$tournamentTeamId/confirm',
+      '${_paths.tournament(tournamentId)}/teams/$tournamentTeamId/confirm',
       data: {'isConfirmed': isConfirmed},
     );
     return _extractDataMap(response.data);
@@ -157,7 +158,7 @@ class SharedTournamentRepository {
     bool autoAssign = false,
   }) async {
     final response = await _dio.post(
-      '${HostContracts.tournament(tournamentId)}/groups',
+      '${_paths.tournament(tournamentId)}/groups',
       data: {
         'groupNames': groupNames,
         'autoAssign': autoAssign,
@@ -172,7 +173,7 @@ class SharedTournamentRepository {
     String? groupId,
   ) async {
     final response = await _dio.patch(
-      '${HostContracts.tournament(tournamentId)}/teams/$tournamentTeamId/assign-group',
+      '${_paths.tournament(tournamentId)}/teams/$tournamentTeamId/assign-group',
       data: {'groupId': groupId},
     );
     return _extractDataMap(response.data);
@@ -180,7 +181,7 @@ class SharedTournamentRepository {
 
   Future<void> recalculateStandings(String tournamentId) async {
     await _dio.post(
-        '${HostContracts.tournament(tournamentId)}/recalculate-standings');
+        '${_paths.tournament(tournamentId)}/recalculate-standings');
   }
 
   Future<void> autoGenerateSchedule(
@@ -188,17 +189,17 @@ class SharedTournamentRepository {
     int matchesPerDay = 1,
   }) async {
     await _dio.post(
-      '${HostContracts.tournament(tournamentId)}/auto-generate',
+      '${_paths.tournament(tournamentId)}/auto-generate',
       data: {'matchesPerDay': matchesPerDay},
     );
   }
 
   Future<void> deleteSchedule(String tournamentId) async {
-    await _dio.delete('${HostContracts.tournament(tournamentId)}/schedule');
+    await _dio.delete('${_paths.tournament(tournamentId)}/schedule');
   }
 
   Future<void> advanceRound(String tournamentId) async {
-    await _dio.post('${HostContracts.tournament(tournamentId)}/advance-round');
+    await _dio.post('${_paths.tournament(tournamentId)}/advance-round');
   }
 
   Map<String, dynamic> _extractDataMap(Object? data) {
@@ -226,11 +227,14 @@ class SharedTournamentRepository {
 }
 
 class HostTournamentRepository extends SharedTournamentRepository {
-  HostTournamentRepository(super.dio);
+  HostTournamentRepository(super.dio, super.paths);
 }
 
 final hostTournamentRepositoryProvider = Provider<HostTournamentRepository>(
-  (ref) => HostTournamentRepository(ref.watch(hostDioProvider)),
+  (ref) => HostTournamentRepository(
+    ref.watch(hostDioProvider),
+    ref.watch(hostPathConfigProvider),
+  ),
 );
 
 class TournamentPermissions {

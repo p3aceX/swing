@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../contracts/host_path_config.dart';
 import '../../../providers/host_dio_provider.dart';
 import '../../../repositories/host_match_repository.dart';
 import '../../../repositories/host_player_repository.dart';
@@ -153,9 +154,10 @@ class HostScoringService {
 
 final hostScoringServiceProvider = Provider<HostScoringService>((ref) {
   final dio = ref.watch(hostDioProvider);
+  final paths = ref.watch(hostPathConfigProvider);
   return HostScoringService(
-    HostScoringRepository(dio),
-    HostMatchRepository(dio),
-    HostPlayerRepository(dio),
+    HostScoringRepository(dio, paths),
+    HostMatchRepository(dio, paths),
+    HostPlayerRepository(dio, paths),
   );
 });

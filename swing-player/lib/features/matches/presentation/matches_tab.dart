@@ -71,9 +71,7 @@ class _MatchesTabState extends ConsumerState<MatchesTab>
             '$losses lost',
           ].join('  ·  ');
 
-    return Stack(
-      children: [
-      Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Header ───────────────────────────────────────────────────────
@@ -114,6 +112,10 @@ class _MatchesTabState extends ConsumerState<MatchesTab>
                         child: Icon(Icons.search_rounded,
                             color: context.fgSub, size: 22),
                       ),
+                    ),
+                    const SizedBox(width: 6),
+                    _CreateMatchButton(
+                      onTap: () => context.push('/create-match'),
                     ),
                   ],
                 ),
@@ -243,49 +245,6 @@ class _MatchesTabState extends ConsumerState<MatchesTab>
           ),
         ),
       ],
-    ),
-
-      // ── FAB ────────────────────────────────────────────────────────────
-      Positioned(
-        right: 20,
-        bottom: 24,
-        child: GestureDetector(
-          onTap: () => context.push('/create-match'),
-          child: Container(
-            height: 48,
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            decoration: BoxDecoration(
-              color: context.accent,
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: context.accent.withValues(alpha: 0.35),
-                  blurRadius: 18,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.add_rounded, color: Colors.white, size: 18),
-                const SizedBox(width: 7),
-                const Text(
-                  'Create Match',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ],
     );
   }
 
@@ -308,6 +267,43 @@ class _MatchesTabState extends ConsumerState<MatchesTab>
       MatchTimelineFilter.hosting => 'Hosting',
     };
     return '$n $label';
+  }
+}
+
+// ── Create match button ───────────────────────────────────────────────────────
+
+class _CreateMatchButton extends StatelessWidget {
+  const _CreateMatchButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: context.accentBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: context.accent.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, color: context.accent, size: 15),
+            const SizedBox(width: 4),
+            Text(
+              'Create',
+              style: TextStyle(
+                color: context.accent,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

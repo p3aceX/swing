@@ -286,7 +286,9 @@ class _BallTypeToggle extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: isSelected ? Colors.white : context.fgSub,
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.onPrimary
+                        : context.fgSub,
                   ),
                 ),
               ),

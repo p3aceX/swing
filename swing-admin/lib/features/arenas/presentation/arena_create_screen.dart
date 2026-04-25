@@ -392,7 +392,7 @@ class _ArenaCreateScreenState extends ConsumerState<ArenaCreateScreen> {
           .read(arenasRepositoryProvider)
           .createArena(payload);
       if (_photoUrls.isNotEmpty) {
-        await ref.read(arenasRepositoryProvider).updateArena(created.id, {
+        await ref.read(arenasRepositoryProvider).updateArenaAdmin(created.id, {
           'photoUrls': _photoUrls,
         });
       }

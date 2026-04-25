@@ -2,404 +2,663 @@ import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/auth/me_providers.dart';
+import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
-import '../data/academy_dashboard_data.dart';
+import '../../arena/services/arena_profile_providers.dart';
 
-const _ownerBg = Color(0xFF08111F);
-const _ownerCard = Color(0xFF151F2E);
-const _ownerBorder = Color(0xFF243246);
-const _ownerBlue = Color(0xFF38BDF8);
-const _ownerText = Color(0xFFFFFFFF);
-const _ownerMuted = Color(0xFFB6C2D1);
-
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final meAsync = ref.watch(meProvider);
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      _HomeTab(onOpenProfile: () => setState(() => _index = 2)),
+      const _ArenasTab(),
+      const _UserProfileTab(),
+    ];
+
     return Scaffold(
-      backgroundColor: _ownerBg,
-      appBar: AppBar(
-        backgroundColor: _ownerBg,
-        foregroundColor: _ownerText,
-        title: const Text('Academy Manager'),
-        leading: const Padding(
-          padding: EdgeInsets.only(left: 12),
-          child: Icon(Icons.sports_cricket_rounded),
-        ),
-        leadingWidth: 42,
-        actions: [
-          IconButton(
-            onPressed: () => context.push(AppRoutes.ownerSearch),
-            icon: const Icon(Icons.search_rounded),
+      backgroundColor: Colors.white,
+      body: SafeArea(child: pages[_index]),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (value) => setState(() => _index = value),
+        backgroundColor: Colors.white,
+        indicatorColor: const Color(0xFFEFF4FF),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard_rounded),
+            label: 'Home',
           ),
-          Stack(
-            children: [
-              IconButton(
-                onPressed: () => context.push(AppRoutes.ownerNotifications),
-                icon: const Icon(Icons.notifications_none_rounded),
-              ),
-              Positioned(
-                right: 10,
-                top: 10,
-                child: Container(
-                  width: 18,
-                  height: 18,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Center(
-                    child: Text('3',
-                        style: TextStyle(color: Colors.white, fontSize: 10)),
-                  ),
-                ),
-              ),
-            ],
+          NavigationDestination(
+            icon: Icon(Icons.stadium_outlined),
+            selectedIcon: Icon(Icons.stadium_rounded),
+            label: 'Arena',
           ),
-          PopupMenuButton<String>(
-            icon: const CircleAvatar(
-              radius: 16,
-              child: Text('OM'),
-            ),
-            onSelected: (value) {
-              if (value == 'profile') {
-                context.push(AppRoutes.academyProfile);
-              } else if (value == 'settings') {
-                context.push(AppRoutes.settings);
-              } else if (value == 'logout') {
-                context.push(AppRoutes.ownerLogoutConfirm);
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'profile', child: Text('Account')),
-              PopupMenuItem(value: 'settings', child: Text('Settings')),
-              PopupMenuItem(value: 'logout', child: Text('Logout')),
-            ],
+          NavigationDestination(
+            icon: Icon(Icons.person_outline_rounded),
+            selectedIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
           ),
-          const SizedBox(width: 8),
         ],
       ),
-      body: meAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(
-          child: Text('Could not load owner dashboard: $err',
-              style: const TextStyle(color: _ownerText)),
-        ),
-        data: (me) => _OwnerDashboardBody(me: me),
-      ),
-      bottomNavigationBar: const _OwnerBottomNav(index: 0),
     );
   }
 }
 
-class _OwnerDashboardBody extends StatelessWidget {
-  const _OwnerDashboardBody({required this.me});
+class _HomeTab extends ConsumerWidget {
+  const _HomeTab({required this.onOpenProfile});
 
-  final BizMeResponse? me;
+  final VoidCallback onOpenProfile;
 
   @override
-  Widget build(BuildContext context) {
-    final name = me?.user.name ?? 'Owner';
-    final academyName = me?.businessAccount?.businessName ?? 'Swing Academy';
-    final modules = [
-      _ModuleItem('Academy Overview', Icons.apartment_rounded,
-          AppRoutes.academyOverview),
-      _ModuleItem('Players', Icons.groups_rounded, AppRoutes.students),
-      _ModuleItem('Coaches', Icons.sports_rounded, AppRoutes.coaches),
-      _ModuleItem('Batches', Icons.calendar_month_rounded, AppRoutes.batches),
-      _ModuleItem('Fee Management', Icons.account_balance_wallet_rounded,
-          AppRoutes.fees),
-      _ModuleItem('Reminders', Icons.notifications_active_rounded,
-          AppRoutes.feeReminderList),
-      _ModuleItem('Documents', Icons.folder_open_rounded, AppRoutes.documents),
-      _ModuleItem(
-          'Salary Management', Icons.payments_rounded, AppRoutes.payroll),
-      _ModuleItem('Inventory', Icons.inventory_2_rounded, AppRoutes.inventory),
-      _ModuleItem('Reports', Icons.bar_chart_rounded, AppRoutes.reports),
-      _ModuleItem('Settings', Icons.settings_rounded, AppRoutes.settings),
-    ];
+  Widget build(BuildContext context, WidgetRef ref) {
+    final meAsync = ref.watch(meProvider);
+    final session = ref.watch(sessionControllerProvider);
+    final name = meAsync.valueOrNull?.user.name ?? 'User';
+    final dateStr = DateFormat('EEEE, d MMM').format(DateTime.now());
+    final profileType = session.activeProfile?.name.toUpperCase() ?? 'BIZ';
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
-        _panel(
-          child: Row(
+        Row(
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: onOpenProfile,
+              child: CircleAvatar(
+                radius: 24,
+                backgroundColor: const Color(0xFFF2F4F7),
+                child: Text(
+                  name.isNotEmpty ? name[0].toUpperCase() : 'U',
+                  style: const TextStyle(
+                    color: Color(0xFF101828),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Hello, $name',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF101828),
+                    ),
+                  ),
+                  Text(
+                    dateStr,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF667085),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: () => context.go(AppRoutes.roleSelection),
+              icon: const Icon(Icons.switch_account_rounded),
+              tooltip: 'Switch Profile',
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        _WorkspacePanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _OwnerIcon(Icons.waving_hand_rounded),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Welcome back, $name',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: _ownerText,
-                              fontWeight: FontWeight.w900,
-                            )),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$academyName â€¢ 23 Apr 2026 â€¢ 6:30 PM',
-                      style: const TextStyle(color: _ownerMuted),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'You have 3 unpaid fees pending',
-                      style: TextStyle(color: _ownerBlue),
-                    ),
-                  ],
+              _StatusBadge(profileType),
+              const SizedBox(height: 14),
+              const Text(
+                'Business workspace',
+                style: TextStyle(
+                  color: Color(0xFF101828),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Manage your business profile and role-specific modules from the bottom navigation.',
+                style: TextStyle(
+                  color: Color(0xFF667085),
+                  fontSize: 14,
+                  height: 1.4,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        Row(
-          children: const [
-            Expanded(child: _MetricCard('Rs 1,45,000', 'Total Revenue')),
-            SizedBox(width: 10),
-            Expanded(child: _MetricCard('48', 'Total Players')),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: const [
-            Expanded(child: _MetricCard('5', 'Total Coaches')),
-            SizedBox(width: 10),
-            Expanded(child: _MetricCard('Rs 32,500', 'Pending Fees')),
-          ],
-        ),
-        const SizedBox(height: 18),
-        const _SectionTitle('Quick Access'),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: modules.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: .92,
+      ],
+    );
+  }
+}
+
+class _ArenasTab extends ConsumerWidget {
+  const _ArenasTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final arenasAsync = ref.watch(ownedArenasProvider);
+
+    return Column(
+      children: [
+        _PageHeader(
+          title: 'Arenas',
+          subtitle: 'Manage venues, photos, facilities and booking rules.',
+          action: FilledButton.icon(
+            onPressed: () => context.push(AppRoutes.createArena),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Add Arena'),
           ),
-          itemBuilder: (context, index) {
-            final item = modules[index];
-            return _panel(
-              onTap: () => context.push(item.route),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        ),
+        Expanded(
+          child: arenasAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _CenteredMessage(
+              title: 'Could not load arenas',
+              message: '$error',
+            ),
+            data: (arenas) {
+              if (arenas.isEmpty) {
+                return _CenteredMessage(
+                  title: 'No arenas yet',
+                  message: 'Add your first arena to start managing bookings.',
+                  action: FilledButton.icon(
+                    onPressed: () => context.push(AppRoutes.createArena),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Add Arena'),
+                  ),
+                );
+              }
+
+              return RefreshIndicator(
+                onRefresh: () async => ref.refresh(ownedArenasProvider.future),
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                  itemCount: arenas.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final arena = arenas[index];
+                    return _ArenaListItem(arena: arena);
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ArenaListItem extends StatelessWidget {
+  const _ArenaListItem({required this.arena});
+
+  final ArenaListing arena;
+
+  @override
+  Widget build(BuildContext context) {
+    final location = _joinNonEmpty([arena.city, arena.state, arena.pincode]);
+    final imageUrl = arena.photoUrls.isEmpty ? null : arena.photoUrls.first;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => context.push('${AppRoutes.arenaProfile}/${arena.id}'),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 56,
+                height: 56,
+                child: imageUrl == null
+                    ? Container(
+                        color: const Color(0xFFF2F4F7),
+                        child: const Icon(Icons.stadium_rounded),
+                      )
+                    : Image.network(
+                        imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: const Color(0xFFF2F4F7),
+                          child: const Icon(Icons.stadium_rounded),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _OwnerIcon(item.icon, size: 42),
-                  const SizedBox(height: 10),
                   Text(
-                    item.label,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
+                    arena.name,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: _ownerText,
+                      color: Color(0xFF101828),
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    location.isEmpty ? 'Location not set' : location,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF667085),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${arena.units.length} units • ${arena.openTime}-${arena.closeTime}',
+                    style: const TextStyle(
+                      color: Color(0xFF667085),
                       fontSize: 12,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
-            );
-          },
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFF98A2B3)),
+          ],
         ),
-        const SizedBox(height: 18),
-        const _SectionTitle('Recent Activity'),
-        ...academyActivities.map(
-          (activity) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _panel(
+      ),
+    );
+  }
+}
+
+class _UserProfileTab extends ConsumerWidget {
+  const _UserProfileTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final meAsync = ref.watch(meProvider);
+
+    return meAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => _CenteredMessage(
+        title: 'Could not load profile',
+        message: '$error',
+      ),
+      data: (me) {
+        if (me == null) {
+          return const _CenteredMessage(
+            title: 'Profile unavailable',
+            message: 'Login again to refresh your business profile.',
+          );
+        }
+
+        final business = me.businessAccount;
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            const _PageTitle(
+              title: 'Profile',
+              subtitle: 'User and business account',
+            ),
+            const SizedBox(height: 16),
+            _WorkspacePanel(
               child: Row(
                 children: [
-                  const _OwnerIcon(Icons.history_rounded),
-                  const SizedBox(width: 12),
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: const Color(0xFFF2F4F7),
+                    child: Text(
+                      (me.user.name ?? 'U').isNotEmpty
+                          ? (me.user.name ?? 'U')[0].toUpperCase()
+                          : 'U',
+                      style: const TextStyle(
+                        color: Color(0xFF101828),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(activity.text,
-                            style: const TextStyle(
-                              color: _ownerText,
-                              fontWeight: FontWeight.w700,
-                            )),
+                        Text(
+                          me.user.name ?? 'User',
+                          style: const TextStyle(
+                            color: Color(0xFF101828),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        Text(activity.time,
-                            style: const TextStyle(color: _ownerMuted)),
+                        Text(
+                          me.user.phone,
+                          style: const TextStyle(
+                            color: Color(0xFF667085),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: () => context.push(AppRoutes.academyOverview),
-            child: const Text('View More Metrics'),
-          ),
-        ),
-      ],
+            const SizedBox(height: 14),
+            _InfoTable(
+              title: 'User',
+              rows: [
+                _InfoRow('Name', me.user.name ?? 'Not set'),
+                _InfoRow('Phone', me.user.phone),
+                _InfoRow('Email', me.user.email ?? 'Not set'),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _InfoTable(
+              title: 'Business',
+              rows: [
+                _InfoRow('Business name', business?.businessName ?? 'Not set'),
+                _InfoRow('Contact name', business?.contactName ?? 'Not set'),
+                _InfoRow('Phone', business?.phone ?? 'Not set'),
+                _InfoRow('Email', business?.email ?? 'Not set'),
+                _InfoRow('Address', business?.address ?? 'Not set'),
+                _InfoRow('GST', business?.gstNumber ?? 'Not set'),
+                _InfoRow('PAN', business?.panNumber ?? 'Not set'),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _InfoTable(
+              title: 'Profiles',
+              rows: [
+                _InfoRow(
+                  'Active profiles',
+                  me.businessStatus.availableProfiles.isEmpty
+                      ? 'None'
+                      : me.businessStatus.availableProfiles
+                          .map(_profileName)
+                          .join(', '),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  ref.read(sessionControllerProvider.notifier).signOut(),
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('Logout'),
+            ),
+          ],
+        );
+      },
     );
   }
+}
 
-  Widget _panel({
-    required Widget child,
-    EdgeInsetsGeometry padding = const EdgeInsets.all(16),
-    VoidCallback? onTap,
-  }) {
-    final content = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: _ownerCard,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _ownerBorder),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
+class _PageHeader extends StatelessWidget {
+  const _PageHeader({
+    required this.title,
+    required this.subtitle,
+    this.action,
+  });
+
+  final String title;
+  final String subtitle;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      child: Row(
+        children: [
+          Expanded(child: _PageTitle(title: title, subtitle: subtitle)),
+          if (action != null) action!,
         ],
-      ),
-      child: child,
-    );
-    if (onTap == null) return content;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: content,
       ),
     );
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard(this.value, this.label);
+class _PageTitle extends StatelessWidget {
+  const _PageTitle({required this.title, required this.subtitle});
 
-  final String value;
-  final String label;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF101828),
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            color: Color(0xFF667085),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkspacePanel extends StatelessWidget {
+  const _WorkspacePanel({required this.child});
+
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _ownerCard,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _ownerBorder),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
+      child: child,
+    );
+  }
+}
+
+class _InfoTable extends StatelessWidget {
+  const _InfoTable({required this.title, required this.rows});
+
+  final String title;
+  final List<_InfoRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return _WorkspacePanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: _ownerText,
-                    fontWeight: FontWeight.w900,
-                  )),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(color: _ownerMuted)),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF344054),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...rows.map((row) => _TableRowView(row: row)),
         ],
       ),
     );
   }
 }
 
-class _OwnerBottomNav extends StatelessWidget {
-  const _OwnerBottomNav({required this.index});
+class _TableRowView extends StatelessWidget {
+  const _TableRowView({required this.row});
 
-  final int index;
-
-  @override
-  Widget build(BuildContext context) {
-    const items = [
-      _NavTarget('Home', Icons.home_rounded, AppRoutes.dashboard),
-      _NavTarget('Players', Icons.groups_rounded, AppRoutes.students),
-      _NavTarget('Coaches', Icons.sports_rounded, AppRoutes.coaches),
-      _NavTarget(
-          'Finance', Icons.account_balance_wallet_rounded, AppRoutes.fees),
-      _NavTarget('Settings', Icons.settings_rounded, AppRoutes.settings),
-    ];
-    return NavigationBar(
-      backgroundColor: _ownerCard,
-      indicatorColor: _ownerBlue.withValues(alpha: .2),
-      selectedIndex: index,
-      onDestinationSelected: (value) => context.go(items[value].route),
-      destinations: items
-          .map(
-            (item) => NavigationDestination(
-              icon: Icon(item.icon, color: _ownerMuted),
-              selectedIcon: Icon(item.icon, color: _ownerBlue),
-              label: item.label,
-            ),
-          )
-          .toList(),
-    );
-  }
-}
-
-class _OwnerIcon extends StatelessWidget {
-  const _OwnerIcon(this.icon, {this.size = 42});
-
-  final IconData icon;
-  final double size;
+  final _InfoRow row;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: _ownerBlue.withValues(alpha: .15),
-        borderRadius: BorderRadius.circular(14),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFF2F4F7))),
       ),
-      child: Icon(icon, color: _ownerBlue, size: size * .52),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              row.label,
+              style: const TextStyle(
+                color: Color(0xFF667085),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              row.value,
+              style: const TextStyle(
+                color: Color(0xFF101828),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title);
+class _InfoRow {
+  const _InfoRow(this.label, this.value);
+
+  final String label;
+  final String value;
+}
+
+class _CenteredMessage extends StatelessWidget {
+  const _CenteredMessage({
+    required this.title,
+    required this.message,
+    this.action,
+  });
 
   final String title;
+  final String message;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: _ownerText,
-              fontWeight: FontWeight.w900,
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF101828),
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
             ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF667085)),
+            ),
+            if (action != null) ...[
+              const SizedBox(height: 16),
+              action!,
+            ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _ModuleItem {
-  const _ModuleItem(this.label, this.icon, this.route);
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge(this.label);
 
   final String label;
-  final IconData icon;
-  final String route;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F4F7),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF344054),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
 }
 
-class _NavTarget {
-  const _NavTarget(this.label, this.icon, this.route);
-
-  final String label;
-  final IconData icon;
-  final String route;
+String _joinNonEmpty(List<String?> values, {String separator = ', '}) {
+  return values
+      .where((value) => value != null && value.trim().isNotEmpty)
+      .map((value) => value!.trim())
+      .join(separator);
 }
+
+String _profileName(BizProfileType type) => switch (type) {
+      BizProfileType.academy => 'Academy',
+      BizProfileType.coach => 'Coach',
+      BizProfileType.arena => 'Arena',
+      BizProfileType.arenaManager => 'Arena Manager',
+      BizProfileType.store => 'Store',
+    };

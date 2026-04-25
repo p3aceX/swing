@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart'
     show HostCreateTournamentScreen;
+import 'package:go_router/go_router.dart';
 
 class CreateTournamentScreen extends StatelessWidget {
   const CreateTournamentScreen({super.key});
@@ -8,7 +9,14 @@ class CreateTournamentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return HostCreateTournamentScreen(
-      onTournamentCreated: (_, __) {},
+      onTournamentCreated: (ctx, tournament) {
+        final id = '${tournament['id'] ?? ''}'.trim();
+        if (id.isEmpty) {
+          ctx.pop();
+          return;
+        }
+        ctx.go('/host-tournament/$id', extra: tournament);
+      },
     );
   }
 }

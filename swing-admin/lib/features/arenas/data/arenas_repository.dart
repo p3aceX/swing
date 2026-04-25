@@ -45,6 +45,11 @@ class ArenasRepository {
     return ArenaDetail.fromJson(_asMap(resp));
   }
 
+  Future<ArenaDetail> updateArenaAdmin(String id, Map<String, dynamic> body) async {
+    final resp = await _api.patch('/admin/arenas/$id', body);
+    return ArenaDetail.fromJson(_asMap(resp));
+  }
+
   Future<String> uploadMedia({
     required String folder,
     required List<int> bytes,
@@ -88,12 +93,12 @@ class ArenasRepository {
     String unitId,
     Map<String, dynamic> body,
   ) async {
-    final resp = await _api.patch('/arenas/u/$unitId', body);
+    final resp = await _api.patch('/admin/arena-units/$unitId', body);
     return ArenaUnitDetail.fromJson(_asMap(resp));
   }
 
   Future<void> deleteUnit(String unitId) async {
-    await _api.delete('/arenas/u/$unitId');
+    await _api.delete('/admin/arena-units/$unitId');
   }
 
   Future<List<ArenaTimeBlockDetail>> listBlocks(

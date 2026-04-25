@@ -96,23 +96,24 @@ class _CreateTeamButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: context.accentBg,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: context.accent.withValues(alpha: 0.3)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.add_rounded, color: context.accent, size: 18),
-            const SizedBox(width: 6),
+            Icon(Icons.add_rounded, color: context.accent, size: 15),
+            const SizedBox(width: 4),
             Text(
               'New Squad',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: context.accent,
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: TextStyle(
+                color: context.accent,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
             ),
           ],
         ),

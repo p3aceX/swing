@@ -1,4 +1,5 @@
 import 'package:flutter_host_core/flutter_host_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'token_storage.dart';
@@ -36,6 +37,7 @@ class SessionController extends StateNotifier<SessionState> {
     final profileRaw = await TokenStorage.getActiveProfile();
     final profile =
         profileRaw == null ? null : bizProfileTypeFromString(profileRaw);
+    debugPrint('[biz session] bootstrap token=${token != null} profileRaw=$profileRaw');
     state = SessionState(
       status:
           token == null ? AuthStatus.unauthenticated : AuthStatus.authenticated,
@@ -47,6 +49,7 @@ class SessionController extends StateNotifier<SessionState> {
     required String accessToken,
     required String refreshToken,
   }) async {
+    debugPrint('[biz session] signIn start access=${accessToken.isNotEmpty} refresh=${refreshToken.isNotEmpty}');
     await TokenStorage.saveTokens(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -56,15 +59,18 @@ class SessionController extends StateNotifier<SessionState> {
       status: AuthStatus.authenticated,
       clearActiveProfile: true,
     );
+    debugPrint('[biz session] signIn state authenticated');
   }
 
   Future<void> setActiveProfile(BizProfileType? profile) async {
+    debugPrint('[biz session] setActiveProfile profile=${profile?.name}');
     await TokenStorage.saveActiveProfile(_nameOf(profile));
     state = state.copyWith(
         activeProfile: profile, clearActiveProfile: profile == null);
   }
 
   Future<void> signOut() async {
+    debugPrint('[biz session] signOut');
     await TokenStorage.clear();
     state = const SessionState(status: AuthStatus.unauthenticated);
   }

@@ -126,7 +126,7 @@ class _TrophyCard extends StatelessWidget {
     return switch (tone) {
       TrophyTone.gold => context.gold,
       TrophyTone.emerald => context.accent,
-      TrophyTone.steel => Colors.white.withValues(alpha: 0.72),
+      TrophyTone.steel => context.fg.withValues(alpha: 0.72),
     };
   }
 

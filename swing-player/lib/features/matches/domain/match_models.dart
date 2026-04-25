@@ -58,6 +58,8 @@ class PlayerMatch {
     this.scoringOwnerIds = const [],
     this.involvesPlayerTeam = false,
     this.ballType,
+    this.tossWinner,
+    this.tossDecision,
   });
 
   final String id;
@@ -93,6 +95,9 @@ class PlayerMatch {
 
   /// e.g. 'LEATHER' or 'TENNIS'
   final String? ballType;
+
+  final String? tossWinner;
+  final String? tossDecision;
 }
 
 // ── Structured scorecard row types ────────────────────────────────────────────

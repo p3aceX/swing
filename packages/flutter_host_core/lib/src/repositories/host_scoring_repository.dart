@@ -1,19 +1,20 @@
 import 'package:dio/dio.dart';
 
-import '../contracts/host_contracts.dart';
+import '../contracts/host_path_config.dart';
 
 class HostScoringRepository {
-  HostScoringRepository(this._dio);
+  HostScoringRepository(this._dio, this._paths);
 
   final Dio _dio;
+  final HostPathConfig _paths;
 
   Future<Map<String, dynamic>> loadMatch(String matchId) async {
-    final response = await _dio.get(HostContracts.match(matchId));
+    final response = await _dio.get(_paths.match(matchId));
     return _asMap(response.data);
   }
 
   Future<Map<String, dynamic>> loadPlayers(String matchId) async {
-    final response = await _dio.get(HostContracts.matchPlayers(matchId));
+    final response = await _dio.get(_paths.matchPlayers(matchId));
     return _asMap(response.data);
   }
 
@@ -22,7 +23,10 @@ class HostScoringRepository {
     int inningsNumber, {
     required Map<String, dynamic> payload,
   }) async {
-    await _dio.post(HostContracts.inningsBall(matchId, inningsNumber), data: payload);
+    await _dio.post(
+      _paths.inningsBall(matchId, inningsNumber),
+      data: payload,
+    );
   }
 
   Future<Map<String, dynamic>> patchInningsState(
@@ -31,18 +35,18 @@ class HostScoringRepository {
     required Map<String, dynamic> payload,
   }) async {
     final response = await _dio.patch(
-      HostContracts.inningsState(matchId, inningsNumber),
+      _paths.inningsState(matchId, inningsNumber),
       data: payload,
     );
     return _asMap(response.data);
   }
 
   Future<void> completeInnings(String matchId, int inningsNumber) async {
-    await _dio.post(HostContracts.inningsComplete(matchId, inningsNumber));
+    await _dio.post(_paths.inningsComplete(matchId, inningsNumber));
   }
 
   Future<void> continueInnings(String matchId) async {
-    await _dio.post('${HostContracts.match(matchId)}/continue-innings');
+    await _dio.post(_paths.matchContinueInnings(matchId));
   }
 
   Future<void> completeMatch(
@@ -51,13 +55,15 @@ class HostScoringRepository {
     required String? winMargin,
   }) async {
     await _dio.post(
-      '${HostContracts.match(matchId)}/complete',
+      _paths.matchComplete(matchId),
       data: {'winnerId': winnerId, if (winMargin != null) 'winMargin': winMargin},
     );
   }
 
-  Future<Map<String, dynamic>> undoLastBall(String matchId, int inningsNumber) async {
-    final response = await _dio.delete(HostContracts.inningsUndo(matchId, inningsNumber));
+  Future<Map<String, dynamic>> undoLastBall(
+      String matchId, int inningsNumber) async {
+    final response =
+        await _dio.delete(_paths.inningsUndo(matchId, inningsNumber));
     return _asMap(response.data);
   }
 }

@@ -1,4 +1,5 @@
 export 'src/contracts/host_contracts.dart';
+export 'src/contracts/host_path_config.dart';
 export 'src/providers/host_dio_provider.dart';
 export 'src/repositories/host_arena_repository.dart';
 export 'src/repositories/host_match_repository.dart';
@@ -7,6 +8,7 @@ export 'src/repositories/host_scoring_repository.dart';
 export 'src/repositories/host_team_repository.dart';
 export 'src/repositories/host_tournament_repository.dart';
 export 'src/theme/host_colors.dart';
+export 'src/theme/host_palette.dart';
 
 export 'src/biz/biz_models.dart';
 export 'src/biz/host_biz_repository.dart';
@@ -20,6 +22,13 @@ export 'src/features/create_match/presentation/form_widgets.dart';
 export 'src/features/create_match/presentation/player_manage_sheet.dart';
 export 'src/features/create_match/presentation/team_search_sheet.dart';
 export 'src/features/create_match/presentation/toss_screen.dart';
+export 'src/features/create_team/controller/create_team_controller.dart';
+export 'src/features/create_team/data/create_team_repository.dart';
+export 'src/features/create_team/presentation/create_team_screen.dart';
+export 'src/features/my_teams/controller/my_teams_controller.dart';
+export 'src/features/my_teams/data/my_teams_repository.dart';
+export 'src/features/my_teams/domain/my_teams_models.dart';
+export 'src/features/playing_eleven/presentation/playing_eleven_screen.dart';
 export 'src/features/create_tournament/presentation/create_tournament_screen.dart';
 export 'src/features/create_tournament/presentation/tournament_detail_screen.dart';
 export 'src/features/scoring/controller/scoring_controller.dart';
@@ -31,3 +40,22 @@ export 'src/features/scoring/presentation/player_picker_sheet.dart';
 export 'src/features/scoring/presentation/scoring_screen.dart';
 export 'src/features/scoring/presentation/scoring_widgets.dart';
 export 'src/features/scoring/presentation/wicket_sheet.dart';
+
+export 'src/features/play_tab/domain/play_tab_models.dart';
+export 'src/features/play_tab/data/play_tab_repository.dart';
+export 'src/features/play_tab/controller/play_tab_controller.dart';
+export 'src/features/play_tab/presentation/play_tab.dart';
+export 'src/features/play_tab/presentation/play_matches_tab.dart';
+export 'src/features/play_tab/presentation/play_teams_tab.dart';
+export 'src/features/play_tab/presentation/play_tournaments_tab.dart';
+
+export 'src/features/team_detail/domain/team_models.dart';
+export 'src/features/team_detail/data/team_detail_repository.dart';
+export 'src/features/team_detail/controller/team_detail_controller.dart';
+export 'src/features/team_detail/presentation/team_detail_screen.dart';
+
+export 'src/features/match_detail/domain/match_models.dart';
+export 'src/features/match_detail/data/match_detail_repository.dart';
+export 'src/features/match_detail/controller/match_detail_controller.dart';
+export 'src/features/match_detail/presentation/match_card.dart';
+export 'src/features/match_detail/presentation/match_detail_screen.dart';

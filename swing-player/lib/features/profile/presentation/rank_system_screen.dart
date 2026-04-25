@@ -28,70 +28,92 @@ class RankSystemScreen extends StatelessWidget {
       backgroundColor: context.bg,
       appBar: AppBar(
         backgroundColor: context.bg,
-        foregroundColor: Colors.white,
+        foregroundColor: context.fg,
         elevation: 0,
-        title: const Text(
+        scrolledUnderElevation: 0,
+        title: Text(
           'Rank System',
-          style: TextStyle(fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: context.fg,
+            fontWeight: FontWeight.w900,
+            fontSize: 17,
+            letterSpacing: -0.3,
+          ),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _CurrentRankCard(
-              ranking: ranking,
-              currentTier: currentTier,
-              rankTheme: rankTheme,
-            ),
-            const SizedBox(height: 12),
-            const _InfoCard(
-              title: 'Impact Points',
-              text:
-                  'Impact Points (IP) are earned from verified match contribution, results, milestones, and sustained consistency.',
-            ),
-            const SizedBox(height: 12),
-            const _InfoCard(
-              title: 'How Rank Moves',
-              text:
-                  'As your IP grows, you climb the rank ladder. Better and repeat performances push you upward faster.',
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Rank Ladder',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.92),
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+        children: [
+          _CurrentRankCard(
+            ranking: ranking,
+            currentTier: currentTier,
+            rankTheme: rankTheme,
+          ),
+          const SizedBox(height: 22),
+
+          // Section: How it works
+          _LabelHeader(text: 'HOW IT WORKS'),
+          const SizedBox(height: 10),
+          const _InfoRow(
+            icon: Icons.bolt_rounded,
+            title: 'Impact Points (IP)',
+            text:
+                'Earn IP from verified match contribution, results, milestones and consistency.',
+          ),
+          const SizedBox(height: 14),
+          const _InfoRow(
+            icon: Icons.trending_up_rounded,
+            title: 'How rank moves',
+            text:
+                'As your IP grows, you climb the ladder. Better and repeat performances push you upward faster.',
+          ),
+
+          const SizedBox(height: 28),
+
+          // Section: Rank ladder
+          Row(
+            children: [
+              _LabelHeader(text: 'RANK LADDER'),
+              const Spacer(),
+              Text(
+                '${tiers.length} tiers',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: tiers.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 0.84,
             ),
-            const SizedBox(height: 12),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: tiers.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 0.92,
-              ),
-              itemBuilder: (context, index) {
-                final tier = tiers[index];
-                return _RankTile(
-                  tier: tier,
-                  isCurrent: tier.label == currentTier.label,
-                  isPast: tier.stepIndex < currentTier.stepIndex,
-                );
-              },
-            ),
-          ],
-        ),
+            itemBuilder: (context, index) {
+              final tier = tiers[index];
+              return _RankTile(
+                tier: tier,
+                isCurrent: tier.label == currentTier.label,
+                isPast: tier.stepIndex < currentTier.stepIndex,
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Hero — current rank card
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _CurrentRankCard extends StatelessWidget {
   const _CurrentRankCard({
@@ -108,59 +130,88 @@ class _CurrentRankCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
       decoration: BoxDecoration(
-        color: rankTheme.deep,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: rankTheme.primary.withValues(alpha: 0.24)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            rankTheme.primary.withValues(alpha: 0.18),
+            rankTheme.primary.withValues(alpha: 0.06),
+            const Color(0xFFFFFFFF),
+          ],
+          stops: const [0.0, 0.55, 1.0],
+        ),
       ),
       child: Row(
         children: [
           Container(
-            width: 88,
-            height: 88,
+            width: 92,
+            height: 92,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: rankTheme.primary.withValues(alpha: 0.08),
+              color: rankTheme.primary.withValues(alpha: 0.10),
+              border: Border.all(
+                color: rankTheme.primary.withValues(alpha: 0.35),
+                width: 1.4,
+              ),
             ),
             alignment: Alignment.center,
             child: SvgPicture.asset(
               currentTier.assetPath,
-              width: 76,
-              height: 76,
+              width: 70,
+              height: 70,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  currentTier.label,
+                  currentTier.label.toUpperCase(),
                   style: TextStyle(
                     color: rankTheme.primary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${ranking.impactPoints} IP',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Rank is driven by Impact Points earned.',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.62),
                     fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      '${ranking.impactPoints}',
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -1.2,
+                        height: 1,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'IP',
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Earn more by performing in verified matches.',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
                   ),
                 ),
               ],
@@ -172,50 +223,88 @@ class _CurrentRankCard extends StatelessWidget {
   }
 }
 
-class _InfoCard extends StatelessWidget {
-  const _InfoCard({
+// ═══════════════════════════════════════════════════════════════════════════
+// Section labels + info rows
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _LabelHeader extends StatelessWidget {
+  const _LabelHeader({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: context.fgSub,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.8,
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.icon,
     required this.title,
     required this.text,
   });
 
+  final IconData icon;
   final String title;
   final String text;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: context.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.92),
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: context.panel,
+            shape: BoxShape.circle,
           ),
-          const SizedBox(height: 6),
-          Text(
-            text,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.68),
-              fontSize: 12,
-              height: 1.4,
-            ),
+          child: Icon(icon, size: 18, color: context.fg),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                text,
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  height: 1.4,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Rank ladder grid tile
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _RankTile extends StatelessWidget {
   const _RankTile({
@@ -231,37 +320,42 @@ class _RankTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = resolveRankVisualTheme(tier.rank);
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
       decoration: BoxDecoration(
-        color:
-            isCurrent ? theme.primary.withValues(alpha: 0.1) : context.cardBg,
-        borderRadius: BorderRadius.circular(16),
+        color: isCurrent ? theme.primary.withValues(alpha: 0.12) : context.surf,
         border: Border.all(
           color: isCurrent
-              ? theme.primary.withValues(alpha: 0.35)
-              : Colors.white.withValues(alpha: 0.06),
+              ? theme.primary.withValues(alpha: 0.55)
+              : context.stroke,
+          width: isCurrent ? 1.5 : 1,
         ),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SvgPicture.asset(
-            tier.assetPath,
-            width: 44,
-            height: 44,
+          Opacity(
+            opacity: isCurrent || isPast ? 1.0 : 0.55,
+            child: SvgPicture.asset(
+              tier.assetPath,
+              width: 46,
+              height: 46,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             tier.rank,
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: Colors.white
-                  .withValues(alpha: isPast || isCurrent ? 0.92 : 0.72),
+              color: isCurrent || isPast
+                  ? context.fg
+                  : context.fgSub.withValues(alpha: 0.7),
               fontSize: 11,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.3,
             ),
           ),
           const SizedBox(height: 2),
@@ -270,11 +364,31 @@ class _RankTile extends StatelessWidget {
             style: TextStyle(
               color: isCurrent
                   ? theme.primary
-                  : Colors.white.withValues(alpha: 0.45),
+                  : context.fgSub.withValues(alpha: 0.7),
               fontSize: 10,
               fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
             ),
           ),
+          if (isCurrent) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: theme.primary,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: const Text(
+                'YOU',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

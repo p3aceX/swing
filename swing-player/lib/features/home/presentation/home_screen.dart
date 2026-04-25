@@ -1,6 +1,4 @@
-import "package:cached_network_image/cached_network_image.dart";
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
@@ -18,13 +16,11 @@ import '../../../core/api/api_endpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../booking/presentation/booking_module_tab.dart';
 import '../../elite/presentation/elite_dashboard_screen.dart';
-import '../../matches/presentation/matches_tab.dart';
+import '../../../app.dart';
 import '../../profile/controller/profile_controller.dart';
 import '../../profile/data/profile_repository.dart';
 import '../../store/domain/store_models.dart';
 import '../../store/presentation/storefront_screen.dart';
-import '../../teams/presentation/teams_tab.dart';
-import '../../tournaments/presentation/tournaments_tab.dart';
 import 'player_home_body.dart';
 import 'play_tab.dart';
 import '../../apex/presentation/apex_shell.dart';
@@ -47,7 +43,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ];
 
   int _currentIndex = 0;
-  bool _isSearchExpanded = false;
   String _currentCity = 'Fetching...';
   double? _currentLatitude;
   double? _currentLongitude;
@@ -97,6 +92,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     } catch (_) {}
   }
 
+  void _openSupport() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => const _SupportSheet(),
+    );
+  }
+
+  void _openSearchOverlay() {
+    final overlay = Overlay.of(context, rootOverlay: true);
+    late OverlayEntry entry;
+    void close() {
+      if (entry.mounted) entry.remove();
+    }
+
+    entry = OverlayEntry(builder: (ctx) {
+      return _SearchOverlay(onClose: close);
+    });
+    overlay.insert(entry);
+  }
+
   @override
   Widget build(BuildContext context) {
     final profileState = ref.watch(profileControllerProvider);
@@ -107,16 +123,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       backgroundColor: context.bg,
       appBar: _currentIndex == 0
           ? PreferredSize(
-              preferredSize: Size.fromHeight(_isSearchExpanded ? 186 : 106),
+              preferredSize: const Size.fromHeight(76),
               child: _SexyHeader(
                 avatarUrl: avatarUrl,
-                isSearchExpanded: _isSearchExpanded,
-                onSearchTap: () {
-                  setState(() => _isSearchExpanded = !_isSearchExpanded);
-                },
+                userName: profileData?.identity.fullName,
+                onSearchTap: _openSearchOverlay,
                 onProfileTap: () => context.push('/profile'),
                 onChatTap: () => context.push('/chat'),
                 onNotificationTap: () => context.push('/notifications'),
+                onSupportTap: _openSupport,
               ),
             )
           : null,
@@ -137,168 +152,220 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
 // ── App Header (ERP Shell) ────────────────────────────────────────────────────
 
-class _SexyHeader extends StatefulWidget {
+class _SexyHeader extends ConsumerWidget {
   const _SexyHeader({
     this.avatarUrl,
-    required this.isSearchExpanded,
+    this.userName,
     required this.onSearchTap,
     required this.onProfileTap,
     required this.onChatTap,
     required this.onNotificationTap,
+    required this.onSupportTap,
   });
 
   final String? avatarUrl;
-  final bool isSearchExpanded;
+  final String? userName;
   final VoidCallback onSearchTap;
   final VoidCallback onProfileTap;
   final VoidCallback onChatTap;
   final VoidCallback onNotificationTap;
+  final VoidCallback onSupportTap;
 
   @override
-  State<_SexyHeader> createState() => _SexyHeaderState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unreadChat =
+        ref.watch(chatUnreadCountProvider).valueOrNull ?? 0;
+    final unreadNotif =
+        ref.watch(notificationSummaryProvider).valueOrNull ?? 0;
+    final themeMode = ref.watch(themeModeProvider);
+    final isDark = themeMode == ThemeMode.dark;
 
-class _SexyHeaderState extends State<_SexyHeader> {
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        color: context.surf.withValues(alpha: 0.72),
-        border: Border(
-          bottom: BorderSide(color: context.stroke.withValues(alpha: 0.4)),
+      color: context.surf,
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: 76,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                _GradientAvatar(url: avatarUrl, onTap: onProfileTap),
+                const Spacer(),
+                _SoftIconButton(
+                  icon: isDark
+                      ? Icons.wb_sunny_outlined
+                      : Icons.dark_mode_outlined,
+                  onTap: () {
+                    ref.read(themeModeProvider.notifier).state =
+                        isDark ? ThemeMode.light : ThemeMode.dark;
+                  },
+                  tooltip: isDark ? 'Light mode' : 'Dark mode',
+                ),
+                const SizedBox(width: 10),
+                _SoftIconButton(
+                  icon: Icons.search_rounded,
+                  onTap: onSearchTap,
+                  tooltip: 'Search',
+                ),
+                const SizedBox(width: 10),
+                _SoftIconButton(
+                  icon: Icons.notifications_none_rounded,
+                  onTap: onNotificationTap,
+                  tooltip: 'Notifications',
+                  hasDot: unreadNotif > 0,
+                ),
+                const SizedBox(width: 10),
+                _SoftIconButton(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  onTap: onChatTap,
+                  tooltip: 'Messages',
+                  hasDot: unreadChat > 0,
+                ),
+                const SizedBox(width: 10),
+                _SoftIconButton(
+                  icon: Icons.headset_mic_outlined,
+                  onTap: onSupportTap,
+                  tooltip: 'Support',
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      // Profile Avatar with high-contrast ring
-                      GestureDetector(
-                        onTap: widget.onProfileTap,
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                context.accent,
-                                context.accent.withValues(alpha: 0.2)
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: context.accent.withValues(alpha: 0.12),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
-                            ],
-                          ),
-                          child: Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: context.cardBg,
-                              image: widget.avatarUrl != null
-                                  ? DecorationImage(
-                                      image: CachedNetworkImageProvider(widget.avatarUrl!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : null,
-                            ),
-                            child: widget.avatarUrl == null
-                                ? Icon(Icons.person_rounded,
-                                    color: context.fgSub, size: 18)
-                                : null,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
+    );
+  }
+}
 
-                      // Modern Pill Search Bar
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: widget.onSearchTap,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 240),
-                            height: 42,
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            decoration: BoxDecoration(
-                              color: widget.isSearchExpanded
-                                  ? context.accent.withValues(alpha: 0.08)
-                                  : context.cardBg.withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(22),
-                              border: Border.all(
-                                color: widget.isSearchExpanded
-                                    ? context.accent.withValues(alpha: 0.6)
-                                    : context.stroke.withValues(alpha: 0.5),
-                                width: 1.2,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  widget.isSearchExpanded
-                                      ? Icons.close_rounded
-                                      : Icons.search_rounded,
-                                  color: widget.isSearchExpanded
-                                      ? context.accent
-                                      : context.fgSub,
-                                  size: 19,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    widget.isSearchExpanded
-                                        ? 'Close search'
-                                        : 'Search Swing...',
-                                    style: TextStyle(
-                                      color: widget.isSearchExpanded
-                                          ? context.accent
-                                          : context.fgSub,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: -0.2,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+class _GradientAvatar extends StatelessWidget {
+  const _GradientAvatar({required this.url, required this.onTap});
+  final String? url;
+  final VoidCallback onTap;
 
-                      const SizedBox(width: 12),
+  // Soft pastel gradient — premium/playful (purple → pink → sky).
+  static const _ringGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      Color(0xFFB39DDB), // soft lavender
+      Color(0xFFF8BBD0), // soft pink
+      Color(0xFF90CAF9), // soft sky
+    ],
+  );
 
-                      // Actions with unified container feel
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ChatBadgeButton(onTap: widget.onChatTap),
-                          const SizedBox(width: 4),
-                          NotificationBellBadge(
-                              onTap: widget.onNotificationTap),
-                        ],
-                      ),
-                    ],
-                  ),
-                  if (widget.isSearchExpanded) ...[
-                    const SizedBox(height: 12),
-                    _ExpandedSearchField(onCloseTap: widget.onSearchTap),
-                  ],
-                ],
-              ),
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: _ringGradient,
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: context.surf,
+          ),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: context.panel,
             ),
+            clipBehavior: Clip.antiAlias,
+            child: url != null
+                ? CachedNetworkImage(
+                    imageUrl: url!,
+                    fit: BoxFit.cover,
+                    memCacheWidth: 132, // 44 * 3
+                    memCacheHeight: 132,
+                    placeholder: (context, url) =>
+                        Container(color: context.panel),
+                    errorWidget: (context, url, error) => Icon(
+                        Icons.person_rounded,
+                        color: context.fgSub,
+                        size: 22),
+                  )
+                : Icon(Icons.person_rounded, color: context.fgSub, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SoftIconButton extends StatefulWidget {
+  const _SoftIconButton({
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+    this.hasDot = false,
+    this.active = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final String? tooltip;
+  final bool hasDot;
+  final bool active;
+
+  @override
+  State<_SoftIconButton> createState() => _SoftIconButtonState();
+}
+
+class _SoftIconButtonState extends State<_SoftIconButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final restBg = widget.active ? context.ctaBg : context.panel;
+    final pressBg = widget.active
+        ? context.ctaBg
+        : (context.isDark
+            ? const Color(0xFF2A2A2A)
+            : const Color(0xFFE5E7EB));
+    final fg = widget.active ? context.ctaFg : context.fg;
+
+    return Tooltip(
+      message: widget.tooltip ?? '',
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 130),
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: _pressed ? pressBg : restBg,
+            shape: BoxShape.circle,
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(widget.icon, size: 22, color: fg),
+              if (widget.hasDot)
+                Positioned(
+                  top: 11,
+                  right: 11,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: restBg, width: 1.6),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -754,23 +821,21 @@ class _SuggestionListState extends State<_SuggestionList> {
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: context.surf.withValues(alpha: 0.96),
+        color: context.surf,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: context.stroke.withValues(alpha: 0.5),
-          width: 1.2,
+          color: context.stroke,
+          width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.22),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
           ),
         ],
       ),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Column(
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -844,7 +909,6 @@ class _SuggestionListState extends State<_SuggestionList> {
               ),
           ],
         ),
-      ),
     );
   }
 }
@@ -1044,6 +1108,13 @@ class _PremiumBottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.surf,
         border: Border(top: BorderSide(color: context.stroke)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 18,
+            offset: const Offset(0, -6),
+          ),
+        ],
       ),
       child: Row(
         children: List.generate(items.length, (index) {
@@ -1068,21 +1139,32 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final activeColor = context.ctaBg;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(
-          item.icon,
-          size: 22,
-          color: isSelected ? context.accent : context.fgSub,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? activeColor.withValues(alpha: 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Icon(
+            item.icon,
+            size: 22,
+            color: isSelected ? activeColor : context.fgSub,
+          ),
         ),
         const SizedBox(height: 3),
         Text(
           item.label,
           style: TextStyle(
-            color: isSelected ? context.accent : context.fgSub,
+            color: isSelected ? activeColor : context.fgSub,
             fontSize: 10,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+            letterSpacing: isSelected ? 0.2 : 0,
           ),
         ),
       ],
@@ -1491,6 +1573,514 @@ class _BookingLocationSuggestionsList extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _SupportSheet extends StatelessWidget {
+  const _SupportSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final items = const [
+      (icon: Icons.help_outline_rounded, label: 'Help center', sub: 'Browse FAQs and guides'),
+      (icon: Icons.mail_outline_rounded, label: 'Email us', sub: 'support@swing.app'),
+      (icon: Icons.bug_report_outlined, label: 'Report a bug', sub: 'Tell us what'"'"'s broken'),
+      (icon: Icons.chat_bubble_outline_rounded, label: 'Live chat', sub: 'Mon–Fri, 10am–7pm IST'),
+    ];
+    return Container(
+      decoration: BoxDecoration(
+        color: context.surf,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + MediaQuery.of(context).padding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: context.stroke,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Support',
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'How can we help?',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 18),
+          ...items.map((item) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Material(
+                  color: const Color(0xFFF1F2F5),
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: context.surf,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(item.icon, size: 20, color: context.fg),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.label,
+                                  style: TextStyle(
+                                    color: context.fg,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  item.sub,
+                                  style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded,
+                              color: context.fgSub.withValues(alpha: 0.7),
+                              size: 20),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchOverlay extends StatefulWidget {
+  const _SearchOverlay({required this.onClose});
+  final VoidCallback onClose;
+
+  @override
+  State<_SearchOverlay> createState() => _SearchOverlayState();
+}
+
+class _SearchOverlayState extends State<_SearchOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  final TextEditingController _ctrl = TextEditingController();
+  final FocusNode _focus = FocusNode();
+  final Dio _dio = ApiClient.instance.dio;
+
+  Timer? _debounce;
+  bool _loading = false;
+  List<_SearchSuggestion> _suggestions = const [];
+  String? _activeKind;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _fade = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, -0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic));
+    _anim.forward();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    _debounce?.cancel();
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _close() async {
+    await _anim.reverse();
+    widget.onClose();
+  }
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    final query = value.trim();
+    if (query.length < 2) {
+      setState(() {
+        _suggestions = const [];
+        _loading = false;
+      });
+      return;
+    }
+    setState(() => _loading = true);
+    _debounce = Timer(const Duration(milliseconds: 280), () => _fetch(query));
+  }
+
+  Future<void> _fetch(String query) async {
+    try {
+      final response = await _dio.get(
+        ApiEndpoints.playerSearch,
+        queryParameters: {'q': query, 'type': 'all', 'limit': 25},
+      );
+      if (!mounted) return;
+      setState(() {
+        _suggestions = _parseSuggestions(response.data);
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _suggestions = const [];
+        _loading = false;
+      });
+    }
+  }
+
+  List<_SearchSuggestion> _parseSuggestions(dynamic body) {
+    final results = <_SearchSuggestion>[];
+    final data = (body is Map ? body['data'] ?? body : {}) as Map;
+
+    void section(String kind, List items, _SearchSuggestion Function(Map) map) {
+      for (final raw in items.take(5)) {
+        if (raw is Map) results.add(map(raw));
+      }
+    }
+
+    List asList(dynamic v) => v is List ? v : const [];
+
+    section(
+        'players',
+        asList(data['players']),
+        (m) => _SearchSuggestion(
+              id: '${m['id'] ?? m['userId'] ?? ''}',
+              kind: 'players',
+              title:
+                  '${m['name'] ?? m['displayName'] ?? m['username'] ?? 'Player'}',
+              subtitle: '${m['role'] ?? m['city'] ?? ''}',
+              avatarUrl: m['avatarUrl'] as String?,
+            ));
+    section(
+        'teams',
+        asList(data['teams']),
+        (m) => _SearchSuggestion(
+              id: '${m['id'] ?? m['teamId'] ?? ''}',
+              kind: 'teams',
+              title: '${m['name'] ?? m['teamName'] ?? 'Team'}',
+              subtitle: '${m['city'] ?? m['sport'] ?? ''}',
+              avatarUrl: m['logoUrl'] as String?,
+            ));
+    section(
+        'venues',
+        asList(data['venues'] ?? data['arenas']),
+        (m) => _SearchSuggestion(
+              id: '${m['id'] ?? m['arenaId'] ?? ''}',
+              kind: 'venues',
+              title: '${m['name'] ?? 'Venue'}',
+              subtitle: '${m['city'] ?? m['address'] ?? ''}',
+            ));
+    section(
+        'tournaments',
+        asList(data['tournaments']),
+        (m) => _SearchSuggestion(
+              id: '${m['id'] ?? m['tournamentId'] ?? ''}',
+              kind: 'tournaments',
+              title: '${m['name'] ?? 'Tournament'}',
+              subtitle: '${m['sport'] ?? m['format'] ?? ''}',
+            ));
+    section(
+        'events',
+        asList(data['events']),
+        (m) => _SearchSuggestion(
+              id: '${m['id'] ?? m['eventId'] ?? ''}',
+              kind: 'events',
+              title: '${m['name'] ?? m['title'] ?? 'Event'}',
+              subtitle: '${m['city'] ?? m['date'] ?? ''}',
+            ));
+
+    return results;
+  }
+
+  void _open(_SearchSuggestion item) async {
+    await _close();
+    if (!mounted) return;
+    if (item.route.isNotEmpty) GoRouter.of(context).push(item.route);
+  }
+
+  void _submitFull() async {
+    final q = _ctrl.text.trim();
+    await _close();
+    if (!mounted) return;
+    GoRouter.of(context).push(
+      q.isEmpty ? '/search' : '/search?q=${Uri.encodeQueryComponent(q)}',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final available = const ['players', 'teams', 'venues', 'tournaments', 'events']
+        .where((k) => _suggestions.any((s) => s.kind == k))
+        .toList();
+    final visible = _activeKind == null
+        ? _suggestions
+        : _suggestions.where((s) => s.kind == _activeKind).toList();
+
+    return Material(
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          // Tap-out backdrop (no dim)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _close,
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: FadeTransition(
+              opacity: _fade,
+              child: SlideTransition(
+                position: _slide,
+                child: GestureDetector(
+                  onTap: () {},
+                  child: Container(
+                    color: context.surf,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Search field row — flat, matches top bar height
+                          SizedBox(
+                            height: 76,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 0, 8, 0),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.search_rounded,
+                                      color: context.fgSub, size: 22),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _ctrl,
+                                    focusNode: _focus,
+                                    textInputAction: TextInputAction.search,
+                                    onChanged: _onChanged,
+                                    onSubmitted: (_) => _submitFull(),
+                                    cursorColor: context.fg,
+                                    style: TextStyle(
+                                      color: context.fg,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText:
+                                          'Search players, teams, venues…',
+                                      hintStyle: TextStyle(
+                                        color: context.fgSub,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                      filled: false,
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      disabledBorder: InputBorder.none,
+                                      errorBorder: InputBorder.none,
+                                      focusedErrorBorder: InputBorder.none,
+                                      isCollapsed: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
+                                ),
+                                if (_loading)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 12),
+                                    child: SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 1.6,
+                                          color: context.fgSub),
+                                    ),
+                                  ),
+                                GestureDetector(
+                                  onTap: _close,
+                                  behavior: HitTestBehavior.opaque,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 4),
+                                    child: Text(
+                                      'Cancel',
+                                      style: TextStyle(
+                                        color: context.fg,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            ),
+                          ),
+                          // Hairline divider under search
+                          Container(height: 1, color: context.stroke),
+                          // Filter chips (only when results exist)
+                          if (available.isNotEmpty)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _MinimalChip(
+                                      label: 'All',
+                                      selected: _activeKind == null,
+                                      onTap: () =>
+                                          setState(() => _activeKind = null),
+                                    ),
+                                    ...available.map((k) => Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 16),
+                                          child: _MinimalChip(
+                                            label: _kFilterLabels[k]!,
+                                            selected: _activeKind == k,
+                                            onTap: () => setState(() =>
+                                                _activeKind = _activeKind == k
+                                                    ? null
+                                                    : k),
+                                          ),
+                                        )),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          // Results
+                          if (visible.isNotEmpty)
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight:
+                                    MediaQuery.of(context).size.height * 0.6,
+                              ),
+                              child: ListView.separated(
+                                shrinkWrap: true,
+                                padding: EdgeInsets.zero,
+                                itemCount: visible.length,
+                                separatorBuilder: (_, __) => Container(
+                                  height: 1,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 20),
+                                  color: context.stroke,
+                                ),
+                                itemBuilder: (ctx, i) => _SuggestionTile(
+                                  item: visible[i],
+                                  onTap: _open,
+                                ),
+                              ),
+                            )
+                          else if (_ctrl.text.trim().length >= 2 && !_loading)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 28),
+                              child: Center(
+                                child: Text(
+                                  'No results',
+                                  style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MinimalChip extends StatelessWidget {
+  const _MinimalChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? context.fg : context.fgSub,
+          fontSize: 13,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          decoration: selected ? TextDecoration.underline : null,
+          decorationThickness: 2,
+          decorationColor: context.fg,
+        ),
+      ),
     );
   }
 }

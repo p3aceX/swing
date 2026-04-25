@@ -77,7 +77,7 @@ class _CreateCoachScreenState extends ConsumerState<CreateCoachScreen> {
           .read(sessionControllerProvider.notifier)
           .setActiveProfile(BizProfileType.coach);
       ref.invalidate(meProvider);
-      if (mounted) context.go(AppRoutes.coachHome);
+      if (mounted) context.go(AppRoutes.dashboard);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -864,6 +864,7 @@ export async function playerRoutes(app: FastifyInstance) {
         viceCaptainId: true,
         wicketKeeperId: true,
         playerIds: true,
+        createdByUserId: true,
         createdAt: true,
       },
     })
@@ -903,6 +904,7 @@ export async function playerRoutes(app: FastifyInstance) {
         teamType: team.teamType,
         followerCount,
         isFollowing,
+        isOwner: team.createdByUserId === user.userId,
         memberCount: team.playerIds.length,
         members: players.map(p => ({
           profileId: p.id,

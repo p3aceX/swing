@@ -16,15 +16,15 @@ class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 2),
+    duration: const Duration(milliseconds: 1800),
   )..repeat(reverse: true);
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 2400), () {
-      if (mounted) context.go(AppRoutes.welcome);
+    _timer = Timer(const Duration(milliseconds: 2200), () {
+      if (mounted) context.go(AppRoutes.login);
     });
   }
 
@@ -41,65 +41,107 @@ class _SplashScreenState extends State<SplashScreen>
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
-          final glow = Color.lerp(
-            const Color(0xFF0F172A),
-            const Color(0xFF1E3A8A),
+          final accent = Color.lerp(
+            const Color(0xFF0F766E),
+            const Color(0xFF14B8A6),
             _controller.value,
           )!;
           return Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
                 colors: [
-                  const Color(0xFF020617),
-                  glow,
                   const Color(0xFF0F172A),
+                  const Color(0xFF132A2A),
+                  accent.withValues(alpha: 0.9),
                 ],
               ),
             ),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 96,
-                    height: 96,
+            child: Stack(
+              children: [
+                Positioned(
+                  top: -80,
+                  right: -40,
+                  child: Container(
+                    width: 220,
+                    height: 220,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .08),
-                      borderRadius: BorderRadius.circular(28),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: .14),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.sports_cricket_rounded,
-                      color: Colors.white,
-                      size: 48,
+                      color: Colors.white.withValues(alpha: 0.06),
+                      shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Swing Biz',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 30,
-                      fontWeight: FontWeight.w900,
+                ),
+                Positioned(
+                  bottom: -70,
+                  left: -20,
+                  child: Container(
+                    width: 180,
+                    height: 180,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Sports Business Platform',
-                    style: TextStyle(color: Color(0xFFCBD5E1)),
+                ),
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 108,
+                          height: 108,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: .08),
+                            borderRadius: BorderRadius.circular(32),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: .14),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.stadium_rounded,
+                            color: Colors.white,
+                            size: 52,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Swing Biz',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 34,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Built for academies, coaches and arenas.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Color(0xFFD7E1DE),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        const SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 26),
-                  const SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 2.2),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         },

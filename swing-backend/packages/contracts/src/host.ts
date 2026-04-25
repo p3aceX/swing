@@ -169,6 +169,9 @@ export const recordBallRequestSchema = z.object({
   dismissedPlayerId: z.string().optional(),
   switchEnds: z.boolean().optional(),
   wagonZone: z.string().optional(),
+  shotType: z.string().optional(),
+  ballLine: z.string().optional(),
+  ballLength: z.string().optional(),
   tags: z.array(z.string()).default([]),
   isOfflineEntry: z.boolean().default(false),
 });
@@ -182,6 +185,9 @@ export const updateBallRequestSchema = z.object({
   dismissedPlayerId: z.string().nullable().optional(),
   fielderId: z.string().nullable().optional(),
   wagonZone: z.string().nullable().optional(),
+  shotType: z.string().nullable().optional(),
+  ballLine: z.string().nullable().optional(),
+  ballLength: z.string().nullable().optional(),
 });
 
 export const completeMatchRequestSchema = z.object({

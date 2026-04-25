@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_host_core/flutter_host_core.dart';
 
 import '../../features/profile/domain/rank_visual_theme.dart';
 import 'app_colors.dart';
@@ -23,11 +24,11 @@ class AppTheme {
     const Color stroke$dark = Color(0xFF2A2A2A);
     const Color panel$dark = Color(0xFF1F1F1F);
 
-    const Color bg$light = Color(0xFFF4F6F8);
+    const Color bg$light = Color(0xFFFFFFFF);
     const Color surf$light = Color(0xFFFFFFFF);
     const Color card$light = Color(0xFFFFFFFF);
-    const Color stroke$light = Color(0xFFE2E6EA);
-    const Color panel$light = Color(0xFFECF0F3);
+    const Color stroke$light = Color(0xFFD3D9E0);
+    const Color panel$light = Color(0xFFF0F3F7);
 
     final bg = isDark ? bg$dark : bg$light;
     final surf = isDark ? surf$dark : surf$light;
@@ -49,6 +50,10 @@ class AppTheme {
     final sky = isDark ? const Color(0xFF4A90E2) : const Color(0xFF43698F);
     final match = isDark ? const Color(0xFFC0C0C0) : const Color(0xFF357ABD);
 
+    // Dark-on-light CTAs in light mode; platinum on dark.
+    final ctaBg = isDark ? accent : const Color(0xFF0A0A0A);
+    final ctaFg = isDark ? const Color(0xFF050505) : Colors.white;
+
     final palette = SwingPalette(
       bg: bg,
       surf: surf,
@@ -65,6 +70,8 @@ class AppTheme {
       gold: gold,
       sky: sky,
       match: match,
+      ctaBg: ctaBg,
+      ctaFg: ctaFg,
     );
 
     final base = isDark
@@ -104,7 +111,10 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: card,
-        elevation: 0,
+        elevation: isDark ? 0 : 1.2,
+        shadowColor:
+            isDark ? Colors.transparent : Colors.black.withValues(alpha: 0.06),
+        surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -133,12 +143,15 @@ class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: accent,
-          foregroundColor: isDark ? Colors.black : Colors.white,
+          backgroundColor: ctaBg,
+          foregroundColor: ctaFg,
+          disabledBackgroundColor: ctaBg.withValues(alpha: 0.55),
+          disabledForegroundColor: ctaFg.withValues(alpha: 0.75),
           minimumSize: const Size.fromHeight(48),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 0,
+          elevation: isDark ? 0 : 2,
+          shadowColor: isDark ? Colors.transparent : ctaBg.withValues(alpha: 0.3),
           textStyle: const TextStyle(
               fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 0.5),
         ),
@@ -197,6 +210,24 @@ class AppTheme {
       ),
       extensions: <ThemeExtension<dynamic>>[
         palette,
+        HostPalette(
+          bg: bg,
+          surf: surf,
+          cardBg: card,
+          stroke: stroke,
+          panel: panel,
+          fg: fg,
+          fgSub: fgSub,
+          accent: accent,
+          accentBg: accentBg,
+          ctaBg: ctaBg,
+          ctaFg: ctaFg,
+          success: success,
+          warn: warn,
+          danger: danger,
+          gold: gold,
+          sky: sky,
+        ),
       ],
       textTheme: TextTheme(
         displayLarge: TextStyle(

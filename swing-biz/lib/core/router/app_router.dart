@@ -1,30 +1,30 @@
 import 'package:flutter_host_core/flutter_host_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/session_controller.dart';
-import '../presentation/shared_screens.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/otp_verification_screen.dart';
+import '../../features/auth/presentation/register_screen.dart';
 import '../../features/auth/presentation/role_selection_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/auth/presentation/welcome_screen.dart';
-import '../../features/arena/screens/arena_screens.dart';
-import '../../features/dashboard/presentation/coach_dashboard_screens.dart';
 import '../auth/me_providers.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
-import '../../features/dashboard/presentation/owner_dashboard_screens.dart';
 import '../../features/onboarding/presentation/business_details_screen.dart';
 import '../../features/onboarding/presentation/choose_profile_screen.dart';
 import '../../features/onboarding/presentation/create_academy_screen.dart';
 import '../../features/onboarding/presentation/create_arena_screen.dart';
 import '../../features/onboarding/presentation/create_coach_screen.dart';
+import '../../features/arena/screens/arena_profile_page.dart';
 import 'router_refresh.dart';
 
 class AppRoutes {
   static const splash = '/';
   static const welcome = '/welcome';
   static const login = '/phone';
+  static const register = '/register';
   static const otp = '/otp';
   static const businessDetails = '/onboarding/business-details';
   static const chooseProfile = '/onboarding/choose-profile';
@@ -158,31 +158,38 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final onSplash = loc == AppRoutes.splash;
       final onWelcome = loc == AppRoutes.welcome;
       final onPhone = loc == AppRoutes.login;
+      final onRegister = loc == AppRoutes.register;
       final onOtp = loc == AppRoutes.otp;
       final onRoleSelection = loc == AppRoutes.roleSelection;
-      final onPublic = onSplash || onWelcome || onPhone || onOtp;
+      final onPublic = onSplash || onWelcome || onPhone || onOtp || onRegister;
+
+      debugPrint(
+        '[biz router] loc=$loc status=${session.status.name} role=${selectedRole?.name} '
+        'meLoading=${meAsync.isLoading} meReady=${meAsync.valueOrNull != null}',
+      );
 
       if (session.status == AuthStatus.unknown) return null;
 
-      if (!loggedIn) return onPublic ? null : AppRoutes.welcome;
+      if (!loggedIn) {
+        if (onPublic) return null;
+        return AppRoutes.login;
+      }
 
       if (selectedRole == null) {
         return onRoleSelection ? null : AppRoutes.roleSelection;
       }
 
-      if (meAsync.isLoading) return null;
+      if (onRoleSelection) return null;
+
+      if (meAsync.isLoading || meAsync.valueOrNull == null) return null;
+
       final me = meAsync.valueOrNull;
       final requiredSetup = _setupRouteForRole(selectedRole, me);
       if (requiredSetup != null) {
         return loc == requiredSetup ? null : requiredSetup;
       }
 
-      final roleHome = _homeForRole(selectedRole);
-      if (onPublic || onRoleSelection) return roleHome;
-
-      if (!_isRouteAllowedForRole(loc, selectedRole)) {
-        return roleHome;
-      }
+      if (onPublic) return AppRoutes.dashboard;
 
       return null;
     },
@@ -193,6 +200,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const WelcomeScreen(),
       ),
       GoRoute(path: AppRoutes.login, builder: (_, __) => const LoginScreen()),
+      GoRoute(
+        path: AppRoutes.register,
+        builder: (_, state) =>
+            RegisterScreen(phone: state.uri.queryParameters['phone'] ?? ''),
+      ),
       GoRoute(
           path: AppRoutes.otp,
           builder: (_, __) => const OtpVerificationScreen()),
@@ -443,7 +455,13 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.arenaProfile,
-        builder: (_, __) => const ArenaProfileScreen(),
+        builder: (_, __) => const ArenaProfilePage(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaProfile}/:arenaId',
+        builder: (_, state) => ArenaProfilePage(
+          arenaId: state.pathParameters['arenaId'],
+        ),
       ),
       GoRoute(
         path: AppRoutes.arenaProfileMenu,
@@ -786,15 +804,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
-String _homeForRole(BizProfileType role) {
-  return switch (role) {
-    BizProfileType.academy => AppRoutes.dashboard,
-    BizProfileType.coach => AppRoutes.coachHome,
-    BizProfileType.arena || BizProfileType.arenaManager => AppRoutes.arenaHome,
-    BizProfileType.store => AppRoutes.dashboard,
-  };
-}
-
 String? _setupRouteForRole(BizProfileType role, BizMeResponse? me) {
   final status = me?.businessStatus;
   return switch (role) {
@@ -806,24 +815,5 @@ String? _setupRouteForRole(BizProfileType role, BizMeResponse? me) {
     BizProfileType.arenaManager =>
       status?.arenaId == null ? AppRoutes.createArena : null,
     BizProfileType.store => null,
-  };
-}
-
-bool _isRouteAllowedForRole(String loc, BizProfileType role) {
-  final isOwnerRoute =
-      loc == AppRoutes.dashboard || loc.startsWith('${AppRoutes.dashboard}/');
-  final isCoachRoute =
-      loc == AppRoutes.coachHome || loc.startsWith('${AppRoutes.coachHome}/');
-  final isArenaRoute =
-      loc == AppRoutes.arenaHome || loc.startsWith('${AppRoutes.arenaHome}/');
-  final isSharedRoute = loc.startsWith('/shared/');
-
-  return switch (role) {
-    BizProfileType.academy => isOwnerRoute || isSharedRoute,
-    BizProfileType.coach => isCoachRoute || isSharedRoute,
-    BizProfileType.arena ||
-    BizProfileType.arenaManager =>
-      isArenaRoute || isSharedRoute,
-    BizProfileType.store => isOwnerRoute || isSharedRoute,
   };
 }

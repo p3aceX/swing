@@ -32,14 +32,12 @@ class CacheInterceptor extends Interceptor {
 
   @override
   void onResponse(Response response, ResponseInterceptorHandler handler) {
+    final data = response.data;
     if (response.requestOptions.method.toUpperCase() == 'GET' &&
-        response.statusCode == 200) {
+        response.statusCode == 200 &&
+        (data is Map || data is List)) {
       final cacheKey = _generateCacheKey(response.requestOptions);
-      CacheManager.set(
-        cacheKey,
-        response.data,
-        ttl: const Duration(hours: 24), // Default TTL of 24 hours
-      );
+      CacheManager.set(cacheKey, data, ttl: const Duration(hours: 24));
     }
     handler.next(response);
   }

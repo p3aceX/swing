@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
+import '../../../../core/theme/app_colors.dart';
 import '../../domain/profile_models.dart';
 import '../../domain/rank_visual_theme.dart';
 
@@ -81,18 +82,18 @@ class _BadgesTabState extends State<BadgesTab> {
                     decoration: BoxDecoration(
                       color: isSelected
                           ? widget.rankTheme.primary.withOpacity(0.15)
-                          : Colors.white.withOpacity(0.05),
+                          : context.panel,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: isSelected
                             ? widget.rankTheme.primary.withOpacity(0.6)
-                            : Colors.white.withOpacity(0.1),
+                            : context.stroke,
                       ),
                     ),
                     child: Text(
                       cat,
                       style: TextStyle(
-                        color: isSelected ? widget.rankTheme.primary : Colors.white54,
+                        color: isSelected ? widget.rankTheme.primary : context.fgSub,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.2,
@@ -112,7 +113,7 @@ class _BadgesTabState extends State<BadgesTab> {
             child: Text(
               '$unlocked / ${badges.length} unlocked',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.35),
+                color: context.fgSub,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.5,
@@ -130,14 +131,14 @@ class _BadgesTabState extends State<BadgesTab> {
               children: [
                 Icon(Icons.workspace_premium_rounded,
                     size: 48,
-                    color: Colors.white.withOpacity(0.15)),
+                    color: context.fgSub.withValues(alpha: 0.5)),
                 const SizedBox(height: 16),
                 Text(
                   widget.badges.isEmpty
                       ? 'No badges yet'
                       : 'No badges in this category',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.4),
+                    color: context.fg,
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
@@ -149,7 +150,7 @@ class _BadgesTabState extends State<BadgesTab> {
                       : 'Try a different category filter.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.25),
+                    color: context.fgSub,
                     fontSize: 13,
                     height: 1.5,
                   ),
@@ -281,12 +282,12 @@ class _BadgeTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: unlocked
               ? color.withOpacity(0.08)
-              : Colors.white.withOpacity(0.03),
+              : context.panel,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: unlocked
                 ? color.withOpacity((badge.isRare == true) ? 0.7 : 0.3)
-                : Colors.white.withOpacity(0.07),
+                : context.stroke,
             width: (badge.isRare == true) && unlocked ? 1.5 : 1,
           ),
           boxShadow: unlocked && (badge.isRare == true)
@@ -320,13 +321,13 @@ class _BadgeTile extends StatelessWidget {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.04),
+                      color: context.fg.withValues(alpha: 0.06),
                       shape: BoxShape.circle,
                     ),
                   ),
                 Icon(
                   icon,
-                  color: unlocked ? color : Colors.white.withOpacity(0.15),
+                  color: unlocked ? color : context.fgSub.withValues(alpha: 0.6),
                   size: 26,
                 ),
                 if (!unlocked)
@@ -384,7 +385,7 @@ class _BadgeTile extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: unlocked ? Colors.white : Colors.white.withOpacity(0.25),
+                  color: unlocked ? context.fg : context.fgSub,
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   height: 1.2,

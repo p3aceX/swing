@@ -1,7 +1,7 @@
 enum BizProfileType { academy, coach, arena, arenaManager, store }
 
-BizProfileType? bizProfileTypeFromString(String raw) {
-  switch (raw) {
+BizProfileType? bizProfileTypeFromString(String value) {
+  switch (value.toUpperCase()) {
     case 'ACADEMY':
       return BizProfileType.academy;
     case 'COACH':
@@ -12,23 +12,13 @@ BizProfileType? bizProfileTypeFromString(String raw) {
       return BizProfileType.arenaManager;
     case 'STORE':
       return BizProfileType.store;
+    default:
+      return null;
   }
-  return null;
 }
 
-String bizProfileTypeLabel(BizProfileType type) {
-  switch (type) {
-    case BizProfileType.academy:
-      return 'Academy Owner';
-    case BizProfileType.coach:
-      return 'Coach';
-    case BizProfileType.arena:
-      return 'Arena Owner';
-    case BizProfileType.arenaManager:
-      return 'Arena Manager';
-    case BizProfileType.store:
-      return 'Store Owner';
-  }
+String bizProfileTypeToString(BizProfileType type) {
+  return type.name.toUpperCase();
 }
 
 class BizUser {
@@ -37,37 +27,36 @@ class BizUser {
     required this.phone,
     this.name,
     this.email,
-    this.activeRole,
-    this.roles = const [],
+    this.photoUrl,
   });
 
   final String id;
   final String phone;
   final String? name;
   final String? email;
-  final String? activeRole;
-  final List<String> roles;
+  final String? photoUrl;
 
   factory BizUser.fromJson(Map<String, dynamic> json) => BizUser(
-        id: json['id'] as String,
-        phone: json['phone'] as String? ?? '',
-        name: json['name'] as String?,
-        email: json['email'] as String?,
-        activeRole: json['activeRole'] as String?,
-        roles: (json['roles'] as List?)?.cast<String>() ?? const [],
+        id: _string(json['id']),
+        phone: _string(json['phone']),
+        name: _nullableString(json['name']),
+        email: _nullableString(json['email']),
+        photoUrl: _nullableString(json['photoUrl']),
       );
 }
 
 class BusinessAccount {
   const BusinessAccount({
     required this.id,
+    required this.ownerId,
     required this.businessName,
+    this.description,
     this.contactName,
     this.phone,
     this.email,
+    this.address,
     this.city,
     this.state,
-    this.address,
     this.pincode,
     this.gstNumber,
     this.panNumber,
@@ -75,13 +64,15 @@ class BusinessAccount {
   });
 
   final String id;
+  final String ownerId;
   final String businessName;
+  final String? description;
   final String? contactName;
   final String? phone;
   final String? email;
+  final String? address;
   final String? city;
   final String? state;
-  final String? address;
   final String? pincode;
   final String? gstNumber;
   final String? panNumber;
@@ -89,17 +80,19 @@ class BusinessAccount {
 
   factory BusinessAccount.fromJson(Map<String, dynamic> json) =>
       BusinessAccount(
-        id: json['id'] as String,
-        businessName: json['businessName'] as String? ?? '',
-        contactName: json['contactName'] as String?,
-        phone: json['phone'] as String?,
-        email: json['email'] as String?,
-        city: json['city'] as String?,
-        state: json['state'] as String?,
-        address: json['address'] as String?,
-        pincode: json['pincode'] as String?,
-        gstNumber: json['gstNumber'] as String?,
-        panNumber: json['panNumber'] as String?,
+        id: _string(json['id']),
+        ownerId: _string(json['ownerId']),
+        businessName: _string(json['businessName']),
+        description: _nullableString(json['description']),
+        contactName: _nullableString(json['contactName']),
+        phone: _nullableString(json['phone']),
+        email: _nullableString(json['email']),
+        address: _nullableString(json['address']),
+        city: _nullableString(json['city']),
+        state: _nullableString(json['state']),
+        pincode: _nullableString(json['pincode']),
+        gstNumber: _nullableString(json['gstNumber']),
+        panNumber: _nullableString(json['panNumber']),
         onboardingComplete: json['onboardingComplete'] as bool? ?? false,
       );
 }
@@ -112,6 +105,7 @@ class BusinessStatus {
     this.academyId,
     this.coachProfileId,
     this.arenaId,
+    this.arenaIds = const [],
     this.managedArenaId,
     this.storeIds = const [],
     this.storeAvailable = false,
@@ -123,6 +117,7 @@ class BusinessStatus {
   final String? academyId;
   final String? coachProfileId;
   final String? arenaId;
+  final List<String> arenaIds;
   final String? managedArenaId;
   final List<String> storeIds;
   final bool storeAvailable;
@@ -132,15 +127,20 @@ class BusinessStatus {
         (json['availableProfiles'] as List?)?.cast<String>() ?? const [];
     return BusinessStatus(
       hasBusinessAccount: json['hasBusinessAccount'] as bool? ?? false,
-      businessAccountId: json['businessAccountId'] as String?,
+      businessAccountId: _nullableString(json['businessAccountId']),
       availableProfiles: rawProfiles
           .map(bizProfileTypeFromString)
           .whereType<BizProfileType>()
           .toList(),
-      academyId: json['academyId'] as String?,
-      coachProfileId: json['coachProfileId'] as String?,
-      arenaId: json['arenaId'] as String?,
-      managedArenaId: json['managedArenaId'] as String?,
+      academyId: _nullableString(json['academyId']),
+      coachProfileId: _nullableString(json['coachProfileId']),
+      arenaId: _nullableString(json['arenaId']),
+      arenaIds: (json['arenaIds'] as List?)
+              ?.map((item) => '$item')
+              .where((item) => item.isNotEmpty)
+              .toList() ??
+          const [],
+      managedArenaId: _nullableString(json['managedArenaId']),
       storeIds: (json['storeIds'] as List?)?.cast<String>() ?? const [],
       storeAvailable: json['storeAvailable'] as bool? ?? false,
     );
@@ -160,8 +160,8 @@ class BizMeResponse {
 
   factory BizMeResponse.fromJson(Map<String, dynamic> json) => BizMeResponse(
         user: BizUser.fromJson(json['user'] as Map<String, dynamic>),
-        businessStatus:
-            BusinessStatus.fromJson(json['businessStatus'] as Map<String, dynamic>),
+        businessStatus: BusinessStatus.fromJson(
+            json['businessStatus'] as Map<String, dynamic>),
         businessAccount: json['businessAccount'] is Map<String, dynamic>
             ? BusinessAccount.fromJson(
                 json['businessAccount'] as Map<String, dynamic>)
@@ -188,8 +188,8 @@ class BizLoginResponse {
 
   factory BizLoginResponse.fromJson(Map<String, dynamic> json) =>
       BizLoginResponse(
-        accessToken: json['accessToken'] as String,
-        refreshToken: json['refreshToken'] as String,
+        accessToken: _string(json['accessToken']),
+        refreshToken: _string(json['refreshToken']),
         isNewUser: json['isNewUser'] as bool? ?? false,
         user: BizUser.fromJson(json['user'] as Map<String, dynamic>),
         businessStatus: BusinessStatus.fromJson(
@@ -201,15 +201,29 @@ class BizLoginResponse {
       );
 }
 
+String _string(Object? value) => value is String ? value : '';
+
+String? _nullableString(Object? value) => value is String ? value : null;
+
+class PhoneCheckResult {
+  const PhoneCheckResult({
+    required this.exists,
+    required this.normalizedPhone,
+  });
+
+  final bool exists;
+  final String normalizedPhone;
+}
+
 class BusinessDetailsInput {
   const BusinessDetailsInput({
     required this.businessName,
     this.contactName,
     this.phone,
     this.email,
+    this.address,
     this.city,
     this.state,
-    this.address,
     this.pincode,
     this.gstNumber,
     this.panNumber,
@@ -219,9 +233,9 @@ class BusinessDetailsInput {
   final String? contactName;
   final String? phone;
   final String? email;
+  final String? address;
   final String? city;
   final String? state;
-  final String? address;
   final String? pincode;
   final String? gstNumber;
   final String? panNumber;
@@ -231,9 +245,9 @@ class BusinessDetailsInput {
         if (_hasValue(contactName)) 'contactName': contactName,
         if (_hasValue(phone)) 'phone': phone,
         if (_hasValue(email)) 'email': email,
+        if (_hasValue(address)) 'address': address,
         if (_hasValue(city)) 'city': city,
         if (_hasValue(state)) 'state': state,
-        if (_hasValue(address)) 'address': address,
         if (_hasValue(pincode)) 'pincode': pincode,
         if (_hasValue(gstNumber)) 'gstNumber': gstNumber,
         if (_hasValue(panNumber)) 'panNumber': panNumber,
@@ -245,70 +259,73 @@ class AcademyProfileInput {
     required this.name,
     required this.city,
     required this.state,
-    this.description,
     this.address,
-    this.pincode,
-    this.tagline,
     this.phone,
     this.email,
+    this.tagline,
   });
 
   final String name;
   final String city;
   final String state;
-  final String? description;
   final String? address;
-  final String? pincode;
-  final String? tagline;
   final String? phone;
   final String? email;
+  final String? tagline;
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'city': city,
         'state': state,
-        if (_hasValue(description)) 'description': description,
         if (_hasValue(address)) 'address': address,
-        if (_hasValue(pincode)) 'pincode': pincode,
-        if (_hasValue(tagline)) 'tagline': tagline,
         if (_hasValue(phone)) 'phone': phone,
         if (_hasValue(email)) 'email': email,
+        if (_hasValue(tagline)) 'tagline': tagline,
       };
 }
 
 class CoachProfileInput {
   const CoachProfileInput({
+    this.name,
+    this.city,
+    this.state,
     this.bio,
+    this.specialization,
     this.specializations = const [],
     this.certifications = const [],
     this.experienceYears = 0,
-    this.city,
-    this.state,
+    this.phone,
     this.hourlyRate,
     this.gigEnabled = false,
     this.oneOnOneEnabled = false,
   });
 
+  final String? name;
+  final String? city;
+  final String? state;
   final String? bio;
+  final String? specialization;
   final List<String> specializations;
   final List<String> certifications;
   final int experienceYears;
-  final String? city;
-  final String? state;
+  final String? phone;
   final int? hourlyRate;
   final bool gigEnabled;
   final bool oneOnOneEnabled;
 
   Map<String, dynamic> toJson() => {
+        if (_hasValue(name)) 'name': name,
+        if (_hasValue(city)) 'city': city,
+        if (_hasValue(state)) 'state': state,
+        if (_hasValue(bio)) 'bio': bio,
+        if (_hasValue(specialization)) 'specialization': specialization,
         'specializations': specializations,
         'certifications': certifications,
         'experienceYears': experienceYears,
+        if (_hasValue(phone)) 'phone': phone,
+        if (hourlyRate != null) 'hourlyRate': hourlyRate,
         'gigEnabled': gigEnabled,
         'oneOnOneEnabled': oneOnOneEnabled,
-        if (_hasValue(bio)) 'bio': bio,
-        if (_hasValue(city)) 'city': city,
-        if (_hasValue(state)) 'state': state,
-        if (hourlyRate != null) 'hourlyRate': hourlyRate,
       };
 }
 
@@ -316,9 +333,9 @@ class ArenaProfileInput {
   const ArenaProfileInput({
     required this.name,
     required this.address,
-    required this.city,
-    required this.state,
-    required this.pincode,
+    this.city = 'Bhopal',
+    this.state = 'Madhya Pradesh',
+    this.pincode = '462041',
     this.description,
     this.phone,
     this.sports = const ['CRICKET'],
@@ -328,6 +345,11 @@ class ArenaProfileInput {
     this.hasWashrooms = false,
     this.hasCanteen = false,
     this.hasCCTV = false,
+    this.hasScorer = false,
+    this.openTime = '06:00',
+    this.closeTime = '22:00',
+    this.latitude,
+    this.longitude,
   });
 
   final String name;
@@ -344,6 +366,11 @@ class ArenaProfileInput {
   final bool hasWashrooms;
   final bool hasCanteen;
   final bool hasCCTV;
+  final bool hasScorer;
+  final String openTime;
+  final String closeTime;
+  final double? latitude;
+  final double? longitude;
 
   Map<String, dynamic> toJson() => {
         'name': name,
@@ -358,6 +385,11 @@ class ArenaProfileInput {
         'hasWashrooms': hasWashrooms,
         'hasCanteen': hasCanteen,
         'hasCCTV': hasCCTV,
+        'hasScorer': hasScorer,
+        'openTime': openTime,
+        'closeTime': closeTime,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
         if (_hasValue(description)) 'description': description,
         if (_hasValue(phone)) 'phone': phone,
       };

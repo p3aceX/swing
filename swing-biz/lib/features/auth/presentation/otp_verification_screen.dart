@@ -55,6 +55,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     final auth = ref.watch(authControllerProvider);
     final ctl = ref.read(authControllerProvider.notifier);
     final maskedPhone = _maskPhone(auth.phone);
+    final theme = Theme.of(context);
 
     ref.listen(authControllerProvider, (prev, next) {
       if (next.error != null && prev?.error != next.error) {
@@ -71,76 +72,122 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Verify Your Number')),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: auth.step == AuthStep.name
-                  ? _nameFallback(auth, ctl)
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          maskedPhone,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFF0F8F6), Colors.white],
+            ),
+          ),
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: const Color(0xFFD8E3E0)),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x140F172A),
+                        blurRadius: 28,
+                        offset: Offset(0, 16),
+                      ),
+                    ],
+                  ),
+                  child: auth.step == AuthStep.name
+                      ? _nameFallback(auth, ctl)
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Container(
+                              width: 56,
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE7F6F2),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: const Icon(
+                                Icons.shield_outlined,
+                                color: Color(0xFF0F766E),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'Enter verification code',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'We sent a 6-digit code to $maskedPhone',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFF5B6B79),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Code expires in ${_timeLabel(_secondsLeft)}',
+                              style: const TextStyle(
+                                color: Color(0xFF0F766E),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Pinput(
+                              length: 6,
+                              controller: _otpCtrl,
+                              autofocus: true,
+                              onCompleted: ctl.verifyOtp,
+                            ),
+                            const SizedBox(height: 20),
+                            ElevatedButton(
+                              onPressed: auth.loading
+                                  ? null
+                                  : () => ctl.verifyOtp(_otpCtrl.text),
+                              child: auth.loading
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('Verify'),
+                            ),
+                            const SizedBox(height: 10),
+                            TextButton(
+                              onPressed: _resendWait > 0 || auth.loading
+                                  ? null
+                                  : () async {
+                                      await ctl.sendOtp(auth.phone);
+                                      _startTimer();
+                                    },
+                              child: Text(
+                                _resendWait > 0
+                                    ? 'Resend OTP in ${_resendWait}s'
+                                    : 'Resend OTP',
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: auth.loading
+                                  ? null
+                                  : () {
+                                      ctl.resetToPhone();
+                                      context.go(AppRoutes.login);
+                                    },
+                              child: const Text('Change Phone Number'),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Code expires in ${_timeLabel(_secondsLeft)}',
-                          style: const TextStyle(color: Color(0xFF64748B)),
-                        ),
-                        const SizedBox(height: 18),
-                        Pinput(
-                          length: 6,
-                          controller: _otpCtrl,
-                          autofocus: true,
-                          onCompleted: ctl.verifyOtp,
-                        ),
-                        const SizedBox(height: 20),
-                        ElevatedButton(
-                          onPressed: auth.loading
-                              ? null
-                              : () => ctl.verifyOtp(_otpCtrl.text),
-                          child: auth.loading
-                              ? const SizedBox(
-                                  height: 22,
-                                  width: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Text('Verify'),
-                        ),
-                        const SizedBox(height: 10),
-                        TextButton(
-                          onPressed: _resendWait > 0 || auth.loading
-                              ? null
-                              : () async {
-                                  await ctl.sendOtp(auth.phone);
-                                  _startTimer();
-                                },
-                          child: Text(
-                            _resendWait > 0
-                                ? 'Resend OTP in ${_resendWait}s'
-                                : 'Resend OTP',
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: auth.loading
-                              ? null
-                              : () {
-                                  ctl.resetToPhone();
-                                  context.go(AppRoutes.login);
-                                },
-                          child: const Text('Change Phone Number'),
-                        ),
-                      ],
-                    ),
+                ),
+              ),
             ),
           ),
         ),
@@ -149,22 +196,45 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   }
 
   Widget _nameFallback(AuthFlowState auth, AuthController ctl) {
+    final theme = Theme.of(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE7F6F2),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: const Icon(
+            Icons.edit_outlined,
+            color: Color(0xFF0F766E),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Text(
           'Complete your account',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
         ),
         const SizedBox(height: 8),
-        const Text(
-          'Enter your full name to continue.',
-          style: TextStyle(color: Color(0xFF64748B)),
+        Text(
+          'We still need your full name before creating your business account.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: const Color(0xFF5B6B79),
+          ),
         ),
         const SizedBox(height: 18),
         TextField(
           controller: _nameCtrl,
-          decoration: const InputDecoration(labelText: 'Full name'),
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Full name',
+            prefixIcon: Icon(Icons.badge_outlined),
+          ),
         ),
         const SizedBox(height: 16),
         ElevatedButton(

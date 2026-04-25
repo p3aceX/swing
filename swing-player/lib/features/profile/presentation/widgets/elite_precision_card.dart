@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../../core/theme/app_colors.dart';
 import '../../domain/rank_visual_theme.dart';
 import '../../domain/profile_models.dart';
 
@@ -93,7 +95,7 @@ class _MetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: isHighlight ? rankTheme.primary.withOpacity(0.1) : Colors.white.withOpacity(0.03),
+        color: isHighlight ? rankTheme.primary.withOpacity(0.1) : context.panel,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -101,7 +103,7 @@ class _MetricTile extends StatelessWidget {
           Text(
             value,
             style: TextStyle(
-              color: isHighlight ? rankTheme.primary : Colors.white,
+              color: isHighlight ? rankTheme.primary : context.fg,
               fontSize: 18,
               fontWeight: FontWeight.bold,
             ),

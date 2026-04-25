@@ -1484,6 +1484,9 @@ model BallEvent {
   dismissedPlayerId String?
   tags              String[]
   wagonZone         String?
+  shotType          String?
+  ballLine          String?
+  ballLength        String?
   scoreAfterBall    String?
   scoredAt          DateTime       @default(now())
   isOfflineEntry    Boolean        @default(false)

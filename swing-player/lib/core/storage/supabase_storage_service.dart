@@ -31,6 +31,23 @@ class SupabaseStorageService {
     );
   }
 
+  Future<String> uploadTeamLogoBytes(
+      List<int> bytes, String extension) async {
+    final config = _loadConfig();
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw StateError('Image must be 5 MB or smaller.');
+    }
+    final path =
+        'teams/new-team-${DateTime.now().millisecondsSinceEpoch}/logo.$extension';
+    return _uploadFile(
+      supabaseUrl: config.$1,
+      anonKey: config.$2,
+      path: path,
+      bytes: bytes,
+      extension: extension,
+    );
+  }
+
   Future<String> uploadTeamLogoForTeam(String teamId, XFile file) async {
     final config = _loadConfig();
     final bytes = await _validateImage(file);

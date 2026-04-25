@@ -43,6 +43,11 @@ class HostCreateMatchController extends StateNotifier<HostCreateMatchState> {
     required String matchType,
     int? customOvers,
     bool hasImpactPlayer = false,
+    String? ballType,
+    String? facilityId,
+    String? tournamentId,
+    List<String>? teamAPlayerIds,
+    List<String>? teamBPlayerIds,
   }) async {
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
@@ -56,6 +61,11 @@ class HostCreateMatchController extends StateNotifier<HostCreateMatchState> {
         matchType: matchType,
         customOvers: customOvers,
         hasImpactPlayer: hasImpactPlayer,
+        ballType: ballType,
+        facilityId: facilityId,
+        tournamentId: tournamentId,
+        teamAPlayerIds: teamAPlayerIds,
+        teamBPlayerIds: teamBPlayerIds,
       );
       state = state.copyWith(
         isSubmitting: false,

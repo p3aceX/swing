@@ -110,8 +110,8 @@ class _BadgeTile extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: context.fg,
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
               ),
@@ -131,14 +131,14 @@ class _LockedBadgeTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
+        color: context.panel,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: context.stroke),
       ),
       child: Center(
         child: Icon(
           Icons.lock_outline_rounded,
-          color: Colors.white.withOpacity(0.1),
+          color: context.fgSub.withValues(alpha: 0.6),
           size: 24,
         ),
       ),

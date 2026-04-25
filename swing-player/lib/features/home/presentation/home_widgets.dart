@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_host_core/host_ui.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../domain/home_models.dart';
 
 // ── Shared Components ─────────────────────────────────────────────────────────
@@ -178,7 +179,16 @@ class FollowedMatchCard extends StatelessWidget {
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: match.playerAvatarUrl != null
-                    ? Image.network(match.playerAvatarUrl!, fit: BoxFit.cover)
+                    ? CachedNetworkImage(
+                        imageUrl: match.playerAvatarUrl!,
+                        fit: BoxFit.cover,
+                        memCacheWidth: 72, // 24 * devicePixelRatio (approx 3)
+                        memCacheHeight: 72,
+                        placeholder: (context, url) =>
+                            Container(color: context.panel),
+                        errorWidget: (context, url, error) =>
+                            Icon(Icons.person, size: 14, color: context.fgSub),
+                      )
                     : Icon(Icons.person, size: 14, color: context.fgSub),
               ),
               const SizedBox(width: 8),
@@ -248,7 +258,11 @@ class HomeMarketingBanner extends StatelessWidget {
         children: [
           if (banner.imageUrl != null)
             Positioned.fill(
-              child: Image.network(banner.imageUrl!, fit: BoxFit.cover),
+              child: CachedNetworkImage(
+                imageUrl: banner.imageUrl!,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(color: context.panel),
+              ),
             ),
           Padding(
             padding: const EdgeInsets.all(20),
@@ -317,8 +331,14 @@ class PerformanceDayCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child:
-                    Image.network(performance.userAvatarUrl, fit: BoxFit.cover),
+                child: CachedNetworkImage(
+                  imageUrl: performance.userAvatarUrl,
+                  fit: BoxFit.cover,
+                  memCacheWidth: 144, // 48 * 3
+                  memCacheHeight: 144,
+                  placeholder: (context, url) =>
+                      Container(color: context.panel),
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -450,7 +470,13 @@ class NewsCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               clipBehavior: Clip.antiAlias,
-              child: Image.network(news.imageUrl!, fit: BoxFit.cover),
+              child: CachedNetworkImage(
+                imageUrl: news.imageUrl!,
+                fit: BoxFit.cover,
+                memCacheWidth: 240, // 80 * 3
+                memCacheHeight: 180, // 60 * 3
+                placeholder: (context, url) => Container(color: context.panel),
+              ),
             ),
           ],
         ],
@@ -562,7 +588,15 @@ class _LiveTeamInfo extends StatelessWidget {
       decoration: BoxDecoration(color: context.panel, shape: BoxShape.circle),
       clipBehavior: Clip.antiAlias,
       child: logoUrl != null
-          ? Image.network(logoUrl!, fit: BoxFit.cover)
+          ? CachedNetworkImage(
+              imageUrl: logoUrl!,
+              fit: BoxFit.cover,
+              memCacheWidth: 120, // 40 * 3
+              memCacheHeight: 120,
+              placeholder: (context, url) => Container(color: context.panel),
+              errorWidget: (context, url, error) => Icon(Icons.shield_rounded,
+                  size: 20, color: context.fgSub),
+            )
           : Icon(Icons.shield_rounded, size: 20, color: context.fgSub),
     );
 
