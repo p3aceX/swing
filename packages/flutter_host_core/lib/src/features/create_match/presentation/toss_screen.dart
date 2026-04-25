@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../repositories/host_match_repository.dart';
 import '../../../theme/host_colors.dart';
+import '../../go_live/presentation/go_live_screen.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SCREEN
@@ -138,12 +139,19 @@ class _TossScreenState extends ConsumerState<TossScreen>
             tossDecision: _decision!,
           );
       if (!mounted) return;
-      final onCompleted = widget.onCompleted;
-      if (onCompleted != null) {
-        onCompleted(context, widget.matchId);
-      } else {
-        Navigator.of(context).pop(widget.matchId);
-      }
+      // Always push the GoLive step — the host can skip it instantly if they
+      // don't want to broadcast. GoLive will call onCompleted (or pop) once
+      // the user taps "Start Scoring".
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => GoLiveScreen(
+            matchId: widget.matchId,
+            teamAName: widget.teamAName,
+            teamBName: widget.teamBName,
+            onCompleted: widget.onCompleted,
+          ),
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _submitError = error.toString());

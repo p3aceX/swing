@@ -338,10 +338,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/match-toss/:id',
         builder: (_, state) {
           final extra = state.extra as Map<String, String>? ?? {};
+          final matchId = state.pathParameters['id'] ?? '';
           return TossScreen(
-            matchId: state.pathParameters['id'] ?? '',
+            matchId: matchId,
             teamAName: extra['teamAName'] ?? 'Team A',
             teamBName: extra['teamBName'] ?? 'Team B',
+            onCompleted: (ctx, id) =>
+                ctx.go('/score-match/${Uri.encodeComponent(id)}'),
           );
         },
       ),

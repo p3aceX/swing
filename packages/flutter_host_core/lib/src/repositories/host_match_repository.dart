@@ -42,6 +42,22 @@ class HostMatchRepository {
       },
     );
   }
+
+  Future<({String liveCode, String livePin, String teamAName, String teamBName})>
+      fetchLiveCreds(String matchId) async {
+    final res = await _dio.get(_paths.match(matchId));
+    final raw = res.data is Map
+        ? res.data as Map<String, dynamic>
+        : <String, dynamic>{};
+    final data =
+        raw['data'] is Map ? raw['data'] as Map<String, dynamic> : raw;
+    return (
+      liveCode: (data['liveCode'] as String?) ?? '',
+      livePin: (data['livePin'] as String?) ?? '',
+      teamAName: (data['teamAName'] as String?) ?? '',
+      teamBName: (data['teamBName'] as String?) ?? '',
+    );
+  }
 }
 
 final hostMatchRepositoryProvider = Provider<HostMatchRepository>(

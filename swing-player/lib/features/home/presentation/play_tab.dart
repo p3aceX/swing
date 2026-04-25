@@ -28,6 +28,11 @@ class PlayTab extends ConsumerWidget {
             ctx.push('/match/${Uri.encodeComponent(matchId)}'),
         onScoreMatch: (ctx, matchId) =>
             ctx.push('/score-match/${Uri.encodeComponent(matchId)}'),
+        onSetPlayingXI: (ctx, matchId, teamA, teamB) => ctx.push(
+          '/create-match?matchId=${Uri.encodeComponent(matchId)}'
+          '&teamA=${Uri.encodeComponent(teamA)}'
+          '&teamB=${Uri.encodeComponent(teamB)}',
+        ),
         onCreateTournament: (ctx) => ctx.push('/create-tournament'),
         onNavigateToTournament: (ctx, tournamentId, slug, isHost) {
           if (isHost) {
