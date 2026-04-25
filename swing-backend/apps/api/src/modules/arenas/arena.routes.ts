@@ -135,6 +135,11 @@ export async function arenaRoutes(app: FastifyInstance) {
     })
   })
 
+  app.get('/mine', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    return reply.send({ success: true, data: await svc.listOwnedArenas(user.userId) })
+  })
+
   app.post('/:id/units', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }

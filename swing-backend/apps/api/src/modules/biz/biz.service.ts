@@ -42,7 +42,7 @@ export class BizService {
         }),
         prisma.arenaOwnerProfile.findUnique({
           where: { userId },
-          include: { arenas: { where: { isActive: true }, select: { id: true, name: true }, take: 1 } },
+          include: { arenas: { where: { isActive: true }, select: { id: true, name: true } } },
         }),
         prisma.arenaManager.findFirst({ where: { userId, isActive: true }, select: { arenaId: true } }),
         prisma.storeOwnerProfile.findUnique({
@@ -53,6 +53,7 @@ export class BizService {
 
     const academy = academyOwnerProfile?.academies[0] ?? null
     const arena = arenaOwnerProfile?.arenas[0] ?? null
+    const arenas = arenaOwnerProfile?.arenas ?? []
     const stores = storeOwnerProfile?.stores ?? []
 
     return {
@@ -72,6 +73,7 @@ export class BizService {
         academyId: academy?.id ?? null,
         coachProfileId: coachProfile?.id ?? null,
         arenaId: arena?.id ?? null,
+        arenaIds: arenas.map((item) => item.id),
         managedArenaId: managerProfile?.arenaId ?? null,
         storeIds: stores.map((store) => store.id),
         storeAvailable: stores.length > 0,

@@ -184,6 +184,34 @@ export class ArenaService {
     return { arenas: results, total: finalTotal, page: filters.page, limit: filters.limit }
   }
 
+  async listOwnedArenas(userId: string) {
+    const [owner, businessAccount, managedArenaRows] = await Promise.all([
+      prisma.arenaOwnerProfile.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.businessAccount.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.arenaManager.findMany({
+        where: { userId, isActive: true },
+        select: { arenaId: true },
+      }),
+    ])
+
+    const managedArenaIds = managedArenaRows.map((row) => row.arenaId)
+    if (!owner && !businessAccount && managedArenaIds.length === 0) return []
+
+    return prisma.arena.findMany({
+      where: {
+        OR: [
+          ...(owner ? [{ ownerId: owner.id }] : []),
+          ...(businessAccount ? [{ businessAccountId: businessAccount.id }] : []),
+          ...(managedArenaIds.length > 0 ? [{ id: { in: managedArenaIds } }] : []),
+        ],
+      },
+      include: {
+        units: { where: { isActive: true }, orderBy: { name: 'asc' } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
   async getArena(arenaId: string) {
     const arena = await prisma.arena.findUnique({
       where: { id: arenaId },
