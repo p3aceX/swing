@@ -870,6 +870,10 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
         ? DateFormat('EEEE, d MMMM yyyy').format(_booking.bookingDate!)
         : 'Scheduled Date';
 
+    final shortId = _booking.id.length > 7
+        ? _booking.id.substring(_booking.id.length - 7).toUpperCase()
+        : _booking.id.toUpperCase();
+
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a5,
@@ -962,7 +966,7 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
                       pw.Text('BOOKING REFERENCE',
                           style: pw.TextStyle(
                               fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                      pw.Text(_booking.id.toUpperCase(),
+                      pw.Text(shortId,
                           style: pw.TextStyle(
                               fontSize: 11, fontWeight: pw.FontWeight.bold)),
                     ],
@@ -998,6 +1002,10 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
         ? DateFormat('EEEE, d MMM').format(_booking.bookingDate!)
         : 'scheduled date';
 
+    final shortId = _booking.id.length > 7 
+        ? _booking.id.substring(_booking.id.length - 7).toUpperCase() 
+        : _booking.id.toUpperCase();
+
     final msg = '''
 *BOOKING CONFIRMED* ✅
 ---------------------------
@@ -1007,7 +1015,7 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
 🏟️ *Arena:* ${widget.arenaName.toUpperCase()}
 📍 *Unit:* ${_booking.unitName ?? 'General'}
 ---------------------------
-🆔 *Ref:* ${_booking.id.toUpperCase()}
+🆔 *Ref:* $shortId
 💰 *Amount:* ₹${(_booking.totalAmountPaise / 100).toStringAsFixed(0)}
 ---------------------------
 _See you at the arena!_ 🏏
@@ -1029,6 +1037,10 @@ _See you at the arena!_ 🏏
     final statusColor = _statusColor(_booking.status);
     final duration =
         _durationLabel(_durationMins(_booking.startTime, _booking.endTime));
+
+    final shortId = _booking.id.length > 7
+        ? _booking.id.substring(_booking.id.length - 7).toUpperCase()
+        : _booking.id.toUpperCase();
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -1210,7 +1222,7 @@ _See you at the arena!_ 🏏
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1.2)),
                   const SizedBox(height: 6),
-                  Text(_booking.id.toUpperCase(),
+                  Text(shortId,
                       style: const TextStyle(
                           color: Color(0xFF101828),
                           fontSize: 18,
@@ -1616,50 +1628,68 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     finally { if (mounted) setState(() => _loadingAvail = false); }
   }
 
+  // A slot is "busy" if:
+  // • It falls inside an existing booking (always), OR
+  // • Starting a fresh booking here (no slots selected yet, or non-contiguous tap)
+  //   the minimum required duration from this slot would overlap a booking.
+  // When the user is *extending* an existing contiguous selection we only check the
+  // single 1-hr window, because the start time is already fixed.
   bool _isBusy(String time) {
     final tMins = _toMins(time);
+    final minMins = _unit?.minSlotMins ?? 60;
+
+    final checkMins = () {
+      if (_selectedSlots.isNotEmpty) {
+        final lastMins = _toMins(_selectedSlots.last);
+        final firstMins = _toMins(_selectedSlots.first);
+        if (tMins == lastMins + 60 || tMins == firstMins - 60) return 60;
+      }
+      return minMins;
+    }();
+
     return _existingBookings.any((b) {
       if (b.status == 'CANCELLED') return false;
-      return _toMins(b.startTime) < tMins + 60 && _toMins(b.endTime) > tMins;
+      return _toMins(b.startTime) < tMins + checkMins && _toMins(b.endTime) > tMins;
     });
   }
 
   void _onSlotTapped(String time) {
     if (_isBusy(time)) return;
+
+    List<String> next = List.from(_selectedSlots);
+
+    if (next.contains(time)) {
+      next.remove(time);
+    } else {
+      next.add(time);
+      next.sort((a, b) => _toMins(a).compareTo(_toMins(b)));
+
+      // Reset to single slot if selection would be non-contiguous
+      bool contiguous = true;
+      for (int i = 0; i < next.length - 1; i++) {
+        if (_toMins(next[i + 1]) - _toMins(next[i]) != 60) { contiguous = false; break; }
+      }
+      if (!contiguous) next = [time];
+
+      // Enforce max slot cap
+      final maxSlots = (_unit?.maxSlotMins ?? 99 * 60) ~/ 60;
+      if (next.length > maxSlots) {
+        _snack('Max ${maxSlots}hr booking for this unit', err: true);
+        return;
+      }
+    }
+
     setState(() {
-      if (_selectedSlots.contains(time)) {
-        _selectedSlots.remove(time);
-      } else {
-        // Core Logic: Ensure selection is contiguous
-        if (_selectedSlots.isNotEmpty) {
-          final sorted = List<String>.from(_selectedSlots)..add(time);
-          sorted.sort((a, b) => _toMins(a).compareTo(_toMins(b)));
-          
-          bool contiguous = true;
-          for (int i = 0; i < sorted.length - 1; i++) {
-            if (_toMins(sorted[i+1]) - _toMins(sorted[i]) != 60) {
-              contiguous = false;
-              break;
-            }
-          }
-          
-          if (!contiguous) {
-            _selectedSlots.clear(); // Reset if non-contiguous
-          }
-        }
-        _selectedSlots.add(time);
-        _selectedSlots.sort((a, b) => _toMins(a).compareTo(_toMins(b)));
-      }
-      
-      if (!_totalEdited) {
-        _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
-      }
+      _selectedSlots..clear()..addAll(next);
+      if (!_totalEdited) _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
     });
   }
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty || _phoneCtrl.text.trim().isEmpty) { _snack('Required fields missing', err: true); return; }
     if (_selectedSlots.isEmpty) { _snack('Please select at least one slot', err: true); return; }
+    final minSlots = (_unit?.minSlotMins ?? 60) ~/ 60;
+    if (_selectedSlots.length < minSlots) { _snack('Min booking is ${minSlots}hr for this unit', err: true); return; }
     if (!_advanceOk) { _snack('Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required', err: true); return; }
     
     setState(() => _loading = true);
@@ -1759,7 +1789,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               const SizedBox(height: 24),
             ],
             
-            const Text('Select Slots', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+            Row(children: [
+              const Text('Select Slots', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              const Spacer(),
+              if (_unit != null) ...[
+                if (_unit!.minSlotMins > 60)
+                  Text('min ${_unit!.minSlotMins ~/ 60}hr', style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+                if (_unit!.minSlotMins > 60 && _unit!.maxSlotMins < 99 * 60)
+                  const Text(' · ', style: TextStyle(color: _muted, fontSize: 11)),
+                if (_unit!.maxSlotMins < 99 * 60)
+                  Text('max ${_unit!.maxSlotMins ~/ 60}hr', style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+              ],
+            ]),
             const SizedBox(height: 12),
             if (_allDaySlots.isEmpty)
               Container(
@@ -1776,9 +1817,22 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               )
             else
               _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped),
-            
+
             if (_selectedSlots.isNotEmpty) ...[
               const SizedBox(height: 24),
+              // Min selection warning
+              Builder(builder: (_) {
+                final minSlots = (_unit?.minSlotMins ?? 60) ~/ 60;
+                final remaining = minSlots - _selectedSlots.length;
+                if (remaining <= 0) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Select $remaining more hr to meet minimum',
+                    style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
+                  ),
+                );
+              }),
               Row(
                 children: [
                   Expanded(child: _FormTextField(label: 'Total (₹)', controller: _totalCtrl, keyboardType: TextInputType.number, onChanged: (_) => _totalEdited = true)),
@@ -1794,7 +1848,16 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 ],
               ),
               const SizedBox(height: 32),
-              ArenaPrimaryButton(label: 'Confirm ${_selectedSlots.length} Slots', onPressed: _loading ? () {} : _save),
+              Builder(builder: (_) {
+                final minSlots = (_unit?.minSlotMins ?? 60) ~/ 60;
+                final metMin = _selectedSlots.length >= minSlots;
+                return ArenaPrimaryButton(
+                  label: metMin
+                      ? 'Confirm ${_selectedSlots.length}hr Booking'
+                      : 'Select ${minSlots - _selectedSlots.length} more hr',
+                  onPressed: (_loading || !metMin) ? () {} : _save,
+                );
+              }),
             ],
             const SizedBox(height: 24),
           ],
