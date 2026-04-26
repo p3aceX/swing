@@ -29,6 +29,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
   String _searchQuery = '';
   bool _searchOpen = false;
   final _searchCtrl = TextEditingController();
+  int _activeTabIndex = 0;
 
   // Attribute filters
   String? _venueFilter;
@@ -42,6 +43,15 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {
+          _activeTabIndex = _tabController.index;
+          // Reset hosting filter if new tab has no hosted matches
+          if (_selectedFilter == 99) _selectedFilter = -1;
+        });
+      }
+    });
   }
 
   @override
@@ -102,11 +112,24 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     final ctrl = ref.read(playMatchesControllerProvider.notifier);
     final all = state.matches;
 
-    final statLine = all.isEmpty
+    // Counts for the currently visible tab section
+    final currentSection = _activeTabIndex == 0
+        ? MatchSectionType.individual
+        : MatchSectionType.tournament;
+    final sectionAll = _activeTabIndex == 0
+        ? all.where((m) => m.sectionType == MatchSectionType.individual).toList()
+        : all.where((m) => m.sectionType == MatchSectionType.tournament && m.involvesPlayerTeam).toList();
+
+    final liveCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.live).length;
+    final upcomingCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.upcoming).length;
+    final pastCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.past).length;
+    final hostingCount = sectionAll.where((m) => m.canScore && m.lifecycle != MatchLifecycle.past).length;
+
+    final statLine = sectionAll.isEmpty
         ? null
         : [
-            '${all.length} matches',
-            '${all.where((m) => m.lifecycle == MatchLifecycle.live).length} live',
+            '${sectionAll.length} matches',
+            if (liveCount > 0) '$liveCount live',
           ].join('  ·  ');
 
     final individualCount =
@@ -283,7 +306,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                   scrollDirection: Axis.horizontal,
                   children: [
                     _FilterChip(
-                      label: '${all.length} All',
+                      label: '${sectionAll.length} All',
                       selected: _selectedFilter == -1,
                       isLive: false,
                       onTap: () => setState(() => _selectedFilter = -1),
@@ -292,12 +315,9 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                     ...List.generate(_filters.length, (i) {
                       final f = _filters[i];
                       final count = switch (f) {
-                        MatchLifecycle.live =>
-                          all.where((m) => m.lifecycle == MatchLifecycle.live).length,
-                        MatchLifecycle.upcoming =>
-                          all.where((m) => m.lifecycle == MatchLifecycle.upcoming).length,
-                        MatchLifecycle.past =>
-                          all.where((m) => m.lifecycle == MatchLifecycle.past).length,
+                        MatchLifecycle.live => liveCount,
+                        MatchLifecycle.upcoming => upcomingCount,
+                        MatchLifecycle.past => pastCount,
                       };
                       final label = switch (f) {
                         MatchLifecycle.live => '$count Live',
@@ -314,12 +334,13 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                         ),
                       );
                     }),
-                    _FilterChip(
-                      label: '${all.where((m) => m.canScore).length} Hosting',
-                      selected: _selectedFilter == 99,
-                      isLive: false,
-                      onTap: () => setState(() => _selectedFilter = 99),
-                    ),
+                    if (hostingCount > 0)
+                      _FilterChip(
+                        label: '$hostingCount Hosting',
+                        selected: _selectedFilter == 99,
+                        isLive: false,
+                        onTap: () => setState(() => _selectedFilter = 99),
+                      ),
                   ],
                 ),
               ),
@@ -513,6 +534,7 @@ class _MatchList extends ConsumerWidget {
         ),
         itemBuilder: (_, i) => HostMatchCard(
           match: visible[i],
+          showHostingTag: visible[i].canScore,
           onTap: callbacks.onNavigateToMatch != null && visible[i].id.isNotEmpty
               ? () => callbacks.onNavigateToMatch!(context, visible[i].id)
               : null,

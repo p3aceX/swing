@@ -12,10 +12,12 @@ class HostMatchCard extends StatelessWidget {
     super.key,
     required this.match,
     this.onTap,
+    this.showHostingTag = false,
   });
 
   final PlayerMatch match;
   final VoidCallback? onTap;
+  final bool showHostingTag;
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +104,25 @@ class HostMatchCard extends StatelessWidget {
                     DateFormat('d MMM yyyy').format(match.scheduledAt!),
                     style: TextStyle(color: context.fgSub, fontSize: 10),
                   ),
+                if (showHostingTag && match.canScore && match.lifecycle != MatchLifecycle.past) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: context.accentBg,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Hosting',
+                      style: TextStyle(
+                        color: context.accent,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
 
