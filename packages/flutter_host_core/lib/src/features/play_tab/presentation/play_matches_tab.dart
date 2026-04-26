@@ -533,7 +533,8 @@ class _MatchList extends ConsumerWidget {
         0 => m.lifecycle == MatchLifecycle.live,
         1 => m.lifecycle == MatchLifecycle.upcoming,
         2 => m.lifecycle == MatchLifecycle.past,
-        99 => m.canScore,
+        // Hosting tab: owned + not yet completed (live or upcoming only)
+        99 => m.canScore && m.lifecycle != MatchLifecycle.past,
         _ => true,
       };
       if (!lifecycleOk) return false;

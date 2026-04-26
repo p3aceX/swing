@@ -670,12 +670,15 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                   onStartMatch: _ctrl.startMatch,
                   onContinueInnings: _ctrl.continueInnings,
                   onNavigateToToss: widget.onNavigateToToss != null
-                      ? () => widget.onNavigateToToss!(
+                      ? () {
+                          print('[ScoringScreen] onNavigateToToss matchId=${widget.matchId} status=${match.status} tossWonBy=${match.tossWonBy} isComplete=${match.isComplete}');
+                          widget.onNavigateToToss!(
                             context,
                             widget.matchId,
                             match.teamAName,
                             match.teamBName,
-                          )
+                          );
+                        }
                       : null,
                   onDeleteMatch: widget.onMatchDeleted != null
                       ? () async {

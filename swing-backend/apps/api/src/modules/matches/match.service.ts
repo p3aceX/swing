@@ -649,12 +649,22 @@ export class MatchService {
   }
 
   async recordToss(matchId: string, userId: string, tossWonBy: string, tossDecision: string, options: MutationOptions = {}) {
+    console.log('[recordToss] matchId=%s userId=%s tossWonBy=%s tossDecision=%s', matchId, userId, tossWonBy, tossDecision)
     const match = await this.authorizeMutation(matchId, userId, options)
-    if (match.status !== 'SCHEDULED') throw new AppError('INVALID_STATE', 'Match must be in SCHEDULED state', 400)
+    console.log('[recordToss] match.status=%s match.tossWonBy=%s', match.status, match.tossWonBy)
+    // Allow SCHEDULED (normal flow) and IN_PROGRESS (match started before toss was recorded)
+    const allowedStatuses = ['SCHEDULED', 'IN_PROGRESS']
+    if (!allowedStatuses.includes(match.status)) {
+      console.error('[recordToss] REJECT status="%s" — expected one of %o', match.status, allowedStatuses)
+      throw new AppError('INVALID_STATE', `Match must be in SCHEDULED or IN_PROGRESS state (current: ${match.status})`, 400)
+    }
+    // Only advance to TOSS_DONE if match hasn't started yet; leave IN_PROGRESS as-is
+    const newStatus = match.status === 'SCHEDULED' ? 'TOSS_DONE' : match.status
     const updated = await prisma.match.update({
       where: { id: matchId },
-      data: { tossWonBy, tossDecision, status: 'TOSS_DONE' },
+      data: { tossWonBy, tossDecision, status: newStatus },
     })
+    console.log('[recordToss] OK newStatus=%s', newStatus)
     fireStudioEvent(matchId, TriggerEventType.TOSS_DONE)
     return updated
   }
