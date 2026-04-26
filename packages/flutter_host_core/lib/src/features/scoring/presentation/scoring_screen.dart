@@ -300,11 +300,23 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
         onEndMatch: () async {
           Navigator.pop(ctx);
           final before = ref.read(hostScoringControllerProvider(widget.matchId));
-          if (before.activeInnings?.isCompleted == false) {
+          final activeInn = before.activeInnings;
+          print('[onEndMatch] matchId=${widget.matchId} activeInn=${activeInn?.inningsNumber} isCompleted=${activeInn?.isCompleted} matchComplete=${before.match?.isComplete}');
+          print('[onEndMatch] innings count=${before.match?.innings.length} innings=${before.match?.innings.map((i) => "inn${i.inningsNumber}:${i.totalRuns}/${i.totalWickets}(completed=${i.isCompleted})").join(", ")}');
+          if (activeInn?.isCompleted == false) {
+            print('[onEndMatch] calling completeInnings first');
             final ok = await _ctrl.completeInnings();
-            if (!ok || !mounted) return;
+            if (!ok || !mounted) {
+              print('[onEndMatch] completeInnings failed, aborting');
+              return;
+            }
           }
-          final (winnerId, winMargin) = _calcWinner(match);
+          // Re-read state after completeInnings so _calcWinner sees updated totals
+          final after = ref.read(hostScoringControllerProvider(widget.matchId));
+          final freshMatch = after.match ?? match;
+          print('[onEndMatch] freshMatch innings=${freshMatch.innings.map((i) => "inn${i.inningsNumber}:${i.totalRuns}/${i.totalWickets}").join(", ")}');
+          final (winnerId, winMargin) = _calcWinner(freshMatch);
+          print('[onEndMatch] calling completeMatch winnerId="$winnerId" winMargin="$winMargin"');
           await _ctrl.completeMatch(winnerId, winMargin);
         },
         onStartNextInnings: () async {

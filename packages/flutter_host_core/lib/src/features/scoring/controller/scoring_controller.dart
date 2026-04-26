@@ -581,37 +581,49 @@ class HostScoringController extends StateNotifier<HostScoringState> {
 
   Future<bool> completeInnings() async {
     final inn = state.activeInnings;
-    if (inn == null) return false;
+    print('[completeInnings] inn=$inn inningsNumber=${inn?.inningsNumber} isCompleted=${inn?.isCompleted}');
+    if (inn == null) {
+      print('[completeInnings] SKIP — no active innings');
+      return false;
+    }
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await _service.completeInnings(_matchId, inn.inningsNumber);
+      print('[completeInnings] OK innings=${inn.inningsNumber}');
       await _init();
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      print('[completeInnings] ERROR: $e\n$st');
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }
   }
 
   Future<bool> continueInnings() async {
+    print('[continueInnings] matchId=$_matchId');
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await _service.continueInnings(_matchId);
+      print('[continueInnings] OK');
       await _init();
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      print('[continueInnings] ERROR: $e\n$st');
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }
   }
 
   Future<bool> completeMatch(String winnerId, String? winMargin) async {
+    print('[completeMatch] winnerId="$winnerId" winMargin="$winMargin" matchStatus=${state.match?.isComplete}');
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await _service.completeMatch(_matchId, winnerId, winMargin);
+      print('[completeMatch] OK');
       await _init();
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      print('[completeMatch] ERROR: $e\n$st');
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }

@@ -1119,8 +1119,10 @@ export class MatchService {
   }
 
   async completeInnings(matchId: string, inningsNum: number, userId: string, options: MutationOptions = {}) {
+    console.log('[completeInnings] matchId=%s inningsNum=%d userId=%s', matchId, inningsNum, userId)
     await this.authorizeMutation(matchId, userId, options)
     const innings = await prisma.innings.findUnique({ where: { matchId_inningsNumber: { matchId, inningsNumber: inningsNum } } })
+    console.log('[completeInnings] found innings=%o', innings ? { id: innings.id, isCompleted: innings.isCompleted, totalRuns: innings.totalRuns, totalWickets: innings.totalWickets } : null)
     if (!innings) throw Errors.notFound('Innings')
     await prisma.innings.update({ where: { id: innings.id }, data: { isCompleted: true } })
 
@@ -1244,11 +1246,18 @@ export class MatchService {
   }
 
   async completeMatch(matchId: string, userId: string, winnerId: string, winMargin?: string, options: MutationOptions = {}) {
+    console.log('[completeMatch] matchId=%s userId=%s winnerId="%s" winMargin="%s"', matchId, userId, winnerId, winMargin)
     const match = await this.authorizeMutation(matchId, userId, options)
-    if (match.status !== 'IN_PROGRESS') throw new AppError('MATCH_NOT_ACTIVE', 'Match is not in progress', 400)
+    console.log('[completeMatch] match status=%s innings count=%d', match.status, (match as any).innings?.length ?? 'N/A')
+    if (match.status !== 'IN_PROGRESS') {
+      console.error('[completeMatch] REJECT — match status is "%s", expected IN_PROGRESS', match.status)
+      throw new AppError('MATCH_NOT_ACTIVE', 'Match is not in progress', 400)
+    }
     await prisma.innings.updateMany({ where: { matchId }, data: { isCompleted: true } })
+    console.log('[completeMatch] all innings marked completed, computing stats…')
     await this.computePlayerStats(matchId)
     await prisma.match.update({ where: { id: matchId }, data: { status: 'COMPLETED', completedAt: new Date(), winnerId, winMargin } })
+    console.log('[completeMatch] match marked COMPLETED')
     const statsResult = await performanceService.processVerifiedMatch(matchId, { allowUnverified: true })
     if (!statsResult.processed) {
       console.error('[completeMatch] Stats generation failed', { matchId, reason: statsResult.reason })
