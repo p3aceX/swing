@@ -1510,7 +1510,6 @@ export class MatchService {
           currentNonStrikerId: innsStats.nonStrikerId,
           currentBowlerId: innsStats.currentBowlerId,
           ballEvents: inn.ballEvents,
-          extras: inn.extras,
           isCompleted: inn.isCompleted,
           batting, bowling, fallOfWickets, partnerships,
         }
