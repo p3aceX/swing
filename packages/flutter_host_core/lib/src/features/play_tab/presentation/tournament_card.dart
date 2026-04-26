@@ -3,19 +3,18 @@ import 'package:flutter/material.dart';
 import '../../../theme/host_colors.dart';
 import '../domain/play_tab_models.dart';
 
-/// Standalone reusable tournament card. Drop it anywhere.
 class TournamentCard extends StatelessWidget {
   const TournamentCard({
     super.key,
     required this.tournament,
     this.onTap,
+    this.isAlternate = false,
     this.compact = false,
   });
 
   final PlayTournament tournament;
   final VoidCallback? onTap;
-
-  /// Compact mode: smaller padding, no progress bar — good for horizontal lists.
+  final bool isAlternate;
   final bool compact;
 
   @override
@@ -23,140 +22,155 @@ class TournamentCard extends StatelessWidget {
     final t = tournament;
     final statusColor = _statusColor(t.status, context);
     final statusLabel = _statusLabel(t.status);
+    final isLive = t.status.toUpperCase() == 'ONGOING' ||
+        t.status.toUpperCase() == 'LIVE' ||
+        t.status.toUpperCase() == 'IN_PROGRESS';
 
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: 20,
-          vertical: compact ? 12 : 16,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _Logo(url: t.logoUrl, size: compact ? 42 : 50),
-            SizedBox(width: compact ? 12 : 14),
+    return Material(
+      color: isAlternate ? context.panel : context.bg,
+      child: InkWell(
+        onTap: onTap,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+            // Status strip
+            Container(width: 3, color: statusColor),
+
+            // Main content
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Name row ───────────────────────────────────────────
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          t.name,
-                          style: TextStyle(
-                            color: context.fg,
-                            fontSize: compact ? 14 : 15,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                            height: 1.2,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(14, compact ? 12 : 14, 16, compact ? 12 : 14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _Logo(url: t.logoUrl, size: compact ? 40 : 46),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Name + status pill
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  t.name,
+                                  style: TextStyle(
+                                    color: context.fg,
+                                    fontSize: compact ? 13 : 15,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _StatusPill(
+                                label: statusLabel,
+                                color: statusColor,
+                                isLive: isLive,
+                              ),
+                            ],
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                          const SizedBox(height: 8),
+
+                          // Badges
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              _Badge(
+                                label: _formatLabel(t.format),
+                                color: context.sky,
+                                bg: context.sky.withValues(alpha: 0.1),
+                              ),
+                              if (t.isHost)
+                                _Badge(
+                                  label: 'Hosting',
+                                  color: context.gold,
+                                  bg: context.gold.withValues(alpha: 0.12),
+                                  icon: Icons.star_rounded,
+                                ),
+                              if (t.ballType != null)
+                                _Badge(
+                                  label: t.ballType!,
+                                  color: context.fgSub,
+                                  bg: context.stroke.withValues(alpha: 0.5),
+                                ),
+                              if (t.entryFee != null && t.entryFee! > 0)
+                                _Badge(
+                                  label: '₹${t.entryFee}',
+                                  color: context.success,
+                                  bg: context.success.withValues(alpha: 0.1),
+                                  icon: Icons.confirmation_number_rounded,
+                                ),
+                            ],
+                          ),
+
+                          if (!compact) ...[
+                            const SizedBox(height: 10),
+                            _TeamsBar(current: t.teamCount, max: t.maxTeams, context: context),
+                          ],
+
+                          const SizedBox(height: 8),
+
+                          // Footer
+                          Row(
+                            children: [
+                              if (t.city != null || t.venueName != null) ...[
+                                Icon(Icons.location_on_rounded, size: 11, color: context.fgSub),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(
+                                    _locationLabel(t),
+                                    style: TextStyle(color: context.fgSub, fontSize: 11),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
+                              Icon(Icons.calendar_today_rounded, size: 11, color: context.fgSub),
+                              const SizedBox(width: 3),
+                              Text(
+                                t.dateRange,
+                                style: TextStyle(color: context.fgSub, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      _StatusPill(label: statusLabel, color: statusColor),
-                    ],
-                  ),
-                  const SizedBox(height: 7),
-
-                  // ── Badges row ─────────────────────────────────────────
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      _FormatBadge(format: t.format),
-                      if (t.isHost)
-                        _Badge(
-                          label: 'Host',
-                          color: context.gold,
-                          bg: context.gold.withValues(alpha: 0.12),
-                          icon: Icons.star_rounded,
-                        ),
-                      if (t.ballType != null)
-                        _Badge(
-                          label: t.ballType!,
-                          color: context.fgSub,
-                          bg: context.panel,
-                        ),
-                      if (t.entryFee != null && t.entryFee! > 0)
-                        _Badge(
-                          label: '₹${t.entryFee}',
-                          color: context.success,
-                          bg: context.success.withValues(alpha: 0.1),
-                          icon: Icons.confirmation_number_rounded,
-                        ),
-                    ],
-                  ),
-
-                  if (!compact) ...[
-                    const SizedBox(height: 10),
-                    // ── Teams progress ─────────────────────────────────
-                    _TeamsBar(
-                        current: t.teamCount,
-                        max: t.maxTeams,
-                        context: context),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded, size: 16, color: context.fgSub),
                   ],
-
-                  const SizedBox(height: 8),
-
-                  // ── Footer row ─────────────────────────────────────────
-                  Row(
-                    children: [
-                      if (t.city != null || t.venueName != null) ...[
-                        Icon(Icons.location_on_rounded,
-                            size: 11, color: context.fgSub),
-                        const SizedBox(width: 3),
-                        Flexible(
-                          child: Text(
-                            _locationLabel(t),
-                            style: TextStyle(
-                                color: context.fgSub, fontSize: 11),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      Icon(Icons.calendar_today_rounded,
-                          size: 11, color: context.fgSub),
-                      const SizedBox(width: 3),
-                      Text(
-                        t.dateRange,
-                        style:
-                            TextStyle(color: context.fgSub, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
-            const SizedBox(width: 4),
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Icon(Icons.chevron_right_rounded,
-                  size: 16, color: context.fgSub),
-            ),
           ],
+        ),
         ),
       ),
     );
   }
 
   String _locationLabel(PlayTournament t) {
-    if (t.venueName != null && t.city != null) {
-      return '${t.venueName}, ${t.city}';
-    }
+    if (t.venueName != null && t.city != null) return '${t.venueName}, ${t.city}';
     return t.venueName ?? t.city ?? '';
   }
+
+  String _formatLabel(String format) => switch (format.toUpperCase()) {
+        'ONE_DAY' => 'ODI',
+        'TWO_INNINGS' => 'Test',
+        _ => format,
+      };
 }
 
-// ─── Sub-widgets ──────────────────────────────────────────────────────────────
+// ─── Logo ─────────────────────────────────────────────────────────────────────
 
 class _Logo extends StatelessWidget {
   const _Logo({required this.url, required this.size});
@@ -170,53 +184,61 @@ class _Logo extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: context.accentBg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
       clipBehavior: Clip.antiAlias,
       child: url != null
-          ? Image.network(
-              url!,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _fallback(context),
-            )
+          ? Image.network(url!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback(context))
           : _fallback(context),
     );
   }
 
   Widget _fallback(BuildContext context) => Center(
-        child: Icon(Icons.emoji_events_rounded,
-            color: context.accent, size: size * 0.48),
+        child: Icon(Icons.emoji_events_rounded, color: context.accent, size: size * 0.48),
       );
 }
 
+// ─── Status pill ──────────────────────────────────────────────────────────────
+
 class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.color});
+  const _StatusPill({required this.label, required this.color, required this.isLive});
   final String label;
   final Color color;
+  final bool isLive;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(5),
       ),
-      child: Text(label,
-          style: TextStyle(
-              color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isLive) ...[
+            Container(
+              width: 5,
+              height: 5,
+              margin: const EdgeInsets.only(right: 4),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          ],
+          Text(
+            label,
+            style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
     );
   }
 }
 
+// ─── Badge ────────────────────────────────────────────────────────────────────
+
 class _Badge extends StatelessWidget {
-  const _Badge({
-    required this.label,
-    required this.color,
-    required this.bg,
-    this.icon,
-  });
+  const _Badge({required this.label, required this.color, required this.bg, this.icon});
   final String label;
   final Color color;
   final Color bg;
@@ -226,10 +248,7 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
-      ),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -237,36 +256,17 @@ class _Badge extends StatelessWidget {
             Icon(icon, size: 10, color: color),
             const SizedBox(width: 3),
           ],
-          Text(label,
-              style: TextStyle(
-                  color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
         ],
       ),
     );
   }
 }
 
-class _FormatBadge extends StatelessWidget {
-  const _FormatBadge({required this.format});
-  final String format;
-
-  String get _label => switch (format.toUpperCase()) {
-        'ONE_DAY' => 'ODI',
-        'TWO_INNINGS' => 'Test',
-        _ => format,
-      };
-
-  @override
-  Widget build(BuildContext context) => _Badge(
-        label: _label,
-        color: context.fgSub,
-        bg: context.panel,
-      );
-}
+// ─── Teams bar ────────────────────────────────────────────────────────────────
 
 class _TeamsBar extends StatelessWidget {
-  const _TeamsBar(
-      {required this.current, required this.max, required this.context});
+  const _TeamsBar({required this.current, required this.max, required this.context});
   final int current;
   final int max;
   final BuildContext context;
@@ -284,18 +284,14 @@ class _TeamsBar extends StatelessWidget {
           children: [
             Icon(Icons.groups_rounded, size: 12, color: context.fgSub),
             const SizedBox(width: 4),
-            Text('$current / $max teams',
-                style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500)),
+            Text(
+              '$current / $max teams',
+              style: TextStyle(color: context.fgSub, fontSize: 11, fontWeight: FontWeight.w500),
+            ),
             if (isFull) ...[
               const SizedBox(width: 6),
               Text('Full',
-                  style: TextStyle(
-                      color: context.danger,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700)),
+                  style: TextStyle(color: context.danger, fontSize: 10, fontWeight: FontWeight.w700)),
             ],
           ],
         ),
@@ -316,8 +312,7 @@ class _TeamsBar extends StatelessWidget {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-Color _statusColor(String status, BuildContext context) =>
-    switch (status.toUpperCase()) {
+Color _statusColor(String status, BuildContext context) => switch (status.toUpperCase()) {
       'ONGOING' || 'LIVE' || 'IN_PROGRESS' => context.success,
       'UPCOMING' => context.sky,
       'COMPLETED' => context.fgSub,

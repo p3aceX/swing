@@ -80,59 +80,221 @@ class _PlayTabState extends State<HostPlayTab>
     return Column(
       children: [
         // ── Tab bar ─────────────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.only(top: 8),
-          decoration: BoxDecoration(
-            color: context.surf,
-            border: Border(bottom: BorderSide(color: context.stroke)),
+        TabBar(
+          controller: _tabController,
+          indicatorColor: context.accent,
+          indicatorWeight: 2,
+          indicatorSize: TabBarIndicatorSize.label,
+          dividerColor: Colors.transparent,
+          labelColor: context.fg,
+          unselectedLabelColor: context.fgSub,
+          labelStyle: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
           ),
-          child: TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            indicatorColor: context.accent,
-            indicatorWeight: 3,
-            indicatorSize: TabBarIndicatorSize.label,
-            dividerColor: Colors.transparent,
-            labelColor: context.fg,
-            unselectedLabelColor: context.fgSub,
-            labelPadding: const EdgeInsets.symmetric(horizontal: 20),
-            labelStyle: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
-            ),
-            unselectedLabelStyle: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.5,
-            ),
-            tabs: const [
-              Tab(text: 'Teams'),
-              Tab(text: 'Matches'),
-              Tab(text: 'Tournaments'),
-            ],
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.3,
           ),
+          tabs: const [
+            Tab(text: 'Matches'),
+            Tab(text: 'Teams'),
+            Tab(text: 'Tournaments'),
+          ],
         ),
 
-        // ── Tab content ─────────────────────────────────────────────────────
+        // ── Tab content + FAB ───────────────────────────────────────────────
         Expanded(
-          child: TabBarView(
-            controller: _tabController,
+          child: Stack(
             children: [
-              PlayTeamsTab(
-                callbacks: widget.callbacks,
-                currentUserId: widget.currentUserId,
+              TabBarView(
+                controller: _tabController,
+                children: [
+                  PlayMatchesTab(callbacks: widget.callbacks),
+                  PlayTeamsTab(
+                    callbacks: widget.callbacks,
+                    currentUserId: widget.currentUserId,
+                  ),
+                  PlayTournamentsTab(
+                    callbacks: widget.callbacks,
+                    currentCity: widget.currentCity,
+                  ),
+                ],
               ),
-              PlayMatchesTab(callbacks: widget.callbacks),
-              PlayTournamentsTab(
-                callbacks: widget.callbacks,
-                currentCity: widget.currentCity,
+              Positioned(
+                right: 20,
+                bottom: 20,
+                child: _HostFab(callbacks: widget.callbacks),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Host FAB ─────────────────────────────────────────────────────────────────
+
+class _HostFab extends StatelessWidget {
+  const _HostFab({required this.callbacks});
+  final PlayTabCallbacks callbacks;
+
+  void _show(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CreateSheet(callbacks: callbacks),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _show(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        decoration: BoxDecoration(
+          color: context.fg,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, color: context.bg, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              'Host',
+              style: TextStyle(
+                color: context.bg,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Create sheet ─────────────────────────────────────────────────────────────
+
+class _CreateSheet extends StatelessWidget {
+  const _CreateSheet({required this.callbacks});
+  final PlayTabCallbacks callbacks;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: context.surf,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (callbacks.onCreateMatch != null)
+                _SheetOption(
+                  icon: Icons.sports_cricket_rounded,
+                  label: 'Host Match',
+                  color: context.sky,
+                  onTap: () {
+                    Navigator.pop(context);
+                    callbacks.onCreateMatch!(context);
+                  },
+                ),
+              if (callbacks.onCreateTeam != null)
+                _SheetOption(
+                  icon: Icons.shield_rounded,
+                  label: 'Create Team',
+                  color: context.success,
+                  onTap: () {
+                    Navigator.pop(context);
+                    callbacks.onCreateTeam!(context);
+                  },
+                ),
+              if (callbacks.onCreateTournament != null)
+                _SheetOption(
+                  icon: Icons.emoji_events_rounded,
+                  label: 'Host Tournament',
+                  color: context.gold,
+                  onTap: () {
+                    Navigator.pop(context);
+                    callbacks.onCreateTournament!(context);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetOption extends StatelessWidget {
+  const _SheetOption({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, color: context.fgSub, size: 14),
+          ],
+        ),
+      ),
     );
   }
 }

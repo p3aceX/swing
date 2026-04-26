@@ -278,16 +278,28 @@ class _TeamScreen extends ConsumerWidget {
                       builder: (_) => _EditTeamSheet(team: team),
                     ),
                   ),
-                IconButton(
-                  icon: const Icon(Icons.qr_code_rounded,
-                      color: Colors.white, size: 20),
-                  onPressed: () => _showTeamQrSheet(context, team),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded,
-                      color: Colors.white, size: 20),
-                  onPressed: () => _shareViaWhatsApp(team),
-                ),
+                if (isOwnTeam) ...[
+                  IconButton(
+                    icon: const Icon(Icons.qr_code_rounded,
+                        color: Colors.white, size: 20),
+                    onPressed: () {
+                      final matches = ref.read(teamMatchesProvider(team.id)).asData?.value ?? [];
+                      final played = matches.where((m) => m.lifecycle == MatchLifecycle.past).toList();
+                      _showTeamQrSheet(
+                        context,
+                        team,
+                        played: played.length,
+                        wins: played.where((m) => m.result == MatchResult.win).length,
+                        losses: played.where((m) => m.result == MatchResult.loss).length,
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.share_rounded,
+                        color: Colors.white, size: 20),
+                    onPressed: () => _shareViaWhatsApp(team),
+                  ),
+                ],
                 const SizedBox(width: 4),
               ],
             ),
@@ -3194,12 +3206,37 @@ class _JoinTeamSheetState extends ConsumerState<_JoinTeamSheet> {
 
 // ── Team QR sheet ─────────────────────────────────────────────────────────────
 
-class _TeamQrSheet extends StatelessWidget {
-  const _TeamQrSheet({required this.team});
+class _TeamQrSheet extends StatefulWidget {
+  const _TeamQrSheet({
+    required this.team,
+    this.played = 0,
+    this.wins = 0,
+    this.losses = 0,
+  });
   final PlayerTeam team;
+  final int played;
+  final int wins;
+  final int losses;
+
+  @override
+  State<_TeamQrSheet> createState() => _TeamQrSheetState();
+}
+
+class _TeamQrSheetState extends State<_TeamQrSheet> {
+  bool _copied = false;
+
+  Future<void> _copyLink(String url) async {
+    await Clipboard.setData(ClipboardData(text: url));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final team = widget.team;
     final joinUrl = _teamJoinUrl(team);
     final payload = jsonEncode({
       'type': 'SWING_TEAM_INVITE',
@@ -3207,75 +3244,248 @@ class _TeamQrSheet extends StatelessWidget {
       'teamName': team.name,
       'joinUrl': joinUrl,
     });
+    final initials = _initials(team);
+    final memberCount = team.members.length;
+
     return SafeArea(
       top: false,
       child: Container(
         decoration: BoxDecoration(
           color: context.bg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Drag handle
+            const SizedBox(height: 12),
             Container(
-              width: 44, height: 5,
+              width: 36, height: 4,
               decoration: BoxDecoration(
-                  color: context.stroke,
-                  borderRadius: BorderRadius.circular(999)),
+                color: context.stroke,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-            const SizedBox(height: 18),
-            Text(team.name,
-                style: TextStyle(
-                    color: context.fg,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900)),
-            const SizedBox(height: 4),
-            Text('Share this QR or send the WhatsApp link',
-                style: TextStyle(color: context.fgSub, fontSize: 12)),
-            const SizedBox(height: 14),
+
+            // Header
             Container(
-              padding: const EdgeInsets.all(16),
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
               decoration: BoxDecoration(
-                  color: Colors.white, borderRadius: BorderRadius.circular(20)),
-              child: QrImageView(
-                  data: payload, size: 200, backgroundColor: Colors.white),
+                color: context.accentBg,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    width: 60, height: 60,
+                    decoration: BoxDecoration(
+                      color: context.accent,
+                      shape: BoxShape.circle,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: team.logoUrl != null
+                        ? Image.network(team.logoUrl!, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _initialsWidget(initials))
+                        : _initialsWidget(initials),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    team.name,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$memberCount ${memberCount == 1 ? 'player' : 'players'}',
+                    style: TextStyle(color: context.fgSub, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
-            // WhatsApp share button
-            GestureDetector(
-              onTap: () {
-                Navigator.pop(context);
-                _shareViaWhatsApp(team);
-              },
+
+            // Performance strip
+            if (widget.played > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: context.panel,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      _QrStat(value: '${widget.played}', label: 'Played', color: context.fg),
+                      _QrStatDivider(),
+                      _QrStat(value: '${widget.wins}', label: 'Won', color: context.success),
+                      _QrStatDivider(),
+                      _QrStat(value: '${widget.losses}', label: 'Lost', color: context.danger),
+                      _QrStatDivider(),
+                      _QrStat(
+                        value: '${((widget.wins / widget.played) * 100).round()}%',
+                        label: 'Win Rate',
+                        color: context.accent,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // QR code
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF25D366),
-                  borderRadius: BorderRadius.circular(14),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.send_rounded, color: Colors.white, size: 18),
-                    SizedBox(width: 8),
-                    Text('Share via WhatsApp',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700)),
-                  ],
+                child: Center(
+                  child: QrImageView(
+                    data: payload,
+                    version: QrVersions.auto,
+                    size: 190,
+                    backgroundColor: Colors.white,
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            Text('Team ID: ${team.id}',
-                style: TextStyle(color: context.fgSub, fontSize: 11)),
+
+            // Action buttons
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _copyLink(joinUrl),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: _copied
+                              ? context.success.withValues(alpha: 0.1)
+                              : context.panel,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _copied ? context.success : context.stroke,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _copied ? Icons.check_rounded : Icons.copy_rounded,
+                              size: 16,
+                              color: _copied ? context.success : context.fg,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _copied ? 'Copied!' : 'Copy Link',
+                              style: TextStyle(
+                                color: _copied ? context.success : context.fg,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _shareViaWhatsApp(team);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF25D366),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.send_rounded, size: 16, color: Colors.white),
+                            SizedBox(width: 6),
+                            Text(
+                              'WhatsApp',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
+        ),
         ),
       ),
     );
+  }
+
+  Widget _initialsWidget(String initials) => Center(
+        child: Text(
+          initials,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+}
+
+class _QrStat extends StatelessWidget {
+  const _QrStat({required this.value, required this.label, required this.color});
+  final String value;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value,
+              style: TextStyle(
+                  color: color, fontSize: 18, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 3),
+          Text(label,
+              style: TextStyle(
+                  color: context.fgSub, fontSize: 10,
+                  fontWeight: FontWeight.w600, letterSpacing: 0.2)),
+        ],
+      ),
+    );
+  }
+}
+
+class _QrStatDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 1, height: 28, color: context.stroke);
   }
 }
 
@@ -3376,11 +3586,26 @@ class TeamPerformanceSummary {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-void _showTeamQrSheet(BuildContext context, PlayerTeam team) {
+void _showTeamQrSheet(
+  BuildContext context,
+  PlayerTeam team, {
+  int played = 0,
+  int wins = 0,
+  int losses = 0,
+}) {
   showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _TeamQrSheet(team: team),
+    constraints: BoxConstraints(
+      maxHeight: MediaQuery.of(context).size.height * 0.88,
+    ),
+    builder: (_) => _TeamQrSheet(
+      team: team,
+      played: played,
+      wins: wins,
+      losses: losses,
+    ),
   );
 }
 

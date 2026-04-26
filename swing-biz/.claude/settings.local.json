@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dart analyze *)",
+      "Bash(npm run *)",
+      "Bash(flutter analyze *)",
+      "Bash(gcloud builds *)",
+      "Bash(gcloud logging *)",
+      "Bash(gcloud run *)",
+      "Bash(python3 -c \"import json,sys; svc=json.load\\(sys.stdin\\); envs=svc['spec']['template']['spec']['containers'][0].get\\('env',[]\\); [print\\(e['name'],'=',e.get\\('value','<secret>'\\)\\) for e in envs]\")",
+      "Bash(python3 -c ' *)",
+      "Bash(gcloud secrets versions access *)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.pdlqotoyxpzrylxvrmdm.supabase.co:5432/postgres?sslmode=require\" npx prisma migrate resolve --applied 20260425_center_wicket_unit_type --schema packages/db/prisma/schema.prisma)",
+      "Bash(gcloud secrets list *)",
+      "Bash(gcloud secrets *)",
+      "Bash(DATABASE_URL=postgresql://postgres:password@localhost:5432/swing npx prisma migrate dev --name add_holiday_to_time_block)",
+      "Bash(DATABASE_URL=postgresql://postgres:password@localhost:5432/swing npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script)",
+      "Bash(npx prisma *)",
+      "Bash(PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK=1 DATABASE_URL=\"postgresql://x:x@localhost/x\" npx prisma format --schema prisma/schema.prisma)",
+      "Bash(pkill -f \"tsx watch\")",
+      "Bash(pkill -f \"node.*api\")",
+      "Bash(tsx watch *)",
+      "Bash(npx tsx *)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(pkill -f \"tsx.*index.ts\")",
+      "Bash(gcloud config *)",
+      "Bash(echo \"Build submitted in background - PID $!\")",
+      "Bash(xargs ls *)",
+      "Bash(grep *)",
+      "Bash(git add *)"
+    ]
+  }
+}

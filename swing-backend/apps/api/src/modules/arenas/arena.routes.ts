@@ -75,6 +75,7 @@ const arenaTimeBlockSchema = z.object({
   startTime: z.string().regex(timePattern),
   endTime: z.string().regex(timePattern),
   reason: z.string().trim().min(1).max(120).optional(),
+  isHoliday: z.boolean().default(false),
 }).superRefine((value, ctx) => {
   if (!value.date && value.weekdays.length === 0) {
     ctx.addIssue({
@@ -90,7 +91,8 @@ const arenaTimeBlockSchema = z.object({
       message: 'Use either date or weekdays, not both',
     })
   }
-  if (value.startTime >= value.endTime) {
+  // skip time-order check for holidays (00:00–23:59 is always valid)
+  if (!value.isHoliday && value.startTime >= value.endTime) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['endTime'],

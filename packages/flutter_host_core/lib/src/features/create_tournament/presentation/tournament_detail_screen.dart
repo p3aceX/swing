@@ -6,6 +6,10 @@ import '../../../repositories/host_tournament_repository.dart';
 import '../../../theme/host_colors.dart';
 import '../../create_match/presentation/team_search_sheet.dart';
 
+// ---------------------------------------------------------------------------
+// Public entry points
+// ---------------------------------------------------------------------------
+
 class TournamentDetailScreen extends ConsumerStatefulWidget {
   const TournamentDetailScreen({
     super.key,
@@ -33,6 +37,7 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   late final TextEditingController _manualTeamController;
+
   Map<String, dynamic>? _tournament;
   List<Map<String, dynamic>> _teams = const [];
   List<Map<String, dynamic>> _groups = const [];
@@ -50,7 +55,7 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -65,6 +70,8 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
     _manualTeamController.dispose();
     super.dispose();
   }
+
+  // ── Data loading ──────────────────────────────────────────────────────────
 
   Future<void> _reload() async {
     setState(() {
@@ -110,6 +117,8 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
       if (mounted) setState(() => _isBusy = false);
     }
   }
+
+  // ── Dialogs / sheets ──────────────────────────────────────────────────────
 
   Future<void> _showAddTeamSheet() async {
     final selected = await showModalBottomSheet<Map<String, dynamic>>(
@@ -224,51 +233,90 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
     });
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final name =
-        '${_tournament?['name'] ?? widget.initialData?['name'] ?? 'Tournament'}';
+    final appBarTitle =
+        _canManage ? 'Manage Tournament' : '${_tournament?['name'] ?? widget.initialData?['name'] ?? 'Tournament'}';
+
     return Scaffold(
+      backgroundColor: context.bg,
       appBar: AppBar(
-        title: Text(name),
+        backgroundColor: context.bg,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: context.fg),
           onPressed: widget.onBack ?? () => Navigator.of(context).maybePop(),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: const [
-            Tab(text: 'Overview'),
-            Tab(text: 'Teams'),
-            Tab(text: 'Groups'),
-            Tab(text: 'Standings'),
-            Tab(text: 'Schedule'),
-          ],
+        title: Text(
+          appBarTitle,
+          style: TextStyle(
+            color: context.fg,
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+          ),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(44),
+          child: ColoredBox(
+            color: context.bg,
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: false,
+              indicatorColor: context.accent,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicatorWeight: 2,
+              labelColor: context.accent,
+              unselectedLabelColor: context.fgSub,
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
+              ),
+              dividerColor: context.stroke,
+              tabs: const [
+                Tab(text: 'Overview'),
+                Tab(text: 'Teams'),
+                Tab(text: 'Groups'),
+              ],
+            ),
+          ),
         ),
       ),
       floatingActionButton: _canManage && _tabController.index == 1
           ? FloatingActionButton.extended(
+              backgroundColor: context.accent,
+              foregroundColor: context.bg,
               onPressed: _isBusy
                   ? null
                   : () async {
                       await showModalBottomSheet<void>(
                         context: context,
+                        backgroundColor: context.panel,
                         builder: (context) => SafeArea(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               ListTile(
-                                leading: const Icon(Icons.groups_outlined),
-                                title: const Text('Add existing team'),
+                                leading: Icon(Icons.groups_outlined,
+                                    color: context.fg),
+                                title: Text('Add existing team',
+                                    style: TextStyle(color: context.fg)),
                                 onTap: () async {
                                   Navigator.of(context).pop();
                                   await _showAddTeamSheet();
                                 },
                               ),
                               ListTile(
-                                leading: const Icon(Icons.add_circle_outline),
-                                title: const Text('Create team entry manually'),
+                                leading: Icon(Icons.add_circle_outline,
+                                    color: context.fg),
+                                title: Text('Create team entry manually',
+                                    style: TextStyle(color: context.fg)),
                                 onTap: () async {
                                   Navigator.of(context).pop();
                                   await _showManualTeamDialog();
@@ -286,20 +334,30 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
       body: Column(
         children: [
           if ((_error ?? '').isNotEmpty)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.errorContainer,
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                _error!,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onErrorContainer,
+            ColoredBox(
+              color: context.danger.withValues(alpha: 0.1),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline_rounded,
+                        color: context.danger, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: TextStyle(color: context.danger, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(
+                    child: CircularProgressIndicator(color: context.accent))
                 : TabBarView(
                     controller: _tabController,
                     children: [
@@ -307,7 +365,6 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
                         tournament: _tournament ?? const {},
                         teams: _teams,
                         groups: _groups,
-                        standings: _standings,
                         schedule: _schedule,
                         canManage: _canManage,
                         isBusy: _isBusy,
@@ -358,30 +415,6 @@ class _TournamentDetailScreenState extends ConsumerState<TournamentDetailScreen>
                         isBusy: _isBusy,
                         onCreateGroups: _showCreateGroupDialog,
                       ),
-                      _StandingsTab(
-                        standings: _standings,
-                        canManage: _canManage,
-                        isBusy: _isBusy,
-                        onRecalculate: () => _runAction(
-                          () => _repository
-                              .recalculateStandings(widget.tournamentId),
-                        ),
-                      ),
-                      _ScheduleTab(
-                        schedule: _schedule,
-                        canManage: _canManage,
-                        isBusy: _isBusy,
-                        onGenerate: () => _runAction(
-                          () => _repository
-                              .autoGenerateSchedule(widget.tournamentId),
-                        ),
-                        onDelete: () => _runAction(
-                          () => _repository.deleteSchedule(widget.tournamentId),
-                        ),
-                        onAdvanceRound: () => _runAction(
-                          () => _repository.advanceRound(widget.tournamentId),
-                        ),
-                      ),
                     ],
                   ),
           ),
@@ -412,12 +445,15 @@ class HostTournamentDetailScreen extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Overview tab
+// ---------------------------------------------------------------------------
+
 class _OverviewTab extends StatelessWidget {
   const _OverviewTab({
     required this.tournament,
     required this.teams,
     required this.groups,
-    required this.standings,
     required this.schedule,
     required this.canManage,
     required this.isBusy,
@@ -431,7 +467,6 @@ class _OverviewTab extends StatelessWidget {
   final Map<String, dynamic> tournament;
   final List<Map<String, dynamic>> teams;
   final List<Map<String, dynamic>> groups;
-  final Map<String, List<Map<String, dynamic>>> standings;
   final List<Map<String, dynamic>> schedule;
   final bool canManage;
   final bool isBusy;
@@ -443,133 +478,198 @@ class _OverviewTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final name = '${tournament['name'] ?? 'Tournament'}';
+    final status = '${tournament['status'] ?? 'UPCOMING'}';
     final location = [
       '${tournament['city'] ?? ''}'.trim(),
       '${tournament['venueName'] ?? ''}'.trim(),
-    ].where((value) => value.isNotEmpty).join(' • ');
-    final stats = [
-      ('Status', '${tournament['status'] ?? 'UPCOMING'}'),
-      ('Format', '${tournament['format'] ?? 'T20'}'),
-      ('Tournament', '${tournament['tournamentFormat'] ?? 'LEAGUE'}'),
-      ('Teams', '${teams.length}/${tournament['maxTeams'] ?? '-'}'),
-      (
-        'Confirmed',
-        '${teams.where((team) => team['isConfirmed'] == true).length}'
-      ),
-      ('Fixtures', '${schedule.length}'),
-    ];
+    ].where((v) => v.isNotEmpty).join(' • ');
+
+    final startDate = _formatDate(tournament['startDate']);
+    final endDate = tournament['endDate'] != null
+        ? _formatDate(tournament['endDate'])
+        : null;
+    final dateRange =
+        endDate != null ? '$startDate – $endDate' : startDate;
+
+    final confirmed =
+        teams.where((t) => t['isConfirmed'] == true).length;
+    final maxTeams = tournament['maxTeams'];
+    final format = '${tournament['format'] ?? 'T20'}';
+    final structure = '${tournament['tournamentFormat'] ?? 'LEAGUE'}';
+
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.zero,
       children: [
-        _Panel(
+        // ── Header ────────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '${tournament['name'] ?? 'Tournament'}',
-                style: TextStyle(
-                  color: context.fg,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _StatusPill(status: status),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                location.ifEmpty('Venue details not set'),
-                style: TextStyle(color: context.fgSub),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Start: ${_formatDate(tournament['startDate'])}',
-                style: TextStyle(color: context.fgSub),
-              ),
-              if (tournament['endDate'] != null)
-                Text(
-                  'End: ${_formatDate(tournament['endDate'])}',
-                  style: TextStyle(color: context.fgSub),
+              const SizedBox(height: 12),
+              if (location.isNotEmpty) ...[
+                Row(
+                  children: [
+                    Icon(Icons.place_outlined,
+                        size: 15, color: context.fgSub),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(location,
+                          style: TextStyle(
+                              color: context.fgSub, fontSize: 13)),
+                    ),
+                  ],
                 ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: stats
-              .map(
-                (item) => SizedBox(
-                  width: 164,
-                  child: _MetricCard(label: item.$1, value: item.$2),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 12),
-        _Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Summary',
-                style: TextStyle(
-                  color: context.fg,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _SummaryRow(label: 'Groups', value: '${groups.length}'),
-              _SummaryRow(
-                  label: 'Standings buckets', value: '${standings.length}'),
-              _SummaryRow(
-                label: 'Next fixture',
-                value: schedule.isEmpty
-                    ? 'Not generated'
-                    : '${schedule.first['teamAName'] ?? 'TBD'} vs ${schedule.first['teamBName'] ?? 'TBD'}',
+                const SizedBox(height: 6),
+              ],
+              Row(
+                children: [
+                  Icon(Icons.calendar_today_outlined,
+                      size: 15, color: context.fgSub),
+                  const SizedBox(width: 6),
+                  Text(dateRange,
+                      style:
+                          TextStyle(color: context.fgSub, fontSize: 13)),
+                ],
               ),
             ],
           ),
         ),
-        if (canManage) ...[
-          const SizedBox(height: 12),
-          _Panel(
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                FilledButton.icon(
-                  onPressed: isBusy ? null : onCreateGroups,
-                  icon: const Icon(Icons.group_work_outlined),
-                  label: const Text('Create groups'),
-                ),
-                FilledButton.icon(
-                  onPressed: isBusy ? null : onAutoGenerate,
-                  icon: const Icon(Icons.event_repeat),
-                  label: const Text('Auto generate'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: isBusy ? null : onRecalculate,
-                  icon: const Icon(Icons.calculate_outlined),
-                  label: const Text('Recalculate'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: isBusy ? null : onAdvanceRound,
-                  icon: const Icon(Icons.skip_next_outlined),
-                  label: const Text('Advance round'),
-                ),
-                OutlinedButton.icon(
-                  onPressed:
-                      isBusy || schedule.isEmpty ? null : onDeleteSchedule,
-                  icon: const Icon(Icons.delete_sweep_outlined),
-                  label: const Text('Delete schedule'),
+
+        const SizedBox(height: 16),
+
+        // ── Stats row ─────────────────────────────────────────────────────
+        SizedBox(
+          height: 68,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            children: [
+              _StatChip(
+                label: 'Teams',
+                value: maxTeams != null
+                    ? '${teams.length}/$maxTeams'
+                    : '${teams.length}',
+              ),
+              const SizedBox(width: 8),
+              _StatChip(label: 'Confirmed', value: '$confirmed'),
+              const SizedBox(width: 8),
+              _StatChip(label: 'Format', value: format),
+              const SizedBox(width: 8),
+              _StatChip(label: 'Structure', value: structure),
+            ],
+          ),
+        ),
+
+        // ── Divider ───────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Divider(height: 1, color: context.stroke),
+        ),
+
+        // ── Summary rows ──────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              _SummaryInfoRow(
+                icon: Icons.group_work_outlined,
+                label: 'Groups',
+                value: '${groups.length}',
+              ),
+              const SizedBox(height: 8),
+              _SummaryInfoRow(
+                icon: Icons.event_note_outlined,
+                label: 'Fixtures',
+                value: schedule.isEmpty ? 'Not generated' : '${schedule.length}',
+              ),
+              if (schedule.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _SummaryInfoRow(
+                  icon: Icons.sports_cricket_outlined,
+                  label: 'Next match',
+                  value:
+                      '${schedule.first['teamAName'] ?? 'TBD'} vs ${schedule.first['teamBName'] ?? 'TBD'}',
                 ),
               ],
+            ],
+          ),
+        ),
+
+        // ── Management actions ────────────────────────────────────────────
+        if (canManage) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Divider(height: 1, color: context.stroke),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'Actions',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.6,
+              ),
             ),
           ),
-        ],
+          _ActionBtn(
+            icon: Icons.group_work_outlined,
+            label: 'Create groups',
+            onTap: isBusy ? null : onCreateGroups,
+          ),
+          _ActionBtn(
+            icon: Icons.event_repeat_outlined,
+            label: 'Auto generate schedule',
+            onTap: isBusy ? null : onAutoGenerate,
+          ),
+          _ActionBtn(
+            icon: Icons.calculate_outlined,
+            label: 'Recalculate standings',
+            onTap: isBusy ? null : onRecalculate,
+          ),
+          _ActionBtn(
+            icon: Icons.skip_next_outlined,
+            label: 'Advance round',
+            onTap: isBusy ? null : onAdvanceRound,
+          ),
+          _ActionBtn(
+            icon: Icons.delete_sweep_outlined,
+            label: 'Delete schedule',
+            onTap: isBusy || schedule.isEmpty ? null : onDeleteSchedule,
+            destructive: true,
+          ),
+          const SizedBox(height: 24),
+        ] else
+          const SizedBox(height: 24),
       ],
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Teams tab
+// ---------------------------------------------------------------------------
 
 class _TeamsTab extends StatelessWidget {
   const _TeamsTab({
@@ -601,99 +701,254 @@ class _TeamsTab extends StatelessWidget {
         onAction: onRefresh,
       );
     }
+
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: teams.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, __) =>
+          Divider(height: 1, indent: 64, color: context.stroke),
       itemBuilder: (context, index) {
         final team = teams[index];
+        final teamName = '${team['teamName'] ?? 'Unnamed Team'}';
+        final isConfirmed = team['isConfirmed'] == true;
         final groupId = '${team['groupId'] ?? ''}'.trim();
-        return _Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${team['teamName'] ?? 'Unnamed Team'}',
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
+
+        // Find group name
+        String? groupName;
+        if (groupId.isNotEmpty) {
+          final match = groups.where((g) => '${g['id']}' == groupId).toList();
+          if (match.isNotEmpty) {
+            groupName = '${match.first['name'] ?? groupId}';
+          }
+        }
+
+        return InkWell(
+          onTap: canManage
+              ? () => _showTeamOptions(
+                    context,
+                    team: team,
+                    isConfirmed: isConfirmed,
+                  )
+              : null,
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                _TeamAvatar(name: teamName),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        teamName,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
                       ),
-                    ),
-                  ),
-                  _StatusChip(
-                    label:
-                        team['isConfirmed'] == true ? 'Confirmed' : 'Pending',
-                    color: team['isConfirmed'] == true
-                        ? Colors.green
-                        : Colors.orange,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _InfoChip(label: 'Seed ${team['seed'] ?? '-'}'),
-                  _InfoChip(
-                      label:
-                          'Players ${((team['playerIds'] as List?) ?? const []).length}'),
-                  _InfoChip(
-                      label: 'Registered ${_formatDate(team['registeredAt'])}'),
-                ],
-              ),
-              if (canManage) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        initialValue: groupId.isEmpty ? null : groupId,
-                        decoration: const InputDecoration(labelText: 'Group'),
-                        items: [
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('No group'),
-                          ),
-                          ...groups.map(
-                            (group) => DropdownMenuItem<String?>(
-                              value: '${group['id'] ?? ''}',
-                              child: Text('${group['name'] ?? 'Group'}'),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: isConfirmed
+                                  ? context.success
+                                  : context.warn,
+                              shape: BoxShape.circle,
                             ),
                           ),
+                          const SizedBox(width: 5),
+                          Text(
+                            isConfirmed ? 'Confirmed' : 'Pending',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 12,
+                            ),
+                          ),
+                          if (groupName != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: context.accentBg,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                groupName,
+                                style: TextStyle(
+                                  color: context.accent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                        onChanged: isBusy
-                            ? null
-                            : (value) =>
-                                onAssignGroup('${team['id'] ?? ''}', value),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Switch(
-                      value: team['isConfirmed'] == true,
-                      onChanged: isBusy
-                          ? null
-                          : (value) => onConfirm('${team['id'] ?? ''}', value),
-                    ),
-                    IconButton(
-                      onPressed:
-                          isBusy ? null : () => onRemove('${team['id'] ?? ''}'),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+                if (canManage)
+                  Icon(Icons.more_horiz_rounded,
+                      color: context.fgSub, size: 20),
               ],
-            ],
+            ),
           ),
         );
       },
     );
   }
+
+  void _showTeamOptions(
+    BuildContext context, {
+    required Map<String, dynamic> team,
+    required bool isConfirmed,
+  }) {
+    final teamId = '${team['id'] ?? ''}';
+    final groupId = '${team['groupId'] ?? ''}'.trim();
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                '${team['teamName'] ?? 'Team'}',
+                style: TextStyle(
+                  color: context.fg,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            Divider(height: 1, color: context.stroke),
+            ListTile(
+              leading: Icon(
+                isConfirmed
+                    ? Icons.check_circle_outline
+                    : Icons.check_circle_rounded,
+                color: isConfirmed ? context.fgSub : context.success,
+              ),
+              title: Text(
+                isConfirmed ? 'Unconfirm' : 'Confirm',
+                style: TextStyle(color: context.fg),
+              ),
+              onTap: isBusy
+                  ? null
+                  : () {
+                      Navigator.of(ctx).pop();
+                      onConfirm(teamId, !isConfirmed);
+                    },
+            ),
+            if (groups.isNotEmpty)
+              ListTile(
+                leading:
+                    Icon(Icons.group_work_outlined, color: context.fgSub),
+                title: Text('Assign group',
+                    style: TextStyle(color: context.fg)),
+                onTap: isBusy
+                    ? null
+                    : () {
+                        Navigator.of(ctx).pop();
+                        _showAssignGroupSheet(context,
+                            teamId: teamId, currentGroupId: groupId);
+                      },
+              ),
+            ListTile(
+              leading: Icon(Icons.person_remove_outlined,
+                  color: context.danger),
+              title:
+                  Text('Remove', style: TextStyle(color: context.danger)),
+              onTap: isBusy
+                  ? null
+                  : () {
+                      Navigator.of(ctx).pop();
+                      onRemove(teamId);
+                    },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAssignGroupSheet(
+    BuildContext context, {
+    required String teamId,
+    required String currentGroupId,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'Assign to group',
+                style: TextStyle(
+                  color: context.fg,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            Divider(height: 1, color: context.stroke),
+            ListTile(
+              title: Text('No group',
+                  style: TextStyle(color: context.fgSub)),
+              trailing: currentGroupId.isEmpty
+                  ? Icon(Icons.check_rounded, color: context.accent)
+                  : null,
+              onTap: () {
+                Navigator.of(ctx).pop();
+                onAssignGroup(teamId, null);
+              },
+            ),
+            ...groups.map((g) {
+              final gId = '${g['id'] ?? ''}';
+              return ListTile(
+                title: Text('${g['name'] ?? 'Group'}',
+                    style: TextStyle(color: context.fg)),
+                trailing: currentGroupId == gId
+                    ? Icon(Icons.check_rounded, color: context.accent)
+                    : null,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  onAssignGroup(teamId, gId);
+                },
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Groups tab
+// ---------------------------------------------------------------------------
 
 class _GroupsTab extends StatelessWidget {
   const _GroupsTab({
@@ -717,293 +972,324 @@ class _GroupsTab extends StatelessWidget {
         onAction: canManage ? onCreateGroups : null,
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: groups.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final group = groups[index];
-        final teams =
-            (group['teams'] as List?)?.whereType<Map>().toList() ?? const [];
-        return _Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    '${group['name'] ?? 'Group'}',
-                    style: TextStyle(
-                      color: context.fg,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const Spacer(),
-                  _InfoChip(label: '${teams.length} teams'),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (teams.isEmpty)
-                Text(
-                  'No teams assigned.',
-                  style: TextStyle(color: context.fgSub),
-                )
-              else
-                ...teams.map(
-                  (team) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${team['teamName'] ?? 'Team'}',
-                            style: TextStyle(color: context.fg),
-                          ),
-                        ),
-                        _StatusChip(
-                          label: team['isConfirmed'] == true
-                              ? 'Confirmed'
-                              : 'Pending',
-                          color: team['isConfirmed'] == true
-                              ? Colors.green
-                              : Colors.orange,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (canManage) ...[
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton(
-                    onPressed: isBusy ? null : onCreateGroups,
-                    child: const Text('Regenerate groups'),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
 
-class _StandingsTab extends StatelessWidget {
-  const _StandingsTab({
-    required this.standings,
-    required this.canManage,
-    required this.isBusy,
-    required this.onRecalculate,
-  });
-
-  final Map<String, List<Map<String, dynamic>>> standings;
-  final bool canManage;
-  final bool isBusy;
-  final Future<void> Function() onRecalculate;
-
-  @override
-  Widget build(BuildContext context) {
-    if (standings.isEmpty) {
-      return _EmptyPane(
-        message: 'No standings available yet.',
-        actionLabel: canManage ? 'Recalculate' : null,
-        onAction: canManage ? onRecalculate : null,
-      );
-    }
-    final buckets = standings.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: buckets.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final bucket = buckets[index];
-        return _Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    bucket.key == 'overall' ? 'Overall' : 'Group ${bucket.key}',
-                    style: TextStyle(
-                      color: context.fg,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (canManage)
-                    OutlinedButton(
-                      onPressed: isBusy ? null : onRecalculate,
-                      child: const Text('Recalculate'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              ...bucket.value.map(
-                (row) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${(row['team'] as Map?)?['teamName'] ?? row['teamName'] ?? 'Team'}',
-                          style: TextStyle(
-                            color: context.fg,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 44,
-                        child: Text('P ${row['played'] ?? 0}'),
-                      ),
-                      SizedBox(
-                        width: 44,
-                        child: Text('W ${row['won'] ?? 0}'),
-                      ),
-                      SizedBox(
-                        width: 56,
-                        child: Text('Pts ${row['points'] ?? 0}'),
-                      ),
-                      SizedBox(
-                        width: 72,
-                        child: Text(
-                          'NRR ${_nrr(row['nrr'])}',
-                          textAlign: TextAlign.right,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ScheduleTab extends StatelessWidget {
-  const _ScheduleTab({
-    required this.schedule,
-    required this.canManage,
-    required this.isBusy,
-    required this.onGenerate,
-    required this.onDelete,
-    required this.onAdvanceRound,
-  });
-
-  final List<Map<String, dynamic>> schedule;
-  final bool canManage;
-  final bool isBusy;
-  final Future<void> Function() onGenerate;
-  final Future<void> Function() onDelete;
-  final Future<void> Function() onAdvanceRound;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheduleRows = schedule
-        .map(
-          (match) => (
-            match: match,
-            innings: (match['innings'] as List?)?.whereType<Map>().toList() ??
-                const <Map<dynamic, dynamic>>[],
-          ),
-        )
-        .toList();
-    if (schedule.isEmpty) {
-      return _EmptyPane(
-        message: 'No fixtures generated yet.',
-        actionLabel: canManage ? 'Generate schedule' : null,
-        onAction: canManage ? onGenerate : null,
-      );
-    }
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        if (canManage)
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
+        ...groups.map((group) {
+          final groupTeams =
+              (group['teams'] as List?)?.whereType<Map>().toList() ??
+                  const <Map<dynamic, dynamic>>[];
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              FilledButton.icon(
-                onPressed: isBusy ? null : onGenerate,
-                icon: const Icon(Icons.event_repeat),
-                label: const Text('Regenerate'),
-              ),
-              OutlinedButton.icon(
-                onPressed: isBusy ? null : onAdvanceRound,
-                icon: const Icon(Icons.skip_next_outlined),
-                label: const Text('Advance round'),
-              ),
-              OutlinedButton.icon(
-                onPressed: isBusy ? null : onDelete,
-                icon: const Icon(Icons.delete_sweep_outlined),
-                label: const Text('Delete schedule'),
-              ),
-            ],
-          ),
-        if (canManage) const SizedBox(height: 12),
-        ...scheduleRows.map(
-          (entry) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _Panel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${entry.match['teamAName'] ?? 'TBD'} vs ${entry.match['teamBName'] ?? 'TBD'}',
-                          style: TextStyle(
-                            color: context.fg,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
-                          ),
+              // Group header
+              Padding(
+                padding:
+                    const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${group['name'] ?? 'Group'}',
+                        style: TextStyle(
+                          color: context.fg,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
                         ),
                       ),
-                      _StatusChip(
-                        label: '${entry.match['status'] ?? 'SCHEDULED'}',
-                        color:
-                            _matchStatusColor('${entry.match['status'] ?? ''}'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _formatDateTime(entry.match['scheduledAt']),
-                    style: TextStyle(color: context.fgSub),
-                  ),
-                  if ((entry.match['venueName'] ?? '')
-                      .toString()
-                      .trim()
-                      .isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        '${entry.match['venueName']}',
-                        style: TextStyle(color: context.fgSub),
-                      ),
                     ),
-                  if (entry.innings.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    ...entry.innings.map(
-                      (inningsRow) => Text(
-                        'Innings ${inningsRow['inningsNumber']}: ${inningsRow['totalRuns'] ?? 0}/${inningsRow['totalWickets'] ?? 0} in ${inningsRow['totalOvers'] ?? 0}',
-                        style: TextStyle(color: context.fgSub),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: context.accentBg,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '${groupTeams.length} team${groupTeams.length == 1 ? '' : 's'}',
+                        style: TextStyle(
+                          color: context.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
-                ],
+                ),
+              ),
+              // Teams in group
+              if (groupTeams.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  child: Text(
+                    'No teams assigned.',
+                    style: TextStyle(color: context.fgSub, fontSize: 13),
+                  ),
+                )
+              else
+                ...groupTeams.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final team = entry.value;
+                  final teamName = '${team['teamName'] ?? 'Team'}';
+                  final isConfirmed = team['isConfirmed'] == true;
+                  final isLast = i == groupTeams.length - 1;
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        child: Row(
+                          children: [
+                            _TeamAvatar(name: teamName, size: 32),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                teamName,
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: isConfirmed
+                                    ? context.success
+                                    : context.warn,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!isLast)
+                        Divider(
+                            height: 1,
+                            indent: 60,
+                            color: context.stroke),
+                    ],
+                  );
+                }),
+              Divider(height: 1, color: context.stroke),
+            ],
+          );
+        }),
+        if (canManage) ...[
+          const SizedBox(height: 8),
+          _ActionBtn(
+            icon: Icons.refresh_rounded,
+            label: 'Regenerate groups',
+            onTap: isBusy ? null : onCreateGroups,
+          ),
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helper widgets
+// ---------------------------------------------------------------------------
+
+/// Flat tappable action row button.
+class _ActionBtn extends StatelessWidget {
+  const _ActionBtn({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final Color? color;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor = onTap == null
+        ? context.fgSub.withValues(alpha: 0.4)
+        : destructive
+            ? context.danger
+            : color ?? context.fg;
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: effectiveColor, size: 20),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: effectiveColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
+            Icon(Icons.chevron_right_rounded,
+                color: context.fgSub.withValues(alpha: 0.5), size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tournament status pill badge.
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = _resolve(context, status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  (String, Color) _resolve(BuildContext context, String status) {
+    switch (status.toUpperCase()) {
+      case 'UPCOMING':
+        return ('Upcoming', context.sky);
+      case 'REGISTRATION_OPEN':
+        return ('Registration Open', context.success);
+      case 'IN_PROGRESS':
+        return ('In Progress', context.accent);
+      case 'COMPLETED':
+        return ('Completed', context.fgSub);
+      case 'CANCELLED':
+        return ('Cancelled', context.danger);
+      default:
+        return (status, context.warn);
+    }
+  }
+}
+
+/// Team avatar circle with first letter of name.
+class _TeamAvatar extends StatelessWidget {
+  const _TeamAvatar({required this.name, this.size = 40});
+
+  final String name;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final letter =
+        name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: context.accentBg,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: TextStyle(
+          color: context.accent,
+          fontWeight: FontWeight.w700,
+          fontSize: size * 0.42,
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline stat chip for the overview stats row.
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: context.stroke),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              color: context.fg,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(color: context.fgSub, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A labelled info row for overview summary section.
+class _SummaryInfoRow extends StatelessWidget {
+  const _SummaryInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: context.fgSub),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(label,
+              style: TextStyle(color: context.fgSub, fontSize: 13)),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
@@ -1011,125 +1297,7 @@ class _ScheduleTab extends StatelessWidget {
   }
 }
 
-class _Panel extends StatelessWidget {
-  const _Panel({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: context.panel,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: context.stroke),
-      ),
-      child: child,
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(color: context.fgSub, fontSize: 12)),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: context.fg,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: TextStyle(color: context.fgSub))),
-          Text(value,
-              style: TextStyle(color: context.fg, fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.label,
-    required this.color,
-  });
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style:
-            TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12),
-      ),
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: context.cardBg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: context.stroke),
-      ),
-      child: Text(label, style: TextStyle(color: context.fgSub, fontSize: 12)),
-    );
-  }
-}
-
+/// Empty state pane with optional action button.
 class _EmptyPane extends StatelessWidget {
   const _EmptyPane({
     required this.message,
@@ -1145,20 +1313,35 @@ class _EmptyPane extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               message,
               textAlign: TextAlign.center,
-              style: TextStyle(color: context.fgSub),
+              style: TextStyle(color: context.fgSub, fontSize: 15),
             ),
             if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: onAction,
-                child: Text(actionLabel!),
+              const SizedBox(height: 16),
+              GestureDetector(
+                onTap: onAction,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 11),
+                  decoration: BoxDecoration(
+                    color: context.accentBg,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    actionLabel!,
+                    style: TextStyle(
+                      color: context.accent,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
               ),
             ],
           ],
@@ -1167,6 +1350,10 @@ class _EmptyPane extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
 
 String _formatDate(Object? value) {
   final parsed = DateTime.tryParse('${value ?? ''}');
@@ -1180,26 +1367,3 @@ String _formatDateTime(Object? value) {
   return DateFormat('dd MMM yyyy, hh:mm a').format(parsed.toLocal());
 }
 
-String _nrr(Object? value) {
-  final parsed = double.tryParse('${value ?? 0}') ?? 0;
-  return parsed >= 0
-      ? '+${parsed.toStringAsFixed(3)}'
-      : parsed.toStringAsFixed(3);
-}
-
-Color _matchStatusColor(String status) {
-  switch (status) {
-    case 'COMPLETED':
-      return Colors.green;
-    case 'IN_PROGRESS':
-      return Colors.red;
-    case 'TOSS_DONE':
-      return Colors.blue;
-    default:
-      return Colors.orange;
-  }
-}
-
-extension on String {
-  String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
-}

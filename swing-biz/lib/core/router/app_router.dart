@@ -21,6 +21,7 @@ import '../../features/onboarding/presentation/create_academy_screen.dart';
 import '../../features/onboarding/presentation/create_arena_screen.dart';
 import '../../features/onboarding/presentation/create_coach_screen.dart';
 import '../../features/arena/screens/arena_profile_page.dart';
+import '../../features/arena/screens/unit_detail_page.dart';
 import 'router_refresh.dart';
 
 class AppRoutes {
@@ -77,6 +78,7 @@ class AppRoutes {
   static const arenaReviews = '/arena-home/reviews';
   static const arenaReviewDetail = '/arena-home/reviews/detail';
   static const arenaProfile = '/arena-home/profile';
+  static const arenaUnitDetail = '/arena-home/units';
   static const arenaProfileMenu = '/arena-home/profile-menu';
   static const arenaAccount = '/arena-home/account';
   static const arenaNotifications = '/arena-home/notifications';
@@ -464,6 +466,13 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '${AppRoutes.arenaProfile}/:arenaId',
         builder: (_, state) => ArenaProfilePage(
           arenaId: state.pathParameters['arenaId'],
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.arenaUnitDetail}/:arenaId/:unitId',
+        builder: (_, state) => UnitDetailPage(
+          arenaId: state.pathParameters['arenaId']!,
+          unitId: state.pathParameters['unitId']!,
         ),
       ),
       GoRoute(

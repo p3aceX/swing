@@ -1,0 +1,14 @@
+ALTER TABLE "ArenaUnit"
+ADD COLUMN IF NOT EXISTS "unitTypeLabel" TEXT,
+ADD COLUMN IF NOT EXISTS "netType" TEXT;
+
+ALTER TABLE "ArenaAddon"
+ADD COLUMN IF NOT EXISTS "unitId" TEXT,
+ADD COLUMN IF NOT EXISTS "addonType" TEXT;
+
+CREATE INDEX IF NOT EXISTS "ArenaAddon_arenaId_unitId_idx" ON "ArenaAddon"("arenaId", "unitId");
+
+ALTER TABLE "ArenaAddon"
+ADD CONSTRAINT "ArenaAddon_unitId_fkey"
+FOREIGN KEY ("unitId") REFERENCES "ArenaUnit"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;

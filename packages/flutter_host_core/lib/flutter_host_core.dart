@@ -61,3 +61,7 @@ export 'src/features/match_detail/data/match_detail_repository.dart';
 export 'src/features/match_detail/controller/match_detail_controller.dart';
 export 'src/features/match_detail/presentation/match_card.dart';
 export 'src/features/match_detail/presentation/match_detail_screen.dart';
+
+export 'src/features/tournament_detail/domain/tournament_detail_models.dart';
+export 'src/features/tournament_detail/data/tournament_detail_repository.dart';
+export 'src/features/tournament_detail/presentation/tournament_viewer_screen.dart';

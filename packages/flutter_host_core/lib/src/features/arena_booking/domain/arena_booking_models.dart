@@ -120,6 +120,7 @@ class ArenaUnitOption {
     this.minSlotMins = 60,
     this.maxSlotMins = 240,
     this.slotIncrementMins = 60,
+    this.minAdvancePaise = 0,
     this.boundarySize,
     this.addons = const [],
     this.openTime,
@@ -147,6 +148,7 @@ class ArenaUnitOption {
   final int minSlotMins;
   final int maxSlotMins;
   final int slotIncrementMins;
+  final int minAdvancePaise;
   final int? boundarySize;
   final List<ArenaAddon> addons;
   final String? openTime;
@@ -178,6 +180,7 @@ class ArenaUnitOption {
       minSlotMins: _intValue(json['minSlotMins'] ?? 60),
       maxSlotMins: _intValue(json['maxSlotMins'] ?? 240),
       slotIncrementMins: _intValue(json['slotIncrementMins'] ?? 60),
+      minAdvancePaise: _intValue(json['minAdvancePaise']),
       boundarySize: _intOrNull(json['boundarySize']),
       addons: ((json['addons'] as List?) ?? const [])
           .whereType<Map>()
@@ -282,11 +285,21 @@ class ArenaReservation {
     required this.endTime,
     required this.arenaId,
     required this.unitId,
+    this.unitName,
     this.baseAmountPaise,
     this.gstPaise,
     this.addonAmountPaise,
     this.notes,
     this.paymentMode,
+    this.customerName,
+    this.customerPhone,
+    this.guestName,
+    this.guestPhone,
+    this.isOfflineBooking = false,
+    this.checkedInAt,
+    this.paidAt,
+    this.cancellationReason,
+    this.advancePaise = 0,
   });
 
   final String id;
@@ -297,28 +310,64 @@ class ArenaReservation {
   final String endTime;
   final String arenaId;
   final String unitId;
+  final String? unitName;
   final int? baseAmountPaise;
   final int? gstPaise;
   final int? addonAmountPaise;
   final String? notes;
   final String? paymentMode;
+  final String? customerName;
+  final String? customerPhone;
+  final String? guestName;
+  final String? guestPhone;
+  final bool isOfflineBooking;
+  final DateTime? checkedInAt;
+  final DateTime? paidAt;
+  final String? cancellationReason;
+  final int advancePaise;
+
+  int get balancePaise => (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
+  bool get hasBalance => balancePaise > 0 && paidAt == null;
+
+  String get displayName =>
+      guestName ?? customerName ?? (isOfflineBooking ? 'Walk-in' : 'Player');
+
+  String get displayPhone => guestPhone ?? customerPhone ?? '';
+
+  bool get isPaid =>
+      paidAt != null ||
+      status == 'CHECKED_IN' ||
+      status == 'COMPLETED';
 
   factory ArenaReservation.fromJson(Map<String, dynamic> json) {
+    final bookedBy = (json['bookedBy'] as Map?)?.cast<String, dynamic>();
+    final user = (bookedBy?['user'] as Map?)?.cast<String, dynamic>();
+    final unit = (json['unit'] as Map?)?.cast<String, dynamic>();
     return ArenaReservation(
       id: '${json['id'] ?? ''}',
       status: '${json['status'] ?? 'PENDING_PAYMENT'}'.trim(),
       totalAmountPaise:
           _intValue(json['totalAmountPaise'] ?? json['totalPricePaise']),
-      bookingDate: _dateOrNull(json['date']),
+      bookingDate: _dateOrNull(json['date'] ?? json['bookingDate']),
       startTime: '${json['startTime'] ?? ''}'.trim(),
       endTime: '${json['endTime'] ?? ''}'.trim(),
       arenaId: '${json['arenaId'] ?? ''}',
       unitId: '${json['unitId'] ?? ''}',
+      unitName: _stringOrNull(unit?['name']),
       baseAmountPaise: _intOrNull(json['baseAmountPaise']),
       gstPaise: _intOrNull(json['gstPaise']),
       addonAmountPaise: _intOrNull(json['addonAmountPaise']),
       notes: _stringOrNull(json['notes']),
       paymentMode: _stringOrNull(json['paymentMode']),
+      customerName: _stringOrNull(user?['name']),
+      customerPhone: _stringOrNull(user?['phone']),
+      guestName: _stringOrNull(json['guestName']),
+      guestPhone: _stringOrNull(json['guestPhone']),
+      isOfflineBooking: json['isOfflineBooking'] == true,
+      checkedInAt: _dateOrNull(json['checkedInAt']),
+      paidAt: _dateOrNull(json['paidAt']),
+      cancellationReason: _stringOrNull(json['cancellationReason']),
+      advancePaise: _intValue(json['advancePaise']),
     );
   }
 }
@@ -388,6 +437,56 @@ class BookingPaymentOrder {
       amountPaise: _intValue(order['amount']),
       currency: '${order['currency'] ?? 'INR'}'.trim(),
       key: _stringOrNull(order['key']),
+    );
+  }
+}
+
+class ArenaPaymentsData {
+  const ArenaPaymentsData({
+    required this.checkedInBookings,
+    required this.pendingBookings,
+  });
+  // Bookings where customer checked in = collection realized
+  final List<ArenaReservation> checkedInBookings;
+  // Confirmed bookings not yet checked in = balance pending
+  final List<ArenaReservation> pendingBookings;
+
+  int get totalCollectedPaise => checkedInBookings.fold(0, (s, b) => s + b.totalAmountPaise);
+  int get totalBalancePaise => pendingBookings.fold(0, (s, b) => s + b.totalAmountPaise);
+}
+
+class ArenaGuest {
+  const ArenaGuest({
+    required this.phone,
+    required this.name,
+    required this.totalBookings,
+    required this.totalSpentPaise,
+    required this.balanceDuePaise,
+    this.lastDate,
+    this.recentBookings = const [],
+  });
+
+  final String phone;
+  final String name;
+  final int totalBookings;
+  final int totalSpentPaise;
+  final int balanceDuePaise;
+  final DateTime? lastDate;
+  final List<ArenaReservation> recentBookings;
+
+  factory ArenaGuest.fromJson(Map<String, dynamic> json) {
+    final bookingsList = (json['bookings'] as List? ?? const [])
+        .whereType<Map>()
+        .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return ArenaGuest(
+      phone: '${json['phone'] ?? ''}',
+      name: '${json['name'] ?? 'Guest'}',
+      totalBookings: _intValue(json['totalBookings']),
+      totalSpentPaise: _intValue(json['totalSpentPaise']),
+      balanceDuePaise: _intValue(json['balanceDuePaise']),
+      lastDate: _dateOrNull(json['lastDate']),
+      recentBookings: bookingsList,
     );
   }
 }
@@ -522,6 +621,7 @@ class ArenaTimeBlock {
     this.weekdays = const [],
     this.reason,
     this.isRecurring = false,
+    this.isHoliday = false,
   });
 
   final String id;
@@ -533,6 +633,7 @@ class ArenaTimeBlock {
   final String endTime;
   final String? reason;
   final bool isRecurring;
+  final bool isHoliday;
 
   factory ArenaTimeBlock.fromJson(Map<String, dynamic> json) {
     return ArenaTimeBlock(
@@ -547,6 +648,7 @@ class ArenaTimeBlock {
       endTime: '${json['endTime'] ?? ''}',
       reason: _stringOrNull(json['reason']),
       isRecurring: json['isRecurring'] == true,
+      isHoliday: json['isHoliday'] == true,
     );
   }
 }

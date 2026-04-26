@@ -1,0 +1,18 @@
+package com.google.android.gms.internal.p000authapi;
+
+import android.content.Context;
+import android.os.Looper;
+import com.google.android.gms.common.api.a;
+import com.google.android.gms.common.api.g;
+import com.google.android.gms.common.api.internal.InterfaceC0258f;
+import com.google.android.gms.common.api.internal.InterfaceC0267o;
+import com.google.android.gms.common.internal.C0285h;
+import u0.o;
+
+/* JADX INFO: loaded from: classes.dex */
+final class zby extends a {
+    @Override // com.google.android.gms.common.api.a
+    public final /* synthetic */ g buildClient(Context context, Looper looper, C0285h c0285h, Object obj, InterfaceC0258f interfaceC0258f, InterfaceC0267o interfaceC0267o) {
+        return new zbg(context, looper, (o) obj, c0285h, interfaceC0258f, interfaceC0267o);
+    }
+}

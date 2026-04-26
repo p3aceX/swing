@@ -8,6 +8,7 @@ type ArenaTimeBlockInput = {
   startTime: string
   endTime: string
   reason?: string
+  isHoliday?: boolean
 }
 
 type ArenaTimeBlockFilters = {
@@ -271,6 +272,7 @@ export class ArenaService {
         minSlotMins: data.minSlotMins ?? 60,
         maxSlotMins: data.maxSlotMins ?? 240,
         slotIncrementMins: data.slotIncrementMins ?? 60,
+        minAdvancePaise: data.minAdvancePaise ?? 0,
         boundarySize: data.boundarySize ? Number(data.boundarySize) : null,
         openTime: data.openTime || null,
         closeTime: data.closeTime || null,
@@ -290,7 +292,7 @@ export class ArenaService {
     const fields = [
       'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'photoUrls', 'pricePerHourPaise', 'peakPricePaise',
       'peakHoursStart', 'peakHoursEnd', 'price4HrPaise', 'price8HrPaise', 'priceFullDayPaise',
-      'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins',
+      'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins', 'minAdvancePaise',
       'boundarySize', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights', 'isActive',
     ]
     for (const f of fields) {
@@ -424,11 +426,7 @@ export class ArenaService {
     })
     if (!unit) throw Errors.notFound('Arena unit')
 
-    const effectiveOpen = (unit as any)?.openTime || arena.openTime
-    const effectiveClose = (unit as any)?.closeTime || arena.closeTime
-    if (!this.isRangeWithinArenaHours(effectiveOpen, effectiveClose, data.startTime, data.endTime)) {
-      throw new AppError('INVALID_BLOCK_TIME', 'Block must be within arena operating hours', 400)
-    }
+    const isHoliday = data.isHoliday ?? false
 
     const weekdays = [...new Set(data.weekdays || [])].sort((a, b) => a - b)
     const isRecurring = weekdays.length > 0
@@ -438,14 +436,14 @@ export class ArenaService {
       throw new AppError('INVALID_BLOCK_DATE', 'A one-time block requires a date', 400)
     }
 
-    if (!isRecurring && blockDate && !arena.operatingDays.includes(this.weekdayNumber(blockDate))) {
+    if (!isHoliday && !isRecurring && blockDate && !arena.operatingDays.includes(this.weekdayNumber(blockDate))) {
       throw new AppError('ARENA_CLOSED', 'Selected date is outside the arena operating days', 400)
     }
 
     if (!isRecurring && blockDate) {
       await this.assertNoConfirmedBookingConflict(arenaId, unit.id, blockDate, data.startTime, data.endTime)
     }
-    await this.assertNoTimeBlockConflict(arenaId, unit.id, blockDate, weekdays, data.startTime, data.endTime)
+    await this.assertNoTimeBlockConflict(arenaId, unit.id, blockDate, weekdays, data.startTime, data.endTime, isHoliday)
 
     return prisma.arenaTimeBlock.create({
       data: {
@@ -456,6 +454,7 @@ export class ArenaService {
         endTime: data.endTime,
         reason: data.reason?.trim() || null,
         isRecurring,
+        isHoliday,
         weekdays,
       },
       include: {
@@ -613,6 +612,7 @@ export class ArenaService {
     weekdays: number[],
     startTime: string,
     endTime: string,
+    isHoliday = false,
   ) {
     if (blockDate) {
       const weekday = this.weekdayNumber(blockDate)
@@ -620,6 +620,7 @@ export class ArenaService {
         where: {
           arenaId,
           unitId,
+          ...(isHoliday ? { isHoliday: true } : {}),
           startTime: { lt: endTime },
           endTime: { gt: startTime },
           OR: [

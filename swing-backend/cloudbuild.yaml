@@ -63,6 +63,7 @@ steps:
       - --max-instances=3
       - --timeout=600
       - --update-env-vars=RUN_DB_MIGRATIONS=false
+      - --update-secrets=RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest
 
 images:
   - gcr.io/$PROJECT_ID/swing-backend:$COMMIT_SHA

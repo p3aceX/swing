@@ -15,6 +15,8 @@ import 'package:flutter_host_core/flutter_host_core.dart'
         ScoringScreen,
         TossScreen,
         HostTournamentDetailScreen,
+        HostTournamentViewerScreen,
+        TournamentViewerCallbacks,
         HostTeamDetailScreen,
         TeamDetailCallbacks,
         HostMatchDetailScreen,
@@ -22,7 +24,6 @@ import 'package:flutter_host_core/flutter_host_core.dart'
         HostCreateTeamScreen;
 import '../../features/create_match/presentation/create_match_screen.dart';
 import '../../features/create_tournament/presentation/create_tournament_screen.dart';
-import '../../features/create_tournament/presentation/tournament_detail_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/home/presentation/recommended_connections_screen.dart';
 import '../../features/host/presentation/host_screen.dart';
@@ -235,11 +236,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/tournament/:id',
-        builder: (_, state) => TournamentDetailScreen(
-          tournamentId: state.pathParameters['id'] ?? '',
-          initialData: state.extra is Map<String, dynamic>
-              ? state.extra as Map<String, dynamic>
-              : null,
+        builder: (context, state) => HostTournamentViewerScreen(
+          slug: state.pathParameters['id'] ?? '',
+          callbacks: TournamentViewerCallbacks(
+            onBack: () => GoRouter.of(context).pop(),
+            onNavigateToMatch: (matchId) =>
+                GoRouter.of(context).push('/match/$matchId'),
+            onNavigateToTeam: (teamId) =>
+                GoRouter.of(context).push('/team/$teamId'),
+          ),
         ),
       ),
       GoRoute(

@@ -1,0 +1,1 @@
+ALTER TYPE "FacilityUnitType" ADD VALUE 'CENTER_WICKET';

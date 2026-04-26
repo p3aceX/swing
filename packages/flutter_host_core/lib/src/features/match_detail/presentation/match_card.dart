@@ -75,7 +75,8 @@ class HostMatchCard extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Row(
+            child: IntrinsicHeight(
+              child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Lifecycle accent — left strip drawn inside the clip
@@ -299,6 +300,7 @@ class HostMatchCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
             ),
           ),
         ),

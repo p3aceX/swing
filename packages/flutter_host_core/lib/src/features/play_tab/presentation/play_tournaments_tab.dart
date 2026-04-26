@@ -35,9 +35,9 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
   late final TabController _tabs;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
-  bool _searchOpen = false;
   String _statusFilter = ''; // '' | 'LIVE' | 'UPCOMING' | 'COMPLETED'
   Timer? _exploreDebounce;
+  bool _hasAutoSwitched = false;
 
   static const _formats = ['', 'T10', 'T20', 'ONE_DAY'];
   static const _formatLabels = ['All', 'T10', 'T20', 'ODI'];
@@ -69,10 +69,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
 
   void _closeSearch() {
     _searchCtrl.clear();
-    setState(() {
-      _searchQuery = '';
-      _searchOpen = false;
-    });
+    setState(() => _searchQuery = '');
     ref.read(playTournamentsControllerProvider.notifier).setExploreQuery('');
   }
 
@@ -101,6 +98,14 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
   Widget build(BuildContext context) {
     final state = ref.watch(playTournamentsControllerProvider);
 
+    // Auto-jump to Explore when data first loads and user has no participation
+    if (!_hasAutoSwitched && !state.isLoading && state.participated.isEmpty) {
+      _hasAutoSwitched = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _tabs.index == 0) _tabs.animateTo(2);
+      });
+    }
+
     final currentList = switch (_tabs.index) {
       0 => state.participated,
       1 => state.hosted,
@@ -112,208 +117,146 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
     final completedCount =
         currentList.where((t) => _isCompleted(t.status)).length;
 
-    final statLine = state.isLoading
-        ? null
-        : '${state.participated.length} playing  ·  ${state.hosted.length} hosting';
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Header ─────────────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: context.stroke)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Stat line row / search field ──────────────────────────
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 160),
-                crossFadeState: _searchOpen
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                firstChild: Row(
-                  children: [
-                    if (statLine != null)
-                      Expanded(
-                        child: Text(
-                          statLine,
-                          style: TextStyle(
-                            color: context.fgSub,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+        // ── Search ──────────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color: context.cardBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: _onSearchChanged,
+              style: TextStyle(
+                  color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
+              decoration: InputDecoration(
+                hintText: _tabs.index == 2
+                    ? 'Search by name or city…'
+                    : 'Search tournaments…',
+                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
+                prefixIcon:
+                    Icon(Icons.search_rounded, color: context.fgSub, size: 18),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? GestureDetector(
+                        onTap: _closeSearch,
+                        child: Icon(Icons.close_rounded,
+                            color: context.fgSub, size: 18),
                       )
-                    else
-                      const Spacer(),
-                    GestureDetector(
-                      onTap: () => setState(() => _searchOpen = true),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(Icons.search_rounded,
-                            color: context.fgSub, size: 22),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    if (widget.callbacks.onCreateTournament != null)
-                      _CreateButton(
-                        onTap: () =>
-                            widget.callbacks.onCreateTournament!(context),
-                      ),
-                  ],
-                ),
-                secondChild: TextField(
-                  controller: _searchCtrl,
-                  autofocus: true,
-                  onChanged: _onSearchChanged,
-                  style: TextStyle(
-                      color: context.fg,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500),
-                  decoration: InputDecoration(
-                    hintText: _tabs.index == 2
-                        ? 'Search by name or city…'
-                        : 'Search tournaments…',
-                    hintStyle:
-                        TextStyle(color: context.fgSub, fontSize: 14),
-                    prefixIcon: Icon(Icons.search_rounded,
-                        color: context.fgSub, size: 18),
-                    suffixIcon: GestureDetector(
-                      onTap: _closeSearch,
-                      child: Icon(Icons.close_rounded,
-                          color: context.fgSub, size: 18),
-                    ),
-                    filled: true,
-                    fillColor: context.cardBg,
-                    contentPadding: EdgeInsets.zero,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
               ),
+            ),
+          ),
+        ),
 
-              const SizedBox(height: 12),
-
-              // ── Status filter chips ───────────────────────────────────
-              SizedBox(
-                height: 34,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _FilterChip(
-                      label: '${currentList.length} All',
-                      selected: _statusFilter == '',
-                      isLive: false,
-                      onTap: () => setState(() => _statusFilter = ''),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: '$liveCount Live',
-                      selected: _statusFilter == 'LIVE',
-                      isLive: true,
-                      onTap: () => setState(() => _statusFilter =
-                          _statusFilter == 'LIVE' ? '' : 'LIVE'),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: '$upcomingCount Upcoming',
-                      selected: _statusFilter == 'UPCOMING',
-                      isLive: false,
-                      onTap: () => setState(() => _statusFilter =
-                          _statusFilter == 'UPCOMING' ? '' : 'UPCOMING'),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: '$completedCount Completed',
-                      selected: _statusFilter == 'COMPLETED',
-                      isLive: false,
-                      onTap: () => setState(() => _statusFilter =
-                          _statusFilter == 'COMPLETED' ? '' : 'COMPLETED'),
-                    ),
-                  ],
-                ),
+        // ── Status filter chips ──────────────────────────────────────────────
+        SizedBox(
+          height: 44,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            children: [
+              _FilterChip(
+                label: '${currentList.length} All',
+                selected: _statusFilter == '',
+                isLive: false,
+                onTap: () => setState(() => _statusFilter = ''),
               ),
-
-              const SizedBox(height: 10),
-
-              // ── Tab bar ───────────────────────────────────────────────
-              TabBar(
-                controller: _tabs,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                padding: const EdgeInsets.only(left: 4),
-                indicatorColor: context.accent,
-                indicatorWeight: 2,
-                indicatorSize: TabBarIndicatorSize.label,
-                dividerColor: Colors.transparent,
-                labelColor: context.fg,
-                unselectedLabelColor: context.fgSub,
-                labelPadding: const EdgeInsets.fromLTRB(16, 0, 0, 0),
-                labelStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: -0.3,
-                ),
-                tabs: [
-                  _TabLabel(
-                      label: 'Participating',
-                      count: state.participated.length,
-                      loading: state.isLoading),
-                  _TabLabel(
-                      label: 'Hosting',
-                      count: state.hosted.length,
-                      loading: state.isLoading),
-                  _TabLabel(
-                      label: 'Explore',
-                      count: state.publicTournaments.length,
-                      loading: state.isLoading),
-                ],
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: '$liveCount Live',
+                selected: _statusFilter == 'LIVE',
+                isLive: true,
+                onTap: () => setState(
+                    () => _statusFilter = _statusFilter == 'LIVE' ? '' : 'LIVE'),
               ),
-
-              // ── Format filter (Explore only) ──────────────────────────
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 200),
-                crossFadeState: _tabs.index == 2
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                firstChild: const SizedBox(width: double.infinity, height: 0),
-                secondChild: SizedBox(
-                  height: 46,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
-                    itemCount: _formats.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (_, i) => _FormatChip(
-                      label: _formatLabels[i],
-                      selected: state.exploreFormat == _formats[i],
-                      onTap: () => ref
-                          .read(playTournamentsControllerProvider.notifier)
-                          .setExploreFormat(_formats[i]),
-                    ),
-                  ),
-                ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: '$upcomingCount Upcoming',
+                selected: _statusFilter == 'UPCOMING',
+                isLive: false,
+                onTap: () => setState(() =>
+                    _statusFilter = _statusFilter == 'UPCOMING' ? '' : 'UPCOMING'),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: '$completedCount Completed',
+                selected: _statusFilter == 'COMPLETED',
+                isLive: false,
+                onTap: () => setState(() => _statusFilter =
+                    _statusFilter == 'COMPLETED' ? '' : 'COMPLETED'),
               ),
             ],
+          ),
+        ),
+
+        // ── Participating / Hosting / Explore tabs ───────────────────────────
+        TabBar(
+          controller: _tabs,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          indicatorColor: context.accent,
+          indicatorWeight: 2,
+          indicatorSize: TabBarIndicatorSize.label,
+          dividerColor: Colors.transparent,
+          labelColor: context.fg,
+          unselectedLabelColor: context.fgSub,
+          labelPadding: const EdgeInsets.fromLTRB(20, 0, 4, 0),
+          labelStyle: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.3,
+          ),
+          tabs: [
+            _TabLabel(
+                label: 'Participating',
+                count: state.participated.length,
+                loading: state.isLoading),
+            _TabLabel(
+                label: 'Hosting',
+                count: state.hosted.length,
+                loading: state.isLoading),
+            _TabLabel(
+                label: 'Explore',
+                count: state.publicTournaments.length,
+                loading: state.isLoading),
+          ],
+        ),
+
+        // ── Format filter (Explore only) ─────────────────────────────────────
+        AnimatedCrossFade(
+          duration: const Duration(milliseconds: 200),
+          crossFadeState: _tabs.index == 2
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          firstChild: const SizedBox(width: double.infinity, height: 0),
+          secondChild: SizedBox(
+            height: 46,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              itemCount: _formats.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) => _FormatChip(
+                label: _formatLabels[i],
+                selected: state.exploreFormat == _formats[i],
+                onTap: () => ref
+                    .read(playTournamentsControllerProvider.notifier)
+                    .setExploreFormat(_formats[i]),
+              ),
+            ),
           ),
         ),
 
@@ -333,8 +276,9 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
                 emptyMessage: _searchQuery.isEmpty && _statusFilter.isEmpty
                     ? 'Join a tournament from Explore'
                     : 'Try a different search or filter',
-                onRefresh: () async =>
-                    ref.read(playTournamentsControllerProvider.notifier).refresh(),
+                onRefresh: () async => ref
+                    .read(playTournamentsControllerProvider.notifier)
+                    .refresh(),
                 callbacks: widget.callbacks,
               ),
               _TournamentList(
@@ -348,8 +292,9 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
                 emptyMessage: _searchQuery.isEmpty && _statusFilter.isEmpty
                     ? 'Create your first tournament'
                     : 'Try a different search or filter',
-                onRefresh: () async =>
-                    ref.read(playTournamentsControllerProvider.notifier).refresh(),
+                onRefresh: () async => ref
+                    .read(playTournamentsControllerProvider.notifier)
+                    .refresh(),
                 callbacks: widget.callbacks,
                 showCreate: true,
                 onCreateTournament: widget.callbacks.onCreateTournament != null
@@ -363,8 +308,9 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
                 emptyIcon: Icons.explore_rounded,
                 emptyTitle: 'No tournaments found',
                 emptyMessage: 'Try a different format or search term',
-                onRefresh: () async =>
-                    ref.read(playTournamentsControllerProvider.notifier).refresh(),
+                onRefresh: () async => ref
+                    .read(playTournamentsControllerProvider.notifier)
+                    .refresh(),
                 callbacks: widget.callbacks,
               ),
             ],
@@ -439,12 +385,12 @@ class _TournamentList extends StatelessWidget {
     }
     return RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView.separated(
+      child: ListView.builder(
         padding: const EdgeInsets.only(bottom: 100),
         itemCount: tournaments.length,
-        separatorBuilder: (_, __) => Divider(height: 1, color: context.stroke),
         itemBuilder: (_, i) => TournamentCard(
           tournament: tournaments[i],
+          isAlternate: i.isOdd,
           onTap: callbacks.onNavigateToTournament != null
               ? () => callbacks.onNavigateToTournament!(
                     context,
@@ -522,7 +468,7 @@ class _FilterChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: selected ? context.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected ? context.accent : context.stroke,
           ),
@@ -582,42 +528,6 @@ class _FormatChip extends StatelessWidget {
             fontSize: 12,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Create button ────────────────────────────────────────────────────────────
-
-class _CreateButton extends StatelessWidget {
-  const _CreateButton({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: context.accent,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_rounded, color: context.ctaFg, size: 15),
-            const SizedBox(width: 4),
-            Text(
-              'Create',
-              style: TextStyle(
-                color: context.ctaFg,
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-              ),
-            ),
-          ],
         ),
       ),
     );

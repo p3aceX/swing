@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../contracts/host_path_config.dart';
@@ -189,6 +190,187 @@ class HostArenaBookingRepository {
   Future<void> deleteTimeBlock(String blockId) async {
     await _dio.delete(_paths.arenaBlock(blockId));
   }
+
+  Future<List<ArenaReservation>> listArenaBookings(
+    String arenaId, {
+    String? date,
+    String? unitId,
+  }) async {
+    final response = await _dio.get(
+      _paths.arenaReservations(arenaId),
+      queryParameters: {
+        if (date != null) 'date': date,
+      },
+    );
+    final data = _extractMap(response.data);
+    final list = ((data['data'] ?? const []) as List)
+        .whereType<Map>()
+        .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
+        .where((r) => unitId == null || r.unitId == unitId)
+        .toList();
+    return list;
+  }
+
+  // Returns { "YYYY-MM-DD": { count, revenuePaise } }
+  Future<Map<String, ArenaDaySummary>> fetchMonthSummary(
+    String arenaId,
+    String month, // "YYYY-MM"
+  ) async {
+    final response = await _dio.get(
+      _paths.arenaBookingSummary(arenaId),
+      queryParameters: {'month': month},
+    );
+    final data = _extractMap(response.data);
+    final payload = (data['data'] ?? data) as Map?;
+    final result = <String, ArenaDaySummary>{};
+    payload?.forEach((key, value) {
+      if (value is Map) {
+        result['$key'] = ArenaDaySummary(
+          count: (value['count'] as num?)?.toInt() ?? 0,
+          revenuePaise: (value['revenuePaise'] as num?)?.toInt() ?? 0,
+        );
+      }
+    });
+    return result;
+  }
+
+  Future<ArenaReservation> createManualBooking(
+    String arenaId, {
+    required String unitId,
+    required String date,
+    required String startTime,
+    required String endTime,
+    required String guestName,
+    required String guestPhone,
+    required String paymentMode,
+    required int amountPaise,
+    int advancePaise = 0,
+    String? notes,
+  }) async {
+    final response = await _dio.post(
+      _paths.arenaManualBooking(arenaId),
+      data: {
+        'unitId': unitId,
+        'date': date,
+        'startTime': startTime,
+        'endTime': endTime,
+        'guestName': guestName,
+        'guestPhone': guestPhone,
+        'paymentMode': paymentMode,
+        'amountPaise': amountPaise,
+        'advancePaise': advancePaise,
+        if (notes != null) 'notes': notes,
+      },
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaReservation.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<ArenaReservation> markBookingPaid(
+    String bookingId, {
+    required String paymentMode,
+    int? amountPaise,
+    String? reference,
+  }) async {
+    final response = await _dio.post(
+      _paths.bookingMarkPaid(bookingId),
+      data: {
+        'paymentMode': paymentMode,
+        if (amountPaise != null) 'amountPaise': amountPaise,
+        if (reference != null) 'reference': reference,
+      },
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaReservation.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<ArenaReservation> cancelBookingByOwner(
+    String bookingId, {
+    String? reason,
+  }) async {
+    final response = await _dio.post(
+      _paths.bookingCancelByOwner(bookingId),
+      data: {if (reason != null) 'reason': reason},
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaReservation.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<ArenaPaymentsData> fetchArenaPayments(
+    String arenaId, {
+    String? month,
+    String? mode,
+  }) async {
+    debugPrint('[payments] fetchArenaPayments arena=$arenaId month=$month mode=$mode');
+    try {
+      final response = await _dio.get(
+        _paths.arenaPayments(arenaId),
+        queryParameters: {
+          if (month != null) 'month': month,
+          if (mode != null) 'mode': mode,
+        },
+      );
+      debugPrint('[payments] raw response: ${response.data}');
+      final data = _extractMap(response.data);
+      final payload = _extractMap(data['data'] ?? data);
+      debugPrint('[payments] payload keys: ${payload.keys.toList()}');
+      final checkedIn = ((payload['checkedInBookings'] ?? const []) as List)
+          .whereType<Map>()
+          .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      final pending = ((payload['pendingBookings'] ?? const []) as List)
+          .whereType<Map>()
+          .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      debugPrint('[payments] parsed: ${checkedIn.length} checked-in, ${pending.length} pending');
+      return ArenaPaymentsData(checkedInBookings: checkedIn, pendingBookings: pending);
+    } catch (e, st) {
+      debugPrint('[payments] fetchArenaPayments ERROR: $e\n$st');
+      rethrow;
+    }
+  }
+
+  Future<List<ArenaGuest>> fetchArenaGuests(
+    String arenaId, {
+    String? search,
+  }) async {
+    debugPrint('[customers] fetchArenaGuests arena=$arenaId search=$search');
+    try {
+      final response = await _dio.get(
+        _paths.arenaGuests(arenaId),
+        queryParameters: {
+          if (search != null && search.isNotEmpty) 'search': search,
+        },
+      );
+      debugPrint('[customers] raw response: ${response.data}');
+      final data = _extractMap(response.data);
+      final list = ((data['data'] ?? const []) as List)
+          .whereType<Map>()
+          .map((e) => ArenaGuest.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      debugPrint('[customers] parsed: ${list.length} guests');
+      return list;
+    } catch (e, st) {
+      debugPrint('[customers] fetchArenaGuests ERROR: $e\n$st');
+      rethrow;
+    }
+  }
+
+  Future<ArenaReservation> checkinByOwner(String bookingId) async {
+    final response = await _dio.post(_paths.bookingCheckinByOwner(bookingId));
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaReservation.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+}
+
+class ArenaDaySummary {
+  const ArenaDaySummary({required this.count, required this.revenuePaise});
+  final int count;
+  final int revenuePaise;
 }
 
 final hostArenaBookingRepositoryProvider = Provider<HostArenaBookingRepository>(

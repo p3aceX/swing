@@ -115,6 +115,18 @@ class HostPathConfig {
   String arenaBlocks(String arenaId) => '$arenasBase/$arenaId/blocks';
   String arenaBlock(String blockId) => '$arenasBase/blocks/$blockId';
 
+  // ── Bookings / reservations ─────────────────────────────────────────────
+  String arenaReservations(String arenaId) => '/bookings/arena/$arenaId';
+  String arenaBookingSummary(String arenaId) => '/bookings/arena/$arenaId/summary';
+  String arenaGuests(String arenaId) => '/bookings/arena/$arenaId/guests';
+  String arenaPayments(String arenaId) => '/bookings/arena/$arenaId/payments';
+  String arenaManualBooking(String arenaId) => '/bookings/arena/$arenaId/manual';
+  String bookingMarkPaid(String bookingId) => '/bookings/$bookingId/mark-paid';
+  String bookingCancelByOwner(String bookingId) => '/bookings/$bookingId/cancel-by-owner';
+  String bookingCheckinByOwner(String bookingId) => '/bookings/$bookingId/checkin-by-owner';
+  String bookingPaymentOrder(String bookingId) => '/bookings/$bookingId/payment-order';
+  String get verifyPayment => '/bookings/verify-payment';
+
   // ── Players ─────────────────────────────────────────────────────────────
   String get playerSearch => playerSearchPath;
 

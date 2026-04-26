@@ -24,6 +24,14 @@ enum _TeamsFilter { all, owner, member }
 
 class _PlayTeamsTabState extends ConsumerState<PlayTeamsTab> {
   _TeamsFilter _filter = _TeamsFilter.all;
+  String _searchQuery = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   void _load() {
     ref
@@ -51,11 +59,20 @@ class _PlayTeamsTabState extends ConsumerState<PlayTeamsTab> {
   }
 
   List<HostMyTeam> _filtered(List<HostMyTeam> all) {
-    return switch (_filter) {
+    var list = switch (_filter) {
       _TeamsFilter.all => all,
       _TeamsFilter.owner => all.where((t) => t.isOwner).toList(),
       _TeamsFilter.member => all.where((t) => !t.isOwner).toList(),
     };
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list
+          .where((t) =>
+              t.name.toLowerCase().contains(q) ||
+              (t.city?.toLowerCase().contains(q) ?? false))
+          .toList();
+    }
+    return list;
   }
 
   @override
@@ -68,61 +85,70 @@ class _PlayTeamsTabState extends ConsumerState<PlayTeamsTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Header ────────────────────────────────────────────────────────────
+        // ── Search ────────────────────────────────────────────────────────────
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
-                  'My Squads',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                      ),
-                ),
-              ),
-              _NewSquadButton(
-                onTap: widget.callbacks.onCreateTeam != null
-                    ? () => widget.callbacks.onCreateTeam!(context)
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color: context.cardBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v),
+              style: TextStyle(
+                  color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
+              decoration: InputDecoration(
+                hintText: 'Search teams…',
+                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
+                prefixIcon:
+                    Icon(Icons.search_rounded, color: context.fgSub, size: 18),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? GestureDetector(
+                        onTap: () => setState(
+                            () { _searchCtrl.clear(); _searchQuery = ''; }),
+                        child: Icon(Icons.close_rounded,
+                            color: context.fgSub, size: 18),
+                      )
                     : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
               ),
-            ],
+            ),
           ),
         ),
 
-        // ── Filter pills ──────────────────────────────────────────────────────
+        // ── Role filter chips ──────────────────────────────────────────────────
         if (allTeams.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Row(
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               children: [
-                _FilterPill(
-                  label: 'All',
-                  count: allTeams.length,
+                _FilterChip(
+                  label: 'All ${allTeams.length}',
                   selected: _filter == _TeamsFilter.all,
                   onTap: () => setState(() => _filter = _TeamsFilter.all),
                 ),
                 const SizedBox(width: 8),
-                _FilterPill(
-                  label: 'Owner',
-                  count: allTeams.where((t) => t.isOwner).length,
+                _FilterChip(
+                  label: 'Owner ${allTeams.where((t) => t.isOwner).length}',
                   selected: _filter == _TeamsFilter.owner,
                   onTap: () => setState(() => _filter = _TeamsFilter.owner),
                 ),
                 const SizedBox(width: 8),
-                _FilterPill(
-                  label: 'Member',
-                  count: allTeams.where((t) => !t.isOwner).length,
+                _FilterChip(
+                  label: 'Member ${allTeams.where((t) => !t.isOwner).length}',
                   selected: _filter == _TeamsFilter.member,
                   onTap: () => setState(() => _filter = _TeamsFilter.member),
                 ),
               ],
             ),
-          ),
-
-        Divider(height: 1, color: context.stroke),
+          )
+        else
+          const SizedBox(height: 8),
 
         // ── Body ──────────────────────────────────────────────────────────────
         Expanded(child: _body(context, state, ctrl, visibleTeams, allTeams)),
@@ -191,19 +217,13 @@ class _PlayTeamsTabState extends ConsumerState<PlayTeamsTab> {
         itemCount: visibleTeams.length,
         itemBuilder: (context, i) {
           final team = visibleTeams[i];
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _TeamRow(
-                team: team,
-                onTap: widget.callbacks.onNavigateToTeam != null
-                    ? () => widget.callbacks.onNavigateToTeam!(
-                        context, team.id, team.name)
-                    : null,
-              ),
-              if (i < visibleTeams.length - 1)
-                Divider(height: 1, indent: 76, color: context.stroke),
-            ],
+          return _TeamRow(
+            team: team,
+            isAlternate: i.isOdd,
+            onTap: widget.callbacks.onNavigateToTeam != null
+                ? () => widget.callbacks.onNavigateToTeam!(
+                    context, team.id, team.name)
+                : null,
           );
         },
       ),
@@ -211,18 +231,16 @@ class _PlayTeamsTabState extends ConsumerState<PlayTeamsTab> {
   }
 }
 
-// ─── Filter pill ──────────────────────────────────────────────────────────────
+// ─── Filter chip ──────────────────────────────────────────────────────────────
 
-class _FilterPill extends StatelessWidget {
-  const _FilterPill({
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
     required this.label,
-    required this.count,
     required this.selected,
     required this.onTap,
   });
 
   final String label;
-  final int count;
   final bool selected;
   final VoidCallback onTap;
 
@@ -231,55 +249,23 @@ class _FilterPill extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? context.accent : context.panel,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          count > 0 ? '$label  $count' : label,
-          style: TextStyle(
-            color: selected ? context.bg : context.fgSub,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
+          color: selected ? context.accentBg : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? context.accent : context.stroke,
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ─── New squad button ─────────────────────────────────────────────────────────
-
-class _NewSquadButton extends StatelessWidget {
-  const _NewSquadButton({this.onTap});
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: context.accentBg,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_rounded, color: context.accent, size: 16),
-            const SizedBox(width: 4),
-            Text(
-              'New Squad',
-              style: TextStyle(
-                color: context.accent,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-          ],
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? context.accent : context.fgSub,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
         ),
       ),
     );
@@ -289,84 +275,70 @@ class _NewSquadButton extends StatelessWidget {
 // ─── Team row ─────────────────────────────────────────────────────────────────
 
 class _TeamRow extends StatelessWidget {
-  const _TeamRow({required this.team, this.onTap});
+  const _TeamRow({required this.team, this.onTap, this.isAlternate = false});
   final HostMyTeam team;
   final VoidCallback? onTap;
+  final bool isAlternate;
 
   @override
   Widget build(BuildContext context) {
-    final meta = [
+    final metaParts = [
       if (team.city?.isNotEmpty == true) team.city!,
       if (team.teamType?.isNotEmpty == true) team.teamType!,
-    ].join(' · ');
+    ];
+    final playerLabel = '${team.playerCount} ${team.playerCount == 1 ? 'player' : 'players'}';
 
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(
-          children: [
-            _TeamAvatar(team: team),
-            const SizedBox(width: 14),
+    return Material(
+      color: isAlternate ? context.panel : context.bg,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              _TeamAvatar(team: team),
+              const SizedBox(width: 14),
 
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          team.name,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Name + role badge
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            team.name,
+                            style: TextStyle(
+                              color: context.fg,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      _RoleBadge(isOwner: team.isOwner),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    meta.isNotEmpty ? meta : '${team.playerCount} players',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: context.fgSub),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                        const SizedBox(width: 8),
+                        _RoleBadge(isOwner: team.isOwner),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    // Meta: city · type · N players
+                    Text(
+                      [...metaParts, playerLabel].join(' · '),
+                      style: TextStyle(color: context.fgSub, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-            ),
 
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${team.playerCount}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                Text(
-                  team.playerCount == 1 ? 'player' : 'players',
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelSmall
-                      ?.copyWith(color: context.fgSub),
-                ),
-              ],
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.chevron_right_rounded, color: context.fgSub, size: 20),
-          ],
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, color: context.fgSub, size: 18),
+            ],
+          ),
         ),
       ),
     );

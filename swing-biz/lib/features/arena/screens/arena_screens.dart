@@ -11,6 +11,7 @@ import '../models/arena_models.dart';
 import '../services/arena_court_amenity_store.dart';
 import '../services/arena_dummy_data.dart';
 import '../widgets/arena_widgets.dart';
+import '../../bookings/presentation/bookings_page.dart';
 
 final ValueNotifier<List<_ArenaNotificationItem>> _arenaNotificationsNotifier =
     ValueNotifier<List<_ArenaNotificationItem>>([
@@ -1773,79 +1774,26 @@ class ArenaBookingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 4,
-      child: ArenaScaffold(
-        title: 'Bookings',
-        currentIndex: 2,
-        actions: [
-          TextButton.icon(
-            onPressed: () => context.push(AppRoutes.arenaBookingForm),
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text('New Booking'),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF3F4F6),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF3F4F6),
+        elevation: 0,
+        title: const Text(
+          'Bookings',
+          style: TextStyle(
+            color: Color(0xFF101828),
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
           ),
-        ],
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: ArenaCard(
-                child: Column(
-                  children: [
-                    ArenaDropdown(
-                      label: 'Status',
-                      value: 'All',
-                      items: [
-                        'All',
-                        'Confirmed',
-                        'Pending',
-                        'Cancelled',
-                        'Completed'
-                      ],
-                    ),
-                    ArenaTextField(
-                        label: 'Date range', initialValue: '23 Apr - 30 Apr'),
-                    ArenaTextField(label: 'Search by customer name'),
-                  ],
-                ),
-              ),
-            ),
-            const TabBar(
-              labelColor: arenaLightGreen,
-              unselectedLabelColor: arenaMuted,
-              indicatorColor: arenaGreen,
-              tabs: [
-                Tab(text: 'All'),
-                Tab(text: 'Confirmed'),
-                Tab(text: 'Pending'),
-                Tab(text: 'Completed'),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _BookingList(bookings: arenaBookings),
-                  _BookingList(
-                    bookings: arenaBookings
-                        .where((item) => item.status == BookingStatus.confirmed)
-                        .toList(),
-                  ),
-                  _BookingList(
-                    bookings: arenaBookings
-                        .where((item) => item.status == BookingStatus.pending)
-                        .toList(),
-                  ),
-                  _BookingList(
-                    bookings: arenaBookings
-                        .where((item) => item.status == BookingStatus.completed)
-                        .toList(),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF101828)),
+          onPressed: () => context.canPop() ? context.pop() : null,
         ),
       ),
+      body: const SafeArea(child: BookingsPage()),
+      bottomNavigationBar: const ArenaBottomNav(currentIndex: 2),
     );
   }
 }
@@ -4045,68 +3993,6 @@ class _ArenaBanner extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _BookingList extends StatelessWidget {
-  const _BookingList({required this.bookings});
-
-  final List<ArenaBooking> bookings;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (bookings.isEmpty)
-          const ArenaCard(
-            child:
-                Text('No bookings today', style: TextStyle(color: arenaMuted)),
-          ),
-        ...bookings.map(
-          (booking) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: ArenaCard(
-              onTap: () =>
-                  context.push('${AppRoutes.arenaBookings}/${booking.id}'),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${booking.date} - ${booking.timeSlot}',
-                    style: const TextStyle(
-                      color: arenaText,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${booking.courtName} - ${booking.customerName}',
-                    style: const TextStyle(color: arenaMuted),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ArenaStatusBadge(
-                        label: bookingStatusLabel(booking.status),
-                        positive: booking.status == BookingStatus.confirmed ||
-                            booking.status == BookingStatus.completed,
-                      ),
-                      ArenaStatusBadge(
-                        label: paymentStatusLabel(booking.paymentStatus),
-                        positive: booking.paymentStatus == PaymentStatus.paid,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

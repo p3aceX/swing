@@ -27,7 +27,6 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
   late final TabController _tabController;
   int _selectedFilter = -1; // -1 = All
   String _searchQuery = '';
-  bool _searchOpen = false;
   final _searchCtrl = TextEditingController();
   int _activeTabIndex = 0;
 
@@ -59,85 +58,6 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     _tabController.dispose();
     _searchCtrl.dispose();
     super.dispose();
-  }
-
-  void _showCreateSheet(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-          decoration: BoxDecoration(
-            color: context.surf,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Create',
-                  style: TextStyle(
-                      color: context.fg,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5)),
-              const SizedBox(height: 4),
-              Text('What would you like to start?',
-                  style: TextStyle(color: context.fgSub, fontSize: 13)),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  if (widget.callbacks.onCreateMatch != null)
-                    Expanded(
-                      child: _CreateActionCard(
-                        icon: Icons.sports_cricket_rounded,
-                        label: 'Match',
-                        color: context.sky,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          widget.callbacks.onCreateMatch!(context);
-                        },
-                      ),
-                    ),
-                  if (widget.callbacks.onCreateMatch != null &&
-                      widget.callbacks.onCreateTeam != null)
-                    const SizedBox(width: 12),
-                  if (widget.callbacks.onCreateTeam != null)
-                    Expanded(
-                      child: _CreateActionCard(
-                        icon: Icons.shield_rounded,
-                        label: 'Team',
-                        color: context.success,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          widget.callbacks.onCreateTeam!(context);
-                        },
-                      ),
-                    ),
-                  if (widget.callbacks.onCreateTournament != null) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _CreateActionCard(
-                        icon: Icons.emoji_events_rounded,
-                        label: 'Tournament',
-                        color: context.gold,
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          widget.callbacks.onCreateTournament!(context);
-                        },
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _openFilters(BuildContext context, List<PlayerMatch> all) {
@@ -192,9 +112,6 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     final all = state.matches;
 
     // Counts for the currently visible tab section
-    final currentSection = _activeTabIndex == 0
-        ? MatchSectionType.individual
-        : MatchSectionType.tournament;
     final sectionAll = _activeTabIndex == 0
         ? all.where((m) => m.sectionType == MatchSectionType.individual).toList()
         : all.where((m) => m.sectionType == MatchSectionType.tournament && m.involvesPlayerTeam).toList();
@@ -203,13 +120,6 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     final upcomingCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.upcoming).length;
     final pastCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.past).length;
     final hostingCount = sectionAll.where((m) => m.canScore && m.lifecycle != MatchLifecycle.past).length;
-
-    final statLine = sectionAll.isEmpty
-        ? null
-        : [
-            '${sectionAll.length} matches',
-            if (liveCount > 0) '$liveCount live',
-          ].join('  ·  ');
 
     final individualCount =
         all.where((m) => m.sectionType == MatchSectionType.individual).length;
@@ -221,259 +131,176 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Header ─────────────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: context.stroke)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 160),
-                crossFadeState: _searchOpen
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                firstChild: Row(
-                  children: [
-                    if (statLine != null)
-                      Expanded(
-                        child: Text(
-                          statLine,
-                          style: TextStyle(
-                            color: context.fgSub,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+        // ── Search ──────────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color: context.cardBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v),
+              style: TextStyle(
+                  color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
+              decoration: InputDecoration(
+                hintText: 'Search matches…',
+                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
+                prefixIcon:
+                    Icon(Icons.search_rounded, color: context.fgSub, size: 18),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? GestureDetector(
+                        onTap: () => setState(
+                            () { _searchCtrl.clear(); _searchQuery = ''; }),
+                        child: Icon(Icons.close_rounded,
+                            color: context.fgSub, size: 18),
                       )
-                    else
-                      const Spacer(),
-                    GestureDetector(
-                      onTap: () => _openFilters(context, all),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Icon(
-                              Icons.tune_rounded,
-                              size: 22,
-                              color: hasFilters ? context.accent : context.fgSub,
-                            ),
-                            if (hasFilters)
-                              Positioned(
-                                top: -4,
-                                right: -4,
-                                child: Container(
-                                  width: 14,
-                                  height: 14,
-                                  decoration: BoxDecoration(
-                                    color: context.accent,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '$_activeFilterCount',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w800,
-                                      ),
+                    : GestureDetector(
+                        onTap: () => _openFilters(context, all),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            clipBehavior: Clip.none,
+                            children: [
+                              Icon(Icons.tune_rounded,
+                                  size: 18,
+                                  color: hasFilters
+                                      ? context.accent
+                                      : context.fgSub),
+                              if (hasFilters)
+                                Positioned(
+                                  top: 10,
+                                  right: 6,
+                                  child: Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: context.accent,
+                                      shape: BoxShape.circle,
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () => setState(() => _searchOpen = true),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(Icons.search_rounded,
-                            color: context.fgSub, size: 22),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () => _showCreateSheet(context),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: context.ctaBg,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.add_rounded, color: context.ctaFg, size: 16),
-                            const SizedBox(width: 3),
-                            Text('New',
-                                style: TextStyle(
-                                    color: context.ctaFg,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13,
-                                    letterSpacing: 0.2)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                secondChild: TextField(
-                  controller: _searchCtrl,
-                  autofocus: true,
-                  onChanged: (v) => setState(() => _searchQuery = v),
-                  style: TextStyle(
-                      color: context.fg,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500),
-                  decoration: InputDecoration(
-                    hintText: 'Team or venue…',
-                    hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
-                    prefixIcon:
-                        Icon(Icons.search_rounded, color: context.fgSub, size: 18),
-                    suffixIcon: GestureDetector(
-                      onTap: () {
-                        _searchCtrl.clear();
-                        setState(() {
-                          _searchQuery = '';
-                          _searchOpen = false;
-                        });
-                      },
-                      child: Icon(Icons.close_rounded,
-                          color: context.fgSub, size: 18),
-                    ),
-                    filled: true,
-                    fillColor: context.cardBg,
-                    contentPadding: EdgeInsets.zero,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
+                border: InputBorder.none,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 14),
               ),
+            ),
+          ),
+        ),
 
-              // ── Active filter chips ──────────────────────────────────────
-              if (hasFilters) ...[
-                const SizedBox(height: 10),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      if (_formatFilter != null)
-                        _ActiveFilterChip(
-                          label: _formatFilter!,
-                          onRemove: () => setState(() => _formatFilter = null),
-                        ),
-                      if (_opponentFilter != null)
-                        _ActiveFilterChip(
-                          label: 'vs $_opponentFilter',
-                          onRemove: () => setState(() => _opponentFilter = null),
-                        ),
-                      if (_venueFilter != null)
-                        _ActiveFilterChip(
-                          label: _venueFilter!,
-                          onRemove: () => setState(() => _venueFilter = null),
-                        ),
-                    ],
+        // ── Active attribute filters ─────────────────────────────────────────
+        if (hasFilters) ...[
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                if (_formatFilter != null)
+                  _ActiveFilterChip(
+                    label: _formatFilter!,
+                    onRemove: () => setState(() => _formatFilter = null),
                   ),
-                ),
+                if (_opponentFilter != null)
+                  _ActiveFilterChip(
+                    label: 'vs $_opponentFilter',
+                    onRemove: () => setState(() => _opponentFilter = null),
+                  ),
+                if (_venueFilter != null)
+                  _ActiveFilterChip(
+                    label: _venueFilter!,
+                    onRemove: () => setState(() => _venueFilter = null),
+                  ),
               ],
+            ),
+          ),
+        ],
 
-              const SizedBox(height: 12),
-
-              // ── Lifecycle filter chips ───────────────────────────────────
-              SizedBox(
-                height: 34,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _FilterChip(
-                      label: '${sectionAll.length} All',
-                      selected: _selectedFilter == -1,
-                      isLive: false,
-                      onTap: () => setState(() => _selectedFilter = -1),
-                    ),
-                    const SizedBox(width: 8),
-                    ...List.generate(_filters.length, (i) {
-                      final f = _filters[i];
-                      final count = switch (f) {
-                        MatchLifecycle.live => liveCount,
-                        MatchLifecycle.upcoming => upcomingCount,
-                        MatchLifecycle.past => pastCount,
-                      };
-                      final label = switch (f) {
-                        MatchLifecycle.live => '$count Live',
-                        MatchLifecycle.upcoming => '$count Upcoming',
-                        MatchLifecycle.past => '$count Past',
-                      };
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: _FilterChip(
-                          label: label,
-                          isLive: f == MatchLifecycle.live,
-                          selected: _selectedFilter == i,
-                          onTap: () => setState(() => _selectedFilter = i),
-                        ),
-                      );
-                    }),
-                    if (hostingCount > 0)
-                      _FilterChip(
-                        label: '$hostingCount Hosting',
-                        selected: _selectedFilter == 99,
-                        isLive: false,
-                        onTap: () => setState(() => _selectedFilter = 99),
-                      ),
-                  ],
-                ),
+        // ── Lifecycle chips ──────────────────────────────────────────────────
+        SizedBox(
+          height: 44,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            children: [
+              _FilterChip(
+                label: '${sectionAll.length} All',
+                selected: _selectedFilter == -1,
+                isLive: false,
+                onTap: () => setState(() => _selectedFilter = -1),
               ),
-              const SizedBox(height: 10),
-
-              // ── Segment tabs ─────────────────────────────────────────────
-              Container(
-                height: 42,
-                decoration: BoxDecoration(
-                  color: context.cardBg,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: TabBar(
-                  controller: _tabController,
-                  padding: const EdgeInsets.all(4),
-                  indicator: BoxDecoration(
-                    color: context.accentBg,
-                    borderRadius: BorderRadius.circular(10),
+              const SizedBox(width: 8),
+              ...List.generate(_filters.length, (i) {
+                final f = _filters[i];
+                final count = switch (f) {
+                  MatchLifecycle.live => liveCount,
+                  MatchLifecycle.upcoming => upcomingCount,
+                  MatchLifecycle.past => pastCount,
+                };
+                final label = switch (f) {
+                  MatchLifecycle.live => '$count Live',
+                  MatchLifecycle.upcoming => '$count Upcoming',
+                  MatchLifecycle.past => '$count Past',
+                };
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _FilterChip(
+                    label: label,
+                    isLive: f == MatchLifecycle.live,
+                    selected: _selectedFilter == i,
+                    onTap: () => setState(() => _selectedFilter = i),
                   ),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  dividerColor: Colors.transparent,
-                  labelColor: context.accent,
-                  unselectedLabelColor: context.fgSub,
-                  labelStyle: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2),
-                  unselectedLabelStyle: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500),
-                  tabs: [
-                    Tab(text: '$individualCount Individual'),
-                    Tab(text: '$tournamentCount Tournament'),
-                  ],
+                );
+              }),
+              if (hostingCount > 0)
+                _FilterChip(
+                  label: '$hostingCount Hosting',
+                  selected: _selectedFilter == 99,
+                  isLive: false,
+                  onTap: () => setState(() => _selectedFilter = 99),
                 ),
-              ),
             ],
+          ),
+        ),
+
+        // ── Individual / Tournament segment ──────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+          child: Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: context.cardBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              padding: const EdgeInsets.all(3),
+              indicator: BoxDecoration(
+                color: context.accentBg,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerColor: Colors.transparent,
+              labelColor: context.accent,
+              unselectedLabelColor: context.fgSub,
+              labelStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2),
+              unselectedLabelStyle:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              tabs: [
+                Tab(text: '$individualCount Individual'),
+                Tab(text: '$tournamentCount Tournament'),
+              ],
+            ),
           ),
         ),
 
@@ -763,61 +590,6 @@ class _HostedMatchItem extends StatelessWidget {
 }
 
 
-// ─── Sub widgets ──────────────────────────────────────────────────────────────
-
-class _CreateActionCard extends StatelessWidget {
-  const _CreateActionCard({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.2),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              style: TextStyle(
-                color: context.fg,
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-                letterSpacing: -0.2,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _FilterChip extends StatelessWidget {
   const _FilterChip({
     required this.label,
@@ -840,7 +612,7 @@ class _FilterChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
         decoration: BoxDecoration(
           color: selected ? context.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected ? context.accent : context.stroke,
           ),

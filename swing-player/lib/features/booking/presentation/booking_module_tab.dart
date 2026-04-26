@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -70,156 +69,19 @@ class _BookingModuleTabState extends State<BookingModuleTab> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: Stack(
+            child: TabBarView(
               children: [
-                TabBarView(
-                  children: [
-                    BookingTab(
-                      currentCity: widget.currentCity,
-                      currentLatitude: widget.currentLatitude,
-                      currentLongitude: widget.currentLongitude,
-                    ),
-                    const _CoachingBookingPlaceholder(),
-                  ],
+                BookingTab(
+                  currentCity: widget.currentCity,
+                  currentLatitude: widget.currentLatitude,
+                  currentLongitude: widget.currentLongitude,
                 ),
-                // "Coming Soon" Overlay
-                Positioned.fill(
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                      child: Container(
-                        color: context.bg.withValues(alpha: 0.96),
-                        child: Center(
-                          child: SingleChildScrollView(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(24),
-                                    decoration: BoxDecoration(
-                                      color: context.accent.withValues(alpha: 0.1),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: context.accent.withValues(alpha: 0.2),
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: Icon(
-                                      Icons.stars_rounded,
-                                      color: context.accent,
-                                      size: 56,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 28),
-                                  Text(
-                                    'Booking Coming Soon',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: context.fg,
-                                      fontSize: 32,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: -1.2,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Facility and Coach Booking are on their way. No more hustle to find your perfect ground or turf!',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: context.fgSub,
-                                      fontSize: 17,
-                                      height: 1.6,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 36),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 24, vertical: 20),
-                                    decoration: BoxDecoration(
-                                      color: context.panel.withValues(alpha: 0.8),
-                                      borderRadius: BorderRadius.circular(24),
-                                      border: Border.all(
-                                          color: context.stroke
-                                              .withValues(alpha: 0.6)),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        _ComingSoonFeature(
-                                          icon: Icons.stadium_rounded,
-                                          label: 'Verified Arenas & Turfs',
-                                        ),
-                                        const SizedBox(height: 20),
-                                        _ComingSoonFeature(
-                                          icon: Icons.sports_rounded,
-                                          label: 'Pro Coaching Sessions',
-                                        ),
-                                        const SizedBox(height: 20),
-                                        _ComingSoonFeature(
-                                          icon: Icons.flash_on_rounded,
-                                          label: 'Instant Slot Confirmation',
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 48),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 20, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: context.accent.withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(30),
-                                    ),
-                                    child: Text(
-                                      'YOUR CRICKET HOME, JUST A TAP AWAY',
-                                      style: TextStyle(
-                                        color: context.accent,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 1.2,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                const _CoachingBookingPlaceholder(),
               ],
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ComingSoonFeature extends StatelessWidget {
-  const _ComingSoonFeature({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: context.fgSub, size: 20),
-        const SizedBox(width: 12),
-        Text(
-          label,
-          style: TextStyle(
-            color: context.fg,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
     );
   }
 }

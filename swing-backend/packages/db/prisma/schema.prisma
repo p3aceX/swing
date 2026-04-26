@@ -2318,6 +2318,7 @@ model ArenaUnit {
   minSlotMins       Int              @default(60)
   maxSlotMins       Int              @default(240)
   slotIncrementMins Int              @default(60)
+  minAdvancePaise   Int              @default(0)
   openTime          String?
   closeTime         String?
   operatingDays     Int[]            @default([])
@@ -2356,6 +2357,7 @@ model ArenaTimeBlock {
   endTime     String
   reason      String?
   isRecurring Boolean   @default(false)
+  isHoliday   Boolean   @default(false)
   weekdays    Int[]     @default([])
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -2416,6 +2418,13 @@ model SlotBooking {
   notes              String?
   cancellationReason String?
   cancelledAt        DateTime?
+  // Offline / walk-in booking fields
+  isOfflineBooking   Boolean      @default(false)
+  createdByOwnerId   String?
+  guestName          String?
+  guestPhone         String?
+  paymentMode        String?      // ONLINE | CASH | UPI | CARD | BANK_TRANSFER
+  advancePaise       Int          @default(0)
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
