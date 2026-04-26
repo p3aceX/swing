@@ -27,21 +27,21 @@ steps:
     args:
       - -c
       - |
-        JOB_SECRETS="DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest"
-        JOB_ENVVARS="RUN_DB_MIGRATIONS=true,SERVICE_MODE=api"
-        JOB_IMAGE="gcr.io/$PROJECT_ID/swing-backend:$COMMIT_SHA"
+        job_secrets="DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest"
+        job_envvars="RUN_DB_MIGRATIONS=true,SERVICE_MODE=api"
+        job_image="gcr.io/$PROJECT_ID/swing-backend:$COMMIT_SHA"
         if gcloud run jobs describe swing-migrate --region=asia-south1 --project=$PROJECT_ID 2>/dev/null; then
           gcloud run jobs update swing-migrate \
-            --image="$JOB_IMAGE" \
+            --image="$job_image" \
             --region=asia-south1 \
-            --update-env-vars="$JOB_ENVVARS" \
-            --update-secrets="$JOB_SECRETS"
+            --update-env-vars="$job_envvars" \
+            --update-secrets="$job_secrets"
         else
           gcloud run jobs create swing-migrate \
-            --image="$JOB_IMAGE" \
+            --image="$job_image" \
             --region=asia-south1 \
-            --set-env-vars="$JOB_ENVVARS" \
-            --set-secrets="$JOB_SECRETS" \
+            --set-env-vars="$job_envvars" \
+            --set-secrets="$job_secrets" \
             --max-retries=0
         fi
         gcloud run jobs execute swing-migrate --region=asia-south1 --wait
