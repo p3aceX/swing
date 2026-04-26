@@ -24,11 +24,11 @@ class AppTheme {
     const Color stroke$dark = Color(0xFF2A2A2A);
     const Color panel$dark = Color(0xFF1F1F1F);
 
-    const Color bg$light = Color(0xFFFFFFFF);
-    const Color surf$light = Color(0xFFFFFFFF);
-    const Color card$light = Color(0xFFFFFFFF);
-    const Color stroke$light = Color(0xFFD3D9E0);
-    const Color panel$light = Color(0xFFF0F3F7);
+    const Color bg$light = Color(0xFFEEF1F5);    // Slate-tinted bg so cards lift off
+    const Color surf$light = Color(0xFFFFFFFF);  // Sheets, drawers — pure white
+    const Color card$light = Color(0xFFFFFFFF);  // Cards pop against the bg
+    const Color stroke$light = Color(0xFFB8C2CC); // Visible borders and dividers
+    const Color panel$light = Color(0xFFDDE2E9); // Tab bar bg, grouped sections
 
     final bg = isDark ? bg$dark : bg$light;
     final surf = isDark ? surf$dark : surf$light;
@@ -36,13 +36,13 @@ class AppTheme {
     final stroke = isDark ? stroke$dark : stroke$light;
     final panel = isDark ? panel$dark : panel$light;
 
-    final fg = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF141618);
-    final fgSub = isDark ? const Color(0xFF888888) : const Color(0xFF6B7280);
+    final fg = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF0E1114);
+    final fgSub = isDark ? const Color(0xFF888888) : const Color(0xFF52606D);
 
     // Primary Identity: Liquid Silver / Platinum
     final accent = isDark ? const Color(0xFFE5E4E2) : rankTheme.secondary;
     final accentBg =
-        isDark ? const Color(0x1AFFFFFF) : accent.withValues(alpha: 0.09);
+        isDark ? const Color(0x1AFFFFFF) : accent.withValues(alpha: 0.14);
     final success = isDark ? const Color(0xFF00FF95) : const Color(0xFF2F7A52);
     final warn = isDark ? const Color(0xFFFFB347) : const Color(0xFFAF7A2A);
     final danger = isDark ? const Color(0xFFFF5252) : const Color(0xFFB45252);
@@ -111,9 +111,9 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: card,
-        elevation: isDark ? 0 : 1.2,
+        elevation: isDark ? 0 : 2.5,
         shadowColor:
-            isDark ? Colors.transparent : Colors.black.withValues(alpha: 0.06),
+            isDark ? Colors.transparent : Colors.black.withValues(alpha: 0.10),
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
@@ -123,7 +123,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surf,
+        fillColor: isDark ? surf : card,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
@@ -160,7 +160,7 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: fg,
           minimumSize: const Size.fromHeight(44),
-          side: BorderSide(color: stroke),
+          side: BorderSide(color: isDark ? stroke : const Color(0xFF8E9BAA), width: 1.2),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
