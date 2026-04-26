@@ -2323,10 +2323,13 @@ model ArenaUnit {
   closeTime         String?
   operatingDays     Int[]            @default([])
   hasFloodlights    Boolean          @default(false)
+  parentUnitId      String?
   isActive          Boolean          @default(true)
   createdAt         DateTime         @default(now())
 
   arena        Arena            @relation(fields: [arenaId], references: [id])
+  parentUnit   ArenaUnit?       @relation("UnitHierarchy", fields: [parentUnitId], references: [id], onDelete: SetNull)
+  childUnits   ArenaUnit[]      @relation("UnitHierarchy")
   addons       ArenaAddon[]
   bookings     SlotBooking[]
   timeBlocks   ArenaTimeBlock[]

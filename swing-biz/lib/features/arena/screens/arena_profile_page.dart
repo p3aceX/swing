@@ -993,9 +993,13 @@ class _UnitCard extends StatelessWidget {
       unit.netType,
       '${unit.minSlotMins ~/ 60}h min',
     ]);
+    final isGround = unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
     final priceRows = [
-      _money(unit.pricePerHourPaise),
-      if (unit.price4HrPaise != null) '4h ${_money(unit.price4HrPaise!)}',
+      if (!isGround) _money(unit.pricePerHourPaise),
+      if (unit.price4HrPaise != null)
+        '4h ${_money(unit.price4HrPaise!)}'
+      else if (isGround)
+        '4h ${_money(unit.pricePerHourPaise * 4)}',
       if (unit.price8HrPaise != null) '8h ${_money(unit.price8HrPaise!)}',
       if (unit.priceFullDayPaise != null)
         'Day ${_money(unit.priceFullDayPaise!)}',
@@ -1098,7 +1102,9 @@ class _UnitCard extends StatelessWidget {
                   const _SmallPill('Floodlights', highlight: true),
                 if (unit.weekendMultiplier != 1)
                   _SmallPill(
-                    'Wknd ${_money((unit.pricePerHourPaise * unit.weekendMultiplier).round())}/hr',
+                    isGround
+                        ? 'Wknd ${_money(((unit.price4HrPaise ?? unit.pricePerHourPaise * 4) * unit.weekendMultiplier).round())}/4hr'
+                        : 'Wknd ${_money((unit.pricePerHourPaise * unit.weekendMultiplier).round())}/hr',
                     highlight: true,
                   ),
                 if (unit.addons.isNotEmpty)
@@ -1191,15 +1197,20 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   final Map<String, TextEditingController> _stdAddonPrice = {};
   final Map<String, String?> _stdAddonId = {};
 
+  String? _parentUnitId;
+
   bool get _editing => widget.unit != null;
   bool get _isGround =>
       _unitType == 'FULL_GROUND' || _unitType == 'HALF_GROUND';
+  bool get _canHaveParent =>
+      _unitType == 'CENTER_WICKET' || _unitType == 'HALF_GROUND';
 
   @override
   void initState() {
     super.initState();
     final unit = widget.unit;
     _unitType = unit?.unitType ?? 'CRICKET_NET';
+    _parentUnitId = unit?.parentUnitId;
     _labelCtrl.text = unit?.unitTypeLabel ?? _labelForType(_unitType);
     _netType = unit?.netType ?? '';
     _slotMins = unit?.minSlotMins ?? (_isGround ? 240 : 60);
@@ -1365,6 +1376,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           'maxSlotMins': _slotMins,
           'slotIncrementMins': _slotMins,
           'minAdvancePaise': _rupeesToPaise(_minAdvanceCtrl.text),
+          'parentUnitId': _canHaveParent ? _parentUnitId : null,
           if (_openTimeCtrl.text.trim().isNotEmpty)
             'openTime': _openTimeCtrl.text.trim(),
           if (_closeTimeCtrl.text.trim().isNotEmpty)
@@ -1610,6 +1622,25 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               ('Cement', 'Cement'),
             ],
             onChanged: (v) => setState(() => _netType = v),
+          ),
+        ],
+        if (_canHaveParent) ...[
+          const SizedBox(height: 20),
+          const Text(
+            'Part of ground',
+            style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'If this unit shares the ground with a Full ground unit, link them so bookings block each other.',
+            style: TextStyle(color: _muted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          _ParentUnitPicker(
+            arenaId: widget.arenaId,
+            currentUnitId: widget.unit?.id,
+            selectedParentId: _parentUnitId,
+            onChanged: (id) => setState(() => _parentUnitId = id),
           ),
         ],
         const SizedBox(height: 20),
@@ -2004,6 +2035,78 @@ class _StepDots extends StatelessWidget {
           ),
         );
       }),
+    );
+  }
+}
+
+class _ParentUnitPicker extends ConsumerWidget {
+  const _ParentUnitPicker({
+    required this.arenaId,
+    required this.selectedParentId,
+    required this.onChanged,
+    this.currentUnitId,
+  });
+
+  final String arenaId;
+  final String? currentUnitId;
+  final String? selectedParentId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final arenasAsync = ref.watch(ownedArenasProvider);
+    final arenas = arenasAsync.valueOrNull ?? [];
+    final arena = arenas.cast<ArenaListing?>().firstWhere(
+      (a) => a?.id == arenaId, orElse: () => null,
+    );
+    final grounds = (arena?.units ?? [])
+        .where((u) => u.unitType == 'FULL_GROUND' && u.id != currentUnitId)
+        .toList();
+
+    if (grounds.isEmpty) {
+      return const Text(
+        'No Full ground units found. Add a Full ground unit first.',
+        style: TextStyle(color: _muted, fontSize: 12),
+      );
+    }
+
+    final options = <(String?, String)>[
+      (null, 'None — standalone unit'),
+      ...grounds.map((g) => (g.id, g.name)),
+    ];
+
+    return Column(
+      children: options.map((opt) {
+        final selected = selectedParentId == opt.$1;
+        return GestureDetector(
+          onTap: () => onChanged(opt.$1),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: selected ? const Color(0xFFF0FDF4) : Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selected ? _accent : _line,
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  opt.$2,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected ? _accent : _text,
+                  ),
+                ),
+              ),
+              if (selected) Icon(Icons.check_circle_rounded, size: 18, color: _accent),
+            ]),
+          ),
+        );
+      }).toList(),
     );
   }
 }

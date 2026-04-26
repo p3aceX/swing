@@ -3,6 +3,9 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import '../../arena/widgets/arena_widgets.dart';
@@ -239,7 +242,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddBookingSheet(context, selected),
         backgroundColor: _accent,
-        foregroundColor: Colors.black,
+        foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: const Icon(Icons.add_rounded, size: 32),
       ),
@@ -834,65 +837,300 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
 
   void _snack(String m, {bool err = false}) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _bg));
 
+  Future<void> _shareTicketPdf() async {
+    final pdf = pw.Document();
+
+    final dateStr = _booking.bookingDate != null
+        ? DateFormat('EEEE, d MMMM yyyy').format(_booking.bookingDate!)
+        : 'Scheduled Date';
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a5,
+        build: (pw.Context context) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.all(32),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.white,
+              borderRadius: pw.BorderRadius.circular(20),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('SWING ARENA PASS',
+                    style: pw.TextStyle(
+                        fontSize: 12,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.grey700,
+                        letterSpacing: 2)),
+                pw.SizedBox(height: 24),
+                pw.Text('CUSTOMER',
+                    style: pw.TextStyle(
+                        fontSize: 10,
+                        color: PdfColors.grey500,
+                        fontWeight: pw.FontWeight.bold)),
+                pw.Text(_booking.displayName.toUpperCase(),
+                    style: pw.TextStyle(
+                        fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 32),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('DATE',
+                              style: pw.TextStyle(
+                                  fontSize: 8, color: PdfColors.grey500)),
+                          pw.Text(dateStr,
+                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                        ]),
+                    pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text('TIME',
+                              style: pw.TextStyle(
+                                  fontSize: 8, color: PdfColors.grey500)),
+                          pw.Text('${_booking.startTime} - ${_booking.endTime}',
+                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                        ]),
+                  ],
+                ),
+                pw.SizedBox(height: 24),
+                pw.Divider(color: PdfColors.grey300),
+                pw.SizedBox(height: 24),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('ARENA',
+                              style: pw.TextStyle(
+                                  fontSize: 8, color: PdfColors.grey500)),
+                          pw.Text(widget.arenaId.split('-').last.toUpperCase(),
+                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                        ]),
+                    pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text('UNIT',
+                              style: pw.TextStyle(
+                                  fontSize: 8, color: PdfColors.grey500)),
+                          pw.Text(_booking.unitName?.toUpperCase() ?? 'GENERAL',
+                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                        ]),
+                  ],
+                ),
+                pw.SizedBox(height: 40),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.grey100,
+                    borderRadius: pw.BorderRadius.circular(10),
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('BOOKING REFERENCE',
+                          style: pw.TextStyle(
+                              fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                      pw.Text(_booking.id.toUpperCase(),
+                          style: pw.TextStyle(
+                              fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                    ],
+                  ),
+                ),
+                pw.Spacer(),
+                pw.Align(
+                  alignment: pw.Alignment.center,
+                  child: pw.Text('THANK YOU FOR CHOOSING SWING',
+                      style: pw.TextStyle(
+                          fontSize: 8,
+                          color: PdfColors.grey400,
+                          fontWeight: pw.FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    await Printing.sharePdf(
+        bytes: await pdf.save(), filename: 'swing-pass-${_booking.id}.pdf');
+  }
+
+  void _sendWhatsApp() {
+    var phone = _booking.displayPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (phone.isEmpty) return;
+
+    if (phone.length == 10) phone = '91$phone';
+
+    _shareTicketPdf(); // Trigger PDF Share instead of just text
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(hostArenaBookingRepositoryProvider);
     final statusColor = _statusColor(_booking.status);
+    final duration = _durationLabel(_durationMins(_booking.startTime, _booking.endTime));
 
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          20, 12, 20, MediaQuery.of(context).padding.bottom + 24),
       decoration: const BoxDecoration(
-        color: _surface,
+        color: Color(0xFFF2F4F7),
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 44, height: 5, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(10))),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: _accent.withValues(alpha: .1), borderRadius: BorderRadius.circular(16)),
-                child: Icon(Icons.person_rounded, color: _accent, size: 24),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_booking.displayName, style: const TextStyle(color: _text, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-                    Text(_booking.displayPhone, style: const TextStyle(color: _muted, fontSize: 14, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-              _StatusBadge(label: _booking.status, color: statusColor),
-            ],
-          ),
-          const SizedBox(height: 32),
           Container(
-            padding: const EdgeInsets.all(20),
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                  color: const Color(0xFFD0D5DD), borderRadius: BorderRadius.circular(10))),
+          const SizedBox(height: 24),
+
+          // PREMIUM TICKET CARD
+          Container(
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: _bg,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: _border),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: const [
+                BoxShadow(color: Color(0x0D000000), blurRadius: 20, offset: Offset(0, 10))
+              ],
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _DetailInfoRow('Schedule', '\${_booking.startTime} - \${_booking.endTime}', Icons.access_time_rounded),
-                const Divider(height: 32),
-                _DetailInfoRow('Asset/Unit', _booking.unitName ?? 'General', Icons.stadium_rounded),
-                const Divider(height: 32),
-                _DetailInfoRow('Total Amount', '₹\${(_booking.totalAmountPaise / 100).toStringAsFixed(0)}', Icons.payments_rounded, isBold: true),
-                if (_booking.paymentMode != null) ...[
-                  const Divider(height: 32),
-                  _DetailInfoRow('Payment Via', _booking.paymentMode!, Icons.account_balance_wallet_rounded),
-                ],
+                const Text('CUSTOMER', 
+                  style: TextStyle(color: Color(0xFF98A2B3), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+                const SizedBox(height: 6),
+                Text(_booking.displayName.toUpperCase(),
+                  style: const TextStyle(color: Color(0xFF101828), fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+
+                const SizedBox(height: 32),
+
+                // TIME PATH
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_booking.startTime, 
+                      style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
+                    Text(duration, 
+                      style: const TextStyle(color: Color(0xFF101828), fontSize: 13, fontWeight: FontWeight.w900)),
+                    Text(_booking.endTime, 
+                      style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const CircleAvatar(radius: 3, backgroundColor: Color(0xFF101828)),
+                    Expanded(child: Container(height: 1.5, color: const Color(0xFF101828))),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Icon(Icons.sports_cricket_rounded, size: 20, color: _accent),
+                    ),
+                    Expanded(child: Container(height: 1.5, color: const Color(0xFFEAECF0))),
+                    const CircleAvatar(radius: 3, backgroundColor: Color(0xFFEAECF0), child: CircleAvatar(radius: 2, backgroundColor: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('ARENA', style: TextStyle(color: Color(0xFF98A2B3), fontSize: 9, fontWeight: FontWeight.w700)),
+                          Text(widget.arenaId.split('-').last.toUpperCase(), // Using ID part for placeholder arena name or passed name
+                            style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text('UNIT/COURT', style: TextStyle(color: Color(0xFF98A2B3), fontSize: 9, fontWeight: FontWeight.w700)),
+                        Text(_booking.unitName?.toUpperCase() ?? 'GENERAL', 
+                          style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
+                      ],
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 32),
+                const Divider(height: 1, color: Color(0xFFF2F4F7)),
+                const SizedBox(height: 24),
+
+                const Text('BOOKING REFERENCE', 
+                  style: TextStyle(color: Color(0xFF98A2B3), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+                const SizedBox(height: 6),
+                Text(_booking.id.toUpperCase(),
+                  style: const TextStyle(color: Color(0xFF101828), fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+
+                const SizedBox(height: 32),
+
+                // BOTTOM GRID
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _TicketStat(label: 'STATUS', value: _booking.status.replaceAll('_', ' '), color: statusColor),
+                    _TicketStat(label: 'PAYMENT', value: _booking.paymentMode ?? 'PENDING'),
+                    _TicketStat(label: 'AMOUNT', value: '₹${(_booking.totalAmountPaise / 100).toStringAsFixed(0)}', isBold: true),
+                  ],
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 32),
+
+          const SizedBox(height: 24),
+
+          // QUICK ACTIONS
+          if (_booking.displayPhone.isNotEmpty)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        launchUrl(Uri.parse('tel:${_booking.displayPhone}')),
+                    icon: const Icon(Icons.phone_rounded, size: 18),
+                    label: const Text('Call'),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      side: BorderSide.none,
+                      foregroundColor: const Color(0xFF101828),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _sendWhatsApp,
+                    icon: const Icon(Icons.chat_bubble_rounded, size: 18, color: Color(0xFF25D366)),
+                    label: const Text('WhatsApp'),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      side: BorderSide.none,
+                      foregroundColor: const Color(0xFF101828),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+          const SizedBox(height: 24),
+
           if (_loading) const CircularProgressIndicator(color: _accent)
           else ...[
             if (!_booking.isPaid && _booking.status != 'CANCELLED')
@@ -907,6 +1145,31 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
   }
 }
 
+class _TicketStat extends StatelessWidget {
+  const _TicketStat({required this.label, required this.value, this.color, this.isBold = false});
+  final String label;
+  final String value;
+  final Color? color;
+  final bool isBold;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: Color(0xFF98A2B3), fontSize: 9, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        Text(value.toUpperCase(), 
+          style: TextStyle(
+            color: color ?? const Color(0xFF101828), 
+            fontSize: 13, 
+            fontWeight: isBold ? FontWeight.w900 : FontWeight.w800
+          )),
+      ],
+    );
+  }
+}
+
 class _DetailInfoRow extends StatelessWidget {
   const _DetailInfoRow(this.label, this.value, this.icon, {this.isBold = false});
   final String label;
@@ -917,12 +1180,23 @@ class _DetailInfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Icon(icon, size: 18, color: _muted),
         const SizedBox(width: 12),
         Text(label, style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
-        const Spacer(),
-        Text(value, style: TextStyle(color: _text, fontSize: 14, fontWeight: isBold ? FontWeight.w900 : FontWeight.w700)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: _text,
+              fontSize: 14,
+              fontWeight: isBold ? FontWeight.w900 : FontWeight.w700,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1052,21 +1326,32 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   final _totalCtrl = TextEditingController();
   final _advanceCtrl = TextEditingController();
 
+  late DateTime _selectedDate;
   String? _unitId;
-  String? _startTime;
-  List<_SlotOption> _allSlots = [];
-  List<_SlotOption> _availableSlots = [];
-  int _selectedSlotIdx = 0;
+  final List<String> _selectedSlots = [];
   String _paymentMode = 'CASH';
   bool _loading = false;
   bool _totalEdited = false;
-  List<String> _startOptions = [];
+  List<String> _allDaySlots = [];
   List<ArenaReservation> _existingBookings = [];
   bool _loadingAvail = true;
 
   ArenaUnitOption? get _unit => widget.arena.units.where((u) => u.id == _unitId).firstOrNull;
-  String get _endTime => (_startTime == null || _availableSlots.isEmpty) ? '' : _addMinutes(_startTime!, _availableSlots[_selectedSlotIdx].durationMins);
-  int get _totalPaise => _totalEdited ? ((double.tryParse(_totalCtrl.text) ?? 0) * 100).round() : (_availableSlots.isEmpty ? 0 : _availableSlots[_selectedSlotIdx].paise);
+  
+  String get _startTime => _selectedSlots.isEmpty ? '' : _selectedSlots.first;
+  String get _endTime {
+    if (_selectedSlots.isEmpty) return '';
+    // End time is the start of the next slot after the last selected one
+    return _addMinutes(_selectedSlots.last, 60);
+  }
+
+  int get _totalPaise {
+    if (_totalEdited) return ((double.tryParse(_totalCtrl.text) ?? 0) * 100).round();
+    final unit = _unit;
+    if (unit == null || _selectedSlots.isEmpty) return 0;
+    return unit.pricePerHourPaise * _selectedSlots.length;
+  }
+
   int get _advancePaise => ((double.tryParse(_advanceCtrl.text) ?? 0) * 100).round().clamp(0, _totalPaise);
   int get _minAdvancePaise => _unit?.minAdvancePaise ?? 0;
   bool get _advanceOk => _minAdvancePaise == 0 || _advancePaise >= _minAdvancePaise;
@@ -1074,30 +1359,34 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   @override
   void initState() {
     super.initState();
+    _selectedDate = widget.date;
     _unitId = widget.lockedUnitId ?? widget.arena.units.firstOrNull?.id;
-    _rebuildUnit();
+    _rebuildTimes();
     _loadAvailability();
   }
 
-  void _rebuildUnit() {
+  void _rebuildTimes() {
     final unit = _unit;
-    if (unit == null) { _allSlots = []; _startOptions = []; return; }
-    _allSlots = _buildSlotOptions(unit);
-    _startOptions = _buildStartTimes(unit);
-    _startTime = null; _availableSlots = []; _selectedSlotIdx = 0; _totalEdited = false;
-    _totalCtrl.clear(); _advanceCtrl.clear();
-  }
-
-  List<String> _buildStartTimes(ArenaUnitOption unit) {
     final arena = widget.arena;
-    final openStr = unit.openTime ?? arena.openTime;
-    final closeStr = unit.closeTime ?? arena.closeTime;
+    if (unit == null) { _allDaySlots = []; return; }
+    
+    final openStr = unit.openTime ?? arena.openTime ?? '06:00';
+    final closeStr = unit.closeTime ?? arena.closeTime ?? '23:00';
     final openMins = _toMins(openStr);
     final closeMins = _toMins(closeStr);
-    final minDur = _allSlots.isEmpty ? 60 : _allSlots.first.durationMins;
-    final times = <String>[];
-    for (var m = openMins; m + minDur <= closeMins; m += 60) times.add(_fromMins(m));
-    return times;
+    
+    final isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
+    final nowMins = DateTime.now().hour * 60 + DateTime.now().minute;
+
+    _allDaySlots = [];
+    for (var m = openMins; m + 60 <= closeMins; m += 60) {
+      if (isToday && m < nowMins) continue;
+      _allDaySlots.add(_fromMins(m));
+    }
+    _selectedSlots.clear();
+    _totalEdited = false;
+    _totalCtrl.clear();
+    _advanceCtrl.clear();
   }
 
   String _fromMins(int mins) {
@@ -1110,7 +1399,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     if (_unitId == null) { setState(() => _loadingAvail = false); return; }
     setState(() => _loadingAvail = true);
     try {
-      final bookings = await ref.read(hostArenaBookingRepositoryProvider).listArenaBookings(widget.arena.id, date: _fmtDate(widget.date), unitId: _unitId);
+      final bookings = await ref.read(hostArenaBookingRepositoryProvider).listArenaBookings(widget.arena.id, date: _fmtDate(_selectedDate), unitId: _unitId);
       if (mounted) setState(() => _existingBookings = bookings);
     } catch (_) { if (mounted) setState(() => _existingBookings = []); }
     finally { if (mounted) setState(() => _loadingAvail = false); }
@@ -1124,43 +1413,49 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     });
   }
 
-  void _onStartTimeTapped(String time) {
+  void _onSlotTapped(String time) {
     if (_isBusy(time)) return;
     setState(() {
-      _startTime = time; _selectedSlotIdx = 0; _totalEdited = false;
-      _availableSlots = _filterSlots(time);
-      _syncTotalCtrl();
+      if (_selectedSlots.contains(time)) {
+        _selectedSlots.remove(time);
+      } else {
+        // Core Logic: Ensure selection is contiguous
+        if (_selectedSlots.isNotEmpty) {
+          final sorted = List<String>.from(_selectedSlots)..add(time);
+          sorted.sort((a, b) => _toMins(a).compareTo(_toMins(b)));
+          
+          bool contiguous = true;
+          for (int i = 0; i < sorted.length - 1; i++) {
+            if (_toMins(sorted[i+1]) - _toMins(sorted[i]) != 60) {
+              contiguous = false;
+              break;
+            }
+          }
+          
+          if (!contiguous) {
+            _selectedSlots.clear(); // Reset if non-contiguous
+          }
+        }
+        _selectedSlots.add(time);
+        _selectedSlots.sort((a, b) => _toMins(a).compareTo(_toMins(b)));
+      }
+      
+      if (!_totalEdited) {
+        _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
+      }
     });
-  }
-
-  List<_SlotOption> _filterSlots(String startTime) {
-    final unit = _unit; if (unit == null) return [];
-    final closeMins = _toMins(unit.closeTime ?? widget.arena.closeTime);
-    final startMins = _toMins(startTime);
-    return _allSlots.where((slot) {
-      final endMins = startMins + slot.durationMins;
-      if (endMins > closeMins) return false;
-      return !_existingBookings.any((b) {
-        if (b.status == 'CANCELLED') return false;
-        return _toMins(b.startTime) < endMins && _toMins(b.endTime) > startMins;
-      });
-    }).toList();
-  }
-
-  void _syncTotalCtrl() {
-    if (!_totalEdited && _availableSlots.isNotEmpty) {
-      _totalCtrl.text = (_availableSlots[_selectedSlotIdx].paise / 100).toStringAsFixed(0);
-    }
   }
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty || _phoneCtrl.text.trim().isEmpty) { _snack('Required fields missing', err: true); return; }
-    if (!_advanceOk) { _snack('Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required for this unit', err: true); return; }
+    if (_selectedSlots.isEmpty) { _snack('Please select at least one slot', err: true); return; }
+    if (!_advanceOk) { _snack('Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required', err: true); return; }
+    
     setState(() => _loading = true);
     try {
       await ref.read(hostArenaBookingRepositoryProvider).createManualBooking(
-        widget.arena.id, unitId: _unitId!, date: _fmtDate(widget.date),
-        startTime: _startTime!, endTime: _endTime, guestName: _nameCtrl.text.trim(),
+        widget.arena.id, unitId: _unitId!, date: _fmtDate(_selectedDate),
+        startTime: _startTime, endTime: _endTime, guestName: _nameCtrl.text.trim(),
         guestPhone: _phoneCtrl.text.trim(), paymentMode: _paymentMode,
         amountPaise: _totalPaise, advancePaise: _advancePaise,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
@@ -1172,35 +1467,106 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   void _snack(String m, {bool err = false}) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _bg));
 
+  Future<void> _selectDate() async {
+    final today = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: today,
+      lastDate: today.add(const Duration(days: 90)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(colorScheme: ColorScheme.light(primary: _accent, onPrimary: Colors.white, onSurface: _text)),
+        child: child!,
+      ),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _rebuildTimes();
+      });
+      _loadAvailability();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      decoration: const BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('New Booking', style: TextStyle(color: _text, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+            Center(child: Container(width: 44, height: 5, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(10)))),
+            const SizedBox(height: 24),
+            const Text('New Booking', style: TextStyle(color: _text, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.8)),
+            const SizedBox(height: 16),
+            
+            GestureDetector(
+              onTap: _selectDate,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(16), border: Border.all(color: _border)),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: _accent.withValues(alpha: .12), borderRadius: BorderRadius.circular(12)),
+                      child: Icon(Icons.calendar_today_rounded, color: _accent, size: 20),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('BOOKING DATE', style: TextStyle(color: _muted, fontSize: 10, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 2),
+                          Text(DateFormat('EEEE, d MMMM yyyy').format(_selectedDate), style: const TextStyle(color: _text, fontSize: 15, fontWeight: FontWeight.w800)),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.unfold_more_rounded, color: _muted, size: 20),
+                  ],
+                ),
+              ),
+            ),
+            
             const SizedBox(height: 24),
             _FormTextField(label: 'Guest Name', controller: _nameCtrl, icon: Icons.person_outline_rounded),
             const SizedBox(height: 16),
             _FormTextField(label: 'Phone Number', controller: _phoneCtrl, icon: Icons.phone_android_rounded, keyboardType: TextInputType.phone),
             const SizedBox(height: 24),
+            
             if (widget.arena.units.length > 1) ...[
-              const Text('Select Unit', style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _rebuildUnit(); }); _loadAvailability(); }),
+              const Text('Select Unit', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              const SizedBox(height: 12),
+              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _rebuildTimes(); }); _loadAvailability(); }),
               const SizedBox(height: 24),
             ],
-            const Text('Start Time', style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w700)),
+            
+            const Text('Select Slots', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
             const SizedBox(height: 12),
-            _StartTimeGrid(times: _startOptions, selected: _startTime, busyTimes: {for (final t in _startOptions) if (_isBusy(t)) t}, onSelect: _onStartTimeTapped),
-            if (_startTime != null && _availableSlots.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              const Text('Duration', style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              _SlotPicker(slots: _availableSlots, selectedIdx: _selectedSlotIdx, onSelect: (i) => setState(() { _selectedSlotIdx = i; _syncTotalCtrl(); })),
+            if (_allDaySlots.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                width: double.infinity,
+                decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: _border)),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: _muted, size: 18),
+                    const SizedBox(width: 12),
+                    const Text('No slots available.', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              )
+            else
+              _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped),
+            
+            if (_selectedSlots.isNotEmpty) ...[
               const SizedBox(height: 24),
               Row(
                 children: [
@@ -1208,9 +1574,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: _FormTextField(
-                      label: _minAdvancePaise > 0
-                          ? 'Advance (₹)  ·  min ₹${(_minAdvancePaise / 100).toStringAsFixed(0)}'
-                          : 'Advance (₹)',
+                      label: _minAdvancePaise > 0 ? 'Advance (min ₹${(_minAdvancePaise / 100).toStringAsFixed(0)})' : 'Advance (₹)',
                       controller: _advanceCtrl,
                       keyboardType: TextInputType.number,
                       onChanged: (_) => setState(() {}),
@@ -1218,15 +1582,8 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                   ),
                 ],
               ),
-              if (_minAdvancePaise > 0 && !_advanceOk) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
-                ),
-              ],
               const SizedBox(height: 32),
-              ArenaPrimaryButton(label: 'Confirm Booking', onPressed: _loading ? () {} : _save),
+              ArenaPrimaryButton(label: 'Confirm ${_selectedSlots.length} Slots', onPressed: _loading ? () {} : _save),
             ],
             const SizedBox(height: 24),
           ],
@@ -1262,7 +1619,7 @@ class _FormTextField extends StatelessWidget {
             fillColor: _surface,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _border)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _accent, width: 1.5)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _accent, width: 1.6)),
           ),
         ),
       ],
@@ -1272,17 +1629,23 @@ class _FormTextField extends StatelessWidget {
 
 class _StartTimeGrid extends StatelessWidget {
   const _StartTimeGrid({required this.times, required this.selected, required this.busyTimes, required this.onSelect});
-  final List<String> times; final String? selected; final Set<String> busyTimes; final ValueChanged<String> onSelect;
+  final List<String> times; final dynamic selected; final Set<String> busyTimes; final ValueChanged<String> onSelect;
   @override
   Widget build(BuildContext context) {
+    final selList = selected is List<String> ? selected as List<String> : [selected as String];
     return Wrap(spacing: 8, runSpacing: 8, children: times.map((t) {
-      final busy = busyTimes.contains(t); final sel = t == selected;
+      final busy = busyTimes.contains(t); 
+      final sel = selList.contains(t);
       return GestureDetector(
         onTap: busy ? null : () => onSelect(t),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(color: sel ? _accent : (busy ? Colors.transparent : _surface), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? _accent : (busy ? _border.withValues(alpha: .3) : _border))),
-          child: Text(t, style: TextStyle(color: sel ? Colors.black : (busy ? _muted.withValues(alpha: .3) : _text), fontSize: 12, fontWeight: FontWeight.w700, decoration: busy ? TextDecoration.lineThrough : null)),
+          decoration: BoxDecoration(
+            color: sel ? _accent : (busy ? Colors.transparent : _surface), 
+            borderRadius: BorderRadius.circular(10), 
+            border: Border.all(color: sel ? _accent : (busy ? _border.withValues(alpha: .3) : _border))
+          ),
+          child: Text(t, style: TextStyle(color: sel ? Colors.white : (busy ? _muted.withValues(alpha: .3) : _text), fontSize: 12, fontWeight: FontWeight.w700, decoration: busy ? TextDecoration.lineThrough : null)),
         ),
       );
     }).toList());

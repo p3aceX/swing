@@ -251,7 +251,7 @@ export class ArenaService {
 
   async addUnit(arenaId: string, userId: string, data: any) {
     await this.verifyOwner(arenaId, userId)
-    return prisma.arenaUnit.create({
+    return (prisma.arenaUnit as any).create({
       data: {
         arenaId,
         name: data.name,
@@ -274,6 +274,7 @@ export class ArenaService {
         slotIncrementMins: data.slotIncrementMins ?? 60,
         minAdvancePaise: data.minAdvancePaise ?? 0,
         boundarySize: data.boundarySize ? Number(data.boundarySize) : null,
+        parentUnitId: data.parentUnitId || null,
         openTime: data.openTime || null,
         closeTime: data.closeTime || null,
         operatingDays: data.operatingDays || [],
@@ -293,7 +294,7 @@ export class ArenaService {
       'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'photoUrls', 'pricePerHourPaise', 'peakPricePaise',
       'peakHoursStart', 'peakHoursEnd', 'price4HrPaise', 'price8HrPaise', 'priceFullDayPaise',
       'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins', 'minAdvancePaise',
-      'boundarySize', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights', 'isActive',
+      'boundarySize', 'parentUnitId', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights', 'isActive',
     ]
     for (const f of fields) {
       if (f in data) allowed[f] = data[f] === '' ? null : data[f]
@@ -485,10 +486,14 @@ export class ArenaService {
     const units = await prisma.arenaUnit.findMany({ where: unitWhere })
     const unitIds = units.map(unit => unit.id)
 
+    // Also fetch all child unit IDs so we can block parent slots when a child is booked and vice versa
+    const allArenaUnits: { id: string; parentUnitId: string | null }[] =
+      await (prisma.arenaUnit as any).findMany({ where: { arenaId, isActive: true }, select: { id: true, parentUnitId: true } })
+
     const [bookings, blocks] = await Promise.all([
       prisma.slotBooking.findMany({
         where: {
-          unitId: { in: unitIds },
+          arenaId,
           date: { gte: bookingDate, lt: nextDay },
           status: { in: ['CONFIRMED', 'CHECKED_IN'] },
         },
@@ -512,13 +517,22 @@ export class ArenaService {
       }),
     ])
 
+    const getRelatedIds = (unit: { id: string; parentUnitId: string | null }): string[] => {
+      const ids: string[] = []
+      if (unit.parentUnitId) ids.push(unit.parentUnitId)
+      allArenaUnits.filter(u => u.parentUnitId === unit.id).forEach(u => ids.push(u.id))
+      return ids
+    }
+
     return units.map(unit => {
       const unitOpDays = (unit as any).operatingDays
       const unitIsOperatingDay = unitOpDays?.length > 0 ? unitOpDays.includes(weekday) : isOperatingDay
       const unitOpen = (unit as any).openTime || arena.openTime || '06:00'
       const unitClose = (unit as any).closeTime || arena.closeTime || '22:00'
       const slots = this.generateDaySlots(unitOpen, unitClose, unit.slotIncrementMins || 60)
+      const relatedIds = getRelatedIds(unit as any)
       const unitBookings = bookings.filter(booking => booking.unitId === unit.id)
+      const relatedBookings = bookings.filter(booking => relatedIds.includes(booking.unitId))
       const unitBlocks = blocks.filter(block => block.unitId === unit.id)
 
       return {
@@ -544,6 +558,18 @@ export class ArenaService {
               status: 'BOOKED',
               bookingId: booking.id,
               customerName: booking.bookedBy?.user?.name || null,
+              pricePerHourPaise: unit.pricePerHourPaise,
+            }
+          }
+
+          const relatedBooking = relatedBookings.find(item => this.timesOverlap(item.startTime, item.endTime, slot.start, slot.end))
+          if (relatedBooking) {
+            return {
+              start: slot.start,
+              end: slot.end,
+              available: false,
+              status: 'BOOKED',
+              reason: 'Linked unit booked',
               pricePerHourPaise: unit.pricePerHourPaise,
             }
           }

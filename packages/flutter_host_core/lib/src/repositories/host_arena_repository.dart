@@ -313,19 +313,33 @@ class HostArenaBookingRepository {
           if (mode != null) 'mode': mode,
         },
       );
-      debugPrint('[payments] raw response: ${response.data}');
+      debugPrint('[payments] status=${response.statusCode} type=${response.data.runtimeType}');
+      debugPrint('[payments] raw: ${response.data}');
       final data = _extractMap(response.data);
+      debugPrint('[payments] top-level keys: ${data.keys.toList()}');
       final payload = _extractMap(data['data'] ?? data);
       debugPrint('[payments] payload keys: ${payload.keys.toList()}');
-      final checkedIn = ((payload['checkedInBookings'] ?? const []) as List)
+      final rawCheckedIn = payload['checkedInBookings'];
+      final rawPending = payload['pendingBookings'];
+      debugPrint('[payments] checkedInBookings type=${rawCheckedIn.runtimeType} value=$rawCheckedIn');
+      debugPrint('[payments] pendingBookings type=${rawPending.runtimeType} value=$rawPending');
+      final checkedIn = ((rawCheckedIn ?? const []) as List)
           .whereType<Map>()
           .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
           .toList();
-      final pending = ((payload['pendingBookings'] ?? const []) as List)
+      final pending = ((rawPending ?? const []) as List)
           .whereType<Map>()
           .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
           .toList();
       debugPrint('[payments] parsed: ${checkedIn.length} checked-in, ${pending.length} pending');
+      if (checkedIn.isNotEmpty) {
+        final b = checkedIn.first;
+        debugPrint('[payments] first checked-in: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} total=${b.totalAmountPaise}');
+      }
+      if (pending.isNotEmpty) {
+        final b = pending.first;
+        debugPrint('[payments] first pending: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} total=${b.totalAmountPaise}');
+      }
       return ArenaPaymentsData(checkedInBookings: checkedIn, pendingBookings: pending);
     } catch (e, st) {
       debugPrint('[payments] fetchArenaPayments ERROR: $e\n$st');

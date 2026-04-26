@@ -36,9 +36,10 @@ export class BookingService {
     await this.assertBookableWindow(unit, bookingDate, data.startTime, data.endTime)
     await this.assertNoArenaBlock(unit.arenaId, unit.id, bookingDate, data.startTime, data.endTime)
 
+    const conflictUnitIds = await this.getConflictUnitIds(data.arenaUnitId)
     const conflict = await prisma.slotBooking.findFirst({
       where: {
-        unitId: data.arenaUnitId,
+        unitId: { in: conflictUnitIds },
         date: bookingDate,
         status: { in: ['CONFIRMED', 'CHECKED_IN'] },
         startTime: { lt: data.endTime },
@@ -80,9 +81,10 @@ export class BookingService {
     await this.assertBookableWindow(unit, bookingDate, data.startTime, data.endTime)
     await this.assertNoArenaBlock(unit.arenaId, unit.id, bookingDate, data.startTime, data.endTime)
 
+    const conflictUnitIds2 = await this.getConflictUnitIds(data.arenaUnitId)
     const conflict = await prisma.slotBooking.findFirst({
       where: {
-        unitId: data.arenaUnitId,
+        unitId: { in: conflictUnitIds2 },
         date: bookingDate,
         status: { in: ['CONFIRMED', 'CHECKED_IN'] },
         startTime: { lt: data.endTime },
@@ -293,9 +295,10 @@ export class BookingService {
 
     const bookingDate = this.startOfDay(data.date)
 
+    const conflictUnitIds3 = await this.getConflictUnitIds(data.unitId)
     const conflict = await prisma.slotBooking.findFirst({
       where: {
-        unitId: data.unitId,
+        unitId: { in: conflictUnitIds3 },
         date: bookingDate,
         status: { in: ['CONFIRMED', 'CHECKED_IN'] },
         startTime: { lt: data.endTime },
@@ -817,6 +820,23 @@ export class BookingService {
     }
 
     return { id: player.id, userId: user.id }
+  }
+
+  private async getConflictUnitIds(unitId: string): Promise<string[]> {
+    const unit: { id: string; parentUnitId: string | null } | null =
+      await (prisma.arenaUnit as any).findUnique({
+        where: { id: unitId },
+        select: { id: true, parentUnitId: true },
+      })
+    if (!unit) return [unitId]
+    const ids = [unitId]
+    if (unit.parentUnitId) ids.push(unit.parentUnitId)
+    const children: { id: string }[] = await (prisma.arenaUnit as any).findMany({
+      where: { parentUnitId: unitId },
+      select: { id: true },
+    })
+    ids.push(...children.map(c => c.id))
+    return ids
   }
 
   private async assertNoArenaBlock(

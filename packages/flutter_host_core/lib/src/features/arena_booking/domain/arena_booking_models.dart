@@ -122,6 +122,7 @@ class ArenaUnitOption {
     this.slotIncrementMins = 60,
     this.minAdvancePaise = 0,
     this.boundarySize,
+    this.parentUnitId,
     this.addons = const [],
     this.openTime,
     this.closeTime,
@@ -150,6 +151,7 @@ class ArenaUnitOption {
   final int slotIncrementMins;
   final int minAdvancePaise;
   final int? boundarySize;
+  final String? parentUnitId;
   final List<ArenaAddon> addons;
   final String? openTime;
   final String? closeTime;
@@ -182,6 +184,7 @@ class ArenaUnitOption {
       slotIncrementMins: _intValue(json['slotIncrementMins'] ?? 60),
       minAdvancePaise: _intValue(json['minAdvancePaise']),
       boundarySize: _intOrNull(json['boundarySize']),
+      parentUnitId: _stringOrNull(json['parentUnitId']),
       addons: ((json['addons'] as List?) ?? const [])
           .whereType<Map>()
           .map((e) => ArenaAddon.fromJson(Map<String, dynamic>.from(e)))

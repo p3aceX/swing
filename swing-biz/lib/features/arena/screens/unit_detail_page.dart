@@ -1522,6 +1522,11 @@ class _InfoTab extends StatelessWidget {
     final activeDays =
         operatingDays.isEmpty ? 'All week' : _weekdayLabels(operatingDays);
 
+    final isGround = unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
+    final priceChipLabel = isGround
+        ? (unit.price4HrPaise != null ? '${_money(unit.price4HrPaise!)}/4hr' : '${_money(unit.pricePerHourPaise * 4)}/4hr')
+        : '${_money(unit.pricePerHourPaise)}/hr';
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
       children: [
@@ -1534,7 +1539,7 @@ class _InfoTab extends StatelessWidget {
               children: [
                 _SummaryChip(
                   icon: Icons.currency_rupee_rounded,
-                  label: '${_money(unit.pricePerHourPaise)}/hr',
+                  label: priceChipLabel,
                   highlight: true,
                 ),
                 _SummaryChip(icon: Icons.access_time_rounded, label: hours),
@@ -1575,9 +1580,12 @@ class _InfoTab extends StatelessWidget {
         const SizedBox(height: 20),
         const _SectionLabel('BASE RATES'),
         _InfoPanel(children: [
-          _InfoRow('Per hour', _money(unit.pricePerHourPaise)),
+          if (!isGround)
+            _InfoRow('Per hour', _money(unit.pricePerHourPaise)),
           if (unit.price4HrPaise != null)
-            _InfoRow('4 hr block', _money(unit.price4HrPaise!)),
+            _InfoRow('4 hr block', _money(unit.price4HrPaise!))
+          else if (isGround)
+            _InfoRow('4 hr block', _money(unit.pricePerHourPaise * 4)),
           if (unit.price8HrPaise != null)
             _InfoRow('8 hr block', _money(unit.price8HrPaise!)),
           if (unit.priceFullDayPaise != null)
@@ -1588,10 +1596,11 @@ class _InfoTab extends StatelessWidget {
           const _SectionLabel('WEEKEND PRICING'),
           _InfoPanel(children: [
             _InfoRow('Multiplier', '${unit.weekendMultiplier}×'),
-            _InfoRow(
-                'Weekend /hr',
-                _money(
-                    (unit.pricePerHourPaise * unit.weekendMultiplier).round())),
+            if (!isGround)
+              _InfoRow(
+                  'Weekend /hr',
+                  _money(
+                      (unit.pricePerHourPaise * unit.weekendMultiplier).round())),
             if (unit.price4HrPaise != null)
               _InfoRow(
                   'Weekend 4 hr',
