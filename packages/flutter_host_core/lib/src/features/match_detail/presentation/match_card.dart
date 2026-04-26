@@ -68,20 +68,22 @@ class HostMatchCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border(
-                left: BorderSide(color: borderColor, width: 3.5),
-                top: BorderSide(color: context.stroke.withValues(alpha: 0.6)),
-                right: BorderSide(color: context.stroke.withValues(alpha: 0.6)),
-                bottom: BorderSide(color: context.stroke.withValues(alpha: 0.6)),
+              border: Border.all(
+                color: context.stroke.withValues(alpha: 0.6),
               ),
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              child: Column(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Lifecycle accent — left strip drawn inside the clip
+                Container(width: 3.5, color: borderColor),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 14, 14, 14),
+                    child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Meta row: status · format · date ─────────────────────────
