@@ -582,22 +582,20 @@ class _HostedMatchItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final phase = _resolvePhase();
-    final phaseColor = switch (phase) {
-      _MatchPhase.needsXI => context.warn,
-      _MatchPhase.needsScoring => context.sky,
-      _MatchPhase.inProgress => context.success,
-    };
-    final phaseLabel = switch (phase) {
-      _MatchPhase.needsXI => 'SET PLAYING XI',
-      _MatchPhase.needsScoring => 'START SCORING',
-      _MatchPhase.inProgress => 'RESUME SCORING',
-    };
-    final phaseIcon = switch (phase) {
-      _MatchPhase.needsXI => Icons.group_rounded,
-      _MatchPhase.needsScoring => Icons.sports_cricket_rounded,
-      _MatchPhase.inProgress => Icons.play_arrow_rounded,
-    };
+    final isLive = match.lifecycle == MatchLifecycle.live;
+    final hasToss = (match.tossWinner ?? '').isNotEmpty;
+    final phaseColor = isLive
+        ? context.success
+        : hasToss
+            ? context.sky
+            : context.warn;
+    final phaseLabel =
+        isLive ? 'RESUME SCORING' : hasToss ? 'START SCORING' : 'SET UP MATCH';
+    final phaseIcon = isLive
+        ? Icons.play_arrow_rounded
+        : hasToss
+            ? Icons.sports_cricket_rounded
+            : Icons.tune_rounded;
 
     return InkWell(
       onTap: callbacks.onNavigateToMatch != null && match.id.isNotEmpty
@@ -610,7 +608,7 @@ class _HostedMatchItem extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
             child: GestureDetector(
-              onTap: () => _onResume(context, phase),
+              onTap: () => _onResume(context),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 11),
                 decoration: BoxDecoration(
@@ -644,30 +642,13 @@ class _HostedMatchItem extends StatelessWidget {
     );
   }
 
-  _MatchPhase _resolvePhase() {
-    if (match.lifecycle == MatchLifecycle.live) return _MatchPhase.inProgress;
-    // Toss is done when a toss winner is recorded.
-    if ((match.tossWinner ?? '').isNotEmpty) return _MatchPhase.needsScoring;
-    return _MatchPhase.needsXI;
-  }
-
-  void _onResume(BuildContext context, _MatchPhase phase) {
-    switch (phase) {
-      case _MatchPhase.needsXI:
-        callbacks.onSetPlayingXI?.call(
-          context,
-          match.id,
-          match.playerTeamName,
-          match.opponentTeamName,
-        );
-      case _MatchPhase.needsScoring:
-      case _MatchPhase.inProgress:
-        callbacks.onScoreMatch?.call(context, match.id);
-    }
+  void _onResume(BuildContext context) {
+    // Scoring screen is the single entry point for all non-completed hosted
+    // matches — it handles toss recording, match review, and live scoring.
+    callbacks.onScoreMatch?.call(context, match.id);
   }
 }
 
-enum _MatchPhase { needsXI, needsScoring, inProgress }
 
 // ─── Sub widgets ──────────────────────────────────────────────────────────────
 

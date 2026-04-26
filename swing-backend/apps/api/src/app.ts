@@ -132,6 +132,7 @@ export async function buildApp() {
   await app.register(paymentRoutes, { prefix: '/payments' })
   await app.register(notificationRoutes, { prefix: '/notifications' })
   await app.register(adminRoutes, { prefix: '/admin' })
+  await app.register(mediaRoutes)
   await app.register(mediaRoutes, { prefix: '/admin' })
   await app.register(adminSupportRoutes, { prefix: '/admin' })
   await app.register(publicRoutes, { prefix: '/public' })

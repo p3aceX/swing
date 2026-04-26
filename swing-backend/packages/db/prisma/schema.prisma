@@ -270,6 +270,7 @@ enum FacilityUnitType {
   TURF
   CRICKET_NET
   INDOOR_NET
+  CENTER_WICKET
   BADMINTON_COURT
   PICKLEBALL_COURT
   FUTSAL_COURT
@@ -550,32 +551,32 @@ model RefreshToken {
 // ============================================================
 
 model PlayerProfile {
-  id             String       @id @default(cuid())
-  userId         String       @unique
-  username       String?      @unique // public @handle — shown in app as the player's Swing ID
-  dateOfBirth    DateTime?
-  gender         String?
-  heightCm       Float?
-  weightKg       Float?
+  id                   String       @id @default(cuid())
+  userId               String       @unique
+  username             String?      @unique // public @handle — shown in app as the player's Swing ID
+  dateOfBirth          DateTime?
+  gender               String?
+  heightCm             Float?
+  weightKg             Float?
   waistCircumferenceCm Float?
   neckCircumferenceCm  Float?
   hipCircumferenceCm   Float?
-  city           String?
-  state          String?
-  playerRole     PlayerRole   @default(BATSMAN)
-  battingStyle   BattingStyle @default(RIGHT_HAND)
-  bowlingStyle   BowlingStyle @default(NOT_A_BOWLER)
-  level          PlayerLevel  @default(CLUB)
-  goals          String?
-  jerseyNumber   Int?
-  bio            String?
-  availableDays  String[]
-  preferredTimes String[]
-  locationRadius Int          @default(10)
-  isPublic       Boolean      @default(true)
-  showStats      Boolean      @default(true)
-  showLocation   Boolean      @default(false)
-  scoutingOptIn  Boolean      @default(false)
+  city                 String?
+  state                String?
+  playerRole           PlayerRole   @default(BATSMAN)
+  battingStyle         BattingStyle @default(RIGHT_HAND)
+  bowlingStyle         BowlingStyle @default(NOT_A_BOWLER)
+  level                PlayerLevel  @default(CLUB)
+  goals                String?
+  jerseyNumber         Int?
+  bio                  String?
+  availableDays        String[]
+  preferredTimes       String[]
+  locationRadius       Int          @default(10)
+  isPublic             Boolean      @default(true)
+  showStats            Boolean      @default(true)
+  showLocation         Boolean      @default(false)
+  scoutingOptIn        Boolean      @default(false)
 
   followersCount Int @default(0) // denormalised — updated on follow / unfollow
   followingCount Int @default(0)
@@ -1480,6 +1481,8 @@ model BallEvent {
   extras            Int            @default(0)
   totalRuns         Int            @default(0)
   isWicket          Boolean        @default(false)
+  isOverthrow       Boolean        @default(false)
+  overthrowRuns     Int            @default(0)
   dismissalType     DismissalType?
   dismissedPlayerId String?
   tags              String[]
@@ -1725,28 +1728,28 @@ model PlayerPhysicalSample {
 }
 
 model PlayerWellnessCheckin {
-  id              String   @id @default(cuid())
-  playerId        String
-  date            DateTime @db.Date
-  soreness        Int
-  fatigue         Int
-  mood            Int
-  stress          Int
-  painTightness   Int
-  sleepQuality    Int
+  id                   String   @id @default(cuid())
+  playerId             String
+  date                 DateTime @db.Date
+  soreness             Int
+  fatigue              Int
+  mood                 Int
+  stress               Int
+  painTightness        Int
+  sleepQuality         Int
   // Apex Elite Mental Pillar
-  confidence      Int?     @default(5)
-  focus           Int?     @default(5)
-  resilience      Int?     @default(5)
+  confidence           Int?     @default(5)
+  focus                Int?     @default(5)
+  resilience           Int?     @default(5)
   // Apex Elite Physical Context
-  hydrationLiters Float?   @default(0)
-  caloriesConsumed Int?
+  hydrationLiters      Float?   @default(0)
+  caloriesConsumed     Int?
   waistCircumferenceCm Float?
   neckCircumferenceCm  Float?
   hipCircumferenceCm   Float?
   bodyFatPercent       Float?
-  notes           String?
-  createdAt       DateTime @default(now())
+  notes                String?
+  createdAt            DateTime @default(now())
 
   player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
@@ -2297,6 +2300,8 @@ model ArenaUnit {
   arenaId           String
   name              String
   unitType          FacilityUnitType
+  unitTypeLabel     String?
+  netType           String?
   sport             Sport            @default(CRICKET)
   capacity          Int              @default(22)
   description       String?
@@ -2313,10 +2318,15 @@ model ArenaUnit {
   minSlotMins       Int              @default(60)
   maxSlotMins       Int              @default(240)
   slotIncrementMins Int              @default(60)
+  openTime          String?
+  closeTime         String?
+  operatingDays     Int[]            @default([])
+  hasFloodlights    Boolean          @default(false)
   isActive          Boolean          @default(true)
   createdAt         DateTime         @default(now())
 
   arena        Arena            @relation(fields: [arenaId], references: [id])
+  addons       ArenaAddon[]
   bookings     SlotBooking[]
   timeBlocks   ArenaTimeBlock[]
   pricingRules PricingRule[]
@@ -2360,14 +2370,19 @@ model ArenaTimeBlock {
 model ArenaAddon {
   id          String  @id @default(cuid())
   arenaId     String
+  unitId      String?
   name        String
+  addonType   String?
   description String?
   pricePaise  Int
   unit        String  @default("per_session")
   isAvailable Boolean @default(true)
 
   arena         Arena              @relation(fields: [arenaId], references: [id])
+  arenaUnit     ArenaUnit?         @relation(fields: [unitId], references: [id], onDelete: Cascade)
   bookingAddons SlotBookingAddon[]
+
+  @@index([arenaId, unitId])
 }
 
 model SlotBooking {
@@ -3531,17 +3546,17 @@ enum PerformanceActivityDomain {
 }
 
 model PerformancePlan {
-  id                    String   @id @default(cuid())
-  playerId              String   @unique
+  id                    String    @id @default(cuid())
+  playerId              String    @unique
   name                  String
-  isActive              Boolean  @default(true)
-  sleepTargetHours      Float    @default(8.0)
-  hydrationTargetLiters Float    @default(3.0)
+  isActive              Boolean   @default(true)
+  sleepTargetHours      Float     @default(8.0)
+  hydrationTargetLiters Float     @default(3.0)
   dailyCalorieTarget    Int?
-  isAlignedWithAmbition Boolean  @default(true)
+  isAlignedWithAmbition Boolean   @default(true)
   lastSyncedAt          DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   activities PerformancePlanActivity[]
   days       PerformancePlanDay[]
@@ -3909,29 +3924,29 @@ model PerformanceAmbition {
   commitmentStatement String?  @db.Text
 
   // Health & Body Transformation
-  gender                 String?
-  targetWeight           Float?
-  bodyTransformDirection BodyTransformDirection?
-  targetBodyFatPercent   Float?
-  waistCircumferenceCm   Float?
-  neckCircumferenceCm    Float?
-  hipCircumferenceCm     Float?
-  bodyFatPercent         Float?
-  trainingDaysPerWeek    Int?
-  fitnessFocuses         String[]                @default([])
-  nutritionObjective     NutritionObjective?
-  dailySleepHoursGoal    Float?
+  gender                   String?
+  targetWeight             Float?
+  bodyTransformDirection   BodyTransformDirection?
+  targetBodyFatPercent     Float?
+  waistCircumferenceCm     Float?
+  neckCircumferenceCm      Float?
+  hipCircumferenceCm       Float?
+  bodyFatPercent           Float?
+  trainingDaysPerWeek      Int?
+  fitnessFocuses           String[]                @default([])
+  nutritionObjective       NutritionObjective?
+  dailySleepHoursGoal      Float?
   dailyHydrationLitresGoal Float?
-  morningWakeUpTime      String?
-  habitsToQuit           String[]                @default([])
-  disciplineGoals        String[]                @default([])
+  morningWakeUpTime        String?
+  habitsToQuit             String[]                @default([])
+  disciplineGoals          String[]                @default([])
 
   // Computed Health Metrics (Stored)
-  dailyCalorieTarget     Int?
-  bmi                    Float?
+  dailyCalorieTarget Int?
+  bmi                Float?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   player PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
 

@@ -1,14 +1,12 @@
 const scoringWagonZones = <String>[
-  'THIRD_MAN',
-  'POINT',
-  'COVER',
-  'EXTRA_COVER',
-  'MID_OFF',
-  'STRAIGHT',
-  'MID_ON',
-  'MID_WICKET',
-  'SQUARE_LEG',
   'FINE_LEG',
+  'SQUARE_LEG',
+  'MID_WICKET',
+  'LONG_ON',
+  'LONG_OFF',
+  'COVER',
+  'POINT',
+  'THIRD_MAN',
 ];
 
 String? canonicalizeWagonZone(String? raw) {

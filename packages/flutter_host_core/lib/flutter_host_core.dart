@@ -49,6 +49,7 @@ export 'src/features/play_tab/presentation/play_tab.dart';
 export 'src/features/play_tab/presentation/play_matches_tab.dart';
 export 'src/features/play_tab/presentation/play_teams_tab.dart';
 export 'src/features/play_tab/presentation/play_tournaments_tab.dart';
+export 'src/features/play_tab/presentation/tournament_card.dart';
 
 export 'src/features/team_detail/domain/team_models.dart';
 export 'src/features/team_detail/data/team_detail_repository.dart';

@@ -381,6 +381,17 @@ class _LiveCredsPanel extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        Text(
+          'Download the Swing Live app and paste these credentials to broadcast your match live.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            height: 1.5,
+          ),
+        ),
       ],
     );
   }

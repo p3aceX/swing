@@ -165,6 +165,8 @@ export const recordBallRequestSchema = z.object({
   runs: z.number().min(0).default(0),
   extras: z.number().min(0).default(0),
   isWicket: z.boolean().default(false),
+  isOverthrow: z.boolean().default(false),
+  overthrowRuns: z.number().min(0).default(0),
   dismissalType: z.enum(DISMISSAL_TYPES).optional(),
   dismissedPlayerId: z.string().optional(),
   switchEnds: z.boolean().optional(),

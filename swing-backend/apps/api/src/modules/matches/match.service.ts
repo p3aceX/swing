@@ -550,7 +550,11 @@ export class MatchService {
         const snapshot = this.buildInningsSnapshot(inn.ballEvents ?? [])
         return {
           ...inn,
+          // Always derive totals live from ball events so stale DB values never leak
+          totalRuns: snapshot.totalRuns,
+          totalWickets: snapshot.totalWickets,
           totalOvers: snapshot.totalOvers,
+          extras: snapshot.extras,
           currentStrikerId: inn.currentStrikerId ?? snapshot.currentStrikerId,
           currentNonStrikerId: inn.currentNonStrikerId ?? snapshot.currentNonStrikerId,
           currentBowlerId: inn.currentBowlerId ?? snapshot.currentBowlerId,
@@ -947,6 +951,8 @@ export class MatchService {
         extras: candidateBall.extras || 0,
         totalRuns: (candidateBall.runs || 0) + (candidateBall.extras || 0),
         isWicket: candidateBall.isWicket || false,
+        isOverthrow: candidateBall.isOverthrow || false,
+        overthrowRuns: candidateBall.overthrowRuns || 0,
         dismissalType: candidateBall.dismissalType,
         dismissedPlayerId: candidateBall.dismissedPlayerId,
         wagonZone: candidateBall.wagonZone,
@@ -1480,13 +1486,17 @@ export class MatchService {
         }
 
         const teamName = inn.battingTeam === 'A' ? match.teamAName : match.teamBName
+        const liveSnapshot = this.buildInningsSnapshot(inn.ballEvents)
         return {
           inningsNumber: inn.inningsNumber,
           battingTeam: inn.battingTeam,
           teamName,
-          score: `${inn.totalRuns}/${inn.totalWickets}`,
-          overs: inn.totalOvers.toFixed(1),
-          totalOvers: inn.totalOvers,
+          score: `${liveSnapshot.totalRuns}/${liveSnapshot.totalWickets}`,
+          overs: liveSnapshot.totalOvers.toFixed(1),
+          totalOvers: liveSnapshot.totalOvers,
+          totalRuns: liveSnapshot.totalRuns,
+          totalWickets: liveSnapshot.totalWickets,
+          extras: liveSnapshot.extras,
           currentStrikerId: innsStats.strikerId,
           currentNonStrikerId: innsStats.nonStrikerId,
           currentBowlerId: innsStats.currentBowlerId,

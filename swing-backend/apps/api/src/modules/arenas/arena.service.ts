@@ -206,7 +206,11 @@ export class ArenaService {
         ],
       },
       include: {
-        units: { where: { isActive: true }, orderBy: { name: 'asc' } },
+        units: {
+          where: { isActive: true },
+          orderBy: { name: 'asc' },
+          include: { addons: { where: { isAvailable: true }, orderBy: { name: 'asc' } } },
+        },
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -216,7 +220,11 @@ export class ArenaService {
     const arena = await prisma.arena.findUnique({
       where: { id: arenaId },
       include: {
-        units: { where: { isActive: true }, orderBy: { name: 'asc' } },
+        units: {
+          where: { isActive: true },
+          orderBy: { name: 'asc' },
+          include: { addons: { where: { isAvailable: true }, orderBy: { name: 'asc' } } },
+        },
         owner: { include: { user: { select: { name: true, phone: true } } } },
       },
     })
@@ -247,7 +255,11 @@ export class ArenaService {
         arenaId,
         name: data.name,
         unitType: data.unitType,
+        unitTypeLabel: data.unitTypeLabel || null,
+        netType: data.netType || null,
+        sport: data.sport || 'CRICKET',
         description: data.description || null,
+        photoUrls: (data.photoUrls || []).slice(0, 3),
         pricePerHourPaise: data.pricePerHourPaise,
         peakPricePaise: data.peakPricePaise || null,
         peakHoursStart: data.peakHoursStart || null,
@@ -260,6 +272,10 @@ export class ArenaService {
         maxSlotMins: data.maxSlotMins ?? 240,
         slotIncrementMins: data.slotIncrementMins ?? 60,
         boundarySize: data.boundarySize ? Number(data.boundarySize) : null,
+        openTime: data.openTime || null,
+        closeTime: data.closeTime || null,
+        operatingDays: data.operatingDays || [],
+        hasFloodlights: data.hasFloodlights ?? false,
         isActive: true,
       },
     })
@@ -272,10 +288,10 @@ export class ArenaService {
 
     const allowed: any = {}
     const fields = [
-      'name', 'description', 'unitType', 'photoUrls', 'pricePerHourPaise', 'peakPricePaise',
+      'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'photoUrls', 'pricePerHourPaise', 'peakPricePaise',
       'peakHoursStart', 'peakHoursEnd', 'price4HrPaise', 'price8HrPaise', 'priceFullDayPaise',
       'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins',
-      'boundarySize', 'isActive',
+      'boundarySize', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights', 'isActive',
     ]
     for (const f of fields) {
       if (f in data) allowed[f] = data[f] === '' ? null : data[f]
@@ -283,7 +299,72 @@ export class ArenaService {
     if ('boundarySize' in allowed && allowed.boundarySize !== null) {
       allowed.boundarySize = Number(allowed.boundarySize)
     }
+    if ('photoUrls' in allowed && Array.isArray(allowed.photoUrls)) {
+      allowed.photoUrls = allowed.photoUrls.slice(0, 3)
+    }
     return prisma.arenaUnit.update({ where: { id: unitId }, data: allowed })
+  }
+
+  async listAddons(arenaId: string, userId: string, unitId?: string) {
+    await this.verifyOwner(arenaId, userId)
+    return prisma.arenaAddon.findMany({
+      where: {
+        arenaId,
+        ...(unitId ? { unitId } : {}),
+        isAvailable: true,
+      },
+      orderBy: { name: 'asc' },
+    })
+  }
+
+  async createAddon(arenaId: string, userId: string, data: any) {
+    await this.verifyOwner(arenaId, userId)
+    if (data.unitId) {
+      const unit = await prisma.arenaUnit.findFirst({
+        where: { id: data.unitId, arenaId, isActive: true },
+      })
+      if (!unit) throw Errors.notFound('Arena unit')
+    }
+    return prisma.arenaAddon.create({
+      data: {
+        arenaId,
+        unitId: data.unitId || null,
+        name: data.name,
+        addonType: data.addonType || null,
+        description: data.description || null,
+        pricePaise: data.pricePaise,
+        unit: data.unit || 'per_session',
+        isAvailable: data.isAvailable ?? true,
+      },
+    })
+  }
+
+  async updateAddon(addonId: string, userId: string, data: any) {
+    const addon = await prisma.arenaAddon.findUnique({ where: { id: addonId } })
+    if (!addon) throw Errors.notFound('Addon')
+    await this.verifyOwner(addon.arenaId, userId)
+    if (data.unitId) {
+      const unit = await prisma.arenaUnit.findFirst({
+        where: { id: data.unitId, arenaId: addon.arenaId, isActive: true },
+      })
+      if (!unit) throw Errors.notFound('Arena unit')
+    }
+    const allowed: any = {}
+    const fields = ['unitId', 'name', 'addonType', 'description', 'pricePaise', 'unit', 'isAvailable']
+    for (const f of fields) {
+      if (f in data) allowed[f] = data[f] === '' ? null : data[f]
+    }
+    return prisma.arenaAddon.update({ where: { id: addonId }, data: allowed })
+  }
+
+  async deleteAddon(addonId: string, userId: string) {
+    const addon = await prisma.arenaAddon.findUnique({ where: { id: addonId } })
+    if (!addon) throw Errors.notFound('Addon')
+    await this.verifyOwner(addon.arenaId, userId)
+    return prisma.arenaAddon.update({
+      where: { id: addonId },
+      data: { isAvailable: false },
+    })
   }
 
   async deleteUnit(unitId: string, userId: string) {
@@ -343,7 +424,9 @@ export class ArenaService {
     })
     if (!unit) throw Errors.notFound('Arena unit')
 
-    if (!this.isRangeWithinArenaHours(arena.openTime, arena.closeTime, data.startTime, data.endTime)) {
+    const effectiveOpen = (unit as any)?.openTime || arena.openTime
+    const effectiveClose = (unit as any)?.closeTime || arena.closeTime
+    if (!this.isRangeWithinArenaHours(effectiveOpen, effectiveClose, data.startTime, data.endTime)) {
       throw new AppError('INVALID_BLOCK_TIME', 'Block must be within arena operating hours', 400)
     }
 
@@ -431,14 +514,18 @@ export class ArenaService {
     ])
 
     return units.map(unit => {
-      const slots = this.generateDaySlots(arena.openTime || '06:00', arena.closeTime || '22:00', unit.slotIncrementMins || 60)
+      const unitOpDays = (unit as any).operatingDays
+      const unitIsOperatingDay = unitOpDays?.length > 0 ? unitOpDays.includes(weekday) : isOperatingDay
+      const unitOpen = (unit as any).openTime || arena.openTime || '06:00'
+      const unitClose = (unit as any).closeTime || arena.closeTime || '22:00'
+      const slots = this.generateDaySlots(unitOpen, unitClose, unit.slotIncrementMins || 60)
       const unitBookings = bookings.filter(booking => booking.unitId === unit.id)
       const unitBlocks = blocks.filter(block => block.unitId === unit.id)
 
       return {
         unit,
         slots: slots.map(slot => {
-          if (!isOperatingDay) {
+          if (!unitIsOperatingDay) {
             return {
               start: slot.start,
               end: slot.end,

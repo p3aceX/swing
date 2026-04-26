@@ -12,8 +12,8 @@ import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/create_event/presentation/create_event_screen.dart';
 import 'package:flutter_host_core/flutter_host_core.dart'
     show
-        TossScreen,
         ScoringScreen,
+        TossScreen,
         HostTournamentDetailScreen,
         HostTeamDetailScreen,
         TeamDetailCallbacks,
@@ -325,26 +325,30 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             matchId: matchId,
             currentPlayerId: currentPlayerId,
             onNavigateBack: (context, id) => context.go('/match/$id'),
+            onNavigateToMatchDetail: (context, id) => context.push('/match/$id'),
+            onMatchDeleted: (context, id) =>
+                Navigator.of(context).canPop()
+                    ? Navigator.of(context).pop()
+                    : context.go('/home'),
             onNavigateToPlaying11: (context, id, teamA, teamB) =>
                 context.push(
                   '/create-match?matchId=${Uri.encodeQueryComponent(id)}'
                   '&teamA=${Uri.encodeQueryComponent(teamA)}'
                   '&teamB=${Uri.encodeQueryComponent(teamB)}',
                 ),
-          );
-        },
-      ),
-      GoRoute(
-        path: '/match-toss/:id',
-        builder: (_, state) {
-          final extra = state.extra as Map<String, String>? ?? {};
-          final matchId = state.pathParameters['id'] ?? '';
-          return TossScreen(
-            matchId: matchId,
-            teamAName: extra['teamAName'] ?? 'Team A',
-            teamBName: extra['teamBName'] ?? 'Team B',
-            onCompleted: (ctx, id) =>
-                ctx.go('/score-match/${Uri.encodeComponent(id)}'),
+            onNavigateToToss: (context, id, teamA, teamB) =>
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => TossScreen(
+                      matchId: id,
+                      teamAName: teamA,
+                      teamBName: teamB,
+                      onCompleted: (ctx, completedId) =>
+                          ctx.go('/score-match/${Uri.encodeComponent(completedId)}'),
+                      onBack: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ),
           );
         },
       ),

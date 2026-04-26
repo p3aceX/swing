@@ -29,12 +29,43 @@ const addManagerSchema = z.object({
 })
 
 const addUnitSchema = z.object({
-  name: z.string(),
-  unitType: z.enum(['FULL_GROUND', 'HALF_GROUND', 'TURF', 'CRICKET_NET', 'INDOOR_NET', 'MULTI_SPORT', 'OTHER']),
+  name: z.string().trim().min(1),
+  unitType: z.enum(['FULL_GROUND', 'HALF_GROUND', 'TURF', 'CRICKET_NET', 'INDOOR_NET', 'CENTER_WICKET', 'MULTI_SPORT', 'OTHER']),
+  unitTypeLabel: z.string().trim().max(80).optional(),
+  netType: z.string().trim().max(80).optional(),
+  sport: z.enum(['CRICKET', 'FUTSAL', 'PICKLEBALL', 'BADMINTON', 'FOOTBALL', 'OTHER']).optional(),
+  description: z.string().trim().max(500).optional(),
+  photoUrls: z.array(z.string().url()).max(3).default([]),
   pricePerHourPaise: z.number().int().min(0),
   peakPricePaise: z.number().int().min(0).optional(),
+  peakHoursStart: z.string().regex(timePattern).optional(),
+  peakHoursEnd: z.string().regex(timePattern).optional(),
+  price4HrPaise: z.number().int().min(0).optional(),
+  price8HrPaise: z.number().int().min(0).optional(),
+  priceFullDayPaise: z.number().int().min(0).optional(),
+  weekendMultiplier: z.number().min(0).max(5).optional(),
   minSlotMins: z.number().int().default(60),
   maxSlotMins: z.number().int().default(240),
+  slotIncrementMins: z.number().int().default(60),
+  boundarySize: z.number().int().min(0).optional(),
+  openTime: z.string().regex(timePattern).optional(),
+  closeTime: z.string().regex(timePattern).optional(),
+  operatingDays: z.array(z.number().int().min(1).max(7)).default([]),
+  hasFloodlights: z.boolean().default(false),
+})
+
+const updateUnitSchema = addUnitSchema.partial().extend({
+  isActive: z.boolean().optional(),
+})
+
+const addonSchema = z.object({
+  unitId: z.string().optional(),
+  name: z.string().trim().min(1),
+  addonType: z.string().trim().max(80).optional(),
+  description: z.string().trim().max(300).optional(),
+  pricePaise: z.number().int().min(0),
+  unit: z.string().trim().min(1).default('per_session'),
+  isAvailable: z.boolean().optional(),
 })
 
 const arenaTimeBlockSchema = z.object({
@@ -83,7 +114,8 @@ export async function arenaRoutes(app: FastifyInstance) {
   app.patch('/u/:unitId', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { unitId } = request.params as { unitId: string }
-    return reply.send({ success: true, data: await svc.updateUnit(unitId, user.userId, request.body) })
+    const body = updateUnitSchema.parse(request.body)
+    return reply.send({ success: true, data: await svc.updateUnit(unitId, user.userId, body) })
   })
 
   app.delete('/u/:unitId', auth, async (request, reply) => {
@@ -143,7 +175,36 @@ export async function arenaRoutes(app: FastifyInstance) {
   app.post('/:id/units', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
-    return reply.code(201).send({ success: true, data: await svc.addUnit(id, user.userId, request.body) })
+    const body = addUnitSchema.parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.addUnit(id, user.userId, body) })
+  })
+
+  app.get('/:id/addons', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const query = request.query as { unitId?: string }
+    return reply.send({ success: true, data: await svc.listAddons(id, user.userId, query.unitId) })
+  })
+
+  app.post('/:id/addons', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = addonSchema.parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.createAddon(id, user.userId, body) })
+  })
+
+  app.patch('/addons/:addonId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { addonId } = request.params as { addonId: string }
+    const body = addonSchema.partial().parse(request.body)
+    return reply.send({ success: true, data: await svc.updateAddon(addonId, user.userId, body) })
+  })
+
+  app.delete('/addons/:addonId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { addonId } = request.params as { addonId: string }
+    await svc.deleteAddon(addonId, user.userId)
+    return reply.send({ success: true })
   })
 
   app.get('/:id/blocks', auth, async (request, reply) => {

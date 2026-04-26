@@ -1,9 +1,10 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/session_controller.dart';
+import '../presentation/shared_screens.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/otp_verification_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
@@ -11,7 +12,9 @@ import '../../features/auth/presentation/role_selection_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/auth/presentation/welcome_screen.dart';
 import '../auth/me_providers.dart';
+import '../../features/arena/screens/arena_screens.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
+import '../../features/dashboard/presentation/coach_dashboard_screens.dart';
 import '../../features/onboarding/presentation/business_details_screen.dart';
 import '../../features/onboarding/presentation/choose_profile_screen.dart';
 import '../../features/onboarding/presentation/create_academy_screen.dart';
@@ -469,7 +472,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.arenaAccount,
-        builder: (_, __) => const ArenaAccountScreen(),
+        builder: (_, __) => const ArenaProfilePage(),
       ),
       GoRoute(
         path: AppRoutes.arenaNotifications,
@@ -816,4 +819,387 @@ String? _setupRouteForRole(BizProfileType role, BizMeResponse? me) {
       status?.arenaId == null ? AppRoutes.createArena : null,
     BizProfileType.store => null,
   };
+}
+
+class _DeferredScreen extends StatelessWidget {
+  const _DeferredScreen(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            '$title is not available in this arena-focused build.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class StudentsScreen extends StatelessWidget {
+  const StudentsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Students');
+}
+
+class StudentProfileScreen extends StatelessWidget {
+  const StudentProfileScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Student Profile');
+}
+
+class EditStudentScreen extends StatelessWidget {
+  const EditStudentScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Edit Student');
+}
+
+class DeleteStudentConfirmationScreen extends StatelessWidget {
+  const DeleteStudentConfirmationScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Delete Student');
+}
+
+class BatchesScreen extends StatelessWidget {
+  const BatchesScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Batches');
+}
+
+class BatchDetailsScreen extends StatelessWidget {
+  const BatchDetailsScreen({super.key, required this.batchId});
+  final String batchId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Batch Details');
+}
+
+class CoachesScreen extends StatelessWidget {
+  const CoachesScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Coaches');
+}
+
+class CoachProfileScreen extends StatelessWidget {
+  const CoachProfileScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Coach Profile');
+}
+
+class EditCoachProfileScreen extends StatelessWidget {
+  const EditCoachProfileScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Edit Coach');
+}
+
+class DeleteCoachConfirmationScreen extends StatelessWidget {
+  const DeleteCoachConfirmationScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Delete Coach');
+}
+
+class CoachAssignedBatchesScreen extends StatelessWidget {
+  const CoachAssignedBatchesScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Coach Batches');
+}
+
+class CoachMessageScreen extends StatelessWidget {
+  const CoachMessageScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Coach Message');
+}
+
+class FeeManagementScreen extends StatelessWidget {
+  const FeeManagementScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Fees');
+}
+
+class AcademyOverviewScreen extends StatelessWidget {
+  const AcademyOverviewScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Academy Overview');
+}
+
+class CreateStudentScreen extends StatelessWidget {
+  const CreateStudentScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Create Student');
+}
+
+class CreateCoachProfileScreen extends StatelessWidget {
+  const CreateCoachProfileScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Create Coach');
+}
+
+class CreateBatchScreen extends StatelessWidget {
+  const CreateBatchScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Create Batch');
+}
+
+class FeePlanScreen extends StatelessWidget {
+  const FeePlanScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Fee Plan');
+}
+
+class FeeInvoiceScreen extends StatelessWidget {
+  const FeeInvoiceScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Fee Invoice');
+}
+
+class RecordPaymentScreen extends StatelessWidget {
+  const RecordPaymentScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Record Payment');
+}
+
+class PaymentStatusScreen extends StatelessWidget {
+  const PaymentStatusScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Payment Status');
+}
+
+class StudentPaymentHistoryScreen extends StatelessWidget {
+  const StudentPaymentHistoryScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Payment History');
+}
+
+class ReceiptScreen extends StatelessWidget {
+  const ReceiptScreen({super.key, required this.studentId});
+  final String studentId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Receipt');
+}
+
+class ReminderManagementScreen extends StatelessWidget {
+  const ReminderManagementScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Reminders');
+}
+
+class ReminderFormScreen extends StatelessWidget {
+  const ReminderFormScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Reminder Form');
+}
+
+class ReminderHistoryScreen extends StatelessWidget {
+  const ReminderHistoryScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Reminder History');
+}
+
+class FeePlanDetailsScreen extends StatelessWidget {
+  const FeePlanDetailsScreen({super.key, required this.planName});
+  final String planName;
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Fee Plan Details');
+}
+
+class FeePlanDeleteScreen extends StatelessWidget {
+  const FeePlanDeleteScreen({super.key, required this.planName});
+  final String planName;
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Delete Fee Plan');
+}
+
+class PlanUpgradeScreen extends StatelessWidget {
+  const PlanUpgradeScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Plan Upgrade');
+}
+
+class AnnouncementsScreen extends StatelessWidget {
+  const AnnouncementsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Announcements');
+}
+
+class DocumentsScreen extends StatelessWidget {
+  const DocumentsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Documents');
+}
+
+class AddDocumentScreen extends StatelessWidget {
+  const AddDocumentScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Add Document');
+}
+
+class ViewDocumentsScreen extends StatelessWidget {
+  const ViewDocumentsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('View Documents');
+}
+
+class DeleteDocumentScreen extends StatelessWidget {
+  const DeleteDocumentScreen({super.key, required this.documentName});
+  final String documentName;
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Delete Document');
+}
+
+class InventoryScreen extends StatelessWidget {
+  const InventoryScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Inventory');
+}
+
+class InventoryItemScreen extends StatelessWidget {
+  const InventoryItemScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Inventory Item');
+}
+
+class InventoryBillingScreen extends StatelessWidget {
+  const InventoryBillingScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Inventory Billing');
+}
+
+class IssueInventoryItemScreen extends StatelessWidget {
+  const IssueInventoryItemScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Issue Inventory');
+}
+
+class IssuedItemsHistoryScreen extends StatelessWidget {
+  const IssuedItemsHistoryScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Issued Inventory History');
+}
+
+class AcademyProfileScreen extends StatelessWidget {
+  const AcademyProfileScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Academy Profile');
+}
+
+class PayrollScreen extends StatelessWidget {
+  const PayrollScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Payroll');
+}
+
+class CoachSalaryDetailsScreen extends StatelessWidget {
+  const CoachSalaryDetailsScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Coach Salary');
+}
+
+class SendSalarySlipScreen extends StatelessWidget {
+  const SendSalarySlipScreen({super.key, required this.coachId});
+  final String coachId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Salary Slip');
+}
+
+class IncentivesScreen extends StatelessWidget {
+  const IncentivesScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Incentives');
+}
+
+class AddIncentiveScreen extends StatelessWidget {
+  const AddIncentiveScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Add Incentive');
+}
+
+class PayrollReportScreen extends StatelessWidget {
+  const PayrollReportScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Payroll Report');
+}
+
+class ReportsScreen extends StatelessWidget {
+  const ReportsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Reports');
+}
+
+class ReportDetailScreen extends StatelessWidget {
+  const ReportDetailScreen({super.key, required this.reportId});
+  final String reportId;
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Report Detail');
+}
+
+class StudentScheduleScreen extends StatelessWidget {
+  const StudentScheduleScreen({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Student Schedule');
+}
+
+class DevelopmentSettingsScreen extends StatelessWidget {
+  const DevelopmentSettingsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Settings');
+}
+
+class OwnerNotificationsScreen extends StatelessWidget {
+  const OwnerNotificationsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Notifications');
+}
+
+class OwnerNotificationDetailScreen extends StatelessWidget {
+  const OwnerNotificationDetailScreen({
+    super.key,
+    required this.notificationIndex,
+  });
+  final int notificationIndex;
+  @override
+  Widget build(BuildContext context) =>
+      const _DeferredScreen('Notification Detail');
+}
+
+class OwnerSearchScreen extends StatelessWidget {
+  const OwnerSearchScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Search');
+}
+
+class OwnerLogoutConfirmationScreen extends StatelessWidget {
+  const OwnerLogoutConfirmationScreen({super.key});
+  @override
+  Widget build(BuildContext context) => const _DeferredScreen('Logout');
 }

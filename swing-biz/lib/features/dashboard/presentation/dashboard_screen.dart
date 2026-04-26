@@ -22,7 +22,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _HomeTab(onOpenProfile: () => setState(() => _index = 2)),
+      const _HomeTab(),
       const _ArenasTab(),
       const _UserProfileTab(),
     ];
@@ -32,7 +32,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: SafeArea(child: pages[_index]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() => _index = value),
+        onDestinationSelected: (value) {
+          if (value == 2) {
+            context.push(AppRoutes.roleSelection);
+            return;
+          }
+          setState(() => _index = value);
+        },
         backgroundColor: Colors.white,
         indicatorColor: const Color(0xFFEFF4FF),
         destinations: const [
@@ -58,51 +64,45 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 }
 
 class _HomeTab extends ConsumerWidget {
-  const _HomeTab({required this.onOpenProfile});
-
-  final VoidCallback onOpenProfile;
+  const _HomeTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final meAsync = ref.watch(meProvider);
-    final session = ref.watch(sessionControllerProvider);
-    final name = meAsync.valueOrNull?.user.name ?? 'User';
+    final me = ref.watch(meProvider).valueOrNull;
+    final name =
+        me?.businessAccount?.businessName ?? me?.user.name ?? 'Your Arena';
     final dateStr = DateFormat('EEEE, d MMM').format(DateTime.now());
-    final profileType = session.activeProfile?.name.toUpperCase() ?? 'BIZ';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: onOpenProfile,
-              child: CircleAvatar(
-                radius: 24,
-                backgroundColor: const Color(0xFFF2F4F7),
-                child: Text(
-                  name.isNotEmpty ? name[0].toUpperCase() : 'U',
-                  style: const TextStyle(
-                    color: Color(0xFF101828),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const Text(
+                    'Welcome to Arena',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF667085),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
                   Text(
-                    'Hello, $name',
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
                       color: Color(0xFF101828),
                     ),
                   ),
+                  const SizedBox(height: 2),
                   Text(
                     dateStr,
                     style: const TextStyle(
@@ -120,34 +120,6 @@ class _HomeTab extends ConsumerWidget {
               tooltip: 'Switch Profile',
             ),
           ],
-        ),
-        const SizedBox(height: 22),
-        _WorkspacePanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _StatusBadge(profileType),
-              const SizedBox(height: 14),
-              const Text(
-                'Business workspace',
-                style: TextStyle(
-                  color: Color(0xFF101828),
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Manage your business profile and role-specific modules from the bottom navigation.',
-                style: TextStyle(
-                  color: Color(0xFF667085),
-                  fontSize: 14,
-                  height: 1.4,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -617,31 +589,6 @@ class _CenteredMessage extends StatelessWidget {
               action!,
             ],
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F4F7),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Color(0xFF344054),
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
         ),
       ),
     );

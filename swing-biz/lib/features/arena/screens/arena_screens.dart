@@ -94,7 +94,7 @@ class ArenaHomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ArenaScaffold(
-      title: 'Arena Manager',
+      title: 'Home',
       currentIndex: 0,
       actions: [
         ValueListenableBuilder<List<_ArenaNotificationItem>>(
@@ -130,30 +130,10 @@ class ArenaHomeScreen extends StatelessWidget {
             );
           },
         ),
-        PopupMenuButton<String>(
-          icon: const CircleAvatar(
-            radius: 16,
-            backgroundColor: arenaGreen,
-            child:
-                Icon(Icons.storefront_rounded, color: Colors.white, size: 18),
-          ),
-          onSelected: (value) {
-            if (value == 'profile') {
-              context.push(AppRoutes.arenaProfileMenu);
-            } else if (value == 'settings') {
-              context.push(AppRoutes.arenaProfile);
-            } else if (value == 'notifications') {
-              context.push(AppRoutes.arenaNotifications);
-            } else if (value == 'logout') {
-              context.push(AppRoutes.arenaLogoutConfirm);
-            }
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'profile', child: Text('Profile')),
-            PopupMenuItem(value: 'settings', child: Text('Settings')),
-            PopupMenuItem(value: 'notifications', child: Text('Notifications')),
-            PopupMenuItem(value: 'logout', child: Text('Logout')),
-          ],
+        IconButton.filledTonal(
+          tooltip: 'Switch profile',
+          onPressed: () => context.push(AppRoutes.roleSelection),
+          icon: const Icon(Icons.switch_account_rounded),
         ),
       ],
       child: ListView(
@@ -2113,7 +2093,8 @@ class _ArenaBookingFormScreenState extends State<ArenaBookingFormScreen> {
     final endMinutes = picked.hour * 60 + picked.minute + 60;
     final end = TimeOfDay(hour: endMinutes ~/ 60, minute: endMinutes % 60);
     setState(() {
-      _timeController.text = '${picked.format(context)} - ${end.format(context)}';
+      _timeController.text =
+          '${picked.format(context)} - ${end.format(context)}';
     });
   }
 
@@ -2195,7 +2176,8 @@ class _ArenaBookingFormScreenState extends State<ArenaBookingFormScreen> {
                       if (value == null) return;
                       setState(() {
                         _syncSlot(
-                          _availableSlots.firstWhere((slot) => slot.id == value),
+                          _availableSlots
+                              .firstWhere((slot) => slot.id == value),
                         );
                       });
                     },
@@ -2272,8 +2254,7 @@ class _ArenaBookingFormScreenState extends State<ArenaBookingFormScreen> {
                         child: FilledButton(
                           style: _filledStyle(),
                           onPressed: _isSaving ? null : _createBooking,
-                          child:
-                              Text(_isSaving ? 'Saving...' : 'Save Booking'),
+                          child: Text(_isSaving ? 'Saving...' : 'Save Booking'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -2995,7 +2976,8 @@ class ArenaExportReportScreen extends StatefulWidget {
   const ArenaExportReportScreen({super.key});
 
   @override
-  State<ArenaExportReportScreen> createState() => _ArenaExportReportScreenState();
+  State<ArenaExportReportScreen> createState() =>
+      _ArenaExportReportScreenState();
 }
 
 class _ArenaExportReportScreenState extends State<ArenaExportReportScreen> {
@@ -3112,7 +3094,8 @@ class ArenaPaymentActionScreen extends StatefulWidget {
   final String? initialTab;
 
   @override
-  State<ArenaPaymentActionScreen> createState() => _ArenaPaymentActionScreenState();
+  State<ArenaPaymentActionScreen> createState() =>
+      _ArenaPaymentActionScreenState();
 }
 
 class _ArenaPaymentActionScreenState extends State<ArenaPaymentActionScreen>
@@ -3128,7 +3111,8 @@ class _ArenaPaymentActionScreenState extends State<ArenaPaymentActionScreen>
   void initState() {
     super.initState();
     final initialIndex = widget.initialTab == 'payment' ? 1 : 0;
-    _tabController = TabController(length: 2, vsync: this, initialIndex: initialIndex);
+    _tabController =
+        TabController(length: 2, vsync: this, initialIndex: initialIndex);
     final booking = widget.bookingId == null
         ? arenaBookings.first
         : arenaBookings.firstWhere(
@@ -3151,7 +3135,8 @@ class _ArenaPaymentActionScreenState extends State<ArenaPaymentActionScreen>
   }
 
   void _showActionMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -3218,8 +3203,8 @@ class _ArenaPaymentActionScreenState extends State<ArenaPaymentActionScreen>
                             width: double.infinity,
                             child: FilledButton(
                               style: _filledStyle(),
-                              onPressed: () =>
-                                  _showActionMessage('Reminder sent successfully'),
+                              onPressed: () => _showActionMessage(
+                                  'Reminder sent successfully'),
                               child: const Text('Send Reminder'),
                             ),
                           ),
@@ -3350,7 +3335,8 @@ class ArenaReviewDetailScreen extends StatefulWidget {
   final String reviewId;
 
   @override
-  State<ArenaReviewDetailScreen> createState() => _ArenaReviewDetailScreenState();
+  State<ArenaReviewDetailScreen> createState() =>
+      _ArenaReviewDetailScreenState();
 }
 
 class _ArenaReviewDetailScreenState extends State<ArenaReviewDetailScreen> {
@@ -3363,7 +3349,9 @@ class _ArenaReviewDetailScreenState extends State<ArenaReviewDetailScreen> {
   void initState() {
     super.initState();
     _review = arenaReviews.firstWhere(
-      (item) => item.customerName.toLowerCase().replaceAll(' ', '-') == widget.reviewId,
+      (item) =>
+          item.customerName.toLowerCase().replaceAll(' ', '-') ==
+          widget.reviewId,
       orElse: () => arenaReviews.first,
     );
     _replyController = TextEditingController();
@@ -3376,7 +3364,8 @@ class _ArenaReviewDetailScreenState extends State<ArenaReviewDetailScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -3419,7 +3408,8 @@ class _ArenaReviewDetailScreenState extends State<ArenaReviewDetailScreen> {
                     Expanded(
                       child: FilledButton(
                         style: _filledStyle(),
-                        onPressed: () => _showMessage('Reply sent successfully'),
+                        onPressed: () =>
+                            _showMessage('Reply sent successfully'),
                         child: const Text('Reply'),
                       ),
                     ),
@@ -3461,7 +3451,8 @@ class _ArenaReviewDetailScreenState extends State<ArenaReviewDetailScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
-                    onPressed: () => _showMessage('Review reported successfully'),
+                    onPressed: () =>
+                        _showMessage('Review reported successfully'),
                     child: const Text('Report Review'),
                   ),
                 ),
@@ -3488,7 +3479,7 @@ class ArenaProfileMenuScreen extends StatelessWidget {
           _MenuTile(
             title: 'Profile',
             icon: Icons.person_outline_rounded,
-            onTap: () => context.push(AppRoutes.arenaAccount),
+            onTap: () => context.push(AppRoutes.arenaProfile),
           ),
           _MenuTile(
             title: 'Settings',
@@ -3552,13 +3543,15 @@ class ArenaNotificationsScreen extends StatefulWidget {
   const ArenaNotificationsScreen({super.key});
 
   @override
-  State<ArenaNotificationsScreen> createState() => _ArenaNotificationsScreenState();
+  State<ArenaNotificationsScreen> createState() =>
+      _ArenaNotificationsScreenState();
 }
 
 class _ArenaNotificationsScreenState extends State<ArenaNotificationsScreen> {
   void _markAsRead(_ArenaNotificationItem item) {
     final updated = _arenaNotificationsNotifier.value
-        .map((entry) => entry.id == item.id ? entry.copyWith(unread: false) : entry)
+        .map((entry) =>
+            entry.id == item.id ? entry.copyWith(unread: false) : entry)
         .toList(growable: false);
     _arenaNotificationsNotifier.value = updated;
   }
@@ -3579,7 +3572,8 @@ class _ArenaNotificationsScreenState extends State<ArenaNotificationsScreen> {
         child: ValueListenableBuilder<List<_ArenaNotificationItem>>(
           valueListenable: _arenaNotificationsNotifier,
           builder: (context, items, _) {
-            final unread = items.where((item) => item.unread).toList(growable: false);
+            final unread =
+                items.where((item) => item.unread).toList(growable: false);
             final sessionReminders = items
                 .where((item) => item.type == 'Reminder')
                 .toList(growable: false);
@@ -3721,8 +3715,9 @@ class ArenaLogoutConfirmScreen extends ConsumerWidget {
                     Expanded(
                       child: FilledButton(
                         style: _filledStyle(),
-                        onPressed: () =>
-                            ref.read(sessionControllerProvider.notifier).signOut(),
+                        onPressed: () => ref
+                            .read(sessionControllerProvider.notifier)
+                            .signOut(),
                         child: const Text('Logout'),
                       ),
                     ),
@@ -4280,7 +4275,8 @@ class _ArenaNotificationList extends StatelessWidget {
                       Text(item.subtitle,
                           style: const TextStyle(color: arenaMuted)),
                       const SizedBox(height: 4),
-                      Text(item.time, style: const TextStyle(color: arenaMuted)),
+                      Text(item.time,
+                          style: const TextStyle(color: arenaMuted)),
                     ],
                   ),
                 ),
@@ -4421,8 +4417,9 @@ class _ArenaPieChart extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: data.entries.map((entry) {
-                    final color = _pieColors[data.keys.toList().indexOf(entry.key) %
-                        _pieColors.length];
+                    final color = _pieColors[
+                        data.keys.toList().indexOf(entry.key) %
+                            _pieColors.length];
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: Row(
@@ -4475,7 +4472,9 @@ class _ArenaPiePainter extends CustomPainter {
       center: Offset(size.width / 2, size.height / 2),
       radius: math.min(size.width, size.height) / 2.4,
     );
-    final paint = Paint()..style = PaintingStyle.stroke..strokeWidth = 24;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 24;
     double startAngle = -math.pi / 2;
     final entries = data.entries.toList(growable: false);
     for (var i = 0; i < entries.length; i++) {

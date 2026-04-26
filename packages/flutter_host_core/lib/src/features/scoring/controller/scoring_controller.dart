@@ -226,6 +226,27 @@ class HostScoringController extends StateNotifier<HostScoringState> {
   final String _matchId;
 
   static const _retryDelays = [800, 1500, 2500, 4000];
+  static const _coldStartRetryDelays = [5000, 10000, 15000];
+
+  static bool _is503(Object e) =>
+      e is DioException && e.response?.statusCode == 503;
+
+  Future<T> _withColdStartRetry<T>(Future<T> Function() fn) async {
+    for (int i = 0; i <= _coldStartRetryDelays.length; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (_is503(e) && i < _coldStartRetryDelays.length) {
+          final delay = _coldStartRetryDelays[i];
+          print('[503] server cold-starting, retrying in ${delay ~/ 1000}s… (attempt ${i + 1}/${_coldStartRetryDelays.length})');
+          await Future.delayed(Duration(milliseconds: delay));
+          continue;
+        }
+        rethrow;
+      }
+    }
+    throw StateError('unreachable');
+  }
 
   Future<void> _init({int attempt = 0}) async {
     try {
@@ -340,10 +361,10 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     );
   }
 
-  void setZone(String? zone) => state = state.copyWith(
-        zone: canonicalizeWagonZone(zone),
-        clearZone: canonicalizeWagonZone(zone) == null,
-      );
+  void setZone(String? zone) {
+    final canonical = zone == 'INNER' ? 'INNER' : canonicalizeWagonZone(zone);
+    state = state.copyWith(zone: canonical, clearZone: canonical == null);
+  }
 
   void swapBatters() {
     final s = state.effectiveStrikerId;
@@ -379,6 +400,8 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     required int runs,
     required int extras,
     bool isWicket = false,
+    bool isOverthrow = false,
+    int overthrowRuns = 0,
     String? dismissalType,
     String? dismissedPlayerId,
     String? fielderId,
@@ -412,8 +435,9 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     final nextNonStrikerId = nsid == inningsNonStrikerId ? null : nsid;
 
     state = state.copyWith(isSubmitting: true, clearError: true);
+    print('[recordBall] → matchId=$_matchId inn=${inn.inningsNumber} over=${inn.overNumber} ball=${inn.ballInOver + 1} outcome=$outcome runs=$runs extras=$extras isWicket=$isWicket striker=$sid bowler=$bid');
     try {
-      await _service.recordBall(
+      await _withColdStartRetry(() => _service.recordBall(
         _matchId,
         inn.inningsNumber,
         batterId: sid,
@@ -425,12 +449,15 @@ class HostScoringController extends StateNotifier<HostScoringState> {
         runs: runs,
         extras: extras,
         isWicket: isWicket,
+        isOverthrow: isOverthrow,
+        overthrowRuns: overthrowRuns,
         dismissalType: dismissalType,
         dismissedPlayerId: dismissedPlayerId,
         fielderId: fielderId,
         wagonZone: outcome == 'DOT' ? null : canonicalizeWagonZone(state.zone),
         tags: tags,
-      );
+      ));
+      print('[recordBall] ✓ success — refreshing state');
       await _init();
 
       final commentary = _buildCommentary(
@@ -450,6 +477,11 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       );
       return true;
     } catch (e) {
+      if (e is DioException) {
+        print('[recordBall] ✗ status=${e.response?.statusCode} body=${e.response?.data}');
+      } else {
+        print('[recordBall] ✗ error: $e');
+      }
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }
@@ -525,13 +557,23 @@ class HostScoringController extends StateNotifier<HostScoringState> {
 
   Future<bool> undoLastBall() async {
     final inn = state.activeInnings;
-    if (inn == null) return false;
+    if (inn == null) {
+      print('[undoLastBall] skipped — no active innings');
+      return false;
+    }
+    print('[undoLastBall] → matchId=$_matchId inn=${inn.inningsNumber} totalBalls=${inn.balls.length} lastBall=${inn.balls.isNotEmpty ? inn.balls.last.outcome : "none"}');
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
-      await _service.undoLastBall(_matchId, inn.inningsNumber);
+      await _withColdStartRetry(() => _service.undoLastBall(_matchId, inn.inningsNumber));
+      print('[undoLastBall] ✓ success');
       await _init();
       return true;
     } catch (e) {
+      if (e is DioException) {
+        print('[undoLastBall] ✗ status=${e.response?.statusCode} body=${e.response?.data}');
+      } else {
+        print('[undoLastBall] ✗ error: $e');
+      }
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }

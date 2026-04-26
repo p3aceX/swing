@@ -36,6 +36,8 @@ class HostScoringService {
     required int runs,
     required int extras,
     required bool isWicket,
+    bool isOverthrow = false,
+    int overthrowRuns = 0,
     String? dismissalType,
     String? dismissedPlayerId,
     String? fielderId,
@@ -56,6 +58,8 @@ class HostScoringService {
         'runs': runs,
         'extras': extras,
         'isWicket': isWicket,
+        'isOverthrow': isOverthrow,
+        'overthrowRuns': overthrowRuns,
         if (dismissalType != null && dismissalType.isNotEmpty)
           'dismissalType': dismissalType,
         if (dismissedPlayerId != null && dismissedPlayerId.isNotEmpty)

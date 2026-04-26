@@ -16,6 +16,9 @@ class ScoringMatch {
     this.teamAPlayerIds = const [],
     this.teamBPlayerIds = const [],
     this.scorerId,
+    this.venueName,
+    this.venueCity,
+    this.scheduledAt,
   });
 
   final String id;
@@ -34,6 +37,9 @@ class ScoringMatch {
   final List<String> teamAPlayerIds;
   final List<String> teamBPlayerIds;
   final String? scorerId;
+  final String? venueName;
+  final String? venueCity;
+  final DateTime? scheduledAt;
 
   factory ScoringMatch.fromJson(Map<String, dynamic> json) {
     final payload = _unwrapMap(json);
@@ -42,6 +48,12 @@ class ScoringMatch {
         .whereType<Map>()
         .map((entry) => ScoringInnings.fromJson(Map<String, dynamic>.from(entry)))
         .toList();
+
+    DateTime? parsedAt;
+    final rawAt = payload['scheduledAt'];
+    if (rawAt != null) {
+      try { parsedAt = DateTime.parse('$rawAt').toLocal(); } catch (_) {}
+    }
 
     return ScoringMatch(
       id: _asString(payload['id']),
@@ -60,6 +72,9 @@ class ScoringMatch {
       teamAPlayerIds: _list(payload['teamAPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       teamBPlayerIds: _list(payload['teamBPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       scorerId: _nullableString(payload['scorerId']),
+      venueName: _nullableString(payload['venueName']),
+      venueCity: _nullableString(payload['venueCity']),
+      scheduledAt: parsedAt,
     );
   }
 
@@ -149,7 +164,43 @@ class ScoringInnings {
 
   factory ScoringInnings.fromJson(Map<String, dynamic> json) {
     final payload = _unwrapMap(json);
-    final rawBalls = _list(payload['ballEvents'].isNotEmpty ? payload['ballEvents'] : payload['balls']);
+    final rawBalls = _list(payload['ballEvents'] ?? payload['balls']);
+
+    // Server sends totalOvers in cricket notation "completedOvers.ballsInOver"
+    // e.g. "1.3" = 1 completed over, 3 balls into the next.
+    // Fall back to explicit fields if the server ever adds them.
+    int derivedOverNumber = _asInt(payload['overNumber']);
+    int derivedBallInOver = _asInt(payload['ballInOver']);
+    int derivedLegalCount = _asInt(payload['legalCount']);
+    if (derivedOverNumber == 0 && derivedBallInOver == 0 && derivedLegalCount == 0) {
+      final rawTotalOvers = payload['totalOvers'];
+      if (rawTotalOvers != null) {
+        if (rawTotalOvers is int) {
+          // Integer = exactly N completed overs, 0 balls in new over
+          // e.g. 1 → overNumber=1, ballInOver=0
+          derivedOverNumber = rawTotalOvers;
+          derivedBallInOver = 0;
+        } else if (rawTotalOvers is double) {
+          // Double = completed.balls cricket notation
+          // e.g. 0.5 → overNumber=0, ballInOver=5
+          derivedOverNumber = rawTotalOvers.floor();
+          derivedBallInOver = ((rawTotalOvers - rawTotalOvers.floor()) * 10).round();
+        } else {
+          // String fallback: split on '.'
+          final s = '$rawTotalOvers';
+          final dotIdx = s.indexOf('.');
+          if (dotIdx >= 0) {
+            derivedOverNumber = int.tryParse(s.substring(0, dotIdx)) ?? 0;
+            derivedBallInOver = int.tryParse(s.substring(dotIdx + 1)) ?? 0;
+          } else {
+            derivedOverNumber = int.tryParse(s) ?? 0;
+            derivedBallInOver = 0;
+          }
+        }
+        derivedLegalCount = derivedOverNumber * 6 + derivedBallInOver;
+      }
+    }
+
     return ScoringInnings(
       id: _asString(payload['id']),
       inningsNumber: _asInt(payload['inningsNumber'], fallback: 1),
@@ -157,9 +208,9 @@ class ScoringInnings {
       currentStrikerId: _nullableString(payload['currentStrikerId']),
       currentNonStrikerId: _nullableString(payload['currentNonStrikerId']),
       currentBowlerId: _nullableString(payload['currentBowlerId']),
-      overNumber: _asInt(payload['overNumber']),
-      ballInOver: _asInt(payload['ballInOver']),
-      legalCount: _asInt(payload['legalCount']),
+      overNumber: derivedOverNumber,
+      ballInOver: derivedBallInOver,
+      legalCount: derivedLegalCount,
       totalRuns: _asInt(payload['totalRuns']),
       totalWickets: _asInt(payload['totalWickets']),
       isCompleted: payload['isCompleted'] == true,
@@ -183,6 +234,8 @@ class ScoringBall {
     this.runs = 0,
     this.extras = 0,
     this.isWicket = false,
+    this.isOverthrow = false,
+    this.overthrowRuns = 0,
     this.dismissalType,
   });
 
@@ -193,6 +246,8 @@ class ScoringBall {
   final int runs;
   final int extras;
   final bool isWicket;
+  final bool isOverthrow;
+  final int overthrowRuns;
   final String? dismissalType;
 
   factory ScoringBall.fromJson(Map<String, dynamic> json) {
@@ -205,6 +260,8 @@ class ScoringBall {
       runs: _asInt(payload['runs']),
       extras: _asInt(payload['extras']),
       isWicket: payload['isWicket'] == true,
+      isOverthrow: payload['isOverthrow'] == true,
+      overthrowRuns: _asInt(payload['overthrowRuns']),
       dismissalType: _nullableString(payload['dismissalType']),
     );
   }

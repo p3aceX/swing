@@ -105,22 +105,90 @@ class ArenaUnitOption {
     required this.name,
     required this.unitType,
     required this.pricePerHourPaise,
+    this.unitTypeLabel,
+    this.netType,
+    this.sport = 'CRICKET',
+    this.description = '',
+    this.photoUrls = const [],
+    this.peakPricePaise,
+    this.peakHoursStart,
+    this.peakHoursEnd,
+    this.price4HrPaise,
+    this.price8HrPaise,
+    this.priceFullDayPaise,
+    this.weekendMultiplier = 1,
+    this.minSlotMins = 60,
+    this.maxSlotMins = 240,
+    this.slotIncrementMins = 60,
     this.boundarySize,
+    this.addons = const [],
+    this.openTime,
+    this.closeTime,
+    this.operatingDays = const [],
+    this.hasFloodlights = false,
   });
 
   final String id;
   final String name;
   final String unitType;
+  final String? unitTypeLabel;
+  final String? netType;
+  final String sport;
+  final String description;
+  final List<String> photoUrls;
   final int pricePerHourPaise;
+  final int? peakPricePaise;
+  final String? peakHoursStart;
+  final String? peakHoursEnd;
+  final int? price4HrPaise;
+  final int? price8HrPaise;
+  final int? priceFullDayPaise;
+  final double weekendMultiplier;
+  final int minSlotMins;
+  final int maxSlotMins;
+  final int slotIncrementMins;
   final int? boundarySize;
+  final List<ArenaAddon> addons;
+  final String? openTime;
+  final String? closeTime;
+  final List<int> operatingDays;
+  final bool hasFloodlights;
 
   factory ArenaUnitOption.fromJson(Map<String, dynamic> json) {
     return ArenaUnitOption(
       id: '${json['id'] ?? ''}',
       name: '${json['name'] ?? 'Unit'}',
       unitType: '${json['unitType'] ?? json['type'] ?? 'OTHER'}',
+      unitTypeLabel: _stringOrNull(json['unitTypeLabel']),
+      netType: _stringOrNull(json['netType']),
+      sport: '${json['sport'] ?? 'CRICKET'}',
+      description: '${json['description'] ?? ''}',
+      photoUrls: ((json['photoUrls'] as List?) ?? const [])
+          .map((e) => '$e')
+          .where((e) => e.isNotEmpty)
+          .toList(),
       pricePerHourPaise: _intValue(json['pricePerHourPaise'] ?? json['price']),
+      peakPricePaise: _intOrNull(json['peakPricePaise']),
+      peakHoursStart: _stringOrNull(json['peakHoursStart']),
+      peakHoursEnd: _stringOrNull(json['peakHoursEnd']),
+      price4HrPaise: _intOrNull(json['price4HrPaise']),
+      price8HrPaise: _intOrNull(json['price8HrPaise']),
+      priceFullDayPaise: _intOrNull(json['priceFullDayPaise']),
+      weekendMultiplier: _doubleValue(json['weekendMultiplier'], fallback: 1),
+      minSlotMins: _intValue(json['minSlotMins'] ?? 60),
+      maxSlotMins: _intValue(json['maxSlotMins'] ?? 240),
+      slotIncrementMins: _intValue(json['slotIncrementMins'] ?? 60),
       boundarySize: _intOrNull(json['boundarySize']),
+      addons: ((json['addons'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => ArenaAddon.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      openTime: _stringOrNull(json['openTime']),
+      closeTime: _stringOrNull(json['closeTime']),
+      operatingDays: ((json['operatingDays'] as List?) ?? const [])
+          .map((e) => _intValue(e))
+          .toList(),
+      hasFloodlights: json['hasFloodlights'] == true,
     );
   }
 }
@@ -130,20 +198,32 @@ class ArenaAddon {
     required this.id,
     required this.name,
     required this.pricePaise,
+    this.unitId,
+    this.addonType,
+    this.description = '',
     this.unit = 'per_session',
+    this.isAvailable = true,
   });
 
   final String id;
+  final String? unitId;
   final String name;
+  final String? addonType;
+  final String description;
   final int pricePaise;
   final String unit;
+  final bool isAvailable;
 
   factory ArenaAddon.fromJson(Map<String, dynamic> json) {
     return ArenaAddon(
       id: '${json['id'] ?? ''}',
+      unitId: _stringOrNull(json['unitId']),
       name: '${json['name'] ?? 'Addon'}',
+      addonType: _stringOrNull(json['addonType']),
+      description: '${json['description'] ?? ''}',
       pricePaise: _intValue(json['pricePaise'] ?? json['price']),
       unit: '${json['unit'] ?? 'per_session'}',
+      isAvailable: json['isAvailable'] != false,
     );
   }
 }
@@ -431,6 +511,46 @@ class ArenaAvailabilityEngine {
   }
 }
 
+class ArenaTimeBlock {
+  const ArenaTimeBlock({
+    required this.id,
+    required this.arenaId,
+    required this.unitId,
+    required this.startTime,
+    required this.endTime,
+    this.date,
+    this.weekdays = const [],
+    this.reason,
+    this.isRecurring = false,
+  });
+
+  final String id;
+  final String arenaId;
+  final String unitId;
+  final String? date;
+  final List<int> weekdays;
+  final String startTime;
+  final String endTime;
+  final String? reason;
+  final bool isRecurring;
+
+  factory ArenaTimeBlock.fromJson(Map<String, dynamic> json) {
+    return ArenaTimeBlock(
+      id: '${json['id'] ?? ''}',
+      arenaId: '${json['arenaId'] ?? ''}',
+      unitId: '${json['unitId'] ?? ''}',
+      date: _stringOrNull(json['date']),
+      weekdays: ((json['weekdays'] as List?) ?? const [])
+          .map((e) => _intValue(e))
+          .toList(),
+      startTime: '${json['startTime'] ?? ''}',
+      endTime: '${json['endTime'] ?? ''}',
+      reason: _stringOrNull(json['reason']),
+      isRecurring: json['isRecurring'] == true,
+    );
+  }
+}
+
 String? _stringOrNull(Object? value) {
   final raw = '$value'.trim();
   if (raw.isEmpty || raw == 'null') return null;
@@ -449,6 +569,10 @@ double? _doubleOrNull(Object? value) {
   if (value is double) return value;
   if (value is num) return value.toDouble();
   return double.tryParse('${value ?? ''}');
+}
+
+double _doubleValue(Object? value, {double fallback = 0}) {
+  return _doubleOrNull(value) ?? fallback;
 }
 
 DateTime? _dateOrNull(Object? value) {

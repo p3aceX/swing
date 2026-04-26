@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_client.dart';
@@ -27,7 +26,6 @@ class ChatRepository {
     try {
       final res = await _dio.get(ApiEndpoints.chatConversations);
       final body = res.data;
-      if (kDebugMode) debugPrint('[Chat] fetchConversations raw: $body');
       List raw = [];
       if (body is Map) {
         final d = body['data'];
@@ -40,11 +38,7 @@ class ChatRepository {
       } else if (body is List) {
         raw = body;
       }
-      if (kDebugMode) {
-        debugPrint('[Chat] conversations list count: ${raw.length}');
-      }
       final conversations = raw.whereType<Map<String, dynamic>>().map((j) {
-        if (kDebugMode) debugPrint('[Chat] conversation json: $j');
         return Conversation.fromJson(j);
       }).toList()
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
@@ -59,13 +53,6 @@ class ChatRepository {
         }
       }
       merged.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-      if (kDebugMode) {
-        for (final c in merged) {
-          debugPrint('[Chat] parsed conv id=${c.id} isTeam=${c.isTeamChat} '
-              'teamName=${c.teamName} convName=${c.conversationName} '
-              'participants=${c.participants.map((p) => "${p.playerId}:${p.name}").toList()}');
-        }
-      }
       final hiddenMeta = await _getHiddenConversationMeta();
       if (hiddenMeta.isEmpty) return merged;
 
@@ -80,7 +67,6 @@ class ChatRepository {
 
         final updatedAtMillis = conversation.updatedAt.millisecondsSinceEpoch;
         if (updatedAtMillis > deletedAtMillis) {
-          // Conversation had new activity after local delete, so unhide it.
           hiddenMeta.remove(conversation.id);
           didUnhide = true;
           visible.add(conversation);
@@ -91,13 +77,7 @@ class ChatRepository {
         await _setHiddenConversationMeta(hiddenMeta);
       }
       return visible;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[Chat] fetchConversations error: $e');
-        if (e is DioException) {
-          debugPrint('[Chat] response: ${e.response?.data}');
-        }
-      }
+    } catch (_) {
       return [];
     }
   }
@@ -136,7 +116,6 @@ class ChatRepository {
         queryParameters: {'page': page, 'limit': limit},
       );
       final body = res.data;
-      if (kDebugMode) debugPrint('[Chat] fetchMessages raw: $body');
       List raw = [];
       if (body is Map) {
         final d = body['data'];
@@ -149,41 +128,21 @@ class ChatRepository {
       } else if (body is List) {
         raw = body;
       }
-      if (kDebugMode) debugPrint('[Chat] messages count: ${raw.length}');
-      final messages = raw.whereType<Map<String, dynamic>>().map((j) {
-        if (kDebugMode) debugPrint('[Chat] message json: $j');
+      return raw.whereType<Map<String, dynamic>>().map((j) {
         return ChatMessage.fromJson({...j, 'conversationId': conversationId});
       }).toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      if (kDebugMode) {
-        for (final m in messages) {
-          debugPrint('[Chat] parsed msg id=${m.id} senderId=${m.senderId} '
-              'senderName=${m.senderName} text="${m.text}"');
-        }
-      }
-      return messages;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[Chat] fetchMessages error: $e');
-        if (e is DioException) {
-          debugPrint('[Chat] response: ${e.response?.data}');
-        }
-      }
+    } catch (_) {
       return [];
     }
   }
 
   Future<ChatMessage?> sendMessage(String conversationId, String text) async {
     try {
-      if (kDebugMode) {
-        debugPrint(
-            '[Chat] sendMessage conversationId=$conversationId body={content: $text}');
-      }
       final res = await _dio.post(
         ApiEndpoints.chatConversationMessages(conversationId),
         data: {'body': text},
       );
-      if (kDebugMode) debugPrint('[Chat] sendMessage response: ${res.data}');
       final body = res.data;
       final raw = body is Map
           ? (body['data'] ?? body['message'] ?? body) as Map<String, dynamic>
@@ -204,13 +163,7 @@ class ChatRepository {
         unreadCount: existing?.unreadCount ?? 0,
       );
       return sent;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[Chat] sendMessage error: $e');
-        if (e is DioException) {
-          debugPrint('[Chat] response body: ${e.response?.data}');
-        }
-      }
+    } catch (_) {
       return null;
     }
   }
@@ -219,10 +172,7 @@ class ChatRepository {
     try {
       await _dio.post(ApiEndpoints.chatConversationRead(conversationId));
       return true;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[Chat] markRead error: $e');
-      }
+    } catch (_) {
       return false;
     }
   }
@@ -231,54 +181,34 @@ class ChatRepository {
     final conversationId = conversation.id.trim();
     if (conversationId.isEmpty) return false;
 
-    var remoteDeleted = false;
-    var remoteAction = 'none';
     try {
       final teamId = conversation.teamId?.trim();
       if (conversation.isTeamChat && teamId != null && teamId.isNotEmpty) {
-        remoteDeleted =
-            await _requestOk(() => _dio.post(ApiEndpoints.chatTeamLeave(teamId)));
-        if (remoteDeleted) remoteAction = 'team_leave';
+        await _requestOk(() => _dio.post(ApiEndpoints.chatTeamLeave(teamId)));
       } else {
-        remoteDeleted = await _requestOk(
+        final deleted = await _requestOk(
           () => _dio.post('${ApiEndpoints.chatConversation(conversationId)}/leave'),
         );
-        if (remoteDeleted) {
-          remoteAction = 'conversation_leave';
-        } else {
-          remoteDeleted = await _requestOk(
-            () => _dio.post(
-                '${ApiEndpoints.chatConversation(conversationId)}/archive'),
+        if (!deleted) {
+          final archived = await _requestOk(
+            () => _dio.post('${ApiEndpoints.chatConversation(conversationId)}/archive'),
           );
-          if (remoteDeleted) {
-            remoteAction = 'conversation_archive';
-          } else {
-            remoteDeleted = await _requestOk(
+          if (!archived) {
+            final hardDeleted = await _requestOk(
               () => _dio.delete(ApiEndpoints.chatConversation(conversationId)),
             );
-            if (remoteDeleted) {
-              remoteAction = 'conversation_delete';
-            } else {
-              remoteDeleted = await _requestOk(
-                () => _dio.post(
-                    '${ApiEndpoints.chatConversation(conversationId)}/delete'),
+            if (!hardDeleted) {
+              await _requestOk(
+                () => _dio.post('${ApiEndpoints.chatConversation(conversationId)}/delete'),
               );
-              if (remoteDeleted) remoteAction = 'conversation_delete_post';
             }
           }
         }
       }
       _localConversationCache.remove(conversationId);
       await _hideConversationLocally(conversationId);
-      if (kDebugMode) {
-        debugPrint('[Chat] deleteConversation id=$conversationId '
-            'remoteDeleted=$remoteDeleted action=$remoteAction');
-      }
       return true;
-    } catch (e) {
-      if (kDebugMode && !remoteDeleted) {
-        debugPrint('[Chat] deleteConversation failed: $e');
-      }
+    } catch (_) {
       _localConversationCache.remove(conversationId);
       await _hideConversationLocally(conversationId);
       return true;
@@ -292,17 +222,9 @@ class ChatRepository {
       return code >= 200 && code < 300;
     } on DioException catch (e) {
       final code = e.response?.statusCode ?? 0;
-      if (code == 404) {
-        return false;
-      }
-      if (kDebugMode) {
-        debugPrint('[Chat] request error code=$code, error=$e');
-      }
+      if (code == 404) return false;
       return false;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[Chat] request unknown error: $e');
-      }
+    } catch (_) {
       return false;
     }
   }

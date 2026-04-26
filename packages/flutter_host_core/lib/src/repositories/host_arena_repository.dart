@@ -68,6 +68,36 @@ class HostArenaBookingRepository {
     return ArenaListing.fromJson(Map<String, dynamic>.from(payload as Map));
   }
 
+  Future<ArenaUnitOption> createArenaUnit(
+    String arenaId,
+    Map<String, dynamic> input,
+  ) async {
+    final response = await _dio.post(
+      _paths.arenaUnits(arenaId),
+      data: input,
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaUnitOption.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<ArenaUnitOption> updateArenaUnit(
+    String unitId,
+    Map<String, dynamic> input,
+  ) async {
+    final response = await _dio.patch(
+      _paths.arenaUnit(unitId),
+      data: input,
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaUnitOption.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<void> deleteArenaUnit(String unitId) async {
+    await _dio.delete(_paths.arenaUnit(unitId));
+  }
+
   Future<Map<String, List<AvailabilitySlot>>> fetchAvailability({
     required String arenaId,
     required DateTime date,
@@ -95,6 +125,69 @@ class HostArenaBookingRepository {
     final response = await _dio.get(_paths.arenaAddons(arenaId));
     final list = _extractList(response.data, ['data', 'addons']);
     return list.map(ArenaAddon.fromJson).toList();
+  }
+
+  Future<ArenaAddon> createArenaAddon(
+    String arenaId,
+    Map<String, dynamic> input,
+  ) async {
+    final response = await _dio.post(
+      _paths.arenaAddons(arenaId),
+      data: input,
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaAddon.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<ArenaAddon> updateArenaAddon(
+    String addonId,
+    Map<String, dynamic> input,
+  ) async {
+    final response = await _dio.patch(
+      _paths.arenaAddon(addonId),
+      data: input,
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaAddon.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<void> deleteArenaAddon(String addonId) async {
+    await _dio.delete(_paths.arenaAddon(addonId));
+  }
+
+  Future<List<ArenaTimeBlock>> listUnitTimeBlocks(
+    String arenaId, {
+    required String unitId,
+  }) async {
+    final response = await _dio.get(
+      _paths.arenaBlocks(arenaId),
+      queryParameters: {'unitId': unitId},
+    );
+    final data = _extractMap(response.data);
+    final list = ((data['data'] ?? const []) as List)
+        .whereType<Map>()
+        .map((e) => ArenaTimeBlock.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return list;
+  }
+
+  Future<ArenaTimeBlock> createTimeBlock(
+    String arenaId,
+    Map<String, dynamic> input,
+  ) async {
+    final response = await _dio.post(
+      _paths.arenaBlocks(arenaId),
+      data: input,
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaTimeBlock.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<void> deleteTimeBlock(String blockId) async {
+    await _dio.delete(_paths.arenaBlock(blockId));
   }
 }
 

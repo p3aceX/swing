@@ -22,9 +22,6 @@ class ApiClient {
         },
       ),
     );
-    if (kDebugMode) {
-      debugPrint('[API] baseUrl=$baseUrl');
-    }
     _dio.interceptors.add(CacheInterceptor());
     _dio.interceptors.add(
       InterceptorsWrapper(
