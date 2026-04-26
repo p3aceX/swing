@@ -6,6 +6,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:ui' as ui;
+import 'dart:io';
+import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import '../../arena/widgets/arena_widgets.dart';
@@ -230,7 +235,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                     itemCount: bookings.length,
                     itemBuilder: (context, i) => BookingCard(
                       booking: bookings[i],
-                      onTap: () => _showBookingDetail(context, bookings[i], widget.arena.id),
+                      onTap: () => _showBookingDetail(context, bookings[i], widget.arena.name, widget.arena.id),
                     ),
                   ),
                 );
@@ -263,13 +268,13 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     });
   }
 
-  void _showBookingDetail(BuildContext context, ArenaReservation booking, String arenaId) {
+  void _showBookingDetail(BuildContext context, ArenaReservation booking, String arenaName, String arenaId) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: _surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => BookingDetailSheet(booking: booking, arenaId: arenaId),
+      builder: (_) => BookingDetailSheet(booking: booking, arenaName: arenaName, arenaId: arenaId),
     ).then((_) {
       final key = booking.bookingDate == null ? '' : DateFormat('yyyy-MM-dd').format(booking.bookingDate!);
       if (key.isNotEmpty) {
@@ -805,14 +810,16 @@ class _UnitFilterBar extends StatelessWidget {
 // ─── Detail Sheet ────────────────────────────────────────────────────────────
 
 class BookingDetailSheet extends ConsumerStatefulWidget {
-  const BookingDetailSheet({super.key, required this.booking, required this.arenaId});
+  const BookingDetailSheet({super.key, required this.booking, required this.arenaName, required this.arenaId});
   final ArenaReservation booking;
+  final String arenaName;
   final String arenaId;
   @override
   ConsumerState<BookingDetailSheet> createState() => _BookingDetailSheetState();
 }
 
 class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
+  final GlobalKey _boundaryKey = GlobalKey();
   bool _loading = false;
   late ArenaReservation _booking;
 
@@ -836,6 +843,25 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
   }
 
   void _snack(String m, {bool err = false}) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _bg));
+
+  Future<void> _sharePassImage() async {
+    try {
+      final boundary = _boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = byteData!.buffer.asUint8List();
+
+      final tempDir = await getTemporaryDirectory();
+      final file = await File('${tempDir.path}/swing-pass-${_booking.id}.png').create();
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles([XFile(file.path)], text: 'Check out your Swing Arena Pass!');
+    } catch (e) {
+      _snack('Sharing failed: $e', err: true);
+    }
+  }
 
   Future<void> _shareTicketPdf() async {
     final pdf = pw.Document();
@@ -908,7 +934,7 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
                           pw.Text('ARENA',
                               style: pw.TextStyle(
                                   fontSize: 8, color: PdfColors.grey500)),
-                          pw.Text(widget.arenaId.split('-').last.toUpperCase(),
+                          pw.Text(widget.arenaName.toUpperCase(),
                               style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                         ]),
                     pw.Column(
@@ -968,14 +994,41 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
 
     if (phone.length == 10) phone = '91$phone';
 
-    _shareTicketPdf(); // Trigger PDF Share instead of just text
+    final date = _booking.bookingDate != null
+        ? DateFormat('EEEE, d MMM').format(_booking.bookingDate!)
+        : 'scheduled date';
+
+    final msg = '''
+*BOOKING CONFIRMED* ✅
+---------------------------
+👤 *Customer:* ${_booking.displayName}
+📅 *Date:* $date
+⏰ *Time:* ${_booking.startTime} - ${_booking.endTime}
+🏟️ *Arena:* ${widget.arenaName.toUpperCase()}
+📍 *Unit:* ${_booking.unitName ?? 'General'}
+---------------------------
+🆔 *Ref:* ${_booking.id.toUpperCase()}
+💰 *Amount:* ₹${(_booking.totalAmountPaise / 100).toStringAsFixed(0)}
+---------------------------
+_See you at the arena!_ 🏏
+''';
+
+    final uri = Uri(
+      scheme: 'https',
+      host: 'wa.me',
+      path: phone,
+      queryParameters: {'text': msg},
+    );
+
+    launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(hostArenaBookingRepositoryProvider);
     final statusColor = _statusColor(_booking.status);
-    final duration = _durationLabel(_durationMins(_booking.startTime, _booking.endTime));
+    final duration =
+        _durationLabel(_durationMins(_booking.startTime, _booking.endTime));
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -991,102 +1044,201 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
               width: 44,
               height: 5,
               decoration: BoxDecoration(
-                  color: const Color(0xFFD0D5DD), borderRadius: BorderRadius.circular(10))),
+                  color: const Color(0xFFD0D5DD),
+                  borderRadius: BorderRadius.circular(10))),
           const SizedBox(height: 24),
 
-          // PREMIUM TICKET CARD
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: const [
-                BoxShadow(color: Color(0x0D000000), blurRadius: 20, offset: Offset(0, 10))
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('CUSTOMER', 
-                  style: TextStyle(color: Color(0xFF98A2B3), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-                const SizedBox(height: 6),
-                Text(_booking.displayName.toUpperCase(),
-                  style: const TextStyle(color: Color(0xFF101828), fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-
-                const SizedBox(height: 32),
-
-                // TIME PATH
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(_booking.startTime, 
-                      style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
-                    Text(duration, 
-                      style: const TextStyle(color: Color(0xFF101828), fontSize: 13, fontWeight: FontWeight.w900)),
-                    Text(_booking.endTime, 
-                      style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const CircleAvatar(radius: 3, backgroundColor: Color(0xFF101828)),
-                    Expanded(child: Container(height: 1.5, color: const Color(0xFF101828))),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Icon(Icons.sports_cricket_rounded, size: 20, color: _accent),
-                    ),
-                    Expanded(child: Container(height: 1.5, color: const Color(0xFFEAECF0))),
-                    const CircleAvatar(radius: 3, backgroundColor: Color(0xFFEAECF0), child: CircleAvatar(radius: 2, backgroundColor: Colors.white)),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+          // PREMIUM TICKET CARD (Capturable as Image)
+          RepaintBoundary(
+            key: _boundaryKey,
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x0D000000),
+                      blurRadius: 20,
+                      offset: Offset(0, 10))
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // BRANDING HEADER
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
                         children: [
-                          const Text('ARENA', style: TextStyle(color: Color(0xFF98A2B3), fontSize: 9, fontWeight: FontWeight.w700)),
-                          Text(widget.arenaId.split('-').last.toUpperCase(), // Using ID part for placeholder arena name or passed name
-                            style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: _accent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 14),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text('SWING ARENA', 
+                            style: TextStyle(color: Color(0xFF101828), fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
                         ],
                       ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        const Text('UNIT/COURT', style: TextStyle(color: Color(0xFF98A2B3), fontSize: 9, fontWeight: FontWeight.w700)),
-                        Text(_booking.unitName?.toUpperCase() ?? 'GENERAL', 
-                          style: const TextStyle(color: Color(0xFF101828), fontSize: 16, fontWeight: FontWeight.w800)),
-                      ],
-                    ),
-                  ],
-                ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2F4F7),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFEAECF0)),
+                        ),
+                        child: const Text('OFFICIAL PASS', 
+                          style: TextStyle(color: Color(0xFF667085), fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  const Divider(height: 1, color: Color(0xFFF2F4F7)),
+                  const SizedBox(height: 24),
 
-                const SizedBox(height: 32),
-                const Divider(height: 1, color: Color(0xFFF2F4F7)),
-                const SizedBox(height: 24),
+                  const Text('CUSTOMER',
+                      style: TextStyle(
+                          color: Color(0xFF98A2B3),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 6),
+                  Text(_booking.displayName.toUpperCase(),
+                      style: const TextStyle(
+                          color: Color(0xFF101828),
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5)),
 
-                const Text('BOOKING REFERENCE', 
-                  style: TextStyle(color: Color(0xFF98A2B3), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-                const SizedBox(height: 6),
-                Text(_booking.id.toUpperCase(),
-                  style: const TextStyle(color: Color(0xFF101828), fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+                  const SizedBox(height: 32),
 
-                const SizedBox(height: 32),
+                  // TIME PATH
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_booking.startTime,
+                          style: const TextStyle(
+                              color: Color(0xFF101828),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800)),
+                      Text(duration,
+                          style: const TextStyle(
+                              color: Color(0xFF101828),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900)),
+                      Text(_booking.endTime,
+                          style: const TextStyle(
+                              color: Color(0xFF101828),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const CircleAvatar(
+                          radius: 3, backgroundColor: Color(0xFF101828)),
+                      Expanded(
+                          child: Container(
+                              height: 1.5, color: const Color(0xFF101828))),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Icon(Icons.sports_cricket_rounded,
+                            size: 20, color: _accent),
+                      ),
+                      Expanded(
+                          child: Container(
+                              height: 1.5, color: const Color(0xFFEAECF0))),
+                      const CircleAvatar(
+                          radius: 3,
+                          backgroundColor: Color(0xFFEAECF0),
+                          child: CircleAvatar(
+                              radius: 2, backgroundColor: Colors.white)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('ARENA',
+                                style: TextStyle(
+                                    color: Color(0xFF98A2B3),
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700)),
+                            Text(widget.arenaName.toUpperCase(), 
+                                style: const TextStyle(
+                                    color: Color(0xFF101828),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800)),                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text('UNIT/COURT',
+                              style: TextStyle(
+                                  color: Color(0xFF98A2B3),
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700)),
+                          Text(_booking.unitName?.toUpperCase() ?? 'GENERAL',
+                              style: const TextStyle(
+                                  color: Color(0xFF101828),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800)),
+                        ],
+                      ),
+                    ],
+                  ),
 
-                // BOTTOM GRID
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _TicketStat(label: 'STATUS', value: _booking.status.replaceAll('_', ' '), color: statusColor),
-                    _TicketStat(label: 'PAYMENT', value: _booking.paymentMode ?? 'PENDING'),
-                    _TicketStat(label: 'AMOUNT', value: '₹${(_booking.totalAmountPaise / 100).toStringAsFixed(0)}', isBold: true),
-                  ],
-                ),
-              ],
+                  const SizedBox(height: 32),
+                  const Divider(height: 1, color: Color(0xFFF2F4F7)),
+                  const SizedBox(height: 24),
+
+                  const Text('BOOKING REFERENCE',
+                      style: TextStyle(
+                          color: Color(0xFF98A2B3),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 6),
+                  Text(_booking.id.toUpperCase(),
+                      style: const TextStyle(
+                          color: Color(0xFF101828),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0)),
+
+                  const SizedBox(height: 32),
+
+                  // BOTTOM GRID
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _TicketStat(
+                          label: 'STATUS',
+                          value: _booking.status.replaceAll('_', ' '),
+                          color: statusColor),
+                      _TicketStat(
+                          label: 'PAYMENT',
+                          value: _booking.paymentMode ?? 'PENDING'),
+                      _TicketStat(
+                          label: 'AMOUNT',
+                          value:
+                              '₹${(_booking.totalAmountPaise / 100).toStringAsFixed(0)}',
+                          isBold: true),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -1097,33 +1249,29 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
+                  child: _ActionTile(
+                    onTap: () =>
                         launchUrl(Uri.parse('tel:${_booking.displayPhone}')),
-                    icon: const Icon(Icons.phone_rounded, size: 18),
-                    label: const Text('Call'),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: BorderSide.none,
-                      foregroundColor: const Color(0xFF101828),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
+                    icon: Icons.phone_rounded,
+                    label: 'Call',
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _sendWhatsApp,
-                    icon: const Icon(Icons.chat_bubble_rounded, size: 18, color: Color(0xFF25D366)),
-                    label: const Text('WhatsApp'),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: BorderSide.none,
-                      foregroundColor: const Color(0xFF101828),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
+                  child: _ActionTile(
+                    onTap: _sendWhatsApp,
+                    icon: Icons.chat_bubble_rounded,
+                    label: 'WhatsApp',
+                    iconColor: const Color(0xFF25D366),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionTile(
+                    onTap: _sharePassImage,
+                    icon: Icons.badge_rounded,
+                    label: 'Pass',
+                    iconColor: _accent,
                   ),
                 ),
               ],
@@ -1131,15 +1279,64 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
 
           const SizedBox(height: 24),
 
-          if (_loading) const CircularProgressIndicator(color: _accent)
+          if (_loading)
+            const CircularProgressIndicator(color: _accent)
           else ...[
             if (!_booking.isPaid && _booking.status != 'CANCELLED')
-              ArenaPrimaryButton(label: 'Mark as Paid', onPressed: () => _action(() => repo.markBookingPaid(_booking.id, paymentMode: 'CASH'), 'Paid')),
+              ArenaPrimaryButton(
+                  label: 'Mark as Paid',
+                  onPressed: () => _action(
+                      () => repo.markBookingPaid(_booking.id,
+                          paymentMode: 'CASH'),
+                      'Paid')),
             const SizedBox(height: 12),
             if (_booking.status == 'CONFIRMED')
-              ArenaPrimaryButton(label: 'Check In Guest', onPressed: () => _action(() => repo.checkinByOwner(_booking.id), 'Checked In')),
+              ArenaPrimaryButton(
+                  label: 'Check In Guest',
+                  onPressed: () =>
+                      _action(() => repo.checkinByOwner(_booking.id), 'Checked In')),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.onTap,
+    required this.icon,
+    required this.label,
+    this.iconColor,
+  });
+
+  final VoidCallback onTap;
+  final IconData icon;
+  final String label;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 20, color: iconColor ?? const Color(0xFF101828)),
+            const SizedBox(height: 4),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF101828))),
+          ],
+        ),
       ),
     );
   }
@@ -1399,8 +1596,22 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     if (_unitId == null) { setState(() => _loadingAvail = false); return; }
     setState(() => _loadingAvail = true);
     try {
-      final bookings = await ref.read(hostArenaBookingRepositoryProvider).listArenaBookings(widget.arena.id, date: _fmtDate(_selectedDate), unitId: _unitId);
-      if (mounted) setState(() => _existingBookings = bookings);
+      final repo = ref.read(hostArenaBookingRepositoryProvider);
+      final date = _fmtDate(_selectedDate);
+
+      // Collect related unit IDs: the unit itself + parent + children
+      final relatedIds = <String>{_unitId!};
+      final parentId = _unit?.parentUnitId;
+      if (parentId != null) relatedIds.add(parentId);
+      for (final u in widget.arena.units) {
+        if (u.parentUnitId == _unitId) relatedIds.add(u.id);
+      }
+
+      final results = await Future.wait(
+        relatedIds.map((id) => repo.listArenaBookings(widget.arena.id, date: date, unitId: id)),
+      );
+      final merged = results.expand((b) => b).toList();
+      if (mounted) setState(() => _existingBookings = merged);
     } catch (_) { if (mounted) setState(() => _existingBookings = []); }
     finally { if (mounted) setState(() => _loadingAvail = false); }
   }
