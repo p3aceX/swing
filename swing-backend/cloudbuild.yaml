@@ -21,7 +21,18 @@ steps:
       - gcr.io/$PROJECT_ID/swing-backend:latest
 
   # Run migrations as a one-shot Cloud Run Job before deploying the new revision.
-  # This keeps RUN_DB_MIGRATIONS out of the service env so restarts don't re-run them.
+  # Update the job image first, then execute and wait for it to finish.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - swing-migrate
+      - --image=gcr.io/$PROJECT_ID/swing-backend:$COMMIT_SHA
+      - --region=asia-south1
+      - --update-env-vars=RUN_DB_MIGRATIONS=true,SERVICE_MODE=api
+
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -29,9 +40,7 @@ steps:
       - jobs
       - execute
       - swing-migrate
-      - --image=gcr.io/$PROJECT_ID/swing-backend:$COMMIT_SHA
       - --region=asia-south1
-      - --update-env-vars=RUN_DB_MIGRATIONS=true,SERVICE_MODE=api
       - --wait
 
   # Deploy to Cloud Run (no RUN_DB_MIGRATIONS — migrations already ran above)
