@@ -58,6 +58,12 @@ run_migrations() {
 }
 
 case "$MODE" in
+  migrate)
+    # Run migrations only and exit — used by the swing-migrate Cloud Run Job
+    RUN_DB_MIGRATIONS=true run_migrations
+    echo "Migration job complete."
+    exit 0
+    ;;
   api)
     run_migrations
     exec npm run start:api
@@ -72,7 +78,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unsupported SERVICE_MODE: $MODE"
-    echo "Use SERVICE_MODE=api, SERVICE_MODE=worker, or SERVICE_MODE=all"
+    echo "Use SERVICE_MODE=migrate, SERVICE_MODE=api, SERVICE_MODE=worker, or SERVICE_MODE=all"
     exit 1
     ;;
 esac

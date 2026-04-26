@@ -27,8 +27,8 @@ steps:
     args:
       - -c
       - |
-        job_secrets="DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest"
-        job_envvars="RUN_DB_MIGRATIONS=true,SERVICE_MODE=api"
+        job_secrets="DATABASE_URL=DATABASE_URL:latest"
+        job_envvars="SERVICE_MODE=migrate"
         job_image="gcr.io/$PROJECT_ID/swing-backend:$COMMIT_SHA"
         if gcloud run jobs describe swing-migrate --region=asia-south1 --project=$PROJECT_ID 2>/dev/null; then
           gcloud run jobs update swing-migrate \
