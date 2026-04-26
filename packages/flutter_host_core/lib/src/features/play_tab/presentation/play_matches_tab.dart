@@ -61,6 +61,85 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     super.dispose();
   }
 
+  void _showCreateSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          decoration: BoxDecoration(
+            color: context.surf,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Create',
+                  style: TextStyle(
+                      color: context.fg,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5)),
+              const SizedBox(height: 4),
+              Text('What would you like to start?',
+                  style: TextStyle(color: context.fgSub, fontSize: 13)),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  if (widget.callbacks.onCreateMatch != null)
+                    Expanded(
+                      child: _CreateActionCard(
+                        icon: Icons.sports_cricket_rounded,
+                        label: 'Match',
+                        color: context.sky,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          widget.callbacks.onCreateMatch!(context);
+                        },
+                      ),
+                    ),
+                  if (widget.callbacks.onCreateMatch != null &&
+                      widget.callbacks.onCreateTeam != null)
+                    const SizedBox(width: 12),
+                  if (widget.callbacks.onCreateTeam != null)
+                    Expanded(
+                      child: _CreateActionCard(
+                        icon: Icons.shield_rounded,
+                        label: 'Team',
+                        color: context.success,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          widget.callbacks.onCreateTeam!(context);
+                        },
+                      ),
+                    ),
+                  if (widget.callbacks.onCreateTournament != null) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _CreateActionCard(
+                        icon: Icons.emoji_events_rounded,
+                        label: 'Tournament',
+                        color: context.gold,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          widget.callbacks.onCreateTournament!(context);
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openFilters(BuildContext context, List<PlayerMatch> all) {
     final venues = all
         .map((m) => m.venueLabel)
@@ -220,10 +299,28 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                       ),
                     ),
                     const SizedBox(width: 6),
-                    _CreateButton(
-                      onTap: widget.callbacks.onCreateMatch != null
-                          ? () => widget.callbacks.onCreateMatch!(context)
-                          : null,
+                    GestureDetector(
+                      onTap: () => _showCreateSheet(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: context.ctaBg,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.add_rounded, color: context.ctaFg, size: 16),
+                            const SizedBox(width: 3),
+                            Text('New',
+                                style: TextStyle(
+                                    color: context.ctaFg,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                    letterSpacing: 0.2)),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -507,12 +604,10 @@ class _MatchList extends ConsumerWidget {
     if (filter == 99) {
       return RefreshIndicator(
         onRefresh: onRefresh,
-        child: ListView.separated(
+        child: ListView.builder(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(0, 0, 0, 110),
+          padding: const EdgeInsets.fromLTRB(0, 6, 0, 110),
           itemCount: visible.length,
-          separatorBuilder: (_, __) =>
-              Divider(height: 1, thickness: 1, color: context.stroke),
           itemBuilder: (_, i) => _HostedMatchItem(
             match: visible[i],
             callbacks: callbacks,
@@ -523,15 +618,10 @@ class _MatchList extends ConsumerWidget {
 
     return RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView.separated(
+      child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(0, 0, 0, 110),
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 110),
         itemCount: visible.length,
-        separatorBuilder: (_, __) => Divider(
-          height: 1,
-          thickness: 1,
-          color: context.stroke,
-        ),
         itemBuilder: (_, i) => HostMatchCard(
           match: visible[i],
           showHostingTag: visible[i].canScore,
@@ -675,31 +765,52 @@ class _HostedMatchItem extends StatelessWidget {
 
 // ─── Sub widgets ──────────────────────────────────────────────────────────────
 
-class _CreateButton extends StatelessWidget {
-  const _CreateButton({this.onTap});
-  final VoidCallback? onTap;
+class _CreateActionCard extends StatelessWidget {
+  const _CreateActionCard({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
-          color: context.accentBg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: context.accent.withValues(alpha: 0.3)),
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.2),
         ),
-        child: Row(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.add_rounded, color: context.accent, size: 15),
-            const SizedBox(width: 4),
-            Text('Create',
-                style: TextStyle(
-                    color: context.accent,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13)),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: TextStyle(
+                color: context.fg,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                letterSpacing: -0.2,
+              ),
+            ),
           ],
         ),
       ),

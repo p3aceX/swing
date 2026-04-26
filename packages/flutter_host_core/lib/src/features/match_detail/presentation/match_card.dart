@@ -53,11 +53,35 @@ class HostMatchCard extends StatelessWidget {
 
     final tossLine = _buildTossLine(match);
 
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-        child: Column(
+    // Left-border accent color: pulsing green for live, sky for upcoming, faded for past
+    final borderColor = isLive
+        ? context.success
+        : isUpcoming
+            ? context.sky
+            : context.stroke;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Material(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border(
+                left: BorderSide(color: borderColor, width: 3.5),
+                top: BorderSide(color: context.stroke.withValues(alpha: 0.6)),
+                right: BorderSide(color: context.stroke.withValues(alpha: 0.6)),
+                bottom: BorderSide(color: context.stroke.withValues(alpha: 0.6)),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Meta row: status · format · date ─────────────────────────
@@ -269,6 +293,9 @@ class HostMatchCard extends StatelessWidget {
               ),
             ],
           ],
+              ),
+            ),
+          ),
         ),
       ),
     );
