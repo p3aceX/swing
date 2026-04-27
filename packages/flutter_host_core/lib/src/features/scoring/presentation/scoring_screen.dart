@@ -667,7 +667,14 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     _pickBowler(s);
                   },
                   onUndo: _ctrl.undoLastBall,
-                  onStartMatch: _ctrl.startMatch,
+                  onStartMatch: () async {
+                    final ok = await _ctrl.startMatch();
+                    if (ok && mounted) {
+                      final s = ref.read(hostScoringControllerProvider(widget.matchId));
+                      await _autoSetupNewInnings();
+                    }
+                    return ok;
+                  },
                   onContinueInnings: _ctrl.continueInnings,
                   onNavigateToToss: widget.onNavigateToToss != null
                       ? () {
