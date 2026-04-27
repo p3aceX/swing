@@ -63,12 +63,14 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
   @override
   void initState() {
     super.initState();
+    debugPrint('[PlayingEleven] initState matchId=${widget.matchId} teamAId=${widget.teamAId} teamBId=${widget.teamBId}');
     _tabs = TabController(length: 2, vsync: this);
     _loadBoth();
   }
 
   @override
   void dispose() {
+    debugPrint('[PlayingEleven] dispose matchId=${widget.matchId}');
     _tabs.dispose();
     super.dispose();
   }

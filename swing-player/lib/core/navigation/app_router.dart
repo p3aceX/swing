@@ -419,7 +419,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             teamBName: extra['teamBName'] as String? ?? 'Team B',
             onTossCompleted: (ctx, id) =>
                 ctx.go('/score-match/${Uri.encodeComponent(id)}'),
-            onBack: () => Navigator.of(context).pop(),
+            onBack: () => GoRouter.of(context).pop(),
           );
         },
       ),

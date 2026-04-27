@@ -115,8 +115,10 @@ class SharedTournamentRepository {
   }
 
   Future<List<Map<String, dynamic>>> getSchedule(String tournamentId) async {
-    final response =
-        await _dio.get('${_paths.tournament(tournamentId)}/schedule');
+    final response = await _dio.get(
+      '${_paths.tournament(tournamentId)}/schedule',
+      options: Options(extra: {'refresh': true}),
+    );
     return _asList(response.data);
   }
 
