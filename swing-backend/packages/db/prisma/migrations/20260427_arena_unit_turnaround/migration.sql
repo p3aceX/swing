@@ -1,0 +1,1 @@
+ALTER TABLE "ArenaUnit" ADD COLUMN "turnaroundMins" INTEGER NOT NULL DEFAULT 0;

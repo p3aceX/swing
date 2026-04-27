@@ -120,6 +120,7 @@ class ArenaUnitOption {
     this.minSlotMins = 60,
     this.maxSlotMins = 240,
     this.slotIncrementMins = 60,
+    this.turnaroundMins = 0,
     this.minAdvancePaise = 0,
     this.boundarySize,
     this.parentUnitId,
@@ -149,6 +150,7 @@ class ArenaUnitOption {
   final int minSlotMins;
   final int maxSlotMins;
   final int slotIncrementMins;
+  final int turnaroundMins;
   final int minAdvancePaise;
   final int? boundarySize;
   final String? parentUnitId;
@@ -182,6 +184,7 @@ class ArenaUnitOption {
       minSlotMins: _intValue(json['minSlotMins'] ?? 60),
       maxSlotMins: _intValue(json['maxSlotMins'] ?? 240),
       slotIncrementMins: _intValue(json['slotIncrementMins'] ?? 60),
+      turnaroundMins: _intValue(json['turnaroundMins'] ?? 0),
       minAdvancePaise: _intValue(json['minAdvancePaise']),
       boundarySize: _intOrNull(json['boundarySize']),
       parentUnitId: _stringOrNull(json['parentUnitId']),
@@ -245,6 +248,8 @@ class AvailabilitySlot {
     this.bookingId,
     this.customerName,
     this.reason,
+    this.totalSlotPaise,
+    this.assignedUnitId,
   });
 
   final String startTime;
@@ -256,6 +261,10 @@ class AvailabilitySlot {
   final String? bookingId;
   final String? customerName;
   final String? reason;
+  /// Backend-computed total for the full slot duration (base only, no GST). Populated from /slots endpoint.
+  final int? totalSlotPaise;
+  /// The specific unit assigned for this slot (used for NETS grouping). Populated from /slots endpoint.
+  final String? assignedUnitId;
 
   factory AvailabilitySlot.fromJson(Map<String, dynamic> json) {
     final status = _stringOrNull(json['status']);
@@ -329,7 +338,8 @@ class ArenaReservation {
   final String? cancellationReason;
   final int advancePaise;
 
-  int get balancePaise => (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
+  int get balancePaise =>
+      (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
   bool get hasBalance => balancePaise > 0 && paidAt == null;
 
   String get displayName =>
@@ -338,9 +348,7 @@ class ArenaReservation {
   String get displayPhone => guestPhone ?? customerPhone ?? '';
 
   bool get isPaid =>
-      paidAt != null ||
-      status == 'CHECKED_IN' ||
-      status == 'COMPLETED';
+      paidAt != null || status == 'CHECKED_IN' || status == 'COMPLETED';
 
   factory ArenaReservation.fromJson(Map<String, dynamic> json) {
     final bookedBy = (json['bookedBy'] as Map?)?.cast<String, dynamic>();
@@ -378,39 +386,77 @@ class ArenaReservation {
 class PlayerBooking {
   const PlayerBooking({
     required this.id,
-    required this.arenaName,
-    required this.unitName,
+    required this.arenaId,
+    required this.unitId,
+    this.arenaName,
+    this.unitName,
     required this.date,
     required this.startTime,
     required this.endTime,
     required this.status,
     required this.otp,
+    required this.baseAmountPaise,
+    required this.gstPaise,
+    required this.addonAmountPaise,
     required this.totalAmountPaise,
+    this.paymentMode,
+    this.cancellationReason,
+    this.checkedInAt,
+    this.paidAt,
+    this.addonNames = const [],
   });
 
   final String id;
-  final String arenaName;
-  final String unitName;
+  final String arenaId;
+  final String unitId;
+  final String? arenaName;
+  final String? unitName;
   final DateTime date;
   final String startTime;
   final String endTime;
   final String status;
   final String otp;
+  final int baseAmountPaise;
+  final int gstPaise;
+  final int addonAmountPaise;
   final int totalAmountPaise;
+  final String? paymentMode;
+  final String? cancellationReason;
+  final DateTime? checkedInAt;
+  final DateTime? paidAt;
+  final List<String> addonNames;
 
   factory PlayerBooking.fromJson(Map<String, dynamic> json) {
     final arena = (json['arena'] as Map?)?.cast<String, dynamic>() ?? {};
     final unit = (json['unit'] as Map?)?.cast<String, dynamic>() ?? {};
+    final addons =
+        ((json['addons'] ?? json['bookingAddons']) as List?) ?? const [];
     return PlayerBooking(
       id: '${json['id'] ?? ''}',
-      arenaName: '${arena['name'] ?? 'Arena'}',
-      unitName: '${unit['name'] ?? 'Unit'}',
-      date: _dateOrNull(json['date']) ?? DateTime.now(),
+      arenaId: '${json['arenaId'] ?? arena['id'] ?? ''}',
+      unitId: '${json['unitId'] ?? unit['id'] ?? ''}',
+      arenaName:
+          _stringOrNull(json['arenaName']) ?? _stringOrNull(arena['name']),
+      unitName: _stringOrNull(json['unitName']) ?? _stringOrNull(unit['name']),
+      date: _dateOrNull(json['date'] ?? json['bookingDate']) ?? DateTime.now(),
       startTime: '${json['startTime'] ?? ''}',
       endTime: '${json['endTime'] ?? ''}',
       status: '${json['status'] ?? ''}',
-      otp: '${json['otp'] ?? '0000'}',
-      totalAmountPaise: _intValue(json['totalAmountPaise']),
+      otp: '${json['otp'] ?? json['checkInOtp'] ?? ''}',
+      baseAmountPaise: _intValue(json['baseAmountPaise']),
+      gstPaise: _intValue(json['gstPaise']),
+      addonAmountPaise: _intValue(json['addonAmountPaise']),
+      totalAmountPaise:
+          _intValue(json['totalAmountPaise'] ?? json['totalPricePaise']),
+      paymentMode: _stringOrNull(json['paymentMode']),
+      cancellationReason: _stringOrNull(json['cancellationReason']),
+      checkedInAt: _dateOrNull(json['checkedInAt']),
+      paidAt: _dateOrNull(json['paidAt']),
+      addonNames: addons
+          .whereType<Map>()
+          .map((e) => _stringOrNull(e['name'] ?? (e['addon'] as Map?)?['name']))
+          .whereType<String>()
+          .toList(),
     );
   }
 }
@@ -435,11 +481,11 @@ class BookingPaymentOrder {
     final order =
         (json['razorpayOrder'] as Map?)?.cast<String, dynamic>() ?? {};
     return BookingPaymentOrder(
-      paymentId: '${payment['id'] ?? ''}',
-      orderId: '${order['id'] ?? ''}',
-      amountPaise: _intValue(order['amount']),
-      currency: '${order['currency'] ?? 'INR'}'.trim(),
-      key: _stringOrNull(order['key']),
+      paymentId: '${payment['id'] ?? json['paymentId'] ?? ''}',
+      orderId: '${order['id'] ?? json['orderId'] ?? ''}',
+      amountPaise: _intValue(order['amount'] ?? json['amountPaise']),
+      currency: '${order['currency'] ?? json['currency'] ?? 'INR'}'.trim(),
+      key: _stringOrNull(order['key']) ?? _stringOrNull(json['key']),
     );
   }
 }
@@ -454,8 +500,10 @@ class ArenaPaymentsData {
   // Confirmed bookings not yet checked in = balance pending
   final List<ArenaReservation> pendingBookings;
 
-  int get totalCollectedPaise => checkedInBookings.fold(0, (s, b) => s + b.totalAmountPaise);
-  int get totalBalancePaise => pendingBookings.fold(0, (s, b) => s + b.totalAmountPaise);
+  int get totalCollectedPaise =>
+      checkedInBookings.fold(0, (s, b) => s + b.totalAmountPaise);
+  int get totalBalancePaise =>
+      pendingBookings.fold(0, (s, b) => s + b.totalAmountPaise);
 }
 
 class ArenaGuest {
@@ -534,9 +582,30 @@ class ArenaBookingPricing {
     required DateTime start,
     required int durationMins,
     List<ArenaSelectedAddon> addons = const [],
+    int? precomputedBasePaise,
   }) {
-    final hours = (durationMins / 60).clamp(0, 24);
-    final baseAmountPaise = (unit.pricePerHourPaise * hours).round();
+    final int baseAmountPaise;
+    if (precomputedBasePaise != null) {
+      baseAmountPaise = precomputedBasePaise;
+    } else {
+      int base;
+      if (durationMins == 240 && unit.price4HrPaise != null) {
+        base = unit.price4HrPaise!;
+      } else if (durationMins == 480 && unit.price8HrPaise != null) {
+        base = unit.price8HrPaise!;
+      } else if (durationMins == 720 && unit.priceFullDayPaise != null) {
+        base = unit.priceFullDayPaise!;
+      } else {
+        final hours = (durationMins / 60).clamp(0.0, 24.0);
+        base = (unit.pricePerHourPaise * hours).round();
+      }
+      final weekday = start.weekday; // 1=Mon, 7=Sun
+      final isWeekend = weekday == 6 || weekday == 7;
+      if (isWeekend && unit.weekendMultiplier != 1.0) {
+        base = (base * unit.weekendMultiplier).round();
+      }
+      baseAmountPaise = base;
+    }
     final addonAmountPaise =
         addons.fold<int>(0, (sum, addon) => sum + addon.totalPaise);
     final gstPaise = ((baseAmountPaise + addonAmountPaise) * 0.18).round();
@@ -610,6 +679,129 @@ class ArenaAvailabilityEngine {
       }
     }
     return result;
+  }
+}
+
+class PlayerAvailableSlot {
+  const PlayerAvailableSlot({
+    required this.startTime,
+    required this.endTime,
+    required this.totalAmountPaise,
+    required this.assignedUnitId,
+    this.isWeekendRate = false,
+    this.availableCount,
+    this.netTypeOptions,
+  });
+
+  final String startTime;
+  final String endTime;
+  final int totalAmountPaise;
+  final String assignedUnitId;
+  final bool isWeekendRate;
+  final int? availableCount;
+  final List<Map<String, dynamic>>? netTypeOptions;
+
+  factory PlayerAvailableSlot.fromJson(Map<String, dynamic> json) {
+    final opts = (json['netTypeOptions'] as List?)
+        ?.whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    return PlayerAvailableSlot(
+      startTime: '${json['startTime'] ?? ''}',
+      endTime: '${json['endTime'] ?? ''}',
+      totalAmountPaise: _intValue(json['totalAmountPaise']),
+      assignedUnitId: '${json['assignedUnitId'] ?? ''}',
+      isWeekendRate: json['isWeekendRate'] == true,
+      availableCount: _intOrNull(json['availableCount']),
+      netTypeOptions: opts,
+    );
+  }
+}
+
+class PlayerUnitGroup {
+  const PlayerUnitGroup({
+    required this.groupKey,
+    required this.displayName,
+    required this.unitType,
+    required this.pricePerHourPaise,
+    required this.minSlotMins,
+    required this.maxSlotMins,
+    required this.minAdvancePaise,
+    required this.availableSlots,
+    this.unitId,
+    this.netTypes,
+    this.totalCount = 1,
+    this.price4HrPaise,
+    this.price8HrPaise,
+    this.weekendMultiplier = 1.0,
+    this.hasFloodlights = false,
+    this.photoUrls = const [],
+    this.description,
+  });
+
+  final String groupKey;
+  final String displayName;
+  final String unitType;
+  final String? unitId;
+  final List<String>? netTypes;
+  final int totalCount;
+  final int pricePerHourPaise;
+  final int? price4HrPaise;
+  final int? price8HrPaise;
+  final double weekendMultiplier;
+  final int minSlotMins;
+  final int maxSlotMins;
+  final int minAdvancePaise;
+  final bool hasFloodlights;
+  final List<String> photoUrls;
+  final String? description;
+  final List<PlayerAvailableSlot> availableSlots;
+
+  bool get isNetsGroup => groupKey == 'NETS';
+
+  factory PlayerUnitGroup.fromJson(Map<String, dynamic> json) {
+    final slots = (json['availableSlots'] as List? ?? const [])
+        .whereType<Map>()
+        .map((e) => PlayerAvailableSlot.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    final netTypes = (json['netTypes'] as List?)
+        ?.map((e) => '$e')
+        .toList();
+    return PlayerUnitGroup(
+      groupKey: '${json['groupKey'] ?? ''}',
+      displayName: '${json['displayName'] ?? ''}',
+      unitType: '${json['unitType'] ?? ''}',
+      unitId: _stringOrNull(json['unitId']),
+      netTypes: netTypes,
+      totalCount: _intValue(json['totalCount'] ?? 1),
+      pricePerHourPaise: _intValue(json['pricePerHourPaise']),
+      price4HrPaise: _intOrNull(json['price4HrPaise']),
+      price8HrPaise: _intOrNull(json['price8HrPaise']),
+      weekendMultiplier: _doubleValue(json['weekendMultiplier'], fallback: 1),
+      minSlotMins: _intValue(json['minSlotMins'] ?? 60),
+      maxSlotMins: _intValue(json['maxSlotMins'] ?? 480),
+      minAdvancePaise: _intValue(json['minAdvancePaise'] ?? 0),
+      hasFloodlights: json['hasFloodlights'] == true,
+      photoUrls: (json['photoUrls'] as List? ?? const []).map((e) => '$e').toList(),
+      description: _stringOrNull(json['description']),
+      availableSlots: slots,
+    );
+  }
+}
+
+class PlayerSlotsData {
+  const PlayerSlotsData({
+    required this.unitGroups,
+  });
+
+  final List<PlayerUnitGroup> unitGroups;
+
+  factory PlayerSlotsData.fromJson(Map<String, dynamic> json) {
+    final groups = (json['unitGroups'] as List? ?? const [])
+        .whereType<Map>()
+        .map((e) => PlayerUnitGroup.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return PlayerSlotsData(unitGroups: groups);
   }
 }
 

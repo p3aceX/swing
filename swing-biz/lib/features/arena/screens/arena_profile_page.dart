@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,9 +6,11 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../core/api/api_client.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/utils/image_compressor.dart';
 import '../services/arena_profile_providers.dart';
 
 // ─── Color palette ───────────────────────────────────────────────────────────
@@ -36,18 +39,17 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     required int remainingSlots,
   }) async {
     if (remainingSlots <= 0) return const [];
-    final files = await ImagePicker().pickMultiImage(
-      maxWidth: 1280,
-      maxHeight: 960,
-      imageQuality: 72,
-    );
+    final files = await ImagePicker().pickMultiImage();
     if (files.isEmpty) return const [];
 
     final uploads = <String>[];
     for (final file in files.take(remainingSlots)) {
+      final compressedFile = await ImageCompressor.compress(file.path);
+      if (compressedFile == null) continue;
+
       final form = FormData.fromMap({
         'folder': folder,
-        'file': await MultipartFile.fromFile(file.path, filename: file.name),
+        'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
       });
       final response = await ApiClient.instance.dio.post(
         '/media/upload',
@@ -56,7 +58,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       );
       final payload = response.data as Map<String, dynamic>;
       final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-      final url = data['publicUrl'] as String?;
+      final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
       if (url != null && url.isNotEmpty) uploads.add(url);
     }
     return uploads;
@@ -543,20 +545,18 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
   }
 
   Future<void> _pickAndUploadPhotos() async {
-    final files = await ImagePicker().pickMultiImage(
-      maxWidth: 1280,
-      maxHeight: 960,
-      imageQuality: 72,
-    );
+    final files = await ImagePicker().pickMultiImage();
     if (files.isEmpty) return;
     setState(() => _uploading = true);
     try {
       final uploads = <String>[];
       for (final file in files) {
+        final compressedFile = await ImageCompressor.compress(file.path);
+        if (compressedFile == null) continue;
+
         final form = FormData.fromMap({
           'folder': 'arenas/${widget.arena.id}',
-          'file':
-              await MultipartFile.fromFile(file.path, filename: file.name),
+          'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
         });
         final response = await ApiClient.instance.dio.post(
           '/media/upload',
@@ -565,15 +565,19 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
         );
         final payload = response.data as Map<String, dynamic>;
         final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-        final url = data['publicUrl'] as String?;
+        final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
         if (url != null && url.isNotEmpty) uploads.add(url);
       }
       if (!mounted || uploads.isEmpty) return;
       setState(() => _photoUrls = [..._photoUrls, ...uploads]);
     } catch (error) {
       if (!mounted) return;
+      String msg = error.toString();
+      if (error is DioException) {
+        msg = error.response?.data?['message'] ?? error.message ?? msg;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Photo upload failed: $error')),
+        SnackBar(content: Text('Photo upload failed: $msg')),
       );
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -1176,6 +1180,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   String _unitType = 'CRICKET_NET';
   String _netType = '';
   int _slotMins = 60;
+  int _breatherMins = 0;
   double _weekendMultiplier = 1.0;
   int _quantity = 1;
   bool _showBulkPricing = false;
@@ -1214,6 +1219,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
     _labelCtrl.text = unit?.unitTypeLabel ?? _labelForType(_unitType);
     _netType = unit?.netType ?? '';
     _slotMins = unit?.minSlotMins ?? (_isGround ? 240 : 60);
+    final increment = unit?.slotIncrementMins ?? _slotMins;
+    _breatherMins = _isGround ? (increment - _slotMins).clamp(0, 60) : 0;
     _weekendMultiplier = unit?.weekendMultiplier ?? 1.0;
     _priceHourCtrl.text = _rupeesText(unit?.pricePerHourPaise);
     _price4Ctrl.text = _rupeesText(unit?.price4HrPaise);
@@ -1288,8 +1295,12 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       setState(() => _photos = [..._photos, ...uploads].take(3).toList());
     } catch (error) {
       if (!mounted) return;
+      String msg = error.toString();
+      if (error is DioException) {
+        msg = error.response?.data?['message'] ?? error.message ?? msg;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Photo upload failed: $error')),
+        SnackBar(content: Text('Photo upload failed: $msg')),
       );
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -1374,7 +1385,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           'weekendMultiplier': _weekendMultiplier,
           'minSlotMins': _slotMins,
           'maxSlotMins': _slotMins,
-          'slotIncrementMins': _slotMins,
+          'slotIncrementMins': _slotMins + _breatherMins,
+          'turnaroundMins': _breatherMins,
           'minAdvancePaise': _rupeesToPaise(_minAdvanceCtrl.text),
           'parentUnitId': _canHaveParent ? _parentUnitId : null,
           if (_openTimeCtrl.text.trim().isNotEmpty)
@@ -1781,8 +1793,46 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                   ('90', '1.5 hr'),
                   ('120', '2 hr'),
                 ],
-          onChanged: (v) => setState(() => _slotMins = int.parse(v)),
+          onChanged: (v) => setState(() {
+            _slotMins = int.parse(v);
+            // clamp breather so it fits in available window
+          }),
         ),
+        if (_isGround) ...[
+          const SizedBox(height: 20),
+          const Text(
+            'Turnaround between sessions',
+            style: TextStyle(
+              color: _text,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Extra gap after each session before the next can start',
+            style: TextStyle(color: _muted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          _SegmentedOptions(
+            value: _breatherMins.toString(),
+            options: const [
+              ('0', 'None'),
+              ('15', '15 min'),
+              ('30', '30 min'),
+              ('45', '45 min'),
+              ('60', '1 hr'),
+            ],
+            onChanged: (v) => setState(() => _breatherMins = int.parse(v)),
+          ),
+          const SizedBox(height: 20),
+          _SlotPreview(
+            openCtrl: _openTimeCtrl,
+            closeCtrl: _closeTimeCtrl,
+            slotMins: _slotMins,
+            breatherMins: _breatherMins,
+          ),
+        ],
       ],
     );
   }
@@ -2005,6 +2055,116 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           onPressed: () => setState(() => _addons.add(_AddonDraft())),
           icon: const Icon(Icons.add_rounded),
           label: const Text('Custom add-on'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Slot preview widget ──────────────────────────────────────────────────────
+
+class _SlotPreview extends StatefulWidget {
+  const _SlotPreview({
+    required this.openCtrl,
+    required this.closeCtrl,
+    required this.slotMins,
+    required this.breatherMins,
+  });
+
+  final TextEditingController openCtrl;
+  final TextEditingController closeCtrl;
+  final int slotMins;
+  final int breatherMins;
+
+  @override
+  State<_SlotPreview> createState() => _SlotPreviewState();
+}
+
+class _SlotPreviewState extends State<_SlotPreview> {
+  @override
+  void initState() {
+    super.initState();
+    widget.openCtrl.addListener(_rebuild);
+    widget.closeCtrl.addListener(_rebuild);
+  }
+
+  @override
+  void dispose() {
+    widget.openCtrl.removeListener(_rebuild);
+    widget.closeCtrl.removeListener(_rebuild);
+    super.dispose();
+  }
+
+  void _rebuild() => setState(() {});
+
+  List<String> _computeSlots() {
+    final openTime = widget.openCtrl.text.trim();
+    final closeTime = widget.closeCtrl.text.trim();
+    if (openTime.isEmpty || closeTime.isEmpty) return const [];
+    int parseTime(String t) {
+      final parts = t.split(':');
+      if (parts.length < 2) return -1;
+      final h = int.tryParse(parts[0]) ?? -1;
+      final m = int.tryParse(parts[1]) ?? -1;
+      if (h < 0 || m < 0) return -1;
+      return h * 60 + m;
+    }
+    final openMins = parseTime(openTime);
+    final closeMins = parseTime(closeTime);
+    if (openMins < 0 || closeMins < 0 || closeMins <= openMins) return const [];
+    final step = widget.slotMins + widget.breatherMins;
+    if (step <= 0) return const [];
+    final slots = <String>[];
+    var start = openMins;
+    while (start + widget.slotMins <= closeMins) {
+      String fmt(int total) {
+        final h = total ~/ 60;
+        final m = total % 60;
+        final suffix = h < 12 ? 'am' : 'pm';
+        final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
+        return m == 0 ? '$h12$suffix' : '$h12:${m.toString().padLeft(2, '0')}$suffix';
+      }
+      slots.add('${fmt(start)} – ${fmt(start + widget.slotMins)}');
+      start += step;
+    }
+    return slots;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slots = _computeSlots();
+    if (slots.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Slot preview · ${slots.length} session${slots.length == 1 ? '' : 's'}',
+          style: const TextStyle(
+            color: _muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: slots.map((s) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _deep.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _deep.withOpacity(0.2)),
+            ),
+            child: Text(
+              s,
+              style: const TextStyle(
+                color: _deep,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          )).toList(),
         ),
       ],
     );

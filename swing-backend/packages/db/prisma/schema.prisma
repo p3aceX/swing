@@ -2318,6 +2318,7 @@ model ArenaUnit {
   minSlotMins       Int              @default(60)
   maxSlotMins       Int              @default(240)
   slotIncrementMins Int              @default(60)
+  turnaroundMins    Int              @default(0)
   minAdvancePaise   Int              @default(0)
   openTime          String?
   closeTime         String?

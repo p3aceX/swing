@@ -51,13 +51,17 @@ export class BookingService {
     }
 
     const conflictUnitIds = await this.getConflictUnitIds(data.arenaUnitId)
+    const turnaroundMins: number = (unit as any).turnaroundMins ?? 0
+    const effectiveHoldStart = turnaroundMins > 0
+      ? this.minutesToTime(Math.max(0, this.timeToMinutes(data.startTime) - turnaroundMins))
+      : data.startTime
     const conflict = await prisma.slotBooking.findFirst({
       where: {
         unitId: { in: conflictUnitIds },
         date: bookingDate,
         status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         startTime: { lt: data.endTime },
-        endTime: { gt: data.startTime },
+        endTime: { gt: effectiveHoldStart },
       },
     })
     if (conflict) throw Errors.slotAlreadyBooked()
@@ -96,13 +100,17 @@ export class BookingService {
     await this.assertNoArenaBlock(unit.arenaId, unit.id, bookingDate, data.startTime, data.endTime)
 
     const conflictUnitIds2 = await this.getConflictUnitIds(data.arenaUnitId)
+    const turnaroundMins2: number = (unit as any).turnaroundMins ?? 0
+    const effectiveBookStart = turnaroundMins2 > 0
+      ? this.minutesToTime(Math.max(0, this.timeToMinutes(data.startTime) - turnaroundMins2))
+      : data.startTime
     const conflict = await prisma.slotBooking.findFirst({
       where: {
         unitId: { in: conflictUnitIds2 },
         date: bookingDate,
         status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         startTime: { lt: data.endTime },
-        endTime: { gt: data.startTime },
+        endTime: { gt: effectiveBookStart },
       },
     })
     if (conflict) throw Errors.slotAlreadyBooked()
@@ -310,13 +318,17 @@ export class BookingService {
     const bookingDate = this.startOfDay(data.date)
 
     const conflictUnitIds3 = await this.getConflictUnitIds(data.unitId)
+    const turnaroundMins3: number = (unit as any).turnaroundMins ?? 0
+    const effectiveManualStart = turnaroundMins3 > 0
+      ? this.minutesToTime(Math.max(0, this.timeToMinutes(data.startTime) - turnaroundMins3))
+      : data.startTime
     const conflict = await prisma.slotBooking.findFirst({
       where: {
         unitId: { in: conflictUnitIds3 },
         date: bookingDate,
         status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         startTime: { lt: data.endTime },
-        endTime: { gt: data.startTime },
+        endTime: { gt: effectiveManualStart },
       },
     })
     if (conflict) throw Errors.slotAlreadyBooked()
@@ -911,7 +923,10 @@ export class BookingService {
     }
 
     const slotIncrement = unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60
-    if ((startMinutes - openMinutes) % slotIncrement !== 0 || durationMins % slotIncrement !== 0) {
+    // Duration is validated against minSlotMins (the actual booking quantum), not slotIncrementMins
+    // (slotIncrementMins = minSlotMins + turnaroundMins and must not be used to validate duration length)
+    const durationUnit = unit.minSlotMins > 0 ? unit.minSlotMins : 60
+    if ((startMinutes - openMinutes) % slotIncrement !== 0 || durationMins % durationUnit !== 0) {
       throw new AppError('INVALID_SLOT_ALIGNMENT', 'Booking must match the unit slot timing', 400)
     }
 
@@ -943,6 +958,12 @@ export class BookingService {
   private timeToMinutes(value: string) {
     const [h, m] = value.split(':').map(Number)
     return h * 60 + m
+  }
+
+  private minutesToTime(value: number): string {
+    const h = Math.floor(value / 60) % 24
+    const m = value % 60
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   }
 
   private startOfDay(value: string): Date {

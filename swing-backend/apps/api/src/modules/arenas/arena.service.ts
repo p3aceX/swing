@@ -273,6 +273,7 @@ export class ArenaService {
         minSlotMins: data.minSlotMins ?? 60,
         maxSlotMins: data.maxSlotMins ?? 240,
         slotIncrementMins: data.slotIncrementMins ?? 60,
+        turnaroundMins: data.turnaroundMins ?? 0,
         minAdvancePaise: data.minAdvancePaise ?? 0,
         boundarySize: data.boundarySize ? Number(data.boundarySize) : null,
         parentUnitId: data.parentUnitId || null,
@@ -294,7 +295,7 @@ export class ArenaService {
     const fields = [
       'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'photoUrls', 'pricePerHourPaise', 'peakPricePaise',
       'peakHoursStart', 'peakHoursEnd', 'price4HrPaise', 'price8HrPaise', 'priceFullDayPaise',
-      'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins', 'minAdvancePaise',
+      'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins', 'turnaroundMins', 'minAdvancePaise',
       'boundarySize', 'parentUnitId', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights', 'isActive',
     ]
     for (const f of fields) {
@@ -547,6 +548,8 @@ export class ArenaService {
       const relatedBookings = bookings.filter(booking => relatedIds.includes(booking.unitId))
       const unitBlocks = blocks.filter(block => block.unitId === unit.id)
 
+      const unitTurnaround: number = (unit as any).turnaroundMins ?? 0
+
       return {
         unit,
         slots: slots.map(slot => {
@@ -561,15 +564,25 @@ export class ArenaService {
             }
           }
 
-          const booking = unitBookings.find(item => this.timesOverlap(item.startTime, item.endTime, slot.start, slot.end))
+          // Extend booking effective end by turnaround so the gap after a session shows as unavailable
+          const booking = unitBookings.find(item => {
+            const effectiveEnd = unitTurnaround > 0
+              ? this.minutesToTime(this.timeToMinutes(item.endTime) + unitTurnaround)
+              : item.endTime
+            return this.timesOverlap(item.startTime, effectiveEnd, slot.start, slot.end)
+          })
           if (booking) {
+            const isTurnaround = unitTurnaround > 0
+              && slot.start >= booking.endTime
+              && slot.start < this.minutesToTime(this.timeToMinutes(booking.endTime) + unitTurnaround)
             return {
               start: slot.start,
               end: slot.end,
               available: false,
-              status: 'BOOKED',
+              status: isTurnaround ? 'TURNAROUND' : 'BOOKED',
               bookingId: booking.id,
-              customerName: booking.bookedBy?.user?.name || null,
+              customerName: isTurnaround ? null : (booking.bookedBy?.user?.name || null),
+              reason: isTurnaround ? 'Turnaround gap' : undefined,
               pricePerHourPaise: unit.pricePerHourPaise,
             }
           }
@@ -682,11 +695,17 @@ export class ArenaService {
       }
     }
     const playerHeldSet = await getHeldSlotsSet(playerHoldEntries)
+    const unitTurnaroundMap = new Map<string, number>(allUnits.map((u: any) => [u.id, u.turnaroundMins ?? 0]))
 
     const isWindowBusy = (unitId: string, startTime: string, endTime: string): boolean => {
       if (playerHeldSet.has(`${unitId}:${slotsDateStr}:${startTime}`)) return true
+      const turnaround = unitTurnaroundMap.get(unitId) ?? 0
+      // Shift start back by turnaround so existing bookings whose end falls in the gap are treated as conflicts
+      const effectiveStart = turnaround > 0
+        ? this.minutesToTime(Math.max(0, this.timeToMinutes(startTime) - turnaround))
+        : startTime
       return (
-        bookings.some(b => b.unitId === unitId && this.timesOverlap(b.startTime, b.endTime, startTime, endTime)) ||
+        bookings.some(b => b.unitId === unitId && this.timesOverlap(b.startTime, b.endTime, effectiveStart, endTime)) ||
         timeBlocks.some(b => b.unitId === unitId && this.timesOverlap(b.startTime, b.endTime, startTime, endTime))
       )
     }
