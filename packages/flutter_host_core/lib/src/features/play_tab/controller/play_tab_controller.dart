@@ -102,10 +102,16 @@ class PlayTournamentsState {
         exploreFormat: exploreFormat ?? this.exploreFormat,
       );
 
-  List<PlayTournament> get participated =>
-      myTournaments.where((t) => t.isParticipating && !t.isHost).toList();
-  List<PlayTournament> get hosted =>
-      myTournaments.where((t) => t.isHost).toList();
+  List<PlayTournament> get participated => myTournaments.toList();
+
+  // Public list with isHost overlaid from myTournaments so Explore cards also carry the flag
+  List<PlayTournament> get publicTournamentsWithHostFlag {
+    final hostedIds = {for (final t in myTournaments) if (t.isHost) t.id};
+    if (hostedIds.isEmpty) return publicTournaments;
+    return publicTournaments
+        .map((t) => hostedIds.contains(t.id) ? t.copyWith(isHost: true) : t)
+        .toList();
+  }
 }
 
 class PlayTournamentsController extends StateNotifier<PlayTournamentsState> {

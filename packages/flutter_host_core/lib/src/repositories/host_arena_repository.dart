@@ -122,6 +122,25 @@ class HostArenaBookingRepository {
     return result;
   }
 
+  Future<PlayerSlotsData> fetchPlayerSlots({
+    required String arenaId,
+    required DateTime date,
+    required int durationMins,
+  }) async {
+    final response = await _dio.get(
+      _paths.arenaSlots(arenaId),
+      queryParameters: {
+        'date': date.toIso8601String().split('T').first,
+        'durationMins': durationMins,
+      },
+    );
+    final root = _extractMap(response.data);
+    final payload = (root['data'] ?? root) as Map?;
+    return PlayerSlotsData.fromJson(
+      payload != null ? Map<String, dynamic>.from(payload) : <String, dynamic>{},
+    );
+  }
+
   Future<List<ArenaAddon>> fetchArenaAddons(String arenaId) async {
     final response = await _dio.get(_paths.arenaAddons(arenaId));
     final list = _extractList(response.data, ['data', 'addons']);

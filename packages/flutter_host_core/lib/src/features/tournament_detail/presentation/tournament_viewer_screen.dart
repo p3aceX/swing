@@ -21,11 +21,13 @@ class TournamentViewerCallbacks {
     this.onBack,
     this.onNavigateToMatch,
     this.onNavigateToTeam,
+    this.onManage,
   });
 
   final VoidCallback? onBack;
   final void Function(String matchId)? onNavigateToMatch;
   final void Function(String teamId)? onNavigateToTeam;
+  final VoidCallback? onManage;
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -34,10 +36,12 @@ class HostTournamentViewerScreen extends ConsumerStatefulWidget {
   const HostTournamentViewerScreen({
     super.key,
     required this.slug,
+    this.isHost = false,
     this.callbacks = const TournamentViewerCallbacks(),
   });
 
   final String slug;
+  final bool isHost;
   final TournamentViewerCallbacks callbacks;
 
   @override
@@ -65,6 +69,7 @@ class _HostTournamentViewerScreenState
   @override
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(hostTournamentDetailProvider(widget.slug));
+    debugPrint('[ViewerScreen] slug=${widget.slug} isHost=${widget.isHost}');
 
     return Scaffold(
       backgroundColor: context.bg,
@@ -77,9 +82,13 @@ class _HostTournamentViewerScreenState
           tournament: tournament,
           slug: widget.slug,
           tabs: _tabs,
+          isHost: widget.isHost,
           callbacks: widget.callbacks,
         ),
       ),
+      bottomNavigationBar: widget.isHost
+          ? _ManageBar(onManage: widget.callbacks.onManage)
+          : null,
     );
   }
 }
@@ -91,11 +100,13 @@ class _DetailBody extends StatelessWidget {
     required this.tournament,
     required this.slug,
     required this.tabs,
+    required this.isHost,
     required this.callbacks,
   });
   final TournamentDetailModel tournament;
   final String slug;
   final TabController tabs;
+  final bool isHost;
   final TournamentViewerCallbacks callbacks;
 
   @override
@@ -126,6 +137,41 @@ class _DetailBody extends StatelessWidget {
           ),
           _TeamsTab(tournament: tournament, callbacks: callbacks),
         ],
+      ),
+    );
+  }
+}
+
+// ── Manage bar ────────────────────────────────────────────────────────────────
+
+class _ManageBar extends StatelessWidget {
+  const _ManageBar({this.onManage});
+  final VoidCallback? onManage;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).padding.bottom;
+    return Container(
+      color: context.bg,
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + bottom),
+      child: SizedBox(
+        height: 52,
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: onManage,
+          style: FilledButton.styleFrom(
+            backgroundColor: context.accent,
+            foregroundColor: context.ctaFg,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          icon: const Icon(Icons.settings_rounded, size: 18),
+          label: const Text(
+            'Manage Tournament',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          ),
+        ),
       ),
     );
   }
@@ -183,7 +229,10 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
 // ── Tournament header ─────────────────────────────────────────────────────────
 
 class _TournamentHeader extends StatelessWidget {
-  const _TournamentHeader({required this.tournament, required this.onBack});
+  const _TournamentHeader({
+    required this.tournament,
+    required this.onBack,
+  });
   final TournamentDetailModel tournament;
   final VoidCallback onBack;
 

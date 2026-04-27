@@ -1616,6 +1616,13 @@ class HostMatchDetailRepository {
       add(nested['id']); add(nested['_id']); add(nested['profileId']);
       add(nested['playerId']); add(nested['playerProfileId']); add(nested['userId']);
     }
+    // Also collect from scoringOwnerIds array (set on tournament-generated matches)
+    for (final k in const ['scoringOwnerIds', 'ownerIds', 'scorerIds']) {
+      final list = source[k];
+      if (list is List) {
+        for (final v in list) { add(v); }
+      }
+    }
     return ids.toList(growable: false);
   }
 

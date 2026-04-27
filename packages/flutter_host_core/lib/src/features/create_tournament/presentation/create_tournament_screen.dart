@@ -32,7 +32,7 @@ class _HostCreateTournamentScreenState
     extends ConsumerState<HostCreateTournamentScreen>
     with SingleTickerProviderStateMixin {
   // ── Step management ────────────────────────────────────────────────────────
-  static const int _totalSteps = 5;
+  static const int _totalSteps = 6;
   int _currentStep = 0;
   late final PageController _pageController;
 
@@ -91,7 +91,7 @@ class _HostCreateTournamentScreenState
 
   bool _validateCurrentStep() {
     if (_currentStep == 0) return _step1Key.currentState?.validate() ?? false;
-    if (_currentStep == 2) return _step3Key.currentState?.validate() ?? false;
+    if (_currentStep == 3) return _step3Key.currentState?.validate() ?? false;
     return true;
   }
 
@@ -215,11 +215,12 @@ class _HostCreateTournamentScreenState
         formKey: _step1Key,
         nameController: _nameController,
         format: _format,
+        onFormatChanged: (v) => setState(() => _format = v),
+      ),
+      _Step2Structure(
         tournamentFormat: _tournamentFormat,
         seriesMatchCountController: _seriesMatchCountController,
-        onFormatChanged: (v) => setState(() => _format = v),
-        onTournamentFormatChanged: (v) =>
-            setState(() => _tournamentFormat = v),
+        onTournamentFormatChanged: (v) => setState(() => _tournamentFormat = v),
       ),
       _Step2Schedule(
         startDate: _startDate,
@@ -280,6 +281,7 @@ class _HostCreateTournamentScreenState
 
     final stepMeta = [
       (label: 'Identity', icon: Icons.emoji_events_rounded),
+      (label: 'Structure', icon: Icons.account_tree_rounded),
       (label: 'Schedule', icon: Icons.calendar_today_rounded),
       (label: 'Teams', icon: Icons.groups_rounded),
       (label: 'Fees', icon: Icons.confirmation_number_rounded),
@@ -329,7 +331,7 @@ class _HostCreateTournamentScreenState
             step: _currentStep,
             totalSteps: _totalSteps,
             isSubmitting: _isSubmitting,
-            canSkip: _currentStep == 3,
+            canSkip: _currentStep == 4,
             onBack: _back,
             onNext: _next,
             onSkip: _skipStep,
@@ -569,19 +571,13 @@ class _Step1Identity extends StatelessWidget {
     required this.formKey,
     required this.nameController,
     required this.format,
-    required this.tournamentFormat,
-    required this.seriesMatchCountController,
     required this.onFormatChanged,
-    required this.onTournamentFormatChanged,
   });
 
   final GlobalKey<FormState> formKey;
   final TextEditingController nameController;
   final String format;
-  final String tournamentFormat;
-  final TextEditingController seriesMatchCountController;
   final ValueChanged<String> onFormatChanged;
-  final ValueChanged<String> onTournamentFormatChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -625,54 +621,478 @@ class _Step1Identity extends StatelessWidget {
             selected: format,
             onSelected: onFormatChanged,
           ),
-          const SizedBox(height: 24),
-
-          // Tournament format
-          _FieldLabel(label: 'Tournament structure'),
-          const SizedBox(height: 10),
-          _ChipGrid(
-            options: const [
-              ('LEAGUE', 'League'),
-              ('KNOCKOUT', 'Knockout'),
-              ('GROUP_STAGE_KNOCKOUT', 'Group + KO'),
-              ('SERIES', 'Series'),
-              ('SUPER_LEAGUE', 'Super League'),
-              ('DOUBLE_ELIMINATION', 'Double Elim'),
-            ],
-            selected: tournamentFormat,
-            onSelected: onTournamentFormatChanged,
-          ),
-
-          if (tournamentFormat == 'SERIES') ...[
-            const SizedBox(height: 20),
-            _FieldLabel(label: 'Matches per series'),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: seriesMatchCountController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: TextStyle(
-                  color: context.fg,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600),
-              decoration: _inputDecoration(context, hint: '3'),
-              validator: (v) {
-                if (tournamentFormat != 'SERIES') return null;
-                final n = int.tryParse((v ?? '').trim());
-                if (n == null || n < 1 || n > 15) {
-                  return 'Enter a value between 1 and 15';
-                }
-                return null;
-              },
-            ),
-          ],
         ],
       ),
     );
   }
 }
 
-// ── Step 2: Schedule & Venue ───────────────────────────────────────────────────
+// ── Step 2: Structure preview ──────────────────────────────────────────────────
+
+class _Step2Structure extends StatelessWidget {
+  const _Step2Structure({
+    required this.tournamentFormat,
+    required this.seriesMatchCountController,
+    required this.onTournamentFormatChanged,
+  });
+  final String tournamentFormat;
+  final TextEditingController seriesMatchCountController;
+  final ValueChanged<String> onTournamentFormatChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final info = _formatInfo(tournamentFormat);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        _StepHeader(
+          title: 'Tournament structure',
+          subtitle: 'Pick a format — see how it plays out below.',
+        ),
+        const SizedBox(height: 20),
+
+        // Format selector
+        _ChipGrid(
+          options: const [
+            ('LEAGUE', 'League'),
+            ('KNOCKOUT', 'Knockout'),
+            ('GROUP_STAGE_KNOCKOUT', 'Group + KO'),
+            ('SERIES', 'Series'),
+            ('SUPER_LEAGUE', 'Super League'),
+            ('DOUBLE_ELIMINATION', 'Double Elim'),
+          ],
+          selected: tournamentFormat,
+          onSelected: onTournamentFormatChanged,
+        ),
+
+        if (tournamentFormat == 'SERIES') ...[
+          const SizedBox(height: 20),
+          _FieldLabel(label: 'Matches per series'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: seriesMatchCountController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: TextStyle(
+                color: context.fg, fontSize: 15, fontWeight: FontWeight.w600),
+            decoration: _inputDecoration(context, hint: '3'),
+          ),
+        ],
+
+        const SizedBox(height: 28),
+        Text(
+          info.description,
+          style: TextStyle(color: context.fgSub, fontSize: 13, height: 1.5),
+        ),
+        const SizedBox(height: 20),
+        _buildDiagram(context),
+        const SizedBox(height: 28),
+        _buildPhaseList(context, info.phases),
+      ],
+    );
+  }
+
+  Widget _buildDiagram(BuildContext context) {
+    return switch (tournamentFormat) {
+      'LEAGUE'              => _LeagueDiagram(),
+      'KNOCKOUT'            => _KnockoutDiagram(),
+      'GROUP_STAGE_KNOCKOUT'=> _GroupKnockoutDiagram(),
+      'SERIES'              => _SeriesDiagram(),
+      'SUPER_LEAGUE'        => _SuperLeagueDiagram(),
+      'DOUBLE_ELIMINATION'  => _DoubleEliminationDiagram(),
+      _                     => _LeagueDiagram(),
+    };
+  }
+
+  Widget _buildPhaseList(BuildContext context, List<(String, String)> phases) {
+    return Column(
+      children: [
+        for (var i = 0; i < phases.length; i++) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Column(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: context.accentBg,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${i + 1}',
+                        style: TextStyle(
+                          color: context.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (i < phases.length - 1)
+                    Container(width: 1.5, height: 28, color: context.stroke),
+                ],
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        phases[i].$1,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        phases[i].$2,
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  ({String description, List<(String, String)> phases}) _formatInfo(String fmt) =>
+      switch (fmt) {
+        'LEAGUE' => (
+          description: 'Every team plays every other team. The best record wins.',
+          phases: [
+            ('Round Robin', 'All confirmed teams play against each other once.'),
+            ('Standings', 'Points are tallied — wins, draws, and run-rate determine rank.'),
+            ('Champion', 'Top of the table is crowned the winner.'),
+          ],
+        ),
+        'KNOCKOUT' => (
+          description: 'One loss and you\'re out. Highest seeds face off in a bracket.',
+          phases: [
+            ('Seeding', 'Teams are seeded and slotted into the bracket.'),
+            ('Rounds', 'Each round eliminates half the field — QF, SF, Final.'),
+            ('Champion', 'The last team standing wins.'),
+          ],
+        ),
+        'GROUP_STAGE_KNOCKOUT' => (
+          description: 'Teams compete in groups first, then the top teams advance to a knockout.',
+          phases: [
+            ('Group Stage', 'Teams are split into groups and play round-robin within each group.'),
+            ('Qualification', 'Top teams from each group advance to the knockout rounds.'),
+            ('Knockout', 'Single-elimination bracket until the final.'),
+            ('Champion', 'The winner of the final is crowned.'),
+          ],
+        ),
+        'SERIES' => (
+          description: 'Two teams play a fixed number of matches against each other.',
+          phases: [
+            ('Matches', 'A set number of games are played between the two sides.'),
+            ('Series Result', 'The team with the most wins takes the series.'),
+          ],
+        ),
+        'SUPER_LEAGUE' => (
+          description: 'Teams start in groups, top performers form a super league round.',
+          phases: [
+            ('Group Stage', 'Teams play within their groups to earn points.'),
+            ('Super League', 'Top qualifiers from groups play a final league stage.'),
+            ('Champion', 'Highest points in the super league wins.'),
+          ],
+        ),
+        'DOUBLE_ELIMINATION' => (
+          description: 'Two losses to be eliminated. A losers bracket gives teams a second chance.',
+          phases: [
+            ('Winners Bracket', 'Teams with no losses compete for the top path.'),
+            ('Losers Bracket', 'Teams with one loss get a second chance here.'),
+            ('Grand Final', 'Winners bracket champion vs losers bracket champion.'),
+            ('Champion', 'Grand final winner takes the title.'),
+          ],
+        ),
+        _ => (
+          description: 'Select a tournament format to see how it works.',
+          phases: <(String, String)>[],
+        ),
+      };
+}
+
+// ── Structure diagrams ─────────────────────────────────────────────────────────
+
+class _LeagueDiagram extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final teams = ['T1', 'T2', 'T3', 'T4', 'TN'];
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var i = 0; i < teams.length; i++) ...[
+              _DiagramBox(label: teams[i], accent: false, context: context),
+              if (i < teams.length - 1)
+                _DiagramArrow(context: context, bidirectional: true),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        _DiagramConnectorDown(context: context),
+        const SizedBox(height: 4),
+        _DiagramBox(label: 'Standings', accent: false, context: context, wide: true),
+        const SizedBox(height: 4),
+        _DiagramConnectorDown(context: context),
+        const SizedBox(height: 4),
+        _TrophyBox(context: context),
+      ],
+    );
+  }
+}
+
+class _KnockoutDiagram extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Column(children: [
+              _DiagramBox(label: 'T1', accent: false, context: context),
+              const SizedBox(height: 6),
+              _DiagramBox(label: 'T2', accent: false, context: context),
+            ]),
+            _DiagramArrow(context: context),
+            _DiagramBox(label: 'QF', accent: false, context: context),
+            _DiagramArrow(context: context),
+            _DiagramBox(label: 'SF', accent: false, context: context),
+            _DiagramArrow(context: context),
+            _DiagramBox(label: 'Final', accent: true, context: context),
+            _DiagramArrow(context: context),
+            _TrophyBox(context: context),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _GroupKnockoutDiagram extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Column(children: [
+          _DiagramBox(label: 'Grp A', accent: false, context: context),
+          const SizedBox(height: 6),
+          _DiagramBox(label: 'Grp B', accent: false, context: context),
+        ]),
+        _DiagramArrow(context: context),
+        Column(children: [
+          _DiagramBox(label: 'QF', accent: false, context: context),
+          const SizedBox(height: 6),
+          _DiagramBox(label: 'SF', accent: false, context: context),
+        ]),
+        _DiagramArrow(context: context),
+        _DiagramBox(label: 'Final', accent: true, context: context),
+        _DiagramArrow(context: context),
+        _TrophyBox(context: context),
+      ],
+    );
+  }
+}
+
+class _SeriesDiagram extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _DiagramBox(label: 'Team A', accent: false, context: context),
+        const SizedBox(width: 8),
+        Column(
+          children: [
+            Text('vs', style: TextStyle(color: context.fgSub, fontSize: 11, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Row(children: [
+              for (var i = 1; i <= 3; i++) ...[
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: i == 2 ? context.accentBg : context.panel,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text('$i',
+                        style: TextStyle(
+                          color: i == 2 ? context.accent : context.fgSub,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        )),
+                  ),
+                ),
+                if (i < 3) const SizedBox(width: 4),
+              ],
+            ]),
+          ],
+        ),
+        const SizedBox(width: 8),
+        _DiagramBox(label: 'Team B', accent: false, context: context),
+        _DiagramArrow(context: context),
+        _TrophyBox(context: context),
+      ],
+    );
+  }
+}
+
+class _SuperLeagueDiagram extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Column(children: [
+          _DiagramBox(label: 'Grp A', accent: false, context: context),
+          const SizedBox(height: 6),
+          _DiagramBox(label: 'Grp B', accent: false, context: context),
+        ]),
+        _DiagramArrow(context: context),
+        _DiagramBox(label: 'Super\nLeague', accent: true, context: context),
+        _DiagramArrow(context: context),
+        _TrophyBox(context: context),
+      ],
+    );
+  }
+}
+
+class _DoubleEliminationDiagram extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Column(children: [
+          _DiagramBox(label: 'Winners\nBracket', accent: false, context: context),
+          const SizedBox(height: 6),
+          _DiagramBox(label: 'Losers\nBracket', accent: false, context: context),
+        ]),
+        _DiagramArrow(context: context),
+        _DiagramBox(label: 'Grand\nFinal', accent: true, context: context),
+        _DiagramArrow(context: context),
+        _TrophyBox(context: context),
+      ],
+    );
+  }
+}
+
+// ── Diagram shared widgets ─────────────────────────────────────────────────────
+
+class _DiagramBox extends StatelessWidget {
+  const _DiagramBox({
+    required this.label,
+    required this.accent,
+    required this.context,
+    this.wide = false,
+  });
+  final String label;
+  final bool accent;
+  final BuildContext context;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext _) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: wide ? 20 : 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: accent ? context.accentBg : context.panel,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: accent
+              ? context.accent.withValues(alpha: 0.5)
+              : context.stroke,
+          width: 1.5,
+        ),
+      ),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: accent ? context.accent : context.fg,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+        ),
+      ),
+    );
+  }
+}
+
+class _DiagramArrow extends StatelessWidget {
+  const _DiagramArrow({required this.context, this.bidirectional = false});
+  final BuildContext context;
+  final bool bidirectional;
+
+  @override
+  Widget build(BuildContext _) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (bidirectional)
+            Icon(Icons.arrow_back_ios_rounded, size: 10, color: context.fgSub),
+          Container(width: 12, height: 1.5, color: context.stroke),
+          Icon(Icons.arrow_forward_ios_rounded, size: 10, color: context.fgSub),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiagramConnectorDown extends StatelessWidget {
+  const _DiagramConnectorDown({required this.context});
+  final BuildContext context;
+
+  @override
+  Widget build(BuildContext _) {
+    return Container(width: 1.5, height: 14, color: context.stroke);
+  }
+}
+
+class _TrophyBox extends StatelessWidget {
+  const _TrophyBox({required this.context});
+  final BuildContext context;
+
+  @override
+  Widget build(BuildContext _) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: context.accentBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: context.accent.withValues(alpha: 0.4), width: 1.5),
+      ),
+      child: Icon(Icons.emoji_events_rounded, color: context.accent, size: 20),
+    );
+  }
+}
+
+// ── Step 3: Schedule & Venue ───────────────────────────────────────────────────
 
 class _Step2Schedule extends StatelessWidget {
   const _Step2Schedule({

@@ -26,15 +26,11 @@ class HostTeamRepository {
   final HostPathConfig _paths;
 
   Future<List<Map<String, dynamic>>> searchTeams(String query) async {
-    if (query.trim().isEmpty) {
-      return getMyTeams();
-    }
+    final q = query.trim();
+    if (q.isEmpty) return const [];
     final response = await _dio.get(
       _paths.teamSearch,
-      queryParameters: {
-        'q': query.trim(),
-        'limit': 20,
-      },
+      queryParameters: {'q': q, 'limit': 20},
     );
     return _normalizeList(response.data);
   }
