@@ -237,6 +237,8 @@ class ScoringBall {
     this.isOverthrow = false,
     this.overthrowRuns = 0,
     this.dismissalType,
+    this.dismissedPlayerId,
+    this.nonBatterId,
   });
 
   final String id;
@@ -249,6 +251,8 @@ class ScoringBall {
   final bool isOverthrow;
   final int overthrowRuns;
   final String? dismissalType;
+  final String? dismissedPlayerId;
+  final String? nonBatterId;
 
   factory ScoringBall.fromJson(Map<String, dynamic> json) {
     final payload = _unwrapMap(json);
@@ -263,6 +267,8 @@ class ScoringBall {
       isOverthrow: payload['isOverthrow'] == true,
       overthrowRuns: _asInt(payload['overthrowRuns']),
       dismissalType: _nullableString(payload['dismissalType']),
+      dismissedPlayerId: _nullableString(payload['dismissedPlayerId']),
+      nonBatterId: _nullableString(payload['nonBatterId']),
     );
   }
 }

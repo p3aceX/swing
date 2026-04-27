@@ -91,6 +91,9 @@ class HostScoringService {
     return ScoringInnings.fromJson(_extractInningsState(data, inningsNumber));
   }
 
+  Future<void> changeWicketKeeper(String matchId, String team, String playerId) =>
+      _matchRepo.changeWicketKeeper(matchId, team, playerId);
+
   Future<void> startMatch(String matchId) => _matchRepo.startMatch(matchId);
   Future<void> cancelMatch(String matchId) => _matchRepo.cancelMatch(matchId);
   Future<void> deleteMatch(String matchId) => _matchRepo.deleteMatch(matchId);

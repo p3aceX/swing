@@ -41,6 +41,16 @@ export async function matchRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.updateMatchOvers(id, user.userId, customOvers) })
   })
 
+  app.patch('/:id/wicketkeeper', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const { team, wicketKeeperId } = z.object({
+      team: z.enum(['A', 'B']),
+      wicketKeeperId: z.string().min(1),
+    }).parse(request.body)
+    return reply.send({ success: true, data: await svc.changeWicketKeeper(id, user.userId, team, wicketKeeperId) })
+  })
+
   app.patch('/:id/cancel', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }

@@ -129,7 +129,12 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     final players = state.players;
     return state.balls
         .where((b) => b.isWicket && b.dismissalType != 'RETIRED_HURT')
-        .map((b) => players?.normalizeId(b.batterId) ?? b.batterId ?? '')
+        .map((b) {
+          // Use dismissedPlayerId if present (catches non-striker run-outs),
+          // fall back to batterId (the batter facing the ball).
+          final id = b.dismissedPlayerId ?? b.batterId;
+          return players?.normalizeId(id) ?? id ?? '';
+        })
         .where((id) => id.isNotEmpty)
         .toSet();
   }
@@ -206,6 +211,22 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     );
   }
 
+  // ─── Wicket-keeper change ──────────────────────────────────────────────────
+
+  Future<void> _changeWicketKeeper(HostScoringState state) async {
+    final match = state.match;
+    final players = state.players;
+    final innings = state.activeInnings;
+    if (match == null || players == null || innings == null) return;
+    final bowlingSide = match.bowlingTeam ?? 'B';
+    final eligible = players.forSide(bowlingSide);
+    await _pickPlayer(
+      title: 'Change Wicket-Keeper',
+      players: eligible,
+      onPicked: (p) => _ctrl.changeWicketKeeper(bowlingSide, p.profileId),
+    );
+  }
+
   // ─── Post-ball auto-prompts ─────────────────────────────────────────────────
 
   bool _overTurned(HostScoringState s) {
@@ -237,7 +258,15 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       await _showEndOfInningsSheet(s);
       return;
     }
-    if (inn.totalWickets < 10) await _pickStriker(s);
+    // Pick the player that was actually dismissed.
+    // After _init(), the dismissed player's slot will be empty in server state.
+    if (inn.totalWickets < 10) {
+      if (s.effectiveStrikerId.isEmpty) {
+        await _pickStriker(s);
+      } else if (s.effectiveNonStrikerId.isEmpty) {
+        await _pickNonStriker(s);
+      }
+    }
     if (!mounted) return;
     final s2 = ref.read(hostScoringControllerProvider(widget.matchId));
     if (_overTurned(s2)) await _pickBowler(s2, excludeLastBowler: true);
@@ -674,6 +703,10 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     final s = ref.read(hostScoringControllerProvider(widget.matchId));
                     _pickBowler(s);
                   },
+                  onChangeWicketKeeper: () {
+                    final s = ref.read(hostScoringControllerProvider(widget.matchId));
+                    _changeWicketKeeper(s);
+                  },
                   onUndo: _ctrl.undoLastBall,
                   onStartMatch: () async {
                     final ok = await _ctrl.startMatch();
@@ -761,6 +794,7 @@ class _ScoringBody extends StatelessWidget {
     required this.onPickSetup,
     this.onSwapBatters,
     required this.onChangeBowler,
+    this.onChangeWicketKeeper,
     required this.onUndo,
     required this.onStartMatch,
     required this.onContinueInnings,
@@ -786,6 +820,7 @@ class _ScoringBody extends StatelessWidget {
   final VoidCallback onPickSetup;
   final VoidCallback? onSwapBatters;
   final VoidCallback onChangeBowler;
+  final VoidCallback? onChangeWicketKeeper;
   final Future<bool> Function() onUndo;
   final Future<bool> Function() onStartMatch;
   final Future<bool> Function() onContinueInnings;
@@ -896,6 +931,11 @@ class _ScoringBody extends StatelessWidget {
           Divider(height: 1, thickness: 1, color: context.stroke),
           _BowlerRow(matchId: matchId, onTap: onPickBowler),
           Divider(height: 1, thickness: 1, color: context.stroke),
+          // ── 5b. Wicket-keeper row ────────────────────────────────────────
+          if (onChangeWicketKeeper != null)
+            _WicketKeeperRow(matchId: matchId, onTap: onChangeWicketKeeper!),
+          if (onChangeWicketKeeper != null)
+            Divider(height: 1, thickness: 1, color: context.stroke),
 
           // ── Free-hit banner ───────────────────────────────────────────────
           if (state.isFreeHit)
@@ -1168,6 +1208,64 @@ class _BowlerRow extends ConsumerWidget {
       wickets: d.wickets,
       economy: d.eco,
       onTap: onTap,
+    );
+  }
+}
+
+class _WicketKeeperRow extends ConsumerWidget {
+  const _WicketKeeperRow({required this.matchId, required this.onTap});
+
+  final String matchId;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final d = ref.watch(
+      hostScoringControllerProvider(matchId).select((s) {
+        final match = s.match;
+        final players = s.players;
+        final innings = s.activeInnings;
+        if (match == null || players == null || innings == null) {
+          return (name: '— Select Wicket-Keeper');
+        }
+        final bowlingSide = match.bowlingTeam ?? 'B';
+        final keeperId = bowlingSide == 'A'
+            ? players.teamAWicketKeeperId
+            : players.teamBWicketKeeperId;
+        final keeper = keeperId != null ? players.findById(keeperId) : null;
+        return (name: keeper?.name ?? '— Select Wicket-Keeper');
+      }),
+    );
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Text(
+              'WK',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                d.name,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 16, color: context.fgSub),
+          ],
+        ),
+      ),
     );
   }
 }

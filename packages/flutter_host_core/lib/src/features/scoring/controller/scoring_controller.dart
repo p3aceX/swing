@@ -383,6 +383,21 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     state = state.copyWith(strikerId: ns, nonStrikerId: s);
   }
 
+  Future<bool> changeWicketKeeper(String team, String playerId) async {
+    print('[scoring] changeWicketKeeper team=$team playerId=$playerId');
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _service.changeWicketKeeper(_matchId, team, playerId);
+      print('[scoring] changeWicketKeeper ✓');
+      await _init();
+      return true;
+    } catch (e) {
+      _logError('changeWicketKeeper', e);
+      state = state.copyWith(isSubmitting: false, error: _msg(e));
+      return false;
+    }
+  }
+
   void setBowler(String bowlerId) => state = state.copyWith(
         bowlerId: state.players?.normalizeId(bowlerId) ?? bowlerId,
       );
@@ -439,7 +454,10 @@ class HostScoringController extends StateNotifier<HostScoringState> {
         state.players?.normalizeId(inn.currentNonStrikerId) ??
             inn.currentNonStrikerId ??
             '';
-    final nextNonStrikerId = nsid == inningsNonStrikerId ? null : nsid;
+    // Always include nonBatterId when recording a non-striker dismissal so the
+    // backend validation (dismissedPlayerId must match batterId or nonBatterId) passes.
+    final isNonStrikerWicket = isWicket && dismissedPlayerId == nsid && nsid.isNotEmpty;
+    final nextNonStrikerId = (nsid == inningsNonStrikerId && !isNonStrikerWicket) ? null : nsid;
 
     state = state.copyWith(isSubmitting: true, clearError: true);
     print('[recordBall] → matchId=$_matchId inn=${inn.inningsNumber} over=${inn.overNumber} ball=${inn.ballInOver + 1} outcome=$outcome runs=$runs extras=$extras isWicket=$isWicket striker=$sid bowler=$bid');

@@ -357,14 +357,16 @@ export class MatchService {
       if (isInningsWicket(ball)) runningWickets++
       scoreAfterBall.set(ball.id, `${runningRuns}/${runningWickets}`)
 
-      if (!strikerId) strikerId = ball.batterId
-      if (!nonStrikerId && ball.nonBatterId) nonStrikerId = ball.nonBatterId
+      // Use the ball's explicit positions: batterId is always the striker,
+      // nonBatterId overrides when provided (e.g. after a manual swap).
+      const currentStriker: string | null = ball.batterId ?? strikerId
+      const currentNonStriker: string | null = ball.nonBatterId != null ? ball.nonBatterId : nonStrikerId
+
+      let nextStrikerId: string | null = currentStriker
+      let nextNonStrikerId: string | null = currentNonStriker
 
       const isLegal = isLegalDelivery(ball.outcome, ball.dismissalType)
       const isEndOfOver = isLegal && (legalBalls + 1) % 6 === 0
-
-      let nextStrikerId: string | null = strikerId
-      let nextNonStrikerId: string | null = nonStrikerId
 
       const dismissedPlayerId = this.resolveDismissedPlayerId(ball, strikerId, nonStrikerId)
       if ((isInningsWicket(ball) || isRetirementDismissal(ball.dismissalType)) && dismissedPlayerId) {

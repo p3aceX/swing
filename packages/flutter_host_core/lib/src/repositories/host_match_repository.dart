@@ -29,6 +29,13 @@ class HostMatchRepository {
     );
   }
 
+  Future<void> changeWicketKeeper(String matchId, String team, String wicketKeeperId) async {
+    await _dio.patch(
+      _paths.matchWicketkeeper(matchId),
+      data: {'team': team, 'wicketKeeperId': wicketKeeperId},
+    );
+  }
+
   Future<void> updateScorer(String matchId, String scorerId) async {
     await _dio.patch(
       _paths.matchScorer(matchId),
