@@ -135,8 +135,13 @@ export class BizService {
   }
 
   async createArenaProfile(userId: string, data: any) {
-    const businessAccount = await prisma.businessAccount.findUnique({ where: { userId } })
-    if (!businessAccount) throw new AppError('BUSINESS_DETAILS_REQUIRED', 'Complete common business details first', 400)
+    let businessAccount = await prisma.businessAccount.findUnique({ where: { userId } })
+    if (!businessAccount) {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
+      businessAccount = await prisma.businessAccount.create({
+        data: { userId, businessName: user?.name ?? data.name },
+      })
+    }
 
     let ownerProfile = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!ownerProfile) {

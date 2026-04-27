@@ -504,6 +504,10 @@ model BusinessAccount {
   pincode            String?
   gstNumber          String?
   panNumber          String?
+  beneficiaryName    String?
+  accountNumber      String?
+  ifscCode           String?
+  upiId              String?
   onboardingComplete Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

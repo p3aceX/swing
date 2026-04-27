@@ -13,6 +13,10 @@ const businessDetailsSchema = z.object({
   pincode: z.string().min(4).max(10).optional(),
   gstNumber: z.string().optional(),
   panNumber: z.string().optional(),
+  beneficiaryName: z.string().max(120).optional(),
+  accountNumber: z.string().max(30).optional(),
+  ifscCode: z.string().max(20).optional(),
+  upiId: z.string().max(100).optional(),
 })
 
 const academyProfileSchema = z.object({
