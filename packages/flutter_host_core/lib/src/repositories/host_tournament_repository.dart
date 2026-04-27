@@ -80,6 +80,10 @@ class SharedTournamentRepository {
     return _extractDataMap(response.data);
   }
 
+  Future<void> deleteTournament(String tournamentId) async {
+    await _dio.delete(_paths.tournament(tournamentId));
+  }
+
   Future<List<Map<String, dynamic>>> listTeams(String tournamentId) async {
     final response =
         await _dio.get('${_paths.tournament(tournamentId)}/teams');
@@ -167,6 +171,10 @@ class SharedTournamentRepository {
     return _asList(response.data);
   }
 
+  Future<void> discardGroups(String tournamentId) async {
+    await _dio.delete('${_paths.tournament(tournamentId)}/groups');
+  }
+
   Future<Map<String, dynamic>> assignTeamToGroup(
     String tournamentId,
     String tournamentTeamId,
@@ -191,6 +199,44 @@ class SharedTournamentRepository {
     await _dio.post(
       '${_paths.tournament(tournamentId)}/auto-generate',
       data: {'matchesPerDay': matchesPerDay},
+    );
+  }
+
+  Future<Map<String, dynamic>> generateSmartSchedule(
+    String tournamentId, {
+    required String startDate,
+    required String matchStartTime,
+    required int matchesPerDay,
+    required double gapBetweenMatchesHours,
+    required List<int> validWeekdays,
+    List<String> excludeDates = const [],
+  }) async {
+    final response = await _dio.post(
+      '${_paths.tournament(tournamentId)}/smart-schedule',
+      data: {
+        'startDate': startDate,
+        'matchStartTime': matchStartTime,
+        'matchesPerDay': matchesPerDay,
+        'gapBetweenMatchesHours': gapBetweenMatchesHours,
+        'validWeekdays': validWeekdays,
+        if (excludeDates.isNotEmpty) 'excludeDates': excludeDates,
+      },
+    );
+    return _extractDataMap(response.data);
+  }
+
+  Future<void> updateMatch(
+    String matchId, {
+    DateTime? scheduledAt,
+    bool swapTeams = false,
+  }) async {
+    await _dio.patch(
+      _paths.match(matchId),
+      data: {
+        if (scheduledAt != null)
+          'scheduledAt': scheduledAt.toUtc().toIso8601String(),
+        if (swapTeams) 'swapTeams': true,
+      },
     );
   }
 

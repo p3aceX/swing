@@ -24,12 +24,17 @@ class MatchDetailCallbacks {
     this.onNavigateToPlayer,
     this.onNavigateToTeam,
     this.onNavigateBack,
+    this.onEditMatch,
   });
 
   final void Function(BuildContext ctx, String matchId)? onScoreMatch;
   final void Function(BuildContext ctx, String playerId)? onNavigateToPlayer;
   final void Function(BuildContext ctx, String teamId)? onNavigateToTeam;
   final void Function(BuildContext ctx)? onNavigateBack;
+
+  /// Open the create-match form pre-populated for editing (e.g. to change overs).
+  /// Only shown for SCHEDULED matches where canScore is true.
+  final void Function(BuildContext ctx, String matchId, String teamAName, String teamBName)? onEditMatch;
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -367,36 +372,71 @@ class _ResumeScoringBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).padding.bottom;
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottom),
-      decoration: BoxDecoration(
-        color: context.surf,
-        border: Border(top: BorderSide(color: context.stroke)),
-      ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 48,
-        child: ElevatedButton.icon(
-          onPressed: () {
-            if (callbacks?.onScoreMatch != null) {
-              callbacks!.onScoreMatch!(context, matchId);
-            }
-          },
-          icon: const Icon(Icons.sports_cricket_rounded, size: 18),
-          label: Text(
-            isLive ? 'Resume Scoring' : 'Set Playing 11',
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+    final screenWidth = MediaQuery.of(context).size.width;
+    final canEdit = !isLive && callbacks?.onEditMatch != null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.hasBoundedWidth ? constraints.maxWidth : screenWidth;
+        return Container(
+          width: width,
+          padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottom),
+          decoration: BoxDecoration(
+            color: context.surf,
+            border: Border(top: BorderSide(color: context.stroke)),
           ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: context.accent,
-            foregroundColor: context.fg,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
+          child: Row(
+            children: [
+              if (canEdit) ...[
+                IntrinsicWidth(
+                  child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        callbacks!.onEditMatch!(context, matchId, teamAName, teamBName),
+                    icon: const Icon(Icons.edit_rounded, size: 16),
+                    label: const Text('Edit',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: context.fgSub,
+                      side: BorderSide(color: context.stroke),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      if (callbacks?.onScoreMatch != null) {
+                        callbacks!.onScoreMatch!(context, matchId);
+                      }
+                    },
+                    icon: const Icon(Icons.sports_cricket_rounded, size: 18),
+                    label: Text(
+                      isLive ? 'Resume Scoring' : 'Start Scoring',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.accent,
+                      foregroundColor: context.fg,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

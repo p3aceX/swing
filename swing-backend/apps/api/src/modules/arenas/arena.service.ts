@@ -1,4 +1,5 @@
 import { prisma } from '@swing/db'
+import { getHeldSlotsSet } from '../../lib/redis'
 import { Errors, AppError } from '../../lib/errors'
 
 type ArenaTimeBlockInput = {
@@ -495,7 +496,7 @@ export class ArenaService {
         where: {
           arenaId,
           date: { gte: bookingDate, lt: nextDay },
-          status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+          status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         },
         include: {
           bookedBy: {
@@ -523,6 +524,17 @@ export class ArenaService {
       allArenaUnits.filter(u => u.parentUnitId === unit.id).forEach(u => ids.push(u.id))
       return ids
     }
+
+    // Build Redis hold entries for every unit+slot combination so we can batch-check in one mget
+    const dateStr = `${bookingDate.getUTCFullYear()}-${String(bookingDate.getUTCMonth() + 1).padStart(2, '0')}-${String(bookingDate.getUTCDate()).padStart(2, '0')}`
+    const holdEntries: Array<{ unitId: string; date: string; startTime: string }> = []
+    for (const unit of units) {
+      const uOpen = (unit as any).openTime || arena.openTime || '06:00'
+      const uClose = (unit as any).closeTime || arena.closeTime || '22:00'
+      const uSlots = this.generateDaySlots(uOpen, uClose, unit.slotIncrementMins || 60)
+      uSlots.forEach(s => holdEntries.push({ unitId: unit.id, date: dateStr, startTime: s.start }))
+    }
+    const heldSet = await getHeldSlotsSet(holdEntries)
 
     return units.map(unit => {
       const unitOpDays = (unit as any).operatingDays
@@ -587,6 +599,18 @@ export class ArenaService {
             }
           }
 
+          const isHeld = heldSet.has(`${unit.id}:${dateStr}:${slot.start}`)
+          if (isHeld) {
+            return {
+              start: slot.start,
+              end: slot.end,
+              available: false,
+              status: 'HELD',
+              reason: 'Slot temporarily reserved',
+              pricePerHourPaise: unit.pricePerHourPaise,
+            }
+          }
+
           return {
             start: slot.start,
             end: slot.end,
@@ -597,6 +621,256 @@ export class ArenaService {
         }),
       }
     })
+  }
+
+  async getPlayerSlots(arenaId: string, date: string, durationMins: number) {
+    const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
+    if (!arena) throw Errors.notFound('Arena')
+
+    const bookingDate = this.startOfDay(date)
+    const nextDay = this.addDays(bookingDate, 1)
+    const weekday = this.weekdayNumber(bookingDate)
+    const isWeekend = weekday === 6 || weekday === 7
+    const isOperatingDay = arena.operatingDays.includes(weekday)
+
+    if (!isOperatingDay) {
+      return { arena: this.formatArenaInfo(arena), unitGroups: [] }
+    }
+
+    // Current IST time — used to filter out past/too-soon slots when date is today
+    const istOffsetMs = (5 * 60 + 30) * 60 * 1000
+    const nowUtcPlusIST = new Date(Date.now() + istOffsetMs)
+    const todayIST = new Date(Date.UTC(nowUtcPlusIST.getUTCFullYear(), nowUtcPlusIST.getUTCMonth(), nowUtcPlusIST.getUTCDate()))
+    const isToday = bookingDate.getTime() === todayIST.getTime()
+    const nowISTMins = nowUtcPlusIST.getUTCHours() * 60 + nowUtcPlusIST.getUTCMinutes()
+    const leadTimeMins = (arena as any).bufferMins ?? 30
+
+    const allUnits: any[] = await (prisma.arenaUnit as any).findMany({
+      where: { arenaId, isActive: true },
+    })
+    const allUnitIds = allUnits.map((u: any) => u.id)
+
+    const [bookings, timeBlocks] = await Promise.all([
+      prisma.slotBooking.findMany({
+        where: {
+          arenaId,
+          date: { gte: bookingDate, lt: nextDay },
+          status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+          unitId: { in: allUnitIds },
+        },
+      }),
+      prisma.arenaTimeBlock.findMany({
+        where: {
+          arenaId,
+          unitId: { in: allUnitIds },
+          OR: [{ date: bookingDate }, { isRecurring: true, weekdays: { has: weekday } }],
+        },
+      }),
+    ])
+
+    // Build Redis hold set for all unit+start combinations in one batch call
+    const slotsDateStr = `${bookingDate.getUTCFullYear()}-${String(bookingDate.getUTCMonth() + 1).padStart(2, '0')}-${String(bookingDate.getUTCDate()).padStart(2, '0')}`
+    const playerHoldEntries: Array<{ unitId: string; date: string; startTime: string }> = []
+    for (const u of allUnits) {
+      const uOpen: string = (u as any).openTime || arena.openTime || '06:00'
+      const uClose: string = (u as any).closeTime || arena.closeTime || '22:00'
+      const uStep: number = (u as any).slotIncrementMins || 60
+      const uOpenMins = this.timeToMinutes(uOpen)
+      const uCloseMins = this.timeToMinutes(uClose)
+      for (let cur = uOpenMins; cur < uCloseMins; cur += uStep) {
+        playerHoldEntries.push({ unitId: u.id, date: slotsDateStr, startTime: this.minutesToTime(cur) })
+      }
+    }
+    const playerHeldSet = await getHeldSlotsSet(playerHoldEntries)
+
+    const isWindowBusy = (unitId: string, startTime: string, endTime: string): boolean => {
+      if (playerHeldSet.has(`${unitId}:${slotsDateStr}:${startTime}`)) return true
+      return (
+        bookings.some(b => b.unitId === unitId && this.timesOverlap(b.startTime, b.endTime, startTime, endTime)) ||
+        timeBlocks.some(b => b.unitId === unitId && this.timesOverlap(b.startTime, b.endTime, startTime, endTime))
+      )
+    }
+
+    const getRelatedIds = (unit: any): string[] => {
+      const ids: string[] = []
+      if (unit.parentUnitId) ids.push(unit.parentUnitId)
+      allUnits.filter((u: any) => u.parentUnitId === unit.id).forEach((u: any) => ids.push(u.id))
+      return ids
+    }
+
+    const isUnitAvailable = (unit: any, startTime: string, endTime: string): boolean => {
+      if (isWindowBusy(unit.id, startTime, endTime)) return false
+      return !getRelatedIds(unit).some(rid => isWindowBusy(rid, startTime, endTime))
+    }
+
+    const getPossibleStarts = (unit: any): string[] => {
+      const openTime = unit.openTime || arena.openTime || '06:00'
+      const closeTime = unit.closeTime || arena.closeTime || '22:00'
+      const step = unit.slotIncrementMins || 60
+      const openMins = this.timeToMinutes(openTime)
+      const closeMins = this.timeToMinutes(closeTime)
+      const starts: string[] = []
+      for (let cur = openMins; cur + durationMins <= closeMins; cur += step) {
+        if (isToday && cur < nowISTMins + leadTimeMins) continue
+        starts.push(this.minutesToTime(cur))
+      }
+      return starts
+    }
+
+    const computePricePaise = (unit: any): number => {
+      let base: number
+      if (durationMins === 240 && unit.price4HrPaise) base = unit.price4HrPaise
+      else if (durationMins === 480 && unit.price8HrPaise) base = unit.price8HrPaise
+      else base = Math.round((unit.pricePerHourPaise * durationMins) / 60)
+      const mult = isWeekend ? (unit.weekendMultiplier || 1.0) : 1.0
+      return Math.round(base * mult)
+    }
+
+    const netUnitTypes = ['CRICKET_NET', 'INDOOR_NET']
+    const netUnits = allUnits.filter((u: any) => netUnitTypes.includes(u.unitType))
+    const nonNetUnits = allUnits.filter((u: any) => !netUnitTypes.includes(u.unitType))
+
+    const unitGroups: any[] = []
+
+    // All nets merged into one group — per-slot breakdown by net type for sub-picker
+    const activeNetUnits = netUnits.filter((u: any) => {
+      const unitOpDays: number[] = u.operatingDays
+      return unitOpDays?.length > 0 ? unitOpDays.includes(weekday) : isOperatingDay
+    })
+
+    if (activeNetUnits.length > 0) {
+      // Union of possible start times across all active net units (each uses its own open/close)
+      const startTimeSet = new Set<string>()
+      for (const unit of activeNetUnits) {
+        for (const t of getPossibleStarts(unit)) startTimeSet.add(t)
+      }
+      const possibleStarts = [...startTimeSet].sort()
+
+      // Distinct net types present
+      const netTypeKeys = [...new Set(activeNetUnits.map((u: any) => u.netType || 'Standard'))]
+
+      const rep = activeNetUnits[0]
+      const availableSlots: any[] = []
+
+      for (const startTime of possibleStarts) {
+        const endTime = this.minutesToTime(this.timeToMinutes(startTime) + durationMins)
+        const available = activeNetUnits.filter((u: any) => isUnitAvailable(u, startTime, endTime))
+        if (available.length === 0) continue
+
+        // Per-type breakdown so the frontend can offer a sub-picker
+        const netTypeOptions = netTypeKeys.map(nt => {
+          const ofType = available.filter((u: any) => (u.netType || 'Standard') === nt)
+          if (ofType.length === 0) return null
+          const assignedUnit = ofType[0]
+          return {
+            netType: nt,
+            availableCount: ofType.length,
+            assignedUnitId: assignedUnit.id,
+            totalAmountPaise: computePricePaise(assignedUnit),
+          }
+        }).filter(Boolean)
+
+        const assigned = available[0]
+        availableSlots.push({
+          startTime,
+          endTime,
+          availableCount: available.length,
+          assignedUnitId: assigned.id,
+          totalAmountPaise: computePricePaise(assigned),
+          isWeekendRate: isWeekend && (assigned.weekendMultiplier || 1.0) > 1.0,
+          netTypeOptions,
+        })
+      }
+
+      console.log(`[slots] NETS group: activeUnits=${activeNetUnits.length} netTypeKeys=${JSON.stringify(netTypeKeys)} slots=${availableSlots.length} firstSlotOpts=${JSON.stringify(availableSlots[0]?.netTypeOptions ?? [])}`)
+      unitGroups.push({
+        groupKey: 'NETS',
+        displayName: 'Cricket Nets',
+        unitType: rep.unitType,
+        netType: null,
+        netTypes: netTypeKeys,
+        totalCount: activeNetUnits.length,
+        description: rep.description,
+        photoUrls: rep.photoUrls,
+        minAdvancePaise: Math.min(...activeNetUnits.map((u: any) => u.minAdvancePaise || 0)),
+        minSlotMins: rep.minSlotMins,
+        maxSlotMins: rep.maxSlotMins,
+        pricePerHourPaise: Math.min(...activeNetUnits.map((u: any) => u.pricePerHourPaise)),
+        price4HrPaise: rep.price4HrPaise ?? null,
+        price8HrPaise: rep.price8HrPaise ?? null,
+        weekendMultiplier: rep.weekendMultiplier,
+        hasFloodlights: activeNetUnits.some((u: any) => u.hasFloodlights),
+        availableSlots,
+      })
+    }
+
+    // Non-net units individually
+    for (const unit of nonNetUnits) {
+      const unitOpDays: number[] = unit.operatingDays
+      const isUnitOperatingDay = unitOpDays?.length > 0 ? unitOpDays.includes(weekday) : isOperatingDay
+      if (!isUnitOperatingDay) continue
+
+      // Enforce min/max slot duration — show unit as fully booked for unsupported durations
+      const durationValid =
+        durationMins >= (unit.minSlotMins || 30) &&
+        durationMins <= (unit.maxSlotMins || 480)
+
+      const possibleStarts = durationValid ? getPossibleStarts(unit) : []
+      const availableSlots: any[] = []
+
+      for (const startTime of possibleStarts) {
+        const endTime = this.minutesToTime(this.timeToMinutes(startTime) + durationMins)
+        if (!isUnitAvailable(unit, startTime, endTime)) continue
+        availableSlots.push({
+          startTime,
+          endTime,
+          totalAmountPaise: computePricePaise(unit),
+          isWeekendRate: isWeekend && (unit.weekendMultiplier || 1.0) > 1.0,
+        })
+      }
+
+      unitGroups.push({
+        groupKey: unit.id,
+        displayName: unit.unitTypeLabel || unit.name,
+        unitType: unit.unitType,
+        unitId: unit.id,
+        description: unit.description,
+        photoUrls: unit.photoUrls,
+        minAdvancePaise: unit.minAdvancePaise || 0,
+        minSlotMins: unit.minSlotMins,
+        maxSlotMins: unit.maxSlotMins,
+        pricePerHourPaise: unit.pricePerHourPaise,
+        price4HrPaise: unit.price4HrPaise ?? null,
+        price8HrPaise: unit.price8HrPaise ?? null,
+        weekendMultiplier: unit.weekendMultiplier,
+        hasFloodlights: unit.hasFloodlights,
+        availableSlots,
+      })
+    }
+
+    return { arena: this.formatArenaInfo(arena), unitGroups }
+  }
+
+  private formatArenaInfo(arena: any) {
+    return {
+      id: arena.id,
+      name: arena.name,
+      description: arena.description,
+      address: arena.address,
+      city: arena.city,
+      photoUrls: arena.photoUrls,
+      phone: arena.phone,
+      openTime: arena.openTime,
+      closeTime: arena.closeTime,
+      hasParking: arena.hasParking,
+      hasLights: arena.hasLights,
+      hasWashrooms: arena.hasWashrooms,
+      hasCanteen: arena.hasCanteen,
+      hasCCTV: arena.hasCCTV,
+      hasScorer: arena.hasScorer,
+      advanceBookingDays: Math.max(arena.advanceBookingDays ?? 14, 14),
+      cancellationHours: arena.cancellationHours ?? 24,
+    }
   }
 
   async getArenaStats(arenaId: string, userId: string) {

@@ -2985,7 +2985,7 @@ export class AdminService {
   async updateAdminMatch(
     adminId: string,
     matchId: string,
-    data: { scheduledAt?: string; customOvers?: number },
+    data: { scheduledAt?: string; customOvers?: number; swapTeams?: boolean },
   ) {
     await this.verifyAdmin(adminId);
 
@@ -3057,6 +3057,19 @@ export class AdminService {
         );
       }
       patch.customOvers = data.customOvers;
+    }
+
+    if (data.swapTeams) {
+      patch.teamAName = match.teamBName;
+      patch.teamBName = match.teamAName;
+      patch.teamAPlayerIds = match.teamBPlayerIds as string[];
+      patch.teamBPlayerIds = match.teamAPlayerIds as string[];
+      patch.teamACaptainId = match.teamBCaptainId;
+      patch.teamBCaptainId = match.teamACaptainId;
+      patch.teamAViceCaptainId = match.teamBViceCaptainId;
+      patch.teamBViceCaptainId = match.teamAViceCaptainId;
+      patch.teamAWicketKeeperId = match.teamBWicketKeeperId;
+      patch.teamBWicketKeeperId = match.teamAWicketKeeperId;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -3754,6 +3767,15 @@ export class AdminService {
       },
       orderBy: { groupOrder: "asc" },
     });
+  }
+
+  async discardTournamentGroups(adminId: string, tournamentId: string) {
+    await this.verifyAdmin(adminId);
+    const t = await prisma.tournament.findUnique({ where: { id: tournamentId } });
+    if (!t) throw Errors.notFound("Tournament");
+    await prisma.tournamentTeam.updateMany({ where: { tournamentId }, data: { groupId: null } });
+    await prisma.tournamentStanding.updateMany({ where: { tournamentId }, data: { groupId: null } });
+    await prisma.tournamentGroup.deleteMany({ where: { tournamentId } });
   }
 
   async assignTeamToGroup(

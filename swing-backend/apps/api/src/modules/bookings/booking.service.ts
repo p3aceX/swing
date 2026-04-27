@@ -36,12 +36,26 @@ export class BookingService {
     await this.assertBookableWindow(unit, bookingDate, data.startTime, data.endTime)
     await this.assertNoArenaBlock(unit.arenaId, unit.id, bookingDate, data.startTime, data.endTime)
 
+    // Enforce lead time: booking start must be at least bufferMins from now (IST)
+    const istOffsetMs = (5 * 60 + 30) * 60 * 1000
+    const nowUtcPlusIST = new Date(Date.now() + istOffsetMs)
+    const todayIST = new Date(Date.UTC(nowUtcPlusIST.getUTCFullYear(), nowUtcPlusIST.getUTCMonth(), nowUtcPlusIST.getUTCDate()))
+    const isToday = bookingDate.getTime() === todayIST.getTime()
+    if (isToday) {
+      const nowISTMins = nowUtcPlusIST.getUTCHours() * 60 + nowUtcPlusIST.getUTCMinutes()
+      const leadTimeMins = (unit.arena as any).bufferMins ?? 30
+      const startMins = this.timeToMinutes(data.startTime)
+      if (startMins < nowISTMins + leadTimeMins) {
+        throw new AppError('SLOT_TOO_SOON', `Booking must be at least ${leadTimeMins} minutes in advance`, 400)
+      }
+    }
+
     const conflictUnitIds = await this.getConflictUnitIds(data.arenaUnitId)
     const conflict = await prisma.slotBooking.findFirst({
       where: {
         unitId: { in: conflictUnitIds },
         date: bookingDate,
-        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         startTime: { lt: data.endTime },
         endTime: { gt: data.startTime },
       },
@@ -86,7 +100,7 @@ export class BookingService {
       where: {
         unitId: { in: conflictUnitIds2 },
         date: bookingDate,
-        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         startTime: { lt: data.endTime },
         endTime: { gt: data.startTime },
       },
@@ -300,7 +314,7 @@ export class BookingService {
       where: {
         unitId: { in: conflictUnitIds3 },
         date: bookingDate,
-        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
         startTime: { lt: data.endTime },
         endTime: { gt: data.startTime },
       },

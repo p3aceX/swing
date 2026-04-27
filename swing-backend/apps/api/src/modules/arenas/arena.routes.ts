@@ -240,6 +240,17 @@ export async function arenaRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.updateArena(id, user.userId, request.body) })
   })
 
+  app.get('/:id/slots', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const q = request.query as { date: string; durationMins?: string }
+    if (!q.date) return reply.code(400).send({ success: false, error: { code: 'MISSING_DATE', message: 'date query param required' } })
+    const durationMins = q.durationMins ? parseInt(q.durationMins, 10) : 60
+    if (Number.isNaN(durationMins) || durationMins < 30) {
+      return reply.code(400).send({ success: false, error: { code: 'INVALID_DURATION', message: 'durationMins must be >= 30' } })
+    }
+    return reply.send({ success: true, data: await svc.getPlayerSlots(id, q.date, durationMins) })
+  })
+
   app.get('/:id/availability', async (request, reply) => {
     const { id } = request.params as { id: string }
     const q = request.query as { date: string; unitId?: string }

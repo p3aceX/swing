@@ -21,10 +21,14 @@ import 'package:flutter_host_core/flutter_host_core.dart'
         TeamDetailCallbacks,
         HostMatchDetailScreen,
         MatchDetailCallbacks,
-        HostCreateTeamScreen;
+        HostCreateTeamScreen,
+        HostScheduleScreen,
+        HostScheduleCallbacks,
+        PlayingElevenScreen;
 import '../../features/create_match/presentation/create_match_screen.dart';
 import '../../features/create_tournament/presentation/create_tournament_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
+import '../../features/home/presentation/leaderboard_screen.dart';
 import '../../features/home/presentation/recommended_connections_screen.dart';
 import '../../features/host/presentation/host_screen.dart';
 import 'package:image_picker/image_picker.dart';
@@ -38,7 +42,11 @@ import '../../features/elite/presentation/my_plan_screen.dart';
 import '../../features/health/presentation/health_module_screen.dart';
 import '../../features/health/presentation/wellness_checkin_screen.dart';
 import '../../features/health/presentation/workload_log_screen.dart';
+import '../../features/arena_booking/presentation/arena_booking_screen.dart';
 import '../../features/booking/presentation/arena_detail_screen.dart';
+import '../../features/booking/presentation/booking_detail_screen.dart';
+import '../../features/booking/presentation/booking_success_screen.dart';
+import '../../features/booking/presentation/my_bookings_screen.dart';
 import '../../features/booking/domain/booking_models.dart';
 import '../../features/search/search_screen.dart';
 import '../../features/store/domain/store_models.dart';
@@ -109,6 +117,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/recommended-connections',
         builder: (_, __) => const RecommendedConnectionsScreen(),
+      ),
+      GoRoute(
+        path: '/leaderboard',
+        builder: (_, __) => const LeaderboardScreen(),
       ),
       GoRoute(
         path: '/search',
@@ -225,8 +237,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             onScoreMatch: (ctx, id) => ctx.push('/score-match/$id'),
             onNavigateToPlayer: (ctx, playerId) =>
                 ctx.push('/player/$playerId'),
-            onNavigateBack: (ctx) =>
-                Navigator.of(ctx).canPop() ? Navigator.of(ctx).pop() : ctx.go('/home'),
+            onNavigateBack: (ctx) => Navigator.of(ctx).canPop()
+                ? Navigator.of(ctx).pop()
+                : ctx.go('/home'),
+            onEditMatch: (ctx, id, teamA, teamB) => ctx.push(
+              '/create-match?matchId=${Uri.encodeComponent(id)}'
+              '&teamA=${Uri.encodeComponent(teamA)}'
+              '&teamB=${Uri.encodeComponent(teamB)}',
+            ),
           ),
         ),
       ),
@@ -236,24 +254,66 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/tournament/:id',
-        builder: (context, state) => HostTournamentViewerScreen(
-          slug: state.pathParameters['id'] ?? '',
-          callbacks: TournamentViewerCallbacks(
-            onBack: () => GoRouter.of(context).pop(),
-            onNavigateToMatch: (matchId) =>
-                GoRouter.of(context).push('/match/$matchId'),
-            onNavigateToTeam: (teamId) =>
-                GoRouter.of(context).push('/team/$teamId'),
-          ),
-        ),
+        builder: (context, state) {
+          final extra = state.extra is Map<String, dynamic>
+              ? state.extra as Map<String, dynamic>
+              : <String, dynamic>{};
+          final isHost = extra['isHost'] as bool? ?? false;
+          final tournamentId = extra['tournamentId'] as String?;
+          final slug = state.pathParameters['id'] ?? '';
+          debugPrint(
+              '[Router /tournament] slug=$slug isHost=$isHost extra=${state.extra}');
+          return HostTournamentViewerScreen(
+            slug: slug,
+            isHost: isHost,
+            callbacks: TournamentViewerCallbacks(
+              onBack: () => GoRouter.of(context).pop(),
+              onNavigateToMatch: (matchId) =>
+                  GoRouter.of(context).push('/match/$matchId'),
+              onNavigateToTeam: (teamId) =>
+                  GoRouter.of(context).push('/team/$teamId'),
+              onManage: isHost
+                  ? () => GoRouter.of(context).push(
+                      '/host-tournament/${Uri.encodeComponent(tournamentId ?? slug)}')
+                  : null,
+            ),
+          );
+        },
       ),
       GoRoute(
         path: '/host-tournament/:id',
-        builder: (_, state) => HostTournamentDetailScreen(
+        builder: (context, state) => HostTournamentDetailScreen(
           tournamentId: state.pathParameters['id'] ?? '',
           initialData: state.extra is Map<String, dynamic>
               ? state.extra as Map<String, dynamic>
               : null,
+          onNavigateToMatch: (ctx, matchId) {
+            debugPrint('[Router] onNavigateToMatch matchId=$matchId → /match');
+            ctx.push('/match/$matchId');
+          },
+          onStartMatch: (ctx, match) {
+            final matchId = '${match['id'] ?? ''}';
+            final teamAId = '${match['teamAId'] ?? ''}';
+            final teamBId = '${match['teamBId'] ?? ''}';
+            final teamAName = '${match['teamAName'] ?? 'Team A'}';
+            final teamBName = '${match['teamBName'] ?? 'Team B'}';
+            debugPrint('[Router] onStartMatch id=$matchId teamAId=$teamAId teamBId=$teamBId');
+            ctx.push('/start-match/$matchId', extra: {
+              'teamAId': teamAId,
+              'teamBId': teamBId,
+              'teamAName': teamAName,
+              'teamBName': teamBName,
+            });
+          },
+        ),
+      ),
+      GoRoute(
+        path: '/host-schedule',
+        builder: (context, _) => HostScheduleScreen(
+          callbacks: HostScheduleCallbacks(
+            onNavigateToMatch: (ctx, matchId) => ctx.push('/match/$matchId'),
+            onStartMatch: (ctx, matchId) => ctx.push('/match/$matchId'),
+          ),
         ),
       ),
       GoRoute(
@@ -269,14 +329,35 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/arena-booking/:id',
+        builder: (_, state) => ArenaBookingScreen(
+          arenaId: state.pathParameters['id'] ?? '',
+          initialDate: state.extra is DateTime ? state.extra as DateTime : null,
+        ),
+      ),
+      GoRoute(
+        path: '/bookings',
+        builder: (_, __) => const MyBookingsScreen(),
+      ),
+      GoRoute(
+        path: '/bookings/:id',
+        builder: (_, state) => BookingDetailScreen(
+          bookingId: state.pathParameters['id']!,
+        ),
+      ),
+      GoRoute(
+        path: '/booking/success',
+        builder: (_, state) => BookingSuccessScreen(
+          booking: state.extra as PlayerBooking,
+        ),
+      ),
+      GoRoute(
         path: '/create-team',
         builder: (_, __) => HostCreateTeamScreen(
           onPickLogo: () async {
             final picker = ImagePicker();
             final file = await picker.pickImage(
-                source: ImageSource.gallery,
-                imageQuality: 85,
-                maxWidth: 1200);
+                source: ImageSource.gallery, imageQuality: 85, maxWidth: 1200);
             if (file == null) return null;
             final bytes = await file.readAsBytes();
             final dot = file.name.lastIndexOf('.');
@@ -323,6 +404,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/start-match/:id',
+        builder: (context, state) {
+          final matchId = state.pathParameters['id'] ?? '';
+          final extra = state.extra is Map<String, dynamic>
+              ? state.extra as Map<String, dynamic>
+              : <String, dynamic>{};
+          debugPrint('[Router /start-match] matchId=$matchId extra=$extra');
+          return PlayingElevenScreen(
+            matchId: matchId,
+            teamAId: extra['teamAId'] as String? ?? '',
+            teamAName: extra['teamAName'] as String? ?? 'Team A',
+            teamBId: extra['teamBId'] as String? ?? '',
+            teamBName: extra['teamBName'] as String? ?? 'Team B',
+            onTossCompleted: (ctx, id) =>
+                ctx.go('/score-match/${Uri.encodeComponent(id)}'),
+            onBack: () => Navigator.of(context).pop(),
+          );
+        },
+      ),
+      GoRoute(
         path: '/score-match/:id',
         builder: (_, state) {
           final matchId = state.pathParameters['id'] ?? '';
@@ -330,30 +431,29 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             matchId: matchId,
             currentPlayerId: currentPlayerId,
             onNavigateBack: (context, id) => context.go('/match/$id'),
-            onNavigateToMatchDetail: (context, id) => context.push('/match/$id'),
-            onMatchDeleted: (context, id) =>
-                Navigator.of(context).canPop()
-                    ? Navigator.of(context).pop()
-                    : context.go('/home'),
-            onNavigateToPlaying11: (context, id, teamA, teamB) =>
-                context.push(
-                  '/create-match?matchId=${Uri.encodeQueryComponent(id)}'
-                  '&teamA=${Uri.encodeQueryComponent(teamA)}'
-                  '&teamB=${Uri.encodeQueryComponent(teamB)}',
-                ),
+            onNavigateToMatchDetail: (context, id) =>
+                context.push('/match/$id'),
+            onMatchDeleted: (context, id) => Navigator.of(context).canPop()
+                ? Navigator.of(context).pop()
+                : context.go('/home'),
+            onNavigateToPlaying11: (context, id, teamA, teamB) => context.push(
+              '/create-match?matchId=${Uri.encodeQueryComponent(id)}'
+              '&teamA=${Uri.encodeQueryComponent(teamA)}'
+              '&teamB=${Uri.encodeQueryComponent(teamB)}',
+            ),
             onNavigateToToss: (context, id, teamA, teamB) =>
                 Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => TossScreen(
-                      matchId: id,
-                      teamAName: teamA,
-                      teamBName: teamB,
-                      onCompleted: (ctx, completedId) =>
-                          ctx.go('/score-match/${Uri.encodeComponent(completedId)}'),
-                      onBack: () => Navigator.of(context).pop(),
-                    ),
-                  ),
+              MaterialPageRoute<void>(
+                builder: (_) => TossScreen(
+                  matchId: id,
+                  teamAName: teamA,
+                  teamBName: teamB,
+                  onCompleted: (ctx, completedId) => ctx
+                      .go('/score-match/${Uri.encodeComponent(completedId)}'),
+                  onBack: () => Navigator.of(context).pop(),
                 ),
+              ),
+            ),
           );
         },
       ),

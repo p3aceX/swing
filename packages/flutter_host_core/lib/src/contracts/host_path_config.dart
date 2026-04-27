@@ -112,6 +112,7 @@ class HostPathConfig {
   String arenaAddon(String addonId) => '$arenasBase/addons/$addonId';
   String arenaAvailability(String arenaId) =>
       '$arenasBase/$arenaId/availability';
+  String arenaSlots(String arenaId) => '$arenasBase/$arenaId/slots';
   String arenaBlocks(String arenaId) => '$arenasBase/$arenaId/blocks';
   String arenaBlock(String blockId) => '$arenasBase/blocks/$blockId';
 

@@ -91,3 +91,17 @@ export async function getStudioScene(matchId: string): Promise<StudioScene | nul
   if (!val) return null
   try { return JSON.parse(val) } catch { return null }
 }
+
+// Batch-check Redis holds for a set of slots. Returns a Set of "unitId:date:startTime" strings that are currently held.
+export async function getHeldSlotsSet(
+  entries: Array<{ unitId: string; date: string; startTime: string }>
+): Promise<Set<string>> {
+  if (entries.length === 0) return new Set()
+  const keys = entries.map(e => `hold:${e.unitId}:${e.date}:${e.startTime}`)
+  const values = await redis.mget(...keys)
+  const held = new Set<string>()
+  values.forEach((v, i) => {
+    if (v !== null) held.add(`${entries[i].unitId}:${entries[i].date}:${entries[i].startTime}`)
+  })
+  return held
+}

@@ -1194,12 +1194,14 @@ export async function adminRoutes(app: FastifyInstance) {
       .object({
         scheduledAt: z.string().min(1).optional(),
         customOvers: z.number().int().positive().optional(),
+        swapTeams: z.boolean().optional(),
       })
       .refine(
-        (value) => value.scheduledAt !== undefined || value.customOvers !== undefined,
-        {
-          message: "At least one field must be provided",
-        },
+        (value) =>
+          value.scheduledAt !== undefined ||
+          value.customOvers !== undefined ||
+          value.swapTeams === true,
+        { message: "At least one field must be provided" },
       )
       .parse(request.body);
 
@@ -2302,6 +2304,13 @@ export async function adminRoutes(app: FastifyInstance) {
         body.autoAssign,
       ),
     });
+  });
+
+  app.delete("/tournaments/:id/groups", auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string };
+    const { id } = request.params as { id: string };
+    await svc.discardTournamentGroups(user.userId, id);
+    return reply.send({ success: true });
   });
 
   app.patch(

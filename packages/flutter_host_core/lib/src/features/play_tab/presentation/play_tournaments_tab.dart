@@ -45,7 +45,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: 2, vsync: this);
     _tabs.addListener(() => setState(() {}));
   }
 
@@ -59,7 +59,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
 
   void _onSearchChanged(String q) {
     setState(() => _searchQuery = q);
-    if (_tabs.index == 2) {
+    if (_tabs.index == 1) {
       _exploreDebounce?.cancel();
       _exploreDebounce = Timer(const Duration(milliseconds: 300), () {
         ref.read(playTournamentsControllerProvider.notifier).setExploreQuery(q);
@@ -75,7 +75,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
 
   List<PlayTournament> _applyFilters(List<PlayTournament> list) {
     var result = list;
-    if (_searchQuery.isNotEmpty && _tabs.index < 2) {
+    if (_searchQuery.isNotEmpty && _tabs.index < 1) {
       final q = _searchQuery.trim().toLowerCase();
       result = result.where((t) {
         return t.name.toLowerCase().contains(q) ||
@@ -102,14 +102,13 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
     if (!_hasAutoSwitched && !state.isLoading && state.participated.isEmpty) {
       _hasAutoSwitched = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _tabs.index == 0) _tabs.animateTo(2);
+        if (mounted && _tabs.index == 0) _tabs.animateTo(1);
       });
     }
 
     final currentList = switch (_tabs.index) {
       0 => state.participated,
-      1 => state.hosted,
-      _ => state.publicTournaments,
+      _ => state.publicTournamentsWithHostFlag,
     };
     final liveCount = currentList.where((t) => _isLive(t.status)).length;
     final upcomingCount =
@@ -135,7 +134,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
               style: TextStyle(
                   color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
               decoration: InputDecoration(
-                hintText: _tabs.index == 2
+                hintText: _tabs.index == 1
                     ? 'Search by name or city…'
                     : 'Search tournaments…',
                 hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
@@ -196,7 +195,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
           ),
         ),
 
-        // ── Participating / Hosting / Explore tabs ───────────────────────────
+        // ── Participating / Explore tabs ─────────────────────────────────────
         TabBar(
           controller: _tabs,
           isScrollable: true,
@@ -224,10 +223,6 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
                 count: state.participated.length,
                 loading: state.isLoading),
             _TabLabel(
-                label: 'Hosting',
-                count: state.hosted.length,
-                loading: state.isLoading),
-            _TabLabel(
                 label: 'Explore',
                 count: state.publicTournaments.length,
                 loading: state.isLoading),
@@ -237,7 +232,7 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
         // ── Format filter (Explore only) ─────────────────────────────────────
         AnimatedCrossFade(
           duration: const Duration(milliseconds: 200),
-          crossFadeState: _tabs.index == 2
+          crossFadeState: _tabs.index == 1
               ? CrossFadeState.showSecond
               : CrossFadeState.showFirst,
           firstChild: const SizedBox(width: double.infinity, height: 0),
@@ -280,29 +275,13 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
                     .read(playTournamentsControllerProvider.notifier)
                     .refresh(),
                 callbacks: widget.callbacks,
-              ),
-              _TournamentList(
-                tournaments: _applyFilters(state.hosted),
-                isLoading: state.isLoading,
-                error: state.error,
-                emptyIcon: Icons.emoji_events_rounded,
-                emptyTitle: _searchQuery.isEmpty && _statusFilter.isEmpty
-                    ? 'No hosted tournaments'
-                    : 'No results',
-                emptyMessage: _searchQuery.isEmpty && _statusFilter.isEmpty
-                    ? 'Create your first tournament'
-                    : 'Try a different search or filter',
-                onRefresh: () async => ref
-                    .read(playTournamentsControllerProvider.notifier)
-                    .refresh(),
-                callbacks: widget.callbacks,
                 showCreate: true,
                 onCreateTournament: widget.callbacks.onCreateTournament != null
                     ? () => widget.callbacks.onCreateTournament!(context)
                     : null,
               ),
               _TournamentList(
-                tournaments: _applyFilters(state.publicTournaments),
+                tournaments: _applyFilters(state.publicTournamentsWithHostFlag),
                 isLoading: state.isLoading,
                 error: state.error,
                 emptyIcon: Icons.explore_rounded,
