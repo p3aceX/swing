@@ -669,10 +669,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                   onUndo: _ctrl.undoLastBall,
                   onStartMatch: () async {
                     final ok = await _ctrl.startMatch();
-                    if (ok && mounted) {
-                      final s = ref.read(hostScoringControllerProvider(widget.matchId));
-                      await _autoSetupNewInnings();
-                    }
+                    if (ok && mounted) await _autoSetupNewInnings();
                     return ok;
                   },
                   onContinueInnings: _ctrl.continueInnings,
