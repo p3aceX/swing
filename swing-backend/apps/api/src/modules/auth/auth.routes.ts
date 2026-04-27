@@ -57,6 +57,21 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  app.post('/biz/phone-login', {
+    schema: { tags: ['auth'], summary: 'Swing-Biz login with 2Factor OTP' },
+  }, async (request, reply) => {
+    const body = z.object({
+      phone: z.string().min(10),
+      sessionId: z.string().min(5),
+      otp: z.string().min(4).max(8),
+      name: z.string().min(2).max(100).optional(),
+      language: z.enum(['en', 'hi', 'ta', 'te']).optional(),
+    }).parse(request.body)
+
+    const data = await svc.loginWithPhone(body.phone, body.sessionId, body.otp, body.name, body.language)
+    return reply.send({ success: true, data })
+  })
+
   app.post('/refresh', {
     schema: { tags: ['auth'], summary: 'Refresh access token using refresh token' },
   }, async (request, reply) => {

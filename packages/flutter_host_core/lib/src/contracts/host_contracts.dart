@@ -11,6 +11,7 @@ class HostContracts {
 
   // Biz (swing-biz app)
   static const bizLogin = '/auth/biz/login';
+  static const bizPhoneLogin = '/auth/biz/phone-login';
   static const bizCheckPhone = '/auth/check-phone';
   static const bizMe = '/biz/me';
   static const bizBusinessDetails = '/biz/business-details';

@@ -199,6 +199,67 @@ export class AuthService {
     }
   }
 
+  async loginWithPhone(phone: string, sessionId: string, otp: string, name?: string, language?: string) {
+    const apiKey = process.env.TWOFACTOR_API_KEY
+    if (!apiKey) throw new AppError('CONFIG_ERROR', 'OTP service not configured', 500)
+
+    const verifyUrl = `https://2factor.in/API/V1/${apiKey}/SMS/VERIFY/${sessionId}/${otp}`
+    const resp = await fetch(verifyUrl)
+    const verifyData = await resp.json() as any
+    if (verifyData.Status !== 'Success' || verifyData.Details !== 'OTP Matched') {
+      throw new AppError('OTP_INVALID', 'Invalid or expired OTP', 400)
+    }
+
+    const normalizedPhone = normalizePhone(phone)
+    let user = await prisma.user.findUnique({ where: { phone: normalizedPhone } })
+    const isNewUser = !user
+
+    if (!user) {
+      if (!name) throw new AppError('NAME_REQUIRED', 'Name is required for new business users', 400)
+      user = await prisma.user.create({
+        data: {
+          phone: normalizedPhone,
+          name,
+          language: language || 'en',
+          roles: [UserRole.BUSINESS_OWNER],
+          activeRole: UserRole.BUSINESS_OWNER,
+        },
+      })
+    } else {
+      const updateData: any = { lastLoginAt: new Date(), activeRole: UserRole.BUSINESS_OWNER }
+      if (!user.roles.includes(UserRole.BUSINESS_OWNER)) {
+        updateData.roles = { push: UserRole.BUSINESS_OWNER }
+      }
+      if (name && user.name === 'Coach') updateData.name = name
+      if (language && !user.language) updateData.language = language
+      user = await prisma.user.update({ where: { id: user.id }, data: updateData })
+    }
+
+    if (user.isBanned) throw new AppError('ACCOUNT_BANNED', `Account banned: ${user.banReason}`, 403)
+    if (user.isBlocked) throw new AppError('ACCOUNT_BLOCKED', `Account blocked: ${user.blockedReason}`, 403)
+
+    if (isNewUser) {
+      await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
+    }
+
+    const { businessAccount, businessStatus } = await this.getBusinessStatus(user.id)
+    const tokens = await this.issueTokens(user)
+
+    return {
+      ...tokens,
+      isNewUser,
+      user: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        activeRole: user.activeRole,
+        roles: user.roles,
+      },
+      businessAccount,
+      businessStatus,
+    }
+  }
+
   async loginWithFirebaseForBiz(idToken: string, name?: string, language?: string) {
     const { phone: rawPhone } = await verifyFirebaseToken(idToken)
     if (!rawPhone) throw new AppError('PHONE_REQUIRED', 'Swing-Biz login requires phone authentication', 400)

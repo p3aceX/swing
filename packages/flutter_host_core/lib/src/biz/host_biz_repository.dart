@@ -36,6 +36,26 @@ class HostBizRepository {
     return BizLoginResponse.fromJson(_unwrap(response.data));
   }
 
+  Future<BizLoginResponse> bizPhoneLogin({
+    required String phone,
+    required String sessionId,
+    required String otp,
+    String? name,
+    String? language,
+  }) async {
+    final response = await _dio.post(
+      HostContracts.bizPhoneLogin,
+      data: {
+        'phone': phone,
+        'sessionId': sessionId,
+        'otp': otp,
+        if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+        if (language != null && language.isNotEmpty) 'language': language,
+      },
+    );
+    return BizLoginResponse.fromJson(_unwrap(response.data));
+  }
+
   Future<PhoneCheckResult> checkPhone(String phone) async {
     final response = await _dio.post(
       HostContracts.bizCheckPhone,
