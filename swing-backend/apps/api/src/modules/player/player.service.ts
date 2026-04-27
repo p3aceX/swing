@@ -2304,7 +2304,34 @@ export class PlayerService {
         wicketKeeperId: true,
       },
     });
-    if (!team) return { players: [] };
+
+    // Fallback: check if this is a TournamentTeam id
+    if (!team) {
+      const tournamentTeam = await prisma.tournamentTeam.findUnique({
+        where: { id: teamId },
+        select: { playerIds: true, captainId: true, teamName: true },
+      });
+      if (!tournamentTeam) return { players: [] };
+      const profiles = await prisma.playerProfile.findMany({
+        where: { id: { in: tournamentTeam.playerIds } },
+        include: { user: { select: { id: true, name: true, avatarUrl: true } } },
+      });
+      return {
+        players: profiles.map((p) => ({
+          profileId: p.id,
+          userId: p.userId,
+          name: p.user?.name ?? p.id,
+          avatarUrl: p.user?.avatarUrl ?? null,
+          swingId: this.buildSwingId(p.id),
+        })),
+        roleAssignments: {
+          captainId: tournamentTeam.captainId ?? null,
+          viceCaptainId: null,
+          wicketKeeperId: null,
+        },
+      };
+    }
+
     const profiles = await prisma.playerProfile.findMany({
       where: { id: { in: team.playerIds } },
       include: { user: { select: { id: true, name: true, avatarUrl: true } } },

@@ -128,11 +128,9 @@ export class TournamentService {
     tournamentId: string,
     data: { teamName?: string; teamId?: string; captainId?: string; playerIds: string[] },
   ) {
+    console.log(`[addTournamentTeam] tournamentId=${tournamentId} teamId=${data.teamId} teamName=${data.teamName}`)
     const t = await this.verifyOwner(userId, tournamentId)
-    const currentCount = await prisma.tournamentTeam.count({ where: { tournamentId } })
-    if (t.maxTeams && currentCount >= t.maxTeams) {
-      throw new AppError("TOURNAMENT_FULL", `Tournament is full. Maximum ${t.maxTeams} teams allowed.`, 400)
-    }
+    console.log(`[addTournamentTeam] tournament="${t.name}" maxTeams=${t.maxTeams}`)
 
     let resolvedName = data.teamName
     let resolvedTeamId = data.teamId || null
@@ -141,11 +139,14 @@ export class TournamentService {
       const dbTeam = await prisma.team.findUnique({ where: { id: data.teamId } })
       if (!dbTeam) throw Errors.notFound("Team")
       resolvedName = dbTeam.name
+      console.log(`[addTournamentTeam] resolved teamId=${data.teamId} name="${resolvedName}"`)
       const existing = await prisma.tournamentTeam.findFirst({
         where: { tournamentId, teamId: data.teamId },
       })
-      if (existing)
+      if (existing) {
+        console.log(`[addTournamentTeam] ALREADY_REGISTERED teamId=${data.teamId}`)
         throw new AppError("ALREADY_REGISTERED", "This team is already registered in the tournament.", 400)
+      }
     } else if (data.teamName) {
       const newTeam = await prisma.team.create({
         data: {
@@ -157,11 +158,12 @@ export class TournamentService {
       })
       resolvedTeamId = newTeam.id
       resolvedName = newTeam.name
+      console.log(`[addTournamentTeam] created new team id=${newTeam.id} name="${newTeam.name}"`)
     } else {
       throw new AppError("MISSING_TEAM", "Either teamId or teamName is required.", 400)
     }
 
-    return prisma.tournamentTeam.create({
+    const result = await prisma.tournamentTeam.create({
       data: {
         tournamentId,
         teamId: resolvedTeamId,
@@ -171,20 +173,35 @@ export class TournamentService {
         isConfirmed: false,
       },
     })
+    console.log(`[addTournamentTeam] created tournamentTeam id=${result.id} isConfirmed=false (waitlisted)`)
+    return result
   }
 
   async removeTournamentTeam(userId: string, tournamentId: string, tournamentTeamId: string) {
+    console.log(`[removeTournamentTeam] tournamentId=${tournamentId} tournamentTeamId=${tournamentTeamId}`)
     await this.verifyOwner(userId, tournamentId)
     const team = await prisma.tournamentTeam.findUnique({ where: { id: tournamentTeamId } })
     if (!team || team.tournamentId !== tournamentId) throw Errors.notFound("Tournament team")
     await prisma.tournamentStanding.deleteMany({ where: { tournamentTeamId } })
-    return prisma.tournamentTeam.delete({ where: { id: tournamentTeamId } })
+    await prisma.tournamentTeam.delete({ where: { id: tournamentTeamId } })
+    console.log(`[removeTournamentTeam] deleted tournamentTeam id=${tournamentTeamId}`)
   }
 
   async confirmTournamentTeam(userId: string, tournamentTeamId: string, isConfirmed: boolean) {
+    console.log(`[confirmTournamentTeam] tournamentTeamId=${tournamentTeamId} isConfirmed=${isConfirmed}`)
     const team = await prisma.tournamentTeam.findUnique({ where: { id: tournamentTeamId } })
     if (!team) throw Errors.notFound("Tournament team")
-    await this.verifyOwner(userId, team.tournamentId)
+    const t = await this.verifyOwner(userId, team.tournamentId)
+    if (isConfirmed && t.maxTeams) {
+      const confirmedCount = await prisma.tournamentTeam.count({
+        where: { tournamentId: team.tournamentId, isConfirmed: true },
+      })
+      console.log(`[confirmTournamentTeam] confirmedCount=${confirmedCount} maxTeams=${t.maxTeams}`)
+      if (confirmedCount >= t.maxTeams) {
+        console.log(`[confirmTournamentTeam] TOURNAMENT_FULL — blocked confirm`)
+        throw new AppError("TOURNAMENT_FULL", `Tournament is full. Maximum ${t.maxTeams} confirmed teams allowed.`, 400)
+      }
+    }
     if (isConfirmed) {
       await prisma.tournamentStanding.upsert({
         where: {
@@ -197,7 +214,9 @@ export class TournamentService {
         update: {},
       })
     }
-    return prisma.tournamentTeam.update({ where: { id: tournamentTeamId }, data: { isConfirmed } })
+    const result = await prisma.tournamentTeam.update({ where: { id: tournamentTeamId }, data: { isConfirmed } })
+    console.log(`[confirmTournamentTeam] updated id=${tournamentTeamId} isConfirmed=${result.isConfirmed}`)
+    return result
   }
 
   // ── Groups ──────────────────────────────────────────────────────────────────
@@ -255,6 +274,15 @@ export class TournamentService {
       ])
     }
     return groups
+  }
+
+  async discardTournamentGroups(userId: string, tournamentId: string) {
+    console.log(`[discardTournamentGroups] tournamentId=${tournamentId}`)
+    await this.verifyOwner(userId, tournamentId)
+    await prisma.tournamentTeam.updateMany({ where: { tournamentId }, data: { groupId: null } })
+    await prisma.tournamentStanding.updateMany({ where: { tournamentId }, data: { groupId: null } })
+    await prisma.tournamentGroup.deleteMany({ where: { tournamentId } })
+    console.log(`[discardTournamentGroups] all groups deleted for tournamentId=${tournamentId}`)
   }
 
   async assignTeamToGroup(
@@ -418,7 +446,7 @@ export class TournamentService {
 
   async getTournamentSchedule(userId: string, tournamentId: string) {
     await this.verifyOwner(userId, tournamentId)
-    return prisma.match.findMany({
+    const matches = await prisma.match.findMany({
       where: { tournamentId },
       include: {
         innings: {
@@ -430,6 +458,23 @@ export class TournamentService {
       },
       orderBy: { scheduledAt: "asc" },
     })
+
+    // Fetch tournament teams to resolve team IDs
+    const tournamentTeams = await prisma.tournamentTeam.findMany({
+      where: { tournamentId },
+      select: { id: true, teamId: true, teamName: true },
+    })
+    const teamByName = new Map(tournamentTeams.map(t => [t.teamName.toLowerCase(), t]))
+
+    return matches.map(m => ({
+      ...m,
+      teamAId: teamByName.get(m.teamAName.toLowerCase())?.teamId
+        ?? teamByName.get(m.teamAName.toLowerCase())?.id
+        ?? null,
+      teamBId: teamByName.get(m.teamBName.toLowerCase())?.teamId
+        ?? teamByName.get(m.teamBName.toLowerCase())?.id
+        ?? null,
+    }))
   }
 
   async autoGenerateSchedule(userId: string, tournamentId: string, matchesPerDay: number = 1) {
@@ -524,6 +569,7 @@ export class TournamentService {
     })
     if (!tournament) throw Errors.notFound("Tournament")
     await this.verifyOwner(userId, tournamentId)
+    const organizerProfile = await prisma.playerProfile.findUnique({ where: { userId }, select: { id: true } })
     if (tournament.teams.length < 2) {
       throw new AppError(
         "NOT_ENOUGH_TEAMS",
@@ -533,6 +579,7 @@ export class TournamentService {
     }
 
     const format = tournament.tournamentFormat ?? "LEAGUE"
+    console.log(`[generateSmartSchedule] tournamentId=${tournamentId} tournamentFormat=${tournament.tournamentFormat} resolvedFormat=${format} groups=${tournament.groups?.length ?? 0}`)
     if (
       (format === "GROUP_STAGE_KNOCKOUT" || format === "SUPER_LEAGUE") &&
       (!tournament.groups || tournament.groups.length === 0)
@@ -603,6 +650,7 @@ export class TournamentService {
               tournamentId,
               status: "SCHEDULED",
               isRanked: false,
+              scorerId: organizerProfile?.id ?? null,
             })
             busyTeamsToday.add(finalPair.teamAName)
             busyTeamsToday.add(finalPair.teamBName)
@@ -919,6 +967,11 @@ export class TournamentService {
           }
         }
       }
+    }
+    // Shuffle pairs so teams don't play in sequential order
+    for (let i = pairs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
     }
     return pairs
   }
