@@ -85,6 +85,21 @@ class HostScreen extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => context.push('/host-schedule'),
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: context.panel,
+                          borderRadius: BorderRadius.circular(13),
+                          border: Border.all(color: context.stroke),
+                        ),
+                        child: Icon(Icons.calendar_month_rounded,
+                            color: context.accent, size: 19),
+                      ),
+                    ),
                   ],
                 ),
               ),

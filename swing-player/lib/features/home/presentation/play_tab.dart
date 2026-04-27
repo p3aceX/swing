@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,12 +36,11 @@ class PlayTab extends ConsumerWidget {
         ),
         onCreateTournament: (ctx) => ctx.push('/create-tournament'),
         onNavigateToTournament: (ctx, tournamentId, slug, isHost) {
-          if (isHost) {
-            ctx.push('/host-tournament/${Uri.encodeComponent(tournamentId)}');
-          } else {
-            ctx.push(
-                '/tournament/${Uri.encodeComponent(slug ?? tournamentId)}');
-          }
+          debugPrint('[Tournament] nav id=$tournamentId slug=$slug isHost=$isHost');
+          ctx.push(
+            '/tournament/${Uri.encodeComponent(slug ?? tournamentId)}',
+            extra: {'isHost': isHost, 'tournamentId': tournamentId},
+          );
         },
       ),
     );

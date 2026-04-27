@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
 import 'booking_tab.dart';
@@ -64,6 +65,13 @@ class _BookingModuleTabState extends State<BookingModuleTab> {
                   ),
                 ),
                 _LocationChip(city: widget.currentCity),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () => context.push('/bookings'),
+                  icon: Icon(Icons.confirmation_number_outlined,
+                      color: context.fg),
+                  tooltip: 'My Bookings',
+                ),
               ],
             ),
           ),

@@ -10,10 +10,8 @@ import '../domain/leaderboard_models.dart';
 import '../../matches/controller/matches_controller.dart';
 import '../../matches/domain/match_models.dart';
 import '../domain/home_models.dart';
-import '../../profile/controller/profile_controller.dart';
 import '../../profile/domain/rank_frame_resolver.dart';
 import '../../profile/domain/rank_visual_theme.dart';
-import '../../profile/presentation/rank_system_screen.dart';
 
 class PlayerHomeBody extends ConsumerStatefulWidget {
   const PlayerHomeBody({super.key});
@@ -32,15 +30,18 @@ class _PlayerHomeBodyState extends ConsumerState<PlayerHomeBody> {
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          const SliverToBoxAdapter(child: RepaintBoundary(child: _QuickLinks())),
+          const SliverToBoxAdapter(
+              child: RepaintBoundary(child: _QuickLinks())),
           const SliverToBoxAdapter(child: SizedBox(height: 18)),
           const _FixturesContent(),
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
           const _LeaderboardContent(),
           const SliverToBoxAdapter(child: SizedBox(height: 28)),
-          const SliverToBoxAdapter(child: RepaintBoundary(child: _MarketingCarousel())),
+          const SliverToBoxAdapter(
+              child: RepaintBoundary(child: _MarketingCarousel())),
           const SliverToBoxAdapter(child: SizedBox(height: 28)),
-          const SliverToBoxAdapter(child: RepaintBoundary(child: _RecommendedConnections())),
+          const SliverToBoxAdapter(
+              child: RepaintBoundary(child: _RecommendedConnections())),
           const SliverToBoxAdapter(child: SizedBox(height: 40)),
         ],
       ),
@@ -70,7 +71,6 @@ class _SectionHeader extends StatelessWidget {
     );
   }
 }
-
 
 class _MarketingCarousel extends StatefulWidget {
   const _MarketingCarousel();
@@ -382,20 +382,20 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
       ascending: true,
     );
     final recent = _sorted(
-      relevantMatches
-          .where((m) => m.lifecycle == MatchLifecycle.past)
-          .toList(),
+      relevantMatches.where((m) => m.lifecycle == MatchLifecycle.past).toList(),
       ascending: false,
     ).take(3).toList();
 
     // Smart default: live → upcoming → recent
     var effectiveTab = _tab;
     if (effectiveTab == _FixturesTab.live && live.isEmpty) {
-      effectiveTab = upcoming.isNotEmpty ? _FixturesTab.upcoming : _FixturesTab.recent;
+      effectiveTab =
+          upcoming.isNotEmpty ? _FixturesTab.upcoming : _FixturesTab.recent;
     } else if (effectiveTab == _FixturesTab.upcoming && upcoming.isEmpty) {
       effectiveTab = live.isNotEmpty ? _FixturesTab.live : _FixturesTab.recent;
     } else if (effectiveTab == _FixturesTab.recent && recent.isEmpty) {
-      effectiveTab = live.isNotEmpty ? _FixturesTab.live : _FixturesTab.upcoming;
+      effectiveTab =
+          live.isNotEmpty ? _FixturesTab.live : _FixturesTab.upcoming;
     }
 
     if (matchesState.isLoading && matchesState.matches.isEmpty) {
@@ -600,7 +600,8 @@ class _FixturesCarouselState extends State<_FixturesCarousel> {
   @override
   void didUpdateWidget(covariant _FixturesCarousel old) {
     super.didUpdateWidget(old);
-    if ((old.matches.length != widget.matches.length || old.tab != widget.tab) &&
+    if ((old.matches.length != widget.matches.length ||
+            old.tab != widget.tab) &&
         _page != 0) {
       _page = 0;
       if (_pc.hasClients) {
@@ -721,8 +722,18 @@ class _MatchTile extends ConsumerWidget {
     final d = match.scheduledAt;
     if (d == null) return '';
     final months = [
-      'JAN','FEB','MAR','APR','MAY','JUN',
-      'JUL','AUG','SEP','OCT','NOV','DEC'
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC'
     ];
     final dateLabel = '${months[d.month - 1]} ${d.day}';
     final timeLabel =
@@ -762,14 +773,10 @@ class _MatchTile extends ConsumerWidget {
     ];
     final subText = subParts.join(' · ');
 
-    final showScore = isLive || isPast;
+    final showScore = isLive;
     final scoreSummary = match.scoreSummary;
-    final playerScore = isLive && center != null
-        ? _resolveTeamA(center)
-        : (showScore ? (scoreSummary ?? '—') : '');
-    final oppScore = isLive && center != null
-        ? _resolveTeamB(center)
-        : (showScore ? (scoreSummary ?? '—') : '');
+    final playerScore = isLive && center != null ? _resolveTeamA(center) : '';
+    final oppScore = isLive && center != null ? _resolveTeamB(center) : '';
 
     // Status / toss line — backend supplies "Won toss, chose to bat" etc. via statusLabel.
     // Strip noisy duplicates of "Live" / "Match in progress" since we already show the LIVE chip.
@@ -780,6 +787,8 @@ class _MatchTile extends ConsumerWidget {
         lower == 'in progress' ||
         lower == 'in_progress';
     final statusLine = (raw.isNotEmpty && !isJustLive) ? raw : '';
+    final recentResultLine =
+        isPast ? _cleanResultLine(scoreSummary ?? statusLine) : '';
 
     // Richer multi-stop gradients per tab — dark variants flip to deep tints
     final gradColors = context.isDark
@@ -882,7 +891,8 @@ class _MatchTile extends ConsumerWidget {
                         letterSpacing: 1.1,
                       ),
                     )
-                  else if (tab == _FixturesTab.recent && match.result != MatchResult.unknown)
+                  else if (tab == _FixturesTab.recent &&
+                      match.result != MatchResult.unknown)
                     _ResultChip(result: match.result),
                 ],
               ),
@@ -910,8 +920,8 @@ class _MatchTile extends ConsumerWidget {
               const SizedBox(height: 6),
               _TeamScoreRow(
                 logoUrl: match.opponentTeamLogoUrl,
-                shortName: _short(
-                    match.opponentTeamShortName, match.opponentTeamName),
+                shortName:
+                    _short(match.opponentTeamShortName, match.opponentTeamName),
                 score: oppScore,
                 showScore: showScore,
               ),
@@ -921,11 +931,13 @@ class _MatchTile extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      statusLine.isNotEmpty
-                          ? statusLine
-                          : (tab == _FixturesTab.upcoming
-                              ? 'Toss yet to be decided'
-                              : ''),
+                      recentResultLine.isNotEmpty
+                          ? recentResultLine
+                          : (statusLine.isNotEmpty
+                              ? statusLine
+                              : (tab == _FixturesTab.upcoming
+                                  ? 'Toss yet to be decided'
+                                  : '')),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -938,8 +950,7 @@ class _MatchTile extends ConsumerWidget {
                   ),
                   const SizedBox(width: 6),
                   Icon(Icons.chevron_right_rounded,
-                      size: 18,
-                      color: context.fgSub.withValues(alpha: 0.7)),
+                      size: 18, color: context.fgSub.withValues(alpha: 0.7)),
                 ],
               ),
             ],
@@ -947,6 +958,18 @@ class _MatchTile extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _cleanResultLine(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) return '';
+    final lower = text.toLowerCase();
+    const duplicate = ' won the match won the match';
+    final duplicateIndex = lower.indexOf(duplicate);
+    if (duplicateIndex != -1) {
+      return '${text.substring(0, duplicateIndex)} won the match'.trim();
+    }
+    return text;
   }
 
   String _resolveTeamA(MatchCenter c) {
@@ -1099,15 +1122,7 @@ class _LeaderboardContent extends ConsumerStatefulWidget {
 }
 
 class _LeaderboardContentState extends ConsumerState<_LeaderboardContent> {
-  void _openRankPage() {
-    final profile = ref.read(profileControllerProvider).data;
-    if (profile == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => RankSystemScreen(ranking: profile.unified.ranking),
-      ),
-    );
-  }
+  void _openLeaderboard() => context.push('/leaderboard');
 
   @override
   Widget build(BuildContext context) {
@@ -1164,7 +1179,7 @@ class _LeaderboardContentState extends ConsumerState<_LeaderboardContent> {
                       ),
                       const Spacer(),
                       GestureDetector(
-                        onTap: _openRankPage,
+                        onTap: _openLeaderboard,
                         child: Row(
                           children: [
                             Text(
@@ -1193,10 +1208,9 @@ class _LeaderboardContentState extends ConsumerState<_LeaderboardContent> {
                     separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (ctx, i) {
                       if (i == entries.length) {
-                        return _SeeMoreCard(onTap: _openRankPage);
+                        return _SeeMoreCard(onTap: _openLeaderboard);
                       }
-                      return _LeaderCard(
-                          entry: entries[i], position: i + 1);
+                      return _LeaderCard(entry: entries[i], position: i + 1);
                     },
                   ),
                 ),
@@ -1660,13 +1674,18 @@ class _TabItem extends StatelessWidget {
         child: Row(
           children: [
             if (isLive && count > 0) ...[
-              _PulsingLiveDot(color: selected ? Theme.of(context).colorScheme.onPrimary : context.success),
+              _PulsingLiveDot(
+                  color: selected
+                      ? Theme.of(context).colorScheme.onPrimary
+                      : context.success),
               const SizedBox(width: 8),
             ],
             Text(
               label,
               style: TextStyle(
-                color: selected ? Theme.of(context).colorScheme.onPrimary : context.fgSub,
+                color: selected
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : context.fgSub,
                 fontSize: 11,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.5,
@@ -1678,7 +1697,10 @@ class _TabItem extends StatelessWidget {
                 duration: const Duration(milliseconds: 200),
                 style: TextStyle(
                   color: selected
-                      ? Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.6)
+                      ? Theme.of(context)
+                          .colorScheme
+                          .onPrimary
+                          .withValues(alpha: 0.6)
                       : context.fgSub.withValues(alpha: 0.5),
                   fontSize: 11,
                   fontWeight: FontWeight.w900,
@@ -1791,9 +1813,8 @@ class _MatchCard extends ConsumerWidget {
           stops: const [0.0, 0.4, 1.0],
         ),
         border: Border.all(
-          color: isLive
-              ? context.accent.withValues(alpha: 0.55)
-              : context.stroke,
+          color:
+              isLive ? context.accent.withValues(alpha: 0.55) : context.stroke,
           width: isLive ? 1.4 : 1.0,
         ),
         boxShadow: [
@@ -1832,7 +1853,8 @@ class _MatchCard extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: context.fg.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(6),
@@ -1929,7 +1951,8 @@ class _MatchCard extends ConsumerWidget {
                                   Text(
                                     "CRR: ${center.currentRunRate ?? '0.0'}",
                                     style: TextStyle(
-                                      color: context.accent.withValues(alpha: 0.8),
+                                      color:
+                                          context.accent.withValues(alpha: 0.8),
                                       fontSize: 9,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -1994,7 +2017,8 @@ class _MatchCard extends ConsumerWidget {
                           child: Row(
                             children: [
                               Icon(Icons.location_on_rounded,
-                                  size: 11, color: context.fgSub.withValues(alpha: 0.7)),
+                                  size: 11,
+                                  color: context.fgSub.withValues(alpha: 0.7)),
                               const SizedBox(width: 4),
                               Flexible(
                                 child: Text(
@@ -2012,12 +2036,14 @@ class _MatchCard extends ConsumerWidget {
                             ],
                           ),
                         ),
-                      
+
                       // Action Button
                       GestureDetector(
-                        onTap: () => context.push('/match/${Uri.encodeComponent(match.id)}'),
+                        onTap: () => context
+                            .push('/match/${Uri.encodeComponent(match.id)}'),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
                             color: context.ctaBg,
                             borderRadius: BorderRadius.circular(999),
@@ -2148,7 +2174,7 @@ class _HeroSection extends StatelessWidget {
                     color: context.accent.withValues(alpha: 0.03),
                   ),
                 ),
-                
+
                 Padding(
                   padding: const EdgeInsets.all(22),
                   child: Row(
@@ -2174,7 +2200,10 @@ class _HeroSection extends StatelessWidget {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               gradient: LinearGradient(
-                                colors: [context.accent, context.accent.withValues(alpha: 0.4)],
+                                colors: [
+                                  context.accent,
+                                  context.accent.withValues(alpha: 0.4)
+                                ],
                               ),
                             ),
                             padding: const EdgeInsets.all(2),
@@ -2212,21 +2241,23 @@ class _HeroSection extends StatelessWidget {
                                 ],
                               ),
                               child: Icon(Icons.bolt_rounded,
-                                  color: Theme.of(context).colorScheme.onPrimary,
+                                  color:
+                                      Theme.of(context).colorScheme.onPrimary,
                                   size: 14),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(width: 18),
-                      
+
                       // Hero Info
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: context.accent.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(6),
@@ -2267,10 +2298,11 @@ class _HeroSection extends StatelessWidget {
                           ],
                         ),
                       ),
-                      
+
                       // IP Badge
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
                           color: context.fg.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(16),
@@ -2661,7 +2693,8 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
                                     memCacheHeight: 168,
                                     placeholder: (context, url) =>
                                         Container(color: context.panel),
-                                    errorWidget: (context, url, error) => Center(
+                                    errorWidget: (context, url, error) =>
+                                        Center(
                                       child: Text(
                                         entry.name.isNotEmpty
                                             ? entry.name[0].toUpperCase()
@@ -2741,8 +2774,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor:
                         _isFollowing ? Colors.transparent : context.ctaBg,
-                    foregroundColor:
-                        _isFollowing ? context.fg : context.ctaFg,
+                    foregroundColor: _isFollowing ? context.fg : context.ctaFg,
                     elevation: 0,
                     padding: EdgeInsets.zero,
                     side: _isFollowing
@@ -2766,8 +2798,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
                                   ? Icons.check_rounded
                                   : Icons.add_rounded,
                               size: 14,
-                              color:
-                                  _isFollowing ? context.fg : context.ctaFg,
+                              color: _isFollowing ? context.fg : context.ctaFg,
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -2776,9 +2807,8 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
                                 fontSize: 11,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: -0.1,
-                                color: _isFollowing
-                                    ? context.fg
-                                    : context.ctaFg,
+                                color:
+                                    _isFollowing ? context.fg : context.ctaFg,
                               ),
                             ),
                           ],

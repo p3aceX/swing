@@ -184,11 +184,41 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
   double get _grandTotal => _pricingQuote.totalAmountPaise / 100;
 
   bool get _isGroundUnit {
-    final t = _selectedUnit?.unitType;
-    return t == 'FULL_GROUND' || t == 'HALF_GROUND';
+    final unit = _selectedUnit;
+    if (unit == null) return false;
+    final t = unit.unitType;
+    if (t == 'FULL_GROUND' || t == 'HALF_GROUND') return true;
+    // Ground units always have min 4h slots — reliable proxy when unitType is missing
+    if (unit.minSlotMins >= 240) return true;
+    // Also check PlayerUnitGroup data from slots response
+    final slotsData = _playerSlots;
+    if (slotsData != null) {
+      final group = slotsData.unitGroups
+          .where((g) => g.groupKey == unit.id || g.unitId == unit.id)
+          .firstOrNull;
+      if (group != null) {
+        if (group.unitType == 'FULL_GROUND' || group.unitType == 'HALF_GROUND') return true;
+        if (group.minSlotMins >= 240) return true;
+      }
+    }
+    return false;
   }
 
-  int get _unitMinAdvancePaise => _selectedUnit?.minAdvancePaise ?? 0;
+  int get _unitMinAdvancePaise {
+    final slotsData = _playerSlots;
+    final unit = _selectedUnit;
+    if (slotsData != null && unit != null) {
+      final isNet =
+          unit.unitType == 'CRICKET_NET' || unit.unitType == 'INDOOR_NET';
+      final group = isNet
+          ? slotsData.unitGroups.where((g) => g.isNetsGroup).firstOrNull
+          : slotsData.unitGroups
+              .where((g) => g.groupKey == unit.id || g.unitId == unit.id)
+              .firstOrNull;
+      if (group != null) return group.minAdvancePaise;
+    }
+    return unit?.minAdvancePaise ?? 0;
+  }
 
   DateTime _quoteStartDateTime() {
     final slot = _selectedStartSlot;
@@ -984,7 +1014,7 @@ class _SlotPicker extends StatelessWidget {
               border: Border.all(
                   color: isSelected ? context.accent : Colors.transparent),
             ),
-            child: Text(s.startTime,
+            child: Text(_fmt12h(s.startTime),
                 style: TextStyle(
                     color: isSelected
                         ? Colors.white

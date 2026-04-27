@@ -6,6 +6,14 @@ import 'package:intl/intl.dart';
 import '../../arena/services/arena_profile_providers.dart';
 import '../../bookings/presentation/bookings_page.dart';
 
+// ─── Theme Overrides ─────────────────────────────────────────────────────────
+const _bg = Color(0xFFF9FAFB);
+const _surface = Color(0xFFFFFFFF);
+const _border = Color(0xFFE5E7EB);
+const _accent = Color(0xFF059669);
+const _text = Color(0xFF111827);
+const _muted = Color(0xFF6B7280);
+
 // ─── Providers ────────────────────────────────────────────────────────────────
 
 final _payArenaProvider = StateProvider<String?>((ref) => null);
@@ -75,75 +83,106 @@ class _PaymentsBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
-      child: Column(
-        children: [
-          Container(
-            color: Colors.white,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Payments',
-                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF101828))),
-                      if (arenas.length > 1) ...[
-                        const SizedBox(height: 12),
-                        Consumer(builder: (ctx, ref, _) => SizedBox(
-                          height: 36,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: arenas.length,
-                            separatorBuilder: (_, __) => const SizedBox(width: 8),
-                            itemBuilder: (_, i) {
-                              final a = arenas[i];
-                              final sel = a.id == selectedId;
-                              return GestureDetector(
-                                onTap: () => ref.read(_payArenaProvider.notifier).state = a.id,
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 150),
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: sel ? const Color(0xFF101828) : const Color(0xFFF9FAFB),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: sel ? const Color(0xFF101828) : const Color(0xFFE5E7EB)),
-                                  ),
-                                  child: Text(a.name,
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                                          color: sel ? Colors.white : const Color(0xFF344054))),
-                                ),
-                              );
-                            },
-                          ),
-                        )),
+      child: Scaffold(
+        backgroundColor: _bg,
+        body: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 12),
+              decoration: const BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
+                boxShadow: [BoxShadow(color: Color(0x05000000), blurRadius: 10, offset: Offset(0, 4))],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Payments',
+                            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _text, letterSpacing: -0.8)),
+                        if (arenas.length > 1)
+                          Consumer(builder: (ctx, ref, _) => GestureDetector(
+                            onTap: () => _showArenaPicker(ctx, ref),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _bg,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: _border),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.stadium_rounded, color: _accent, size: 18),
+                                  const SizedBox(width: 10),
+                                  Text(arena.name,
+                                      style: const TextStyle(color: _text, fontSize: 13, fontWeight: FontWeight.w800)),
+                                  const SizedBox(width: 6),
+                                  const Icon(Icons.unfold_more_rounded, color: _muted, size: 16),
+                                ],
+                              ),
+                            ),
+                          )),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                const TabBar(
-                  labelColor: Color(0xFF101828),
-                  unselectedLabelColor: Color(0xFF98A2B3),
-                  labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                  unselectedLabelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  indicatorColor: Color(0xFF101828),
-                  indicatorWeight: 2,
-                  tabs: [Tab(text: 'Collections'), Tab(text: 'Customers')],
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  const TabBar(
+                    labelColor: _text,
+                    unselectedLabelColor: _muted,
+                    labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                    unselectedLabelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    indicatorColor: _accent,
+                    indicatorWeight: 3,
+                    indicatorSize: TabBarIndicatorSize.label,
+                    indicatorPadding: EdgeInsets.symmetric(horizontal: 16),
+                    dividerColor: Colors.transparent,
+                    tabs: [Tab(text: 'Collections'), Tab(text: 'Customers')],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _CollectionsTab(arena: arena),
-                _CustomersTab(arena: arena),
-              ],
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _CollectionsTab(arena: arena),
+                  _CustomersTab(arena: arena),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showArenaPicker(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Select Arena', style: TextStyle(color: _text, fontSize: 18, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 16),
+            ...arenas.map((a) => ListTile(
+              leading: const Icon(Icons.stadium_outlined, color: _accent),
+              title: Text(a.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w700)),
+              onTap: () {
+                ref.read(_payArenaProvider.notifier).state = a.id;
+                Navigator.pop(context);
+              },
+            )),
+          ],
+        ),
       ),
     );
   }
@@ -179,15 +218,229 @@ class _CollectionsTabState extends ConsumerState<_CollectionsTab>
     final key = _PayKey(widget.arena.id, _month);
     final async = ref.watch(_arenaPaymentsProvider(key));
 
-    return async.when(
-      loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: Color(0xFF667085)))),
-      data: (data) => _CollectionsList(
-        data: data,
-        month: _month,
-        arena: widget.arena,
-        onMonthChanged: (m) => setState(() => _month = m),
-        onRefresh: () => ref.invalidate(_arenaPaymentsProvider(key)),
+    return Scaffold(
+      backgroundColor: _bg,
+      body: async.when(
+        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+        error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: Color(0xFF667085)))),
+        data: (data) => _CollectionsList(
+          data: data,
+          month: _month,
+          arena: widget.arena,
+          onMonthChanged: (m) => setState(() => _month = m),
+          onRefresh: () => ref.invalidate(_arenaPaymentsProvider(key)),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showQuickPay(context),
+        backgroundColor: _accent,
+        foregroundColor: Colors.white,
+        elevation: 6,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: const Icon(Icons.add_card_rounded),
+        label: const Text('Record Payment', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+    );
+  }
+
+  void _showQuickPay(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _bg,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (_) => _QuickPaySheet(arena: widget.arena),
+    ).then((_) => ref.invalidate(_arenaPaymentsProvider));
+  }
+}
+
+class _QuickPaySheet extends ConsumerStatefulWidget {
+  const _QuickPaySheet({required this.arena});
+  final ArenaListing arena;
+  @override
+  ConsumerState<_QuickPaySheet> createState() => _QuickPaySheetState();
+}
+
+class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
+  String _search = '';
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(_arenaGuestsProvider(_GuestKey(widget.arena.id, _search)));
+    final bottom = MediaQuery.of(context).padding.bottom;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.8,
+      padding: EdgeInsets.fromLTRB(20, 12, 20, bottom),
+      child: Column(
+        children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 24),
+          const Text('Record Payment', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _text)),
+          const SizedBox(height: 20),
+          TextField(
+            onChanged: (v) => setState(() => _search = v),
+            decoration: InputDecoration(
+              hintText: 'Search customer name or phone...',
+              prefixIcon: const Icon(Icons.search_rounded),
+              filled: true, fillColor: _surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: async.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('$e')),
+              data: (guests) {
+                // 1. Extract all unpaid bookings
+                final unpaid = <(ArenaGuest, ArenaReservation)>[];
+                for (final g in guests) {
+                  for (final b in g.recentBookings) {
+                    if (!b.isPaid && b.status != 'CANCELLED') {
+                      unpaid.add((g, b));
+                    }
+                  }
+                }
+
+                if (unpaid.isEmpty) {
+                  return const Center(
+                    child: Text('No pending balances found.',
+                        style: TextStyle(color: _muted, fontWeight: FontWeight.w600)),
+                  );
+                }
+
+                // 2. Sort and Categorize
+                final now = DateTime.now();
+                final nowMins = now.hour * 60 + now.minute;
+
+                final upcoming = <(ArenaGuest, ArenaReservation)>[];
+                final recent = <(ArenaGuest, ArenaReservation)>[];
+
+                for (final item in unpaid) {
+                  final b = item.$2;
+                  final isFutureDate = b.bookingDate != null && b.bookingDate!.isAfter(DateTime(now.year, now.month, now.day));
+                  final isToday = b.bookingDate != null && DateUtils.isSameDay(b.bookingDate, now);
+                  
+                  bool isUpcoming = false;
+                  if (isFutureDate) {
+                    isUpcoming = true;
+                  } else if (isToday) {
+                    final startMins = _toMins(b.startTime);
+                    if (startMins > nowMins) isUpcoming = true;
+                  }
+
+                  if (isUpcoming) upcoming.add(item); else recent.add(item);
+                }
+
+                // Sort: Recent (newest past first), Upcoming (closest first)
+                recent.sort((a, b) {
+                  final da = a.$2.bookingDate ?? DateTime(2000);
+                  final db = b.$2.bookingDate ?? DateTime(2000);
+                  if (da != db) return db.compareTo(da);
+                  return _toMins(b.$2.startTime).compareTo(_toMins(a.$2.startTime));
+                });
+                upcoming.sort((a, b) {
+                  final da = a.$2.bookingDate ?? DateTime(2100);
+                  final db = b.$2.bookingDate ?? DateTime(2100);
+                  if (da != db) return da.compareTo(db);
+                  return _toMins(a.$2.startTime).compareTo(_toMins(b.$2.startTime));
+                });
+
+                return ListView(
+                  children: [
+                    if (recent.isNotEmpty) ...[
+                      const _SectionLabel('RECENT & COMPLETED'),
+                      const SizedBox(height: 12),
+                      ...recent.map((item) => _QuickPayRow(
+                            guest: item.$1,
+                            booking: item.$2,
+                            arena: widget.arena,
+                          )),
+                      const SizedBox(height: 24),
+                    ],
+                    if (upcoming.isNotEmpty) ...[
+                      const _SectionLabel('UPCOMING'),
+                      const SizedBox(height: 12),
+                      ...upcoming.map((item) => _QuickPayRow(
+                            guest: item.$1,
+                            booking: item.$2,
+                            arena: widget.arena,
+                          )),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickPayRow extends StatelessWidget {
+  const _QuickPayRow({required this.guest, required this.booking, required this.arena});
+  final ArenaGuest guest;
+  final ArenaReservation booking;
+  final ArenaListing arena;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = booking.bookingDate != null ? DateFormat('EEE d MMM').format(booking.bookingDate!) : '—';
+    final balance = booking.totalAmountPaise - booking.advancePaise;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GestureDetector(
+        onTap: () {
+          Navigator.pop(context);
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.white,
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+            builder: (_) => BookingDetailSheet(booking: booking, arenaName: arena.name, arenaId: arena.id),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _border),
+            boxShadow: const [BoxShadow(color: Color(0x05000000), blurRadius: 10, offset: Offset(0, 4))],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(color: _text, borderRadius: BorderRadius.circular(12)),
+                alignment: Alignment.center,
+                child: Text(guest.name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(guest.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _text)),
+                    const SizedBox(height: 2),
+                    Text('$date · ${booking.startTime} · ${booking.unitName ?? 'General'}',
+                        style: const TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('₹${(balance / 100).toStringAsFixed(0)}',
+                      style: const TextStyle(color: Color(0xFFDC2626), fontSize: 14, fontWeight: FontWeight.w900)),
+                  const Text('DUE', style: TextStyle(color: Color(0xFFDC2626), fontSize: 8, fontWeight: FontWeight.w900)),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -248,91 +501,130 @@ class _CollectionsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final collected = data.totalCollectedPaise;
-    final balance = data.totalBalancePaise;
+    // Re-filter data to ensure PAID bookings move to the 'Collected' section immediately
+    final unpaidBookings = data.pendingBookings.where((b) => !b.isPaid).toList();
+    final collectedBookings = [
+      ...data.checkedInBookings,
+      ...data.pendingBookings.where((b) => b.isPaid),
+    ];
+    
+    final collected = collectedBookings.fold(0, (sum, b) => sum + b.totalAmountPaise);
+    final balance = unpaidBookings.fold(0, (sum, b) => sum + (b.totalAmountPaise - b.advancePaise));
 
     return RefreshIndicator(
       onRefresh: () async => onRefresh(),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
         children: [
           // Month nav
-          Row(children: [
-            GestureDetector(
-              onTap: () => onMonthChanged(_prevMonth()),
-              child: const Icon(Icons.chevron_left_rounded, color: Color(0xFF344054)),
-            ),
-            Expanded(
-              child: Text(_fmtMonth(month),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF101828))),
-            ),
-            GestureDetector(
-              onTap: _isCurrentMonth ? null : () => onMonthChanged(_nextMonth()),
-              child: Icon(Icons.chevron_right_rounded,
-                  color: _isCurrentMonth ? const Color(0xFFD1D5DB) : const Color(0xFF344054)),
-            ),
-          ]),
-          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _NavBtn(icon: Icons.chevron_left_rounded, onTap: () => onMonthChanged(_prevMonth())),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _border),
+                ),
+                child: Text(_fmtMonth(month),
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text)),
+              ),
+              const SizedBox(width: 12),
+              _NavBtn(
+                icon: Icons.chevron_right_rounded, 
+                onTap: _isCurrentMonth ? null : () => onMonthChanged(_nextMonth()),
+                disabled: _isCurrentMonth,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
 
           // Tappable summary cards
           Row(children: [
             _SummaryCard(
               label: 'Collected',
               paise: collected,
-              count: data.checkedInBookings.length,
-              icon: Icons.check_circle_outline_rounded,
-              positive: true,
+              count: collectedBookings.length,
+              icon: Icons.check_circle_rounded,
+              color: _accent,
               onTap: () => _showBookingList(
-                context, 'Collected', data.checkedInBookings, const Color(0xFF059669)),
+                context, 'Collected', collectedBookings, _accent),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             _SummaryCard(
               label: 'Balance due',
               paise: balance,
-              count: data.pendingBookings.length,
-              icon: Icons.pending_outlined,
-              positive: false,
+              count: unpaidBookings.length,
+              icon: Icons.error_rounded,
+              color: const Color(0xFFDC2626),
               onTap: () => _showBookingList(
-                context, 'Balance Due', data.pendingBookings, const Color(0xFFDC2626)),
+                context, 'Balance Due', unpaidBookings, const Color(0xFFDC2626)),
             ),
           ]),
-          const SizedBox(height: 20),
+          const SizedBox(height: 28),
 
           // Pending check-ins (most actionable)
-          if (data.pendingBookings.isNotEmpty) ...[
-            _SectionLabel('Pending check-in (${data.pendingBookings.length})'),
-            const SizedBox(height: 8),
-            ...data.pendingBookings.map((b) => _BookingRow(
+          if (unpaidBookings.isNotEmpty) ...[
+            _SectionLabel('PENDING COLLECTION (${unpaidBookings.length})'),
+            const SizedBox(height: 12),
+            ...unpaidBookings.map((b) => _BookingRow(
               booking: b,
+              arenaName: arena.name,
               arenaId: arena.id,
               onRefresh: onRefresh,
-              showCheckinBadge: true,
+              showStatusBadge: true,
             )),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
           ],
 
           // Checked-in bookings
-          if (data.checkedInBookings.isNotEmpty) ...[
-            _SectionLabel('Checked in (${data.checkedInBookings.length})'),
-            const SizedBox(height: 8),
-            ...data.checkedInBookings.map((b) => _BookingRow(
+          if (collectedBookings.isNotEmpty) ...[
+            _SectionLabel('RECENTLY COLLECTED (${collectedBookings.length})'),
+            const SizedBox(height: 12),
+            ...collectedBookings.map((b) => _BookingRow(
               booking: b,
+              arenaName: arena.name,
               arenaId: arena.id,
               onRefresh: onRefresh,
-              showCheckinBadge: false,
+              showStatusBadge: false,
             )),
           ],
 
-          if (data.checkedInBookings.isEmpty && data.pendingBookings.isEmpty)
+          if (collectedBookings.isEmpty && unpaidBookings.isEmpty)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 40),
+              padding: EdgeInsets.symmetric(vertical: 60),
               child: Center(
-                child: Text('No bookings this month',
-                    style: TextStyle(color: Color(0xFF98A2B3), fontSize: 14)),
+                child: Text('No payment activity this month',
+                    style: TextStyle(color: _muted, fontSize: 14, fontWeight: FontWeight.w600)),
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _NavBtn extends StatelessWidget {
+  const _NavBtn({required this.icon, required this.onTap, this.disabled = false});
+  final IconData icon;
+  final VoidCallback? onTap;
+  final bool disabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: _surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _border),
+        ),
+        child: Icon(icon, color: disabled ? _border : _text, size: 20),
       ),
     );
   }
@@ -346,45 +638,55 @@ class _SummaryCard extends StatelessWidget {
     required this.paise,
     required this.count,
     required this.icon,
-    required this.positive,
+    required this.color,
     required this.onTap,
   });
   final String label;
   final int paise;
   final int count;
   final IconData icon;
-  final bool positive;
+  final Color color;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = positive ? const Color(0xFF059669) : const Color(0xFFDC2626);
-    final bg = positive ? const Color(0xFFF0FDF4) : const Color(0xFFFEF2F2);
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Icon(icon, size: 16, color: color),
-              const Spacer(),
-              if (count > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(10)),
-                  child: Text('$count', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color)),
-                ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded, size: 14, color: color.withAlpha(128)),
-            ]),
-            const SizedBox(height: 8),
-            Text('₹${(paise / 100).toStringAsFixed(0)}',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: color)),
-            const SizedBox(height: 2),
-            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF667085))),
-          ]),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _border),
+            boxShadow: const [BoxShadow(color: Color(0x05000000), blurRadius: 10, offset: Offset(0, 4))],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: color.withValues(alpha: .1), shape: BoxShape.circle),
+                    child: Icon(icon, color: color, size: 16),
+                  ),
+                  if (count > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: color.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
+                      child: Text('$count', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: color)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text('₹${(paise / 100).toStringAsFixed(0)}',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _text, letterSpacing: -0.5)),
+              const SizedBox(height: 2),
+              Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.2)),
+            ],
+          ),
         ),
       ),
     );
@@ -396,61 +698,101 @@ class _SummaryCard extends StatelessWidget {
 class _BookingRow extends StatelessWidget {
   const _BookingRow({
     required this.booking,
+    required this.arenaName,
     required this.arenaId,
     required this.onRefresh,
-    this.showCheckinBadge = true,
+    this.showStatusBadge = true,
   });
   final ArenaReservation booking;
+  final String arenaName;
   final String arenaId;
   final VoidCallback onRefresh;
-  final bool showCheckinBadge;
+  final bool showStatusBadge;
 
   @override
   Widget build(BuildContext context) {
     final dateStr = booking.bookingDate != null
         ? DateFormat('EEE d MMM').format(booking.bookingDate!)
         : '—';
-    final isCheckedIn = booking.checkedInAt != null;
+    final isPaid = booking.isPaid;
+    final color = isPaid ? _accent : const Color(0xFFD97706);
 
-    return GestureDetector(
-      onTap: () => showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (_) => BookingDetailSheet(booking: booking, arenaId: arenaId),
-      ).then((_) => onRefresh()),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(booking.displayName,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF101828))),
-              const SizedBox(height: 2),
-              Text('${booking.unitName ?? ''} · $dateStr · ${booking.startTime}–${booking.endTime}',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF667085))),
-            ]),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GestureDetector(
+        onTap: () => showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.white,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+          builder: (_) => BookingDetailSheet(booking: booking, arenaName: arenaName, arenaId: arenaId),
+        ).then((_) => onRefresh()),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _border),
+            boxShadow: const [BoxShadow(color: Color(0x05000000), blurRadius: 10, offset: Offset(0, 4))],
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('₹${(booking.totalAmountPaise / 100).toStringAsFixed(0)}',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF101828))),
-            const SizedBox(height: 4),
-            if (showCheckinBadge)
-              _Badge(isCheckedIn ? 'Checked in' : 'Pending',
-                  isCheckedIn ? const Color(0xFF059669) : const Color(0xFFD97706))
-            else
-              _Badge('Checked in', const Color(0xFF059669)),
-          ]),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 18),
-        ]),
+          child: Row(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(booking.startTime,
+                      style: const TextStyle(color: _text, fontSize: 15, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 2),
+                  Text(dateStr,
+                      style: const TextStyle(color: _muted, fontSize: 10, fontWeight: FontWeight.w700)),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Container(height: 36, width: 1, color: _border),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(booking.displayName,
+                        style: const TextStyle(color: _text, fontSize: 14, fontWeight: FontWeight.w800),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        if (booking.unitName != null) ...[
+                          Text(booking.unitName!,
+                              style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+                          const SizedBox(width: 8),
+                        ],
+                        if (showStatusBadge)
+                          _Badge(
+                            isPaid ? 'Paid' : 'Unpaid',
+                            color,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                      '₹${((isPaid ? booking.totalAmountPaise : (booking.totalAmountPaise - booking.advancePaise)) / 100).toStringAsFixed(0)}',
+                      style: const TextStyle(color: _text, fontSize: 15, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 2),
+                  if (!isPaid)
+                    const Text('DUE',
+                        style: TextStyle(color: Color(0xFFDC2626), fontSize: 8, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 4),
+                  const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 18),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -463,12 +805,12 @@ class _Badge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     decoration: BoxDecoration(
-      color: color.withAlpha(25),
+      color: color.withValues(alpha: .1),
       borderRadius: BorderRadius.circular(6),
     ),
-    child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+    child: Text(label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: color, letterSpacing: 0.5)),
   );
 }
 
@@ -527,9 +869,10 @@ class _BookingListSheet extends StatelessWidget {
           else
             ...bookings.map((b) => _BookingRow(
               booking: b,
+              arenaName: arena.name,
               arenaId: arena.id,
               onRefresh: onRefresh,
-              showCheckinBadge: true,
+              showStatusBadge: true,
             )),
         ],
       ),
@@ -570,36 +913,36 @@ class _CustomersTabState extends ConsumerState<_CustomersTab>
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: TextField(
             controller: _searchCtrl,
             onChanged: (v) => setState(() => _search = v),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Color(0xFF101828)),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _text),
             decoration: InputDecoration(
               hintText: 'Search by name or phone...',
-              hintStyle: const TextStyle(color: Color(0xFF98A2B3)),
-              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF98A2B3), size: 20),
+              hintStyle: const TextStyle(color: _muted, fontWeight: FontWeight.w500),
+              prefixIcon: const Icon(Icons.search_rounded, color: _muted, size: 20),
               suffixIcon: _search.isNotEmpty
                   ? GestureDetector(
                       onTap: () { _searchCtrl.clear(); setState(() => _search = ''); },
-                      child: const Icon(Icons.close_rounded, color: Color(0xFF98A2B3), size: 18))
+                      child: const Icon(Icons.close_rounded, color: _muted, size: 18))
                   : null,
               filled: true,
-              fillColor: const Color(0xFFF9FAFB),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFF101828), width: 1.5)),
+              fillColor: _bg,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: _accent, width: 1.5)),
             ),
           ),
         ),
         Expanded(
           child: async.when(
-            loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: Color(0xFF667085)))),
+            loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+            error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: _muted))),
             data: (guests) {
               if (guests.isEmpty) {
                 return _Empty(_search.isEmpty
@@ -608,14 +951,16 @@ class _CustomersTabState extends ConsumerState<_CustomersTab>
               }
               return RefreshIndicator(
                 onRefresh: () async => ref.invalidate(_arenaGuestsProvider(key)),
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   itemCount: guests.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (ctx, i) => _CustomerCard(
-                    guest: guests[i],
-                    arena: widget.arena,
-                    onTap: () => _openCustomer(ctx, guests[i]),
+                  itemBuilder: (ctx, i) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _CustomerCard(
+                      guest: guests[i],
+                      arena: widget.arena,
+                      onTap: () => _openCustomer(ctx, guests[i]),
+                    ),
                   ),
                 ),
               );
@@ -645,50 +990,52 @@ class _CustomerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasBalance = guest.balanceDuePaise > 0;
+    final unpaidBookings = guest.recentBookings.where((b) => !b.isPaid && b.status != 'CANCELLED');
+    final actualBalancePaise = unpaidBookings.fold(0, (sum, b) => sum + (b.totalAmountPaise - b.advancePaise));
+    final hasBalance = actualBalancePaise > 0;
+    
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _surface, 
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _border),
+          boxShadow: const [BoxShadow(color: Color(0x05000000), blurRadius: 10, offset: Offset(0, 4))],
+        ),
         child: Row(children: [
           Container(
-            width: 42, height: 42,
-            decoration: BoxDecoration(color: const Color(0xFF101828), borderRadius: BorderRadius.circular(21)),
+            width: 48, height: 48,
+            decoration: BoxDecoration(color: _text, borderRadius: BorderRadius.circular(16)),
             alignment: Alignment.center,
             child: Text(
               (guest.name.isNotEmpty ? guest.name[0] : '?').toUpperCase(),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(guest.name,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF101828))),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text, letterSpacing: -0.2)),
               const SizedBox(height: 2),
               Text(guest.phone,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF667085))),
-              const SizedBox(height: 5),
+                  style: const TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
               Row(children: [
-                _Tag('${guest.totalBookings} booking${guest.totalBookings == 1 ? '' : 's'}'),
-                const SizedBox(width: 6),
-                _Tag('₹${(guest.totalSpentPaise / 100).toStringAsFixed(0)} collected'),
+                _Tag('${guest.totalBookings}'),
+                const SizedBox(width: 8),
+                _Tag('₹${(guest.totalSpentPaise / 100).toStringAsFixed(0)}'),
                 if (hasBalance) ...[
-                  const SizedBox(width: 6),
-                  _Tag('₹${(guest.balanceDuePaise / 100).toStringAsFixed(0)} due',
+                  const SizedBox(width: 8),
+                  _Tag('₹${(actualBalancePaise / 100).toStringAsFixed(0)} DUE',
                       bg: const Color(0xFFFEF2F2), fg: const Color(0xFFDC2626)),
                 ],
               ]),
             ]),
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            if (guest.lastDate != null)
-              Text(DateFormat('d MMM').format(guest.lastDate!),
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF98A2B3), fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 20),
-          ]),
+          const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 22),
         ]),
       ),
     );
@@ -703,12 +1050,13 @@ class _Tag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-      color: bg ?? const Color(0xFFF3F4F6),
-      borderRadius: BorderRadius.circular(5),
+      color: bg ?? _bg,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: bg != null ? fg!.withValues(alpha: .1) : _border),
     ),
-    child: Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg ?? const Color(0xFF344054))),
+    child: Text(text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: fg ?? _text, letterSpacing: 0.2)),
   );
 }
 
@@ -730,112 +1078,139 @@ class _CustomerDetailSheetState extends ConsumerState<_CustomerDetailSheet> {
     final guest = widget.guest;
 
     // Split bookings by check-in status
-    final checkedIn = guest.recentBookings.where((b) => b.checkedInAt != null).toList();
-    final pending = guest.recentBookings.where((b) => b.checkedInAt == null).toList();
+    final checkedIn = guest.recentBookings.where((b) => b.isPaid).toList();
+    final pending = guest.recentBookings.where((b) => !b.isPaid && b.status != 'CANCELLED').toList();
+    
+    final actualBalancePaise = pending.fold(0, (sum, b) => sum + (b.totalAmountPaise - b.advancePaise));
 
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.75,
-      maxChildSize: 0.95,
-      minChildSize: 0.4,
-      builder: (ctx, ctrl) => ListView(
-        controller: ctrl,
-        padding: EdgeInsets.fromLTRB(20, 16, 20, bottom + 24),
-        children: [
-          Center(
-            child: Container(
-              width: 36, height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(color: const Color(0xFFE5E7EB), borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          Row(children: [
-            Container(
-              width: 50, height: 50,
-              decoration: BoxDecoration(color: const Color(0xFF101828), borderRadius: BorderRadius.circular(25)),
-              alignment: Alignment.center,
-              child: Text(
-                (guest.name.isNotEmpty ? guest.name[0] : '?').toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20),
+    return Container(
+      decoration: const BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.85,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (ctx, ctrl) => ListView(
+          controller: ctrl,
+          padding: EdgeInsets.fromLTRB(20, 12, 20, bottom + 24),
+          children: [
+            Center(
+              child: Container(
+                width: 44, height: 5,
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(10)),
               ),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(guest.name,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF101828))),
-                Text(guest.phone,
-                    style: const TextStyle(fontSize: 13, color: Color(0xFF667085))),
-              ]),
+            
+            // PROFILE HEADER
+            Center(
+              child: Column(
+                children: [
+                  Container(
+                    width: 80, height: 80,
+                    decoration: BoxDecoration(
+                      color: _text, 
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [BoxShadow(color: _text.withValues(alpha: .2), blurRadius: 20, offset: const Offset(0, 8))],
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      (guest.name.isNotEmpty ? guest.name[0] : '?').toUpperCase(),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 32),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(guest.name,
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: _text, letterSpacing: -0.5)),
+                  const SizedBox(height: 4),
+                  Text(guest.phone,
+                      style: const TextStyle(fontSize: 15, color: _muted, fontWeight: FontWeight.w600)),
+                ],
+              ),
             ),
-          ]),
-          const SizedBox(height: 18),
+            const SizedBox(height: 32),
 
-          Row(children: [
-            _StatPill('Bookings', '${guest.totalBookings}'),
-            const SizedBox(width: 8),
-            _StatPill('Collected', '₹${(guest.totalSpentPaise / 100).toStringAsFixed(0)}',
-                color: const Color(0xFF059669)),
-            const SizedBox(width: 8),
-            _StatPill('Balance', '₹${(guest.balanceDuePaise / 100).toStringAsFixed(0)}',
-                highlight: guest.balanceDuePaise > 0),
-          ]),
-          const SizedBox(height: 20),
+            // STATS ROW
+            Row(children: [
+              _StatPill('Bookings', '${guest.totalBookings}', Icons.confirmation_number_rounded),
+              const SizedBox(width: 12),
+              _StatPill('Collected', '₹${(guest.totalSpentPaise / 100).toStringAsFixed(0)}', Icons.check_circle_rounded,
+                  color: _accent),
+              const SizedBox(width: 12),
+              _StatPill('Balance', '₹${(actualBalancePaise / 100).toStringAsFixed(0)}', Icons.error_rounded,
+                  highlight: actualBalancePaise > 0),
+            ]),
+            const SizedBox(height: 32),
 
-          if (pending.isNotEmpty) ...[
-            const Text('Pending check-in',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF344054))),
-            const SizedBox(height: 8),
-            ...pending.map((b) => _BookingHistoryRow(
-              booking: b, arena: widget.arena,
-              onRefresh: () => ref.invalidate(_arenaGuestsProvider),
-            )),
-            const SizedBox(height: 16),
+            if (pending.isNotEmpty) ...[
+              _SectionLabel('PENDING CHECK-IN (${pending.length})'),
+              const SizedBox(height: 12),
+              ...pending.map((b) => _BookingHistoryRow(
+                booking: b, arena: widget.arena,
+                onRefresh: () => ref.invalidate(_arenaGuestsProvider),
+              )),
+              const SizedBox(height: 24),
+            ],
+
+            if (checkedIn.isNotEmpty) ...[
+              _SectionLabel('HISTORY (${checkedIn.length})'),
+              const SizedBox(height: 12),
+              ...checkedIn.map((b) => _BookingHistoryRow(
+                booking: b, arena: widget.arena,
+                onRefresh: () => ref.invalidate(_arenaGuestsProvider),
+              )),
+            ],
+
+            if (guest.recentBookings.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: Text('No recent bookings found.',
+                      style: TextStyle(color: _muted, fontSize: 14, fontWeight: FontWeight.w600)),
+                ),
+              ),
           ],
-
-          if (checkedIn.isNotEmpty) ...[
-            const Text('Checked in',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF344054))),
-            const SizedBox(height: 8),
-            ...checkedIn.map((b) => _BookingHistoryRow(
-              booking: b, arena: widget.arena,
-              onRefresh: () => ref.invalidate(_arenaGuestsProvider),
-            )),
-          ],
-
-          if (guest.recentBookings.isEmpty)
-            const Text('No bookings found.',
-                style: TextStyle(color: Color(0xFF98A2B3), fontSize: 13)),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _StatPill extends StatelessWidget {
-  const _StatPill(this.label, this.value, {this.highlight = false, this.color});
+  const _StatPill(this.label, this.value, this.icon, {this.highlight = false, this.color});
   final String label;
   final String value;
+  final IconData icon;
   final bool highlight;
   final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final fg = color ?? (highlight ? const Color(0xFFDC2626) : const Color(0xFF101828));
+    final fg = color ?? (highlight ? const Color(0xFFDC2626) : _text);
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         decoration: BoxDecoration(
-          color: highlight ? const Color(0xFFFEF2F2) : const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: highlight ? const Color(0xFFFCA5A5) : const Color(0xFFE5E7EB)),
+          color: _surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: highlight ? const Color(0xFFFCA5A5) : _border),
+          boxShadow: const [BoxShadow(color: Color(0x05000000), blurRadius: 8, offset: Offset(0, 4))],
         ),
         child: Column(children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: fg.withValues(alpha: .1), shape: BoxShape.circle),
+            child: Icon(icon, color: fg, size: 14),
+          ),
+          const SizedBox(height: 12),
           Text(value,
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: fg)),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: fg, letterSpacing: -0.5)),
           const SizedBox(height: 2),
           Text(label, textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF667085))),
+              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.2)),
         ]),
       ),
     );
@@ -852,45 +1227,48 @@ class _BookingHistoryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final date = booking.bookingDate != null ? DateFormat('EEE d MMM').format(booking.bookingDate!) : '—';
     final isCheckedIn = booking.checkedInAt != null;
+    final color = isCheckedIn ? _accent : const Color(0xFFD97706);
 
-    return GestureDetector(
-      onTap: () => showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (_) => BookingDetailSheet(booking: booking, arenaId: arena.id),
-      ).then((_) => onRefresh()),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('$date · ${booking.startTime}–${booking.endTime}',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF101828))),
-              const SizedBox(height: 2),
-              Text(booking.unitName ?? '—',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF667085))),
-            ]),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GestureDetector(
+        onTap: () => showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.white,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+          builder: (_) => BookingDetailSheet(booking: booking, arenaName: arena.name, arenaId: arena.id),
+        ).then((_) => onRefresh()),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _border),
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('₹${(booking.totalAmountPaise / 100).toStringAsFixed(0)}',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF101828))),
-            const SizedBox(height: 3),
-            _Badge(
-              isCheckedIn ? 'Checked in' : 'Pending',
-              isCheckedIn ? const Color(0xFF059669) : const Color(0xFFD97706),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('$date · ${booking.startTime}–${booking.endTime}',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _text)),
+                const SizedBox(height: 4),
+                Text(booking.unitName ?? '—',
+                    style: const TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
+              ]),
             ),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('₹${(booking.totalAmountPaise / 100).toStringAsFixed(0)}',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: _text)),
+              const SizedBox(height: 4),
+              _Badge(
+                isCheckedIn ? 'Checked in' : 'Pending',
+                color,
+              ),
+            ]),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 18),
           ]),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 18),
-        ]),
+        ),
       ),
     );
   }
@@ -917,4 +1295,19 @@ class _Empty extends StatelessWidget {
           style: const TextStyle(fontSize: 14, color: Color(0xFF98A2B3), fontWeight: FontWeight.w500)),
     ),
   );
+}
+
+int _toMins(String t) {
+  try {
+    final p = t.split(':').map(int.parse).toList();
+    return p[0] * 60 + p[1];
+  } catch (_) {
+    return 0;
+  }
+}
+
+String _moneyShort(int p) {
+  final r = p / 100;
+  if (r >= 1000) return '₹${(r / 1000).toStringAsFixed(1)}K';
+  return '₹${r.toStringAsFixed(0)}';
 }

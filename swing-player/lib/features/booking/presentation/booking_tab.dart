@@ -168,8 +168,7 @@ class _BookingTabState extends ConsumerState<BookingTab> {
                       child: _CityChip(
                         label: city,
                         selected: _filterCity == city,
-                        onTap: () =>
-                            setState(() => _filterCity = city),
+                        onTap: () => setState(() => _filterCity = city),
                       ),
                     )),
               ],
@@ -197,8 +196,7 @@ class _BookingTabState extends ConsumerState<BookingTab> {
                         )
                       : ListView.builder(
                           physics: const BouncingScrollPhysics(),
-                          padding:
-                              const EdgeInsets.fromLTRB(20, 0, 20, 140),
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 140),
                           itemCount: _visibleArenas.length,
                           itemBuilder: (context, i) {
                             final arena = _visibleArenas[i];
@@ -236,7 +234,8 @@ class _CityChip extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? context.accent : context.panel.withValues(alpha: 0.4),
+          color:
+              selected ? context.accent : context.panel.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: selected
@@ -288,14 +287,14 @@ class _ArenaCard extends StatelessWidget {
         .where((p) => p > 0)
         .toList()
       ..sort();
-    final startingPrice =
-        prices.isNotEmpty ? '₹${(prices.first / 100).toStringAsFixed(0)}' : null;
+    final startingPrice = prices.isNotEmpty
+        ? '₹${(prices.first / 100).toStringAsFixed(0)}'
+        : null;
 
-    final imageUrl =
-        arena.photoUrls.isNotEmpty ? arena.photoUrls.first : null;
+    final imageUrl = arena.photoUrls.isNotEmpty ? arena.photoUrls.first : null;
 
     return GestureDetector(
-      onTap: () => context.push('/arena/${arena.id}', extra: arena),
+      onTap: () => context.push('/arena-booking/${arena.id}'),
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
         decoration: BoxDecoration(
@@ -384,7 +383,8 @@ class _ArenaCard extends StatelessWidget {
                           if (distanceKm != null) ...[
                             Text('  ·  ',
                                 style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.4))),
+                                    color:
+                                        Colors.white.withValues(alpha: 0.4))),
                             Text(
                               '${distanceKm!.toStringAsFixed(1)} km',
                               style: TextStyle(
@@ -431,8 +431,7 @@ class _ArenaCard extends StatelessWidget {
                   ] else
                     const Spacer(),
                   ElevatedButton(
-                    onPressed: () =>
-                        context.push('/arena/${arena.id}', extra: arena),
+                    onPressed: () => context.push('/arena-booking/${arena.id}'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: context.accent,
                       foregroundColor: Colors.white,
@@ -483,7 +482,8 @@ class _Tag extends StatelessWidget {
 }
 
 class _FeedbackState extends StatelessWidget {
-  const _FeedbackState({required this.message, this.actionLabel, this.onAction});
+  const _FeedbackState(
+      {required this.message, this.actionLabel, this.onAction});
   final String message;
   final String? actionLabel;
   final VoidCallback? onAction;
@@ -504,8 +504,7 @@ class _FeedbackState extends StatelessWidget {
                 onPressed: onAction,
                 child: Text(actionLabel!,
                     style: TextStyle(
-                        color: context.accent,
-                        fontWeight: FontWeight.w700))),
+                        color: context.accent, fontWeight: FontWeight.w700))),
         ],
       ),
     );

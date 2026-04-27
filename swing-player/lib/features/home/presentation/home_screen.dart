@@ -15,7 +15,6 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../booking/presentation/booking_module_tab.dart';
-import '../../elite/presentation/elite_dashboard_screen.dart';
 import '../../../app.dart';
 import '../../profile/controller/profile_controller.dart';
 import '../../profile/data/profile_repository.dart';
@@ -23,7 +22,6 @@ import '../../store/domain/store_models.dart';
 import '../../store/presentation/storefront_screen.dart';
 import 'player_home_body.dart';
 import 'play_tab.dart';
-import '../../apex/presentation/apex_shell.dart';
 // import '../../health/presentation/apex_health_shell.dart'; // v1 archived
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -39,7 +37,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _NavItem(icon: Icons.sports_cricket_rounded, label: 'Play'),
     _NavItem(icon: Icons.calendar_month_rounded, label: 'Booking'),
     _NavItem(icon: Icons.storefront_outlined, label: 'Store'),
-    _NavItem(icon: Icons.offline_bolt_rounded, label: 'Apex'),
   ];
 
   int _currentIndex = 0;
@@ -173,10 +170,8 @@ class _SexyHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unreadChat =
-        ref.watch(chatUnreadCountProvider).valueOrNull ?? 0;
-    final unreadNotif =
-        ref.watch(notificationSummaryProvider).valueOrNull ?? 0;
+    final unreadChat = ref.watch(chatUnreadCountProvider).valueOrNull ?? 0;
+    final unreadNotif = ref.watch(notificationSummaryProvider).valueOrNull ?? 0;
     final themeMode = ref.watch(themeModeProvider);
     final isDark = themeMode == ThemeMode.dark;
 
@@ -326,9 +321,7 @@ class _SoftIconButtonState extends State<_SoftIconButton> {
     final restBg = widget.active ? context.ctaBg : context.panel;
     final pressBg = widget.active
         ? context.ctaBg
-        : (context.isDark
-            ? const Color(0xFF2A2A2A)
-            : const Color(0xFFE5E7EB));
+        : (context.isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB));
     final fg = widget.active ? context.ctaFg : context.fg;
 
     return Tooltip(
@@ -836,79 +829,79 @@ class _SuggestionListState extends State<_SuggestionList> {
         ],
       ),
       child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Filter chips ───────────────────────────────────────────────
-            if (kinds.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _FilterChip(
-                        label: 'All',
-                        icon: Icons.travel_explore_rounded,
-                        selected: _activeKind == null,
-                        onTap: () => setState(() => _activeKind = null),
-                      ),
-                      ...kinds.map((k) => Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: _FilterChip(
-                              label: _kFilterLabels[k]!,
-                              icon: _kFilterIcons[k]!,
-                              count:
-                                  widget.items.where((s) => s.kind == k).length,
-                              selected: _activeKind == k,
-                              onTap: () => setState(() =>
-                                  _activeKind = _activeKind == k ? null : k),
-                            ),
-                          )),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Divider(height: 1, color: context.stroke.withValues(alpha: 0.3)),
-            ],
-            // ── Results ────────────────────────────────────────────────────
-            if (visible.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Center(
-                  child: Text(
-                    'No ${_kFilterLabels[_activeKind] ?? 'results'} found',
-                    style: TextStyle(
-                      color: context.fgSub,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Filter chips ───────────────────────────────────────────────
+          if (kinds.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _FilterChip(
+                      label: 'All',
+                      icon: Icons.travel_explore_rounded,
+                      selected: _activeKind == null,
+                      onTap: () => setState(() => _activeKind = null),
                     ),
+                    ...kinds.map((k) => Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: _FilterChip(
+                            label: _kFilterLabels[k]!,
+                            icon: _kFilterIcons[k]!,
+                            count:
+                                widget.items.where((s) => s.kind == k).length,
+                            selected: _activeKind == k,
+                            onTap: () => setState(() =>
+                                _activeKind = _activeKind == k ? null : k),
+                          ),
+                        )),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Divider(height: 1, color: context.stroke.withValues(alpha: 0.3)),
+          ],
+          // ── Results ────────────────────────────────────────────────────
+          if (visible.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No ${_kFilterLabels[_activeKind] ?? 'results'} found',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: visible.length,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  color: context.stroke.withValues(alpha: 0.25),
-                  indent: 16,
-                  endIndent: 16,
-                ),
-                itemBuilder: (context, index) {
-                  final item = visible[index];
-                  return _SuggestionTile(
-                    item: item,
-                    onTap: widget.onTap,
-                  );
-                },
               ),
-          ],
-        ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: visible.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                color: context.stroke.withValues(alpha: 0.25),
+                indent: 16,
+                endIndent: 16,
+              ),
+              itemBuilder: (context, index) {
+                final item = visible[index];
+                return _SuggestionTile(
+                  item: item,
+                  onTap: widget.onTap,
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1211,7 +1204,6 @@ class _HomeBody extends StatelessWidget {
             longitude: currentLongitude,
           ),
         ),
-      4 => const ApexShell(),
       _ => const SizedBox.expand(),
     };
     if (index != 0) {
@@ -1583,17 +1575,34 @@ class _SupportSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = const [
-      (icon: Icons.help_outline_rounded, label: 'Help center', sub: 'Browse FAQs and guides'),
-      (icon: Icons.mail_outline_rounded, label: 'Email us', sub: 'support@swing.app'),
-      (icon: Icons.bug_report_outlined, label: 'Report a bug', sub: 'Tell us what'"'"'s broken'),
-      (icon: Icons.chat_bubble_outline_rounded, label: 'Live chat', sub: 'Mon–Fri, 10am–7pm IST'),
+      (
+        icon: Icons.help_outline_rounded,
+        label: 'Help center',
+        sub: 'Browse FAQs and guides'
+      ),
+      (
+        icon: Icons.mail_outline_rounded,
+        label: 'Email us',
+        sub: 'support@swing.app'
+      ),
+      (
+        icon: Icons.bug_report_outlined,
+        label: 'Report a bug',
+        sub: 'Tell us what' "'" 's broken'
+      ),
+      (
+        icon: Icons.chat_bubble_outline_rounded,
+        label: 'Live chat',
+        sub: 'Mon–Fri, 10am–7pm IST'
+      ),
     ];
     return Container(
       decoration: BoxDecoration(
         color: context.surf,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.fromLTRB(
+          20, 12, 20, 24 + MediaQuery.of(context).padding.bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1637,7 +1646,8 @@ class _SupportSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                     onTap: () => Navigator.of(context).pop(),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
                       child: Row(
                         children: [
                           Container(
@@ -1860,9 +1870,13 @@ class _SearchOverlayState extends State<_SearchOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final available = const ['players', 'teams', 'venues', 'tournaments', 'events']
-        .where((k) => _suggestions.any((s) => s.kind == k))
-        .toList();
+    final available = const [
+      'players',
+      'teams',
+      'venues',
+      'tournaments',
+      'events'
+    ].where((k) => _suggestions.any((s) => s.kind == k)).toList();
     final visible = _activeKind == null
         ? _suggestions
         : _suggestions.where((s) => s.kind == _activeKind).toList();
@@ -1904,69 +1918,69 @@ class _SearchOverlayState extends State<_SearchOverlay>
                                 children: [
                                   Icon(Icons.search_rounded,
                                       color: context.fgSub, size: 22),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: TextField(
-                                    controller: _ctrl,
-                                    focusNode: _focus,
-                                    textInputAction: TextInputAction.search,
-                                    onChanged: _onChanged,
-                                    onSubmitted: (_) => _submitFull(),
-                                    cursorColor: context.fg,
-                                    style: TextStyle(
-                                      color: context.fg,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    decoration: InputDecoration(
-                                      hintText:
-                                          'Search players, teams, venues…',
-                                      hintStyle: TextStyle(
-                                        color: context.fgSub,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w400,
-                                      ),
-                                      filled: false,
-                                      border: InputBorder.none,
-                                      enabledBorder: InputBorder.none,
-                                      focusedBorder: InputBorder.none,
-                                      disabledBorder: InputBorder.none,
-                                      errorBorder: InputBorder.none,
-                                      focusedErrorBorder: InputBorder.none,
-                                      isCollapsed: true,
-                                      contentPadding: EdgeInsets.zero,
-                                    ),
-                                  ),
-                                ),
-                                if (_loading)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 12),
-                                    child: SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 1.6,
-                                          color: context.fgSub),
-                                    ),
-                                  ),
-                                GestureDetector(
-                                  onTap: _close,
-                                  behavior: HitTestBehavior.opaque,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 14, vertical: 4),
-                                    child: Text(
-                                      'Cancel',
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _ctrl,
+                                      focusNode: _focus,
+                                      textInputAction: TextInputAction.search,
+                                      onChanged: _onChanged,
+                                      onSubmitted: (_) => _submitFull(),
+                                      cursorColor: context.fg,
                                       style: TextStyle(
                                         color: context.fg,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText:
+                                            'Search players, teams, venues…',
+                                        hintStyle: TextStyle(
+                                          color: context.fgSub,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w400,
+                                        ),
+                                        filled: false,
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        disabledBorder: InputBorder.none,
+                                        errorBorder: InputBorder.none,
+                                        focusedErrorBorder: InputBorder.none,
+                                        isCollapsed: true,
+                                        contentPadding: EdgeInsets.zero,
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                  if (_loading)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 12),
+                                      child: SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 1.6,
+                                            color: context.fgSub),
+                                      ),
+                                    ),
+                                  GestureDetector(
+                                    onTap: _close,
+                                    behavior: HitTestBehavior.opaque,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14, vertical: 4),
+                                      child: Text(
+                                        'Cancel',
+                                        style: TextStyle(
+                                          color: context.fg,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                           // Hairline divider under search
@@ -2015,8 +2029,8 @@ class _SearchOverlayState extends State<_SearchOverlay>
                                 itemCount: visible.length,
                                 separatorBuilder: (_, __) => Container(
                                   height: 1,
-                                  margin:
-                                      const EdgeInsets.symmetric(horizontal: 20),
+                                  margin: const EdgeInsets.symmetric(
+                                      horizontal: 20),
                                   color: context.stroke,
                                 ),
                                 itemBuilder: (ctx, i) => _SuggestionTile(
@@ -2027,8 +2041,7 @@ class _SearchOverlayState extends State<_SearchOverlay>
                             )
                           else if (_ctrl.text.trim().length >= 2 && !_loading)
                             Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 28),
+                              padding: const EdgeInsets.symmetric(vertical: 28),
                               child: Center(
                                 child: Text(
                                   'No results',

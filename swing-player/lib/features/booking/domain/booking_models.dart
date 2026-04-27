@@ -10,4 +10,7 @@ export 'package:flutter_host_core/flutter_host_core.dart'
         ArenaUnitOption,
         AvailabilitySlot,
         BookingPaymentOrder,
-        PlayerBooking;
+        PlayerBooking,
+        PlayerAvailableSlot,
+        PlayerSlotsData,
+        PlayerUnitGroup;

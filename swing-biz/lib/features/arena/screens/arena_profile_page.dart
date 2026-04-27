@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
@@ -22,6 +22,13 @@ const _muted = Color(0xFF6E7685);
 const _accent = Color(0xFF059669);
 const _deep = Color(0xFF064E3B);
 
+void _arenaUploadLog(String message, [Object? error, StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[arena-profile-upload] $message');
+  if (error != null) debugPrint('[arena-profile-upload] error=$error');
+  if (stackTrace != null) debugPrint('[arena-profile-upload] stack=$stackTrace');
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 class ArenaProfilePage extends ConsumerStatefulWidget {
@@ -38,29 +45,49 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     required String folder,
     required int remainingSlots,
   }) async {
+    _arenaUploadLog('unit picker requested folder=$folder remainingSlots=$remainingSlots');
     if (remainingSlots <= 0) return const [];
     final files = await ImagePicker().pickMultiImage();
+    _arenaUploadLog('unit picker returned ${files.length} file(s)');
     if (files.isEmpty) return const [];
 
     final uploads = <String>[];
     for (final file in files.take(remainingSlots)) {
+      _arenaUploadLog('unit compress start name=${file.name} path=${file.path}');
       final compressedFile = await ImageCompressor.compress(file.path);
-      if (compressedFile == null) continue;
+      if (compressedFile == null) {
+        _arenaUploadLog('unit compression returned null for ${file.name}');
+        continue;
+      }
+      final compressedSize = await compressedFile.length();
+      _arenaUploadLog('unit compress done original=${file.path} compressed=${compressedFile.path} size=$compressedSize');
 
       final form = FormData.fromMap({
         'folder': folder,
         'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
       });
+      _arenaUploadLog(
+        'unit upload request baseUrl=${ApiClient.instance.dio.options.baseUrl} folder=$folder filename=${p.basenameWithoutExtension(file.name)}.jpg size=$compressedSize',
+      );
       final response = await ApiClient.instance.dio.post(
         '/media/upload',
         data: form,
-        options: Options(contentType: 'multipart/form-data'),
+        options: Options(
+          contentType: 'multipart/form-data',
+          sendTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
+        ),
+        onSendProgress: (sent, total) =>
+            _arenaUploadLog('unit upload progress sent=$sent total=$total'),
       );
+      _arenaUploadLog('unit upload response status=${response.statusCode} data=${response.data}');
       final payload = response.data as Map<String, dynamic>;
       final data = (payload['data'] ?? payload) as Map<String, dynamic>;
       final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
+      _arenaUploadLog('unit upload extracted url=$url');
       if (url != null && url.isNotEmpty) uploads.add(url);
     }
+    _arenaUploadLog('unit upload finished count=${uploads.length}');
     return uploads;
   }
 
@@ -545,36 +572,67 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
   }
 
   Future<void> _pickAndUploadPhotos() async {
+    _arenaUploadLog('arena picker requested arenaId=${widget.arena.id}');
     final files = await ImagePicker().pickMultiImage();
+    _arenaUploadLog('arena picker returned ${files.length} file(s)');
     if (files.isEmpty) return;
     setState(() => _uploading = true);
     try {
       final uploads = <String>[];
       for (final file in files) {
+        _arenaUploadLog('arena compress start name=${file.name} path=${file.path}');
         final compressedFile = await ImageCompressor.compress(file.path);
-        if (compressedFile == null) continue;
+        if (compressedFile == null) {
+          _arenaUploadLog('arena compression returned null for ${file.name}');
+          continue;
+        }
+        final compressedSize = await compressedFile.length();
+        _arenaUploadLog('arena compress done original=${file.path} compressed=${compressedFile.path} size=$compressedSize');
 
         final form = FormData.fromMap({
           'folder': 'arenas/${widget.arena.id}',
           'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
         });
+        _arenaUploadLog(
+          'arena upload request baseUrl=${ApiClient.instance.dio.options.baseUrl} folder=arenas/${widget.arena.id} filename=${p.basenameWithoutExtension(file.name)}.jpg size=$compressedSize',
+        );
         final response = await ApiClient.instance.dio.post(
           '/media/upload',
           data: form,
-          options: Options(contentType: 'multipart/form-data'),
+          options: Options(
+            contentType: 'multipart/form-data',
+            sendTimeout: const Duration(seconds: 30),
+            receiveTimeout: const Duration(seconds: 30),
+          ),
+          onSendProgress: (sent, total) =>
+              _arenaUploadLog('arena upload progress sent=$sent total=$total'),
         );
+        _arenaUploadLog('arena upload response status=${response.statusCode} data=${response.data}');
         final payload = response.data as Map<String, dynamic>;
         final data = (payload['data'] ?? payload) as Map<String, dynamic>;
         final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
+        _arenaUploadLog('arena upload extracted url=$url');
         if (url != null && url.isNotEmpty) uploads.add(url);
       }
-      if (!mounted || uploads.isEmpty) return;
+      _arenaUploadLog('arena upload finished count=${uploads.length}');
+      if (!mounted || uploads.isEmpty) {
+        _arenaUploadLog('arena upload produced no urls mounted=$mounted');
+        return;
+      }
       setState(() => _photoUrls = [..._photoUrls, ...uploads]);
+      _arenaUploadLog('arena local photoUrls count=${_photoUrls.length}');
     } catch (error) {
       if (!mounted) return;
       String msg = error.toString();
       if (error is DioException) {
         msg = error.response?.data?['message'] ?? error.message ?? msg;
+        _arenaUploadLog(
+          'arena upload dio failure type=${error.type} status=${error.response?.statusCode} response=${error.response?.data}',
+          error,
+          error.stackTrace,
+        );
+      } else {
+        _arenaUploadLog('arena upload failure', error);
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Photo upload failed: $msg')),
@@ -588,9 +646,7 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
-      await ref
-          .read(hostArenaBookingRepositoryProvider)
-          .updateArena(widget.arena.id, {
+      final input = {
         'name': _nameCtrl.text.trim(),
         'description': _emptyToNull(_descriptionCtrl.text),
         'phone': _emptyToNull(_phoneCtrl.text),
@@ -612,7 +668,12 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
         'hasCanteen': _hasCanteen,
         'hasCCTV': _hasCctv,
         'hasScorer': _hasScorer,
-      });
+      };
+      _arenaUploadLog('save arena request arenaId=${widget.arena.id} photoUrls=${_photoUrls.length} input=$input');
+      final updated = await ref
+          .read(hostArenaBookingRepositoryProvider)
+          .updateArena(widget.arena.id, input);
+      _arenaUploadLog('save arena response photoUrls=${updated.photoUrls.length} first=${updated.photoUrls.isEmpty ? null : updated.photoUrls.first}');
       ref.invalidate(arenaDetailProvider);
       ref.invalidate(arenaDetailByIdProvider);
       ref.invalidate(ownedArenasProvider);
@@ -2152,9 +2213,9 @@ class _SlotPreviewState extends State<_SlotPreview> {
           children: slots.map((s) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: _deep.withOpacity(0.08),
+              color: _deep.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _deep.withOpacity(0.2)),
+              border: Border.all(color: _deep.withValues(alpha: 0.2)),
             ),
             child: Text(
               s,
@@ -2262,7 +2323,7 @@ class _ParentUnitPicker extends ConsumerWidget {
                   ),
                 ),
               ),
-              if (selected) Icon(Icons.check_circle_rounded, size: 18, color: _accent),
+              if (selected) const Icon(Icons.check_circle_rounded, size: 18, color: _accent),
             ]),
           ),
         );

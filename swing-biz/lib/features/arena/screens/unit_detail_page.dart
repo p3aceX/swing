@@ -1,11 +1,14 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../core/api/api_client.dart';
+import '../../../core/utils/image_compressor.dart';
 import '../services/arena_profile_providers.dart';
 import '../../bookings/presentation/bookings_page.dart';
 import 'arena_profile_page.dart';
@@ -107,18 +110,16 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
         unit: unit,
         onPickPhotos: (currentCount) async {
           if (currentCount >= 3) return const [];
-          final files = await ImagePicker().pickMultiImage(
-            maxWidth: 1280,
-            maxHeight: 960,
-            imageQuality: 72,
-          );
+          final files = await ImagePicker().pickMultiImage();
           if (files.isEmpty) return const [];
           final uploads = <String>[];
           for (final file in files.take(3 - currentCount)) {
+            final compressedFile = await ImageCompressor.compress(file.path);
+            if (compressedFile == null) continue;
+
             final form = FormData.fromMap({
               'folder': 'arenas/${arena.id}/units',
-              'file':
-                  await MultipartFile.fromFile(file.path, filename: file.name),
+              'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
             });
             final resp = await ApiClient.instance.dio.post(
               '/media/upload',
@@ -127,7 +128,7 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
             );
             final payload = resp.data as Map<String, dynamic>;
             final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-            final url = data['publicUrl'] as String?;
+            final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
             if (url != null && url.isNotEmpty) uploads.add(url);
           }
           return uploads;
@@ -1077,7 +1078,7 @@ class _BookingsTab extends StatelessWidget {
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => BookingDetailSheet(booking: booking, arenaId: arena.id),
+      builder: (_) => BookingDetailSheet(booking: booking, arenaName: arena.name, arenaId: arena.id),
     ).then((_) => onRefresh());
   }
 

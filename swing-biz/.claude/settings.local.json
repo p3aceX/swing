@@ -27,7 +27,11 @@
       "Bash(echo \"Build submitted in background - PID $!\")",
       "Bash(xargs ls *)",
       "Bash(grep *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(flutter pub *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"Build triggered in background, PID: $!\")"
     ]
   }
 }
