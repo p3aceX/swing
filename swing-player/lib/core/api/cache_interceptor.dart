@@ -44,7 +44,13 @@ class CacheInterceptor extends Interceptor {
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
-    if (err.requestOptions.method.toUpperCase() == 'GET') {
+    final status = err.response?.statusCode;
+    final isAuthError = status == 401 || status == 403;
+    final isRefresh = err.requestOptions.extra['refresh'] == true;
+
+    if (err.requestOptions.method.toUpperCase() == 'GET' &&
+        !isAuthError &&
+        !isRefresh) {
       final cacheKey = _generateCacheKey(err.requestOptions);
       final cachedData = CacheManager.get(cacheKey);
 
