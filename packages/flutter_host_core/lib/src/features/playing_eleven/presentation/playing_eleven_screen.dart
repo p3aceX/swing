@@ -84,6 +84,8 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
 
   Future<void> _loadSide({required bool isA}) async {
     final teamId = isA ? widget.teamAId : widget.teamBId;
+    final side = isA ? 'A' : 'B';
+    debugPrint('[PlayingEleven] _loadSide $side teamId=$teamId');
     setState(() {
       if (isA) {
         _teamA = const _RosterState.loading();
@@ -116,6 +118,14 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
         }
       });
     } catch (error) {
+      debugPrint('[PlayingEleven] _loadSide $side ERROR teamId=$teamId: $error');
+      if (error is Exception) {
+        // ignore: avoid_dynamic_calls
+        final resp = (error as dynamic).response;
+        if (resp != null) {
+          debugPrint('[PlayingEleven] status=${resp.statusCode} body=${resp.data}');
+        }
+      }
       if (!mounted) return;
       setState(() {
         final errored = _RosterState.error(error.toString());
@@ -214,6 +224,7 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
       _submitError = null;
     });
     try {
+      debugPrint('[PlayingEleven] setPlayingEleven matchId=${widget.matchId} teamA=${a.selected.length} teamB=${b.selected.length}');
       await ref
           .read(hostCreateMatchRepositoryProvider)
           .setPlayingEleven(
@@ -243,6 +254,14 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
         ),
       );
     } catch (error) {
+      debugPrint('[PlayingEleven] setPlayingEleven ERROR: $error');
+      if (error is Exception) {
+        // ignore: avoid_dynamic_calls
+        final resp = (error as dynamic).response;
+        if (resp != null) {
+          debugPrint('[PlayingEleven] status=${resp.statusCode} body=${resp.data}');
+        }
+      }
       if (!mounted) return;
       setState(() => _submitError = error.toString());
     } finally {
