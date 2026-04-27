@@ -464,17 +464,17 @@ export class TournamentService {
       where: { tournamentId },
       select: { id: true, teamId: true, teamName: true },
     })
-    console.log(`[getSchedule] tournamentId=${tournamentId} teams=${JSON.stringify(tournamentTeams.map(t => ({id:t.id, teamName:t.teamName, teamId:t.teamId})))}`)
-    console.log(`[getSchedule] matchNames=${JSON.stringify(matches.map(m => ({id:m.id, a:m.teamAName, b:m.teamBName})))}`)
-    const teamByName = new Map(tournamentTeams.map(t => [t.teamName.toLowerCase(), t]))
+    console.log(`[getSchedule] tournamentId=${tournamentId} teams=${JSON.stringify(tournamentTeams.map(t => ({id:t.id, teamName:JSON.stringify(t.teamName), teamId:t.teamId})))}`)
+    console.log(`[getSchedule] matchNames=${JSON.stringify(matches.map(m => ({id:m.id, a:JSON.stringify(m.teamAName), b:JSON.stringify(m.teamBName)})))}`)
+    const teamByName = new Map(tournamentTeams.map(t => [t.teamName.trim().toLowerCase(), t]))
 
     return matches.map(m => ({
       ...m,
-      teamAId: teamByName.get(m.teamAName.toLowerCase())?.teamId
-        ?? teamByName.get(m.teamAName.toLowerCase())?.id
+      teamAId: teamByName.get(m.teamAName.trim().toLowerCase())?.teamId
+        ?? teamByName.get(m.teamAName.trim().toLowerCase())?.id
         ?? null,
-      teamBId: teamByName.get(m.teamBName.toLowerCase())?.teamId
-        ?? teamByName.get(m.teamBName.toLowerCase())?.id
+      teamBId: teamByName.get(m.teamBName.trim().toLowerCase())?.teamId
+        ?? teamByName.get(m.teamBName.trim().toLowerCase())?.id
         ?? null,
     }))
   }
