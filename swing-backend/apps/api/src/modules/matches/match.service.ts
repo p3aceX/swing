@@ -767,6 +767,18 @@ export class MatchService {
     })
   }
 
+  async updateMatchOvers(matchId: string, userId: string, customOvers: number) {
+    const match = await this.authorizeMutation(matchId, userId)
+    if (!['SCHEDULED', 'TOSS_DONE'].includes(match.status)) {
+      throw new AppError('INVALID_STATE', 'Overs can only be changed before the match starts', 400)
+    }
+    return prisma.match.update({
+      where: { id: matchId },
+      data: { customOvers },
+      select: { id: true, customOvers: true },
+    })
+  }
+
   async cancelMatch(matchId: string, userId: string, options: MutationOptions = {}) {
     const match = await this.authorizeMutation(matchId, userId, options)
     if (!['SCHEDULED', 'TOSS_DONE', 'CREATED'].includes(match.status)) {

@@ -34,6 +34,13 @@ export async function matchRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.startMatch(id, user.userId) })
   })
 
+  app.patch('/:id/overs', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const { customOvers } = z.object({ customOvers: z.number().int().positive() }).parse(request.body)
+    return reply.send({ success: true, data: await svc.updateMatchOvers(id, user.userId, customOvers) })
+  })
+
   app.patch('/:id/cancel', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }

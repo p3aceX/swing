@@ -87,6 +87,7 @@ class HostPathConfig {
   String publicPlayerMatches(String playerId) =>
       '/player/profile/$playerId/matches';
   String matchToss(String matchId) => '$matchesBase/$matchId/toss';
+  String matchOvers(String matchId) => '$matchesBase/$matchId/overs';
   String matchScorer(String matchId) => '$matchesBase/$matchId/scorer';
   String matchStart(String matchId) => '$matchesBase/$matchId/start';
   String matchCancel(String matchId) => '$matchesBase/$matchId/cancel';

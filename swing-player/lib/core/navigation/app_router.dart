@@ -24,7 +24,8 @@ import 'package:flutter_host_core/flutter_host_core.dart'
         HostCreateTeamScreen,
         HostScheduleScreen,
         HostScheduleCallbacks,
-        PlayingElevenScreen;
+        PlayingElevenScreen,
+        HostPreMatchScreen;
 import '../../features/create_match/presentation/create_match_screen.dart';
 import '../../features/create_tournament/presentation/create_tournament_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
@@ -297,12 +298,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             final teamBId = '${match['teamBId'] ?? ''}';
             final teamAName = '${match['teamAName'] ?? 'Team A'}';
             final teamBName = '${match['teamBName'] ?? 'Team B'}';
+            final format = '${match['format'] ?? 'T20'}';
+            final customOvers = match['customOvers'] as int?;
+            final round = match['round'] as String?;
             debugPrint('[Router] onStartMatch id=$matchId teamAId=$teamAId teamBId=$teamBId');
             ctx.push('/start-match/$matchId', extra: {
               'teamAId': teamAId,
               'teamBId': teamBId,
               'teamAName': teamAName,
               'teamBName': teamBName,
+              'format': format,
+              'customOvers': customOvers,
+              'round': round,
             });
           },
         ),
@@ -410,13 +417,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final extra = state.extra is Map<String, dynamic>
               ? state.extra as Map<String, dynamic>
               : <String, dynamic>{};
+          final format = extra['format'] as String? ?? 'T20';
+          final defaultOvers = _defaultOversForFormat(format);
+          final customOvers =
+              (extra['customOvers'] as int?) ?? defaultOvers;
+          final round = extra['round'] as String?;
           debugPrint('[Router /start-match] matchId=$matchId extra=$extra');
-          return PlayingElevenScreen(
+          return HostPreMatchScreen(
             matchId: matchId,
             teamAId: extra['teamAId'] as String? ?? '',
             teamAName: extra['teamAName'] as String? ?? 'Team A',
             teamBId: extra['teamBId'] as String? ?? '',
             teamBName: extra['teamBName'] as String? ?? 'Team B',
+            currentOvers: customOvers,
+            formatLabel: format,
+            round: round,
             onTossCompleted: (ctx, id) =>
                 ctx.go('/score-match/${Uri.encodeComponent(id)}'),
             onBack: () => GoRouter.of(context).pop(),
@@ -472,6 +487,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+int _defaultOversForFormat(String format) {
+  switch (format.toUpperCase()) {
+    case 'T10':
+      return 10;
+    case 'T20':
+      return 20;
+    case 'ONE_DAY':
+      return 50;
+    case 'BOX_CRICKET':
+      return 6;
+    default:
+      return 20;
+  }
+}
 
 class RouterRefreshStream extends ChangeNotifier {
   RouterRefreshStream(Stream<dynamic> stream) {

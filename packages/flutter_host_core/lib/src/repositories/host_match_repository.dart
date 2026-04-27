@@ -22,6 +22,13 @@ class HostMatchRepository {
     await _dio.delete(_paths.match(matchId));
   }
 
+  Future<void> updateMatchOvers(String matchId, int customOvers) async {
+    await _dio.patch(
+      _paths.matchOvers(matchId),
+      data: {'customOvers': customOvers},
+    );
+  }
+
   Future<void> updateScorer(String matchId, String scorerId) async {
     await _dio.patch(
       _paths.matchScorer(matchId),

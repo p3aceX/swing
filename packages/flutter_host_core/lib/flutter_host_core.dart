@@ -30,6 +30,7 @@ export 'src/features/my_teams/controller/my_teams_controller.dart';
 export 'src/features/my_teams/data/my_teams_repository.dart';
 export 'src/features/my_teams/domain/my_teams_models.dart';
 export 'src/features/playing_eleven/presentation/playing_eleven_screen.dart';
+export 'src/features/pre_match/host_pre_match_screen.dart';
 export 'src/features/create_tournament/presentation/create_tournament_screen.dart';
 export 'src/features/create_tournament/presentation/tournament_detail_screen.dart';
 export 'src/features/scoring/controller/scoring_controller.dart';
