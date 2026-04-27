@@ -248,14 +248,22 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
   Future<void> _autoSetupNewInnings() async {
     if (!mounted) return;
     final s = ref.read(hostScoringControllerProvider(widget.matchId));
-    if (s.activeInnings == null || s.players == null) return;
+    debugPrint('[autoSetup] innings=${s.activeInnings?.inningsNumber} players=${s.players != null}');
+    if (s.activeInnings == null || s.players == null) {
+      debugPrint('[autoSetup] skipped — no innings or players');
+      return;
+    }
+    debugPrint('[autoSetup] picking striker…');
     await _pickStriker(s);
     if (!mounted) return;
     final s2 = ref.read(hostScoringControllerProvider(widget.matchId));
+    debugPrint('[autoSetup] picking non-striker… striker=${s2.effectiveStrikerId}');
     await _pickNonStriker(s2);
     if (!mounted) return;
     final s3 = ref.read(hostScoringControllerProvider(widget.matchId));
+    debugPrint('[autoSetup] picking bowler… nonStriker=${s3.effectiveNonStrikerId}');
     await _pickBowler(s3);
+    debugPrint('[autoSetup] done');
   }
 
   // Returns (winnerId, winMargin). winnerId is 'A', 'B', or '' for a tie.

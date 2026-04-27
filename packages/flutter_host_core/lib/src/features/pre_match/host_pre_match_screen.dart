@@ -76,9 +76,13 @@ class _HostPreMatchScreenState extends ConsumerState<HostPreMatchScreen> {
 
     try {
       if (overs != widget.currentOvers) {
+        debugPrint('[PreMatch] updating overs ${widget.currentOvers}→$overs matchId=${widget.matchId}');
         await ref
             .read(hostMatchRepositoryProvider)
             .updateMatchOvers(widget.matchId, overs);
+        debugPrint('[PreMatch] updateMatchOvers ✓');
+      } else {
+        debugPrint('[PreMatch] overs unchanged ($overs), skipping PATCH');
       }
       if (!mounted) return;
       Navigator.of(context).push(
@@ -95,6 +99,7 @@ class _HostPreMatchScreenState extends ConsumerState<HostPreMatchScreen> {
         ),
       );
     } catch (e) {
+      debugPrint('[PreMatch] ✗ error: $e');
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _saving = false);

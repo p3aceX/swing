@@ -278,6 +278,7 @@ class HostScoringController extends StateNotifier<HostScoringState> {
         clearError: true,
       );
     } catch (e) {
+      _logError('_init(attempt=$attempt)', e);
       final statusCode = e is DioException ? (e.response?.statusCode ?? 0) : 0;
       final isAuthError = statusCode == 401 || statusCode == 403;
       final canRetry = !isAuthError && attempt < _retryDelays.length;
@@ -303,24 +304,30 @@ class HostScoringController extends StateNotifier<HostScoringState> {
   }
 
   Future<bool> startMatch() async {
+    print('[scoring] startMatch matchId=$_matchId');
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await _service.startMatch(_matchId);
+      print('[scoring] startMatch ✓');
       await _init();
       return true;
     } catch (e) {
+      _logError('startMatch', e);
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }
   }
 
   Future<bool> recordToss(String tossWonBy, String tossDecision) async {
+    print('[scoring] recordToss tossWonBy=$tossWonBy tossDecision=$tossDecision');
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await _service.recordToss(_matchId, tossWonBy, tossDecision);
+      print('[scoring] recordToss ✓');
       await _init();
       return true;
     } catch (e) {
+      _logError('recordToss', e);
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }
@@ -690,6 +697,14 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       'RETIRED_HURT': 'Retired Hurt',
     };
     return map[type] ?? type;
+  }
+
+  void _logError(String op, Object e) {
+    if (e is DioException) {
+      print('[scoring] $op ✗ status=${e.response?.statusCode} url=${e.requestOptions.uri} body=${e.response?.data}');
+    } else {
+      print('[scoring] $op ✗ $e');
+    }
   }
 
   String _msg(Object e) {
