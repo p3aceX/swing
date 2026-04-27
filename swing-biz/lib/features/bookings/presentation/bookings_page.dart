@@ -230,7 +230,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   backgroundColor: _surface,
                   onRefresh: () => ref.refresh(_dayBookingsProvider(_BookingsKey(widget.arena.id, selectedKey)).future),
                   child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                    padding: EdgeInsets.fromLTRB(16, 8, 16, 100 + MediaQuery.of(context).padding.bottom),
                     itemCount: bookings.length,
                     itemBuilder: (context, i) => BookingCard(
                       booking: bookings[i],
@@ -1432,7 +1432,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     final discount = (double.tryParse(_discountCtrl.text) ?? 0);
 
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + 32),
+      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1708,22 +1708,28 @@ class _EmptyDay extends StatelessWidget {
   final VoidCallback onAdd;
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: _surface, shape: BoxShape.circle, border: Border.all(color: _border)),
-            child: Icon(Icons.event_note_rounded, size: 48, color: _muted.withValues(alpha: .5)),
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(color: _surface, shape: BoxShape.circle, border: Border.all(color: _border)),
+                child: Icon(Icons.event_note_rounded, size: 36, color: _muted.withValues(alpha: .5)),
+              ),
+              const SizedBox(height: 16),
+              const Text('No bookings for this day', style: TextStyle(color: _text, fontSize: 15, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              const Text('Tap the button below to add a manual entry', textAlign: TextAlign.center, style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 20),
+              ArenaPrimaryButton(label: 'Add New Booking', onPressed: onAdd),
+            ],
           ),
-          const SizedBox(height: 24),
-          const Text('No bookings for this day', style: TextStyle(color: _text, fontSize: 16, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          const Text('Tap the button below to add a manual entry', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 32),
-          ArenaPrimaryButton(label: 'Add New Booking', onPressed: onAdd),
-        ],
+        ),
       ),
     );
   }
@@ -1802,6 +1808,8 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   List<String> _allDaySlots = [];
   List<ArenaReservation> _existingBookings = [];
   bool _loadingAvail = true;
+  List<ArenaAddon> _addons = [];
+  final Set<ArenaAddon> _selectedAddons = {};
 
   ArenaUnitOption? get _unit => widget.arena.units.where((u) => u.id == _unitId).firstOrNull;
 
@@ -1819,13 +1827,20 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     return _addMinutes(_selectedSlots.first, _currentDurationMins);
   }
 
+  int get _addonPaise => _selectedAddons.fold(0, (s, a) => s + a.pricePaise);
+
+  List<ArenaAddon> get _unitAddons {
+    final unitId = _unitId;
+    return _addons.where((a) => a.unitId == null || a.unitId == unitId).toList();
+  }
+
   int get _totalPaise {
     if (_totalEdited) return ((double.tryParse(_totalCtrl.text) ?? 0) * 100).round();
     final unit = _unit;
     if (unit == null || _selectedSlots.isEmpty) return 0;
     final opts = _buildSlotOptions(unit);
     final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
-    return opts[idx].paise;
+    return opts[idx].paise + _addonPaise;
   }
 
   int get _advancePaise => ((double.tryParse(_advanceCtrl.text) ?? 0) * 100).round().clamp(0, _totalPaise);
@@ -1840,6 +1855,16 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     _initDuration();
     _rebuildTimes();
     _loadAvailability();
+    _loadAddons();
+  }
+
+  Future<void> _loadAddons() async {
+    try {
+      final addons = await ref
+          .read(hostArenaBookingRepositoryProvider)
+          .fetchArenaAddons(widget.arena.id);
+      if (mounted) setState(() => _addons = addons);
+    } catch (_) {}
   }
 
   void _initDuration() {
@@ -1873,6 +1898,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       _allDaySlots.add(_fromMins(m));
     }
     _selectedSlots.clear();
+    _selectedAddons.clear();
     _totalEdited = false;
     _totalCtrl.clear();
     _advanceCtrl.clear();
@@ -1976,7 +2002,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 24),
       decoration: const BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
@@ -2029,7 +2055,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             if (widget.arena.units.length > 1) ...[
               const Text('Select Unit', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
               const SizedBox(height: 12),
-              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _initDuration(); _rebuildTimes(); }); _loadAvailability(); }),
+              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _selectedAddons.clear(); _initDuration(); _rebuildTimes(); }); _loadAvailability(); }),
               const SizedBox(height: 24),
             ],
 
@@ -2044,6 +2070,38 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                   _loadAvailability();
                 },
               ),
+              const SizedBox(height: 24),
+            ],
+
+            if (_unitId != null && _unitAddons.isNotEmpty) ...[
+              const Text('Add-ons', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              const SizedBox(height: 12),
+              ..._unitAddons.map((a) {
+                final isSel = _selectedAddons.contains(a);
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    if (isSel) _selectedAddons.remove(a); else _selectedAddons.add(a);
+                    if (_selectedSlots.isNotEmpty && !_totalEdited) {
+                      _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
+                    }
+                  }),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: isSel ? _accent.withValues(alpha: .08) : _bg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: isSel ? _accent : _border),
+                    ),
+                    child: Row(children: [
+                      Icon(isSel ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, color: isSel ? _accent : _muted, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(a.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w700, fontSize: 14))),
+                      Text('₹${(a.pricePaise / 100).toStringAsFixed(0)} / ${a.unit}', style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                );
+              }),
               const SizedBox(height: 24),
             ],
 
@@ -2063,7 +2121,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 ),
               )
             else
-              _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped, isGround: _unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND', durationMins: _currentDurationMins),
+              _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped, isGround: (_unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND' || (_unit?.minSlotMins ?? 0) >= 240), durationMins: _currentDurationMins),
 
             if (_selectedSlots.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -2242,7 +2300,7 @@ class _StartTimeGrid extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: sel ? _accent : (busy ? _border.withValues(alpha: .3) : _border))
           ),
-          child: Text(t, style: TextStyle(color: sel ? Colors.white : (busy ? _muted.withValues(alpha: .3) : _text), fontSize: 12, fontWeight: FontWeight.w700, decoration: busy ? TextDecoration.lineThrough : null)),
+          child: Text(_fmt12(t), style: TextStyle(color: sel ? Colors.white : (busy ? _muted.withValues(alpha: .3) : _text), fontSize: 12, fontWeight: FontWeight.w700, decoration: busy ? TextDecoration.lineThrough : null)),
         ),
       );
     }).toList());

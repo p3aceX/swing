@@ -50,21 +50,108 @@ final _arenaGuestsProvider = FutureProvider.autoDispose
       .fetchArenaGuests(key.arenaId, search: key.search.isEmpty ? null : key.search);
 });
 
+AsyncValue<ArenaPaymentsData> _combinePayments(
+  List<AsyncValue<ArenaPaymentsData>> values,
+) {
+  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
+  final error = values.where((v) => v.hasError).firstOrNull;
+  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
+
+  final rows = values.map((v) => v.value).whereType<ArenaPaymentsData>();
+  return AsyncValue.data(
+    ArenaPaymentsData(
+      checkedInBookings: rows.expand((r) => r.checkedInBookings).toList(),
+      pendingBookings: rows.expand((r) => r.pendingBookings).toList(),
+    ),
+  );
+}
+
+AsyncValue<List<ArenaGuest>> _combineGuests(
+  List<AsyncValue<List<ArenaGuest>>> values,
+) {
+  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
+  final error = values.where((v) => v.hasError).firstOrNull;
+  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
+
+  final byPhone = <String, ArenaGuest>{};
+  for (final guest in values.expand((v) => v.value ?? const <ArenaGuest>[])) {
+    final key = guest.phone.trim().isEmpty ? guest.name : guest.phone.trim();
+    final current = byPhone[key];
+    if (current == null) {
+      byPhone[key] = guest;
+      continue;
+    }
+    final bookings = [...current.recentBookings, ...guest.recentBookings]
+      ..sort((a, b) {
+        final ad = a.bookingDate ?? DateTime(2000);
+        final bd = b.bookingDate ?? DateTime(2000);
+        return bd.compareTo(ad);
+      });
+    final lastDate = [
+      current.lastDate,
+      guest.lastDate,
+      ...bookings.map((b) => b.bookingDate),
+    ].whereType<DateTime>().fold<DateTime?>(
+      null,
+      (latest, date) => latest == null || date.isAfter(latest) ? date : latest,
+    );
+    byPhone[key] = ArenaGuest(
+      phone: current.phone.isNotEmpty ? current.phone : guest.phone,
+      name: current.name.isNotEmpty ? current.name : guest.name,
+      totalBookings: current.totalBookings + guest.totalBookings,
+      totalSpentPaise: current.totalSpentPaise + guest.totalSpentPaise,
+      balanceDuePaise: current.balanceDuePaise + guest.balanceDuePaise,
+      lastDate: lastDate,
+      recentBookings: bookings,
+    );
+  }
+
+  final guests = byPhone.values.toList()
+    ..sort((a, b) => (b.lastDate ?? DateTime(2000)).compareTo(a.lastDate ?? DateTime(2000)));
+  return AsyncValue.data(guests);
+}
+
+ArenaListing _arenaForBooking(
+  List<ArenaListing> arenas,
+  ArenaListing fallback,
+  ArenaReservation booking,
+) {
+  for (final arena in arenas) {
+    if (arena.id == booking.arenaId) return arena;
+  }
+  return fallback;
+}
+
 // ─── Root page ────────────────────────────────────────────────────────────────
 
-class PaymentsPage extends ConsumerWidget {
+class PaymentsPage extends ConsumerStatefulWidget {
   const PaymentsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PaymentsPage> createState() => _PaymentsPageState();
+}
+
+class _PaymentsPageState extends ConsumerState<PaymentsPage> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() {
+      if (mounted) ref.read(_payArenaProvider.notifier).state = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final arenasAsync = ref.watch(ownedArenasProvider);
     return arenasAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('$e')),
       data: (arenas) {
         if (arenas.isEmpty) return const _Empty('No arenas yet.');
-        final selectedId = ref.watch(_payArenaProvider) ?? arenas.first.id;
-        final arena = arenas.firstWhere((a) => a.id == selectedId, orElse: () => arenas.first);
+        final selectedId = ref.watch(_payArenaProvider);
+        final arena = selectedId == null
+            ? null
+            : arenas.firstWhere((a) => a.id == selectedId, orElse: () => arenas.first);
         return _PaymentsBody(arena: arena, arenas: arenas, selectedId: selectedId);
       },
     );
@@ -75,9 +162,9 @@ class PaymentsPage extends ConsumerWidget {
 
 class _PaymentsBody extends StatelessWidget {
   const _PaymentsBody({required this.arena, required this.arenas, required this.selectedId});
-  final ArenaListing arena;
+  final ArenaListing? arena;
   final List<ArenaListing> arenas;
-  final String selectedId;
+  final String? selectedId;
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +205,7 @@ class _PaymentsBody extends StatelessWidget {
                                 children: [
                                   const Icon(Icons.stadium_rounded, color: _accent, size: 18),
                                   const SizedBox(width: 10),
-                                  Text(arena.name,
+                                  Text(arena?.name ?? 'All arenas',
                                       style: const TextStyle(color: _text, fontSize: 13, fontWeight: FontWeight.w800)),
                                   const SizedBox(width: 6),
                                   const Icon(Icons.unfold_more_rounded, color: _muted, size: 16),
@@ -149,8 +236,8 @@ class _PaymentsBody extends StatelessWidget {
             Expanded(
               child: TabBarView(
                 children: [
-                  _CollectionsTab(arena: arena),
-                  _CustomersTab(arena: arena),
+                  _CollectionsTab(arena: arena, arenas: arenas),
+                  _CustomersTab(arena: arena, arenas: arenas),
                 ],
               ),
             ),
@@ -173,9 +260,19 @@ class _PaymentsBody extends StatelessWidget {
           children: [
             const Text('Select Arena', style: TextStyle(color: _text, fontSize: 18, fontWeight: FontWeight.w900)),
             const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.select_all_rounded, color: _accent),
+              title: const Text('All arenas', style: TextStyle(color: _text, fontWeight: FontWeight.w800)),
+              selected: selectedId == null,
+              onTap: () {
+                ref.read(_payArenaProvider.notifier).state = null;
+                Navigator.pop(context);
+              },
+            ),
             ...arenas.map((a) => ListTile(
               leading: const Icon(Icons.stadium_outlined, color: _accent),
               title: Text(a.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w700)),
+              selected: selectedId == a.id,
               onTap: () {
                 ref.read(_payArenaProvider.notifier).state = a.id;
                 Navigator.pop(context);
@@ -191,8 +288,9 @@ class _PaymentsBody extends StatelessWidget {
 // ─── Collections tab ──────────────────────────────────────────────────────────
 
 class _CollectionsTab extends ConsumerStatefulWidget {
-  const _CollectionsTab({required this.arena});
-  final ArenaListing arena;
+  const _CollectionsTab({required this.arena, required this.arenas});
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
 
   @override
   ConsumerState<_CollectionsTab> createState() => _CollectionsTabState();
@@ -215,20 +313,24 @@ class _CollectionsTabState extends ConsumerState<_CollectionsTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final key = _PayKey(widget.arena.id, _month);
-    final async = ref.watch(_arenaPaymentsProvider(key));
+    final async = widget.arena != null
+        ? ref.watch(_arenaPaymentsProvider(_PayKey(widget.arena!.id, _month)))
+        : _combinePayments(
+            widget.arenas.map((a) => ref.watch(_arenaPaymentsProvider(_PayKey(a.id, _month)))).toList(),
+          );
 
     return Scaffold(
       backgroundColor: _bg,
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
         error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: Color(0xFF667085)))),
-        data: (data) => _CollectionsList(
+          data: (data) => _CollectionsList(
           data: data,
           month: _month,
           arena: widget.arena,
+          arenas: widget.arenas,
           onMonthChanged: (m) => setState(() => _month = m),
-          onRefresh: () => ref.invalidate(_arenaPaymentsProvider(key)),
+          onRefresh: _invalidatePayments,
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -244,19 +346,39 @@ class _CollectionsTabState extends ConsumerState<_CollectionsTab>
   }
 
   void _showQuickPay(BuildContext context) {
+    final fallbackArena = widget.arena ?? widget.arenas.first;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: _bg,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-      builder: (_) => _QuickPaySheet(arena: widget.arena),
-    ).then((_) => ref.invalidate(_arenaPaymentsProvider));
+      builder: (_) => _QuickPaySheet(arena: widget.arena, arenas: widget.arenas, fallbackArena: fallbackArena),
+    ).then((_) {
+      _invalidatePayments();
+      ref.invalidate(_arenaGuestsProvider);
+    });
+  }
+
+  void _invalidatePayments() {
+    if (widget.arena != null) {
+      ref.invalidate(_arenaPaymentsProvider(_PayKey(widget.arena!.id, _month)));
+      return;
+    }
+    for (final arena in widget.arenas) {
+      ref.invalidate(_arenaPaymentsProvider(_PayKey(arena.id, _month)));
+    }
   }
 }
 
 class _QuickPaySheet extends ConsumerStatefulWidget {
-  const _QuickPaySheet({required this.arena});
-  final ArenaListing arena;
+  const _QuickPaySheet({
+    required this.arena,
+    required this.arenas,
+    required this.fallbackArena,
+  });
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
+  final ArenaListing fallbackArena;
   @override
   ConsumerState<_QuickPaySheet> createState() => _QuickPaySheetState();
 }
@@ -265,7 +387,11 @@ class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
   String _search = '';
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(_arenaGuestsProvider(_GuestKey(widget.arena.id, _search)));
+    final async = widget.arena != null
+        ? ref.watch(_arenaGuestsProvider(_GuestKey(widget.arena!.id, _search)))
+        : _combineGuests(
+            widget.arenas.map((a) => ref.watch(_arenaGuestsProvider(_GuestKey(a.id, _search)))).toList(),
+          );
     final bottom = MediaQuery.of(context).padding.bottom;
 
     return Container(
@@ -329,7 +455,11 @@ class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
                     if (startMins > nowMins) isUpcoming = true;
                   }
 
-                  if (isUpcoming) upcoming.add(item); else recent.add(item);
+                  if (isUpcoming) {
+                    upcoming.add(item);
+                  } else {
+                    recent.add(item);
+                  }
                 }
 
                 // Sort: Recent (newest past first), Upcoming (closest first)
@@ -354,7 +484,7 @@ class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
                       ...recent.map((item) => _QuickPayRow(
                             guest: item.$1,
                             booking: item.$2,
-                            arena: widget.arena,
+                            arena: _arenaForBooking(widget.arenas, widget.fallbackArena, item.$2),
                           )),
                       const SizedBox(height: 24),
                     ],
@@ -364,7 +494,7 @@ class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
                       ...upcoming.map((item) => _QuickPayRow(
                             guest: item.$1,
                             booking: item.$2,
-                            arena: widget.arena,
+                            arena: _arenaForBooking(widget.arenas, widget.fallbackArena, item.$2),
                           )),
                     ],
                   ],
@@ -451,13 +581,15 @@ class _CollectionsList extends StatelessWidget {
     required this.data,
     required this.month,
     required this.arena,
+    required this.arenas,
     required this.onMonthChanged,
     required this.onRefresh,
   });
 
   final ArenaPaymentsData data;
   final String month;
-  final ArenaListing arena;
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
   final ValueChanged<String> onMonthChanged;
   final VoidCallback onRefresh;
 
@@ -493,6 +625,7 @@ class _CollectionsList extends StatelessWidget {
         title: title,
         bookings: bookings,
         arena: arena,
+        arenas: arenas,
         accent: accent,
         onRefresh: onRefresh,
       ),
@@ -514,7 +647,7 @@ class _CollectionsList extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: () async => onRefresh(),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+        padding: EdgeInsets.fromLTRB(16, 20, 16, 100 + MediaQuery.of(context).padding.bottom),
         children: [
           // Month nav
           Row(
@@ -572,8 +705,8 @@ class _CollectionsList extends StatelessWidget {
             const SizedBox(height: 12),
             ...unpaidBookings.map((b) => _BookingRow(
               booking: b,
-              arenaName: arena.name,
-              arenaId: arena.id,
+              arenaName: _arenaForBooking(arenas, arena ?? arenas.first, b).name,
+              arenaId: _arenaForBooking(arenas, arena ?? arenas.first, b).id,
               onRefresh: onRefresh,
               showStatusBadge: true,
             )),
@@ -586,8 +719,8 @@ class _CollectionsList extends StatelessWidget {
             const SizedBox(height: 12),
             ...collectedBookings.map((b) => _BookingRow(
               booking: b,
-              arenaName: arena.name,
-              arenaId: arena.id,
+              arenaName: _arenaForBooking(arenas, arena ?? arenas.first, b).name,
+              arenaId: _arenaForBooking(arenas, arena ?? arenas.first, b).id,
               onRefresh: onRefresh,
               showStatusBadge: false,
             )),
@@ -681,8 +814,12 @@ class _SummaryCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              Text('₹${(paise / 100).toStringAsFixed(0)}',
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _text, letterSpacing: -0.5)),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text('₹${(paise / 100).toStringAsFixed(0)}',
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _text, letterSpacing: -0.5)),
+              ),
               const SizedBox(height: 2),
               Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.2)),
             ],
@@ -821,12 +958,14 @@ class _BookingListSheet extends StatelessWidget {
     required this.title,
     required this.bookings,
     required this.arena,
+    required this.arenas,
     required this.accent,
     required this.onRefresh,
   });
   final String title;
   final List<ArenaReservation> bookings;
-  final ArenaListing arena;
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
   final Color accent;
   final VoidCallback onRefresh;
 
@@ -869,8 +1008,8 @@ class _BookingListSheet extends StatelessWidget {
           else
             ...bookings.map((b) => _BookingRow(
               booking: b,
-              arenaName: arena.name,
-              arenaId: arena.id,
+              arenaName: _arenaForBooking(arenas, arena ?? arenas.first, b).name,
+              arenaId: _arenaForBooking(arenas, arena ?? arenas.first, b).id,
               onRefresh: onRefresh,
               showStatusBadge: true,
             )),
@@ -883,8 +1022,9 @@ class _BookingListSheet extends StatelessWidget {
 // ─── Customers tab ────────────────────────────────────────────────────────────
 
 class _CustomersTab extends ConsumerStatefulWidget {
-  const _CustomersTab({required this.arena});
-  final ArenaListing arena;
+  const _CustomersTab({required this.arena, required this.arenas});
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
 
   @override
   ConsumerState<_CustomersTab> createState() => _CustomersTabState();
@@ -907,8 +1047,11 @@ class _CustomersTabState extends ConsumerState<_CustomersTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final key = _GuestKey(widget.arena.id, _search);
-    final async = ref.watch(_arenaGuestsProvider(key));
+    final async = widget.arena != null
+        ? ref.watch(_arenaGuestsProvider(_GuestKey(widget.arena!.id, _search)))
+        : _combineGuests(
+            widget.arenas.map((a) => ref.watch(_arenaGuestsProvider(_GuestKey(a.id, _search)))).toList(),
+          );
 
     return Column(
       children: [
@@ -950,7 +1093,7 @@ class _CustomersTabState extends ConsumerState<_CustomersTab>
                     : 'No results for "$_search".');
               }
               return RefreshIndicator(
-                onRefresh: () async => ref.invalidate(_arenaGuestsProvider(key)),
+                onRefresh: () async => _invalidateGuests(),
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   itemCount: guests.length,
@@ -958,7 +1101,7 @@ class _CustomersTabState extends ConsumerState<_CustomersTab>
                     padding: const EdgeInsets.only(bottom: 12),
                     child: _CustomerCard(
                       guest: guests[i],
-                      arena: widget.arena,
+                      arena: widget.arena ?? widget.arenas.first,
                       onTap: () => _openCustomer(ctx, guests[i]),
                     ),
                   ),
@@ -977,8 +1120,22 @@ class _CustomersTabState extends ConsumerState<_CustomersTab>
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _CustomerDetailSheet(guest: guest, arena: widget.arena),
+      builder: (_) => _CustomerDetailSheet(
+        guest: guest,
+        arena: widget.arena,
+        arenas: widget.arenas,
+      ),
     );
+  }
+
+  void _invalidateGuests() {
+    if (widget.arena != null) {
+      ref.invalidate(_arenaGuestsProvider(_GuestKey(widget.arena!.id, _search)));
+      return;
+    }
+    for (final arena in widget.arenas) {
+      ref.invalidate(_arenaGuestsProvider(_GuestKey(arena.id, _search)));
+    }
   }
 }
 
@@ -1063,9 +1220,14 @@ class _Tag extends StatelessWidget {
 // ─── Customer detail sheet ────────────────────────────────────────────────────
 
 class _CustomerDetailSheet extends ConsumerStatefulWidget {
-  const _CustomerDetailSheet({required this.guest, required this.arena});
+  const _CustomerDetailSheet({
+    required this.guest,
+    required this.arena,
+    required this.arenas,
+  });
   final ArenaGuest guest;
-  final ArenaListing arena;
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
 
   @override
   ConsumerState<_CustomerDetailSheet> createState() => _CustomerDetailSheetState();
@@ -1149,7 +1311,8 @@ class _CustomerDetailSheetState extends ConsumerState<_CustomerDetailSheet> {
               _SectionLabel('PENDING CHECK-IN (${pending.length})'),
               const SizedBox(height: 12),
               ...pending.map((b) => _BookingHistoryRow(
-                booking: b, arena: widget.arena,
+                booking: b,
+                arena: _arenaForBooking(widget.arenas, widget.arena ?? widget.arenas.first, b),
                 onRefresh: () => ref.invalidate(_arenaGuestsProvider),
               )),
               const SizedBox(height: 24),
@@ -1159,7 +1322,8 @@ class _CustomerDetailSheetState extends ConsumerState<_CustomerDetailSheet> {
               _SectionLabel('HISTORY (${checkedIn.length})'),
               const SizedBox(height: 12),
               ...checkedIn.map((b) => _BookingHistoryRow(
-                booking: b, arena: widget.arena,
+                booking: b,
+                arena: _arenaForBooking(widget.arenas, widget.arena ?? widget.arenas.first, b),
                 onRefresh: () => ref.invalidate(_arenaGuestsProvider),
               )),
             ],
@@ -1304,10 +1468,4 @@ int _toMins(String t) {
   } catch (_) {
     return 0;
   }
-}
-
-String _moneyShort(int p) {
-  final r = p / 100;
-  if (r >= 1000) return '₹${(r / 1000).toStringAsFixed(1)}K';
-  return '₹${r.toStringAsFixed(0)}';
 }

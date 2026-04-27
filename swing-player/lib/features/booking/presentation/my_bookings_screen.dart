@@ -73,7 +73,7 @@ class _BookingsList extends ConsumerWidget {
         return RefreshIndicator(
           onRefresh: () => ref.refresh(myBookingsProvider(status).future),
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 120 + MediaQuery.of(context).padding.bottom),
             itemCount: bookings.length,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) => _BookingCard(
@@ -126,6 +126,8 @@ class _BookingCard extends ConsumerWidget {
             const SizedBox(height: 6),
             Text(
               '${booking.unitName ?? 'Unit'} • ${DateFormat('d MMM').format(booking.date)} • ${booking.startTime}-${booking.endTime}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: context.fgSub,
                 fontSize: 13,

@@ -196,7 +196,7 @@ class _BookingTabState extends ConsumerState<BookingTab> {
                         )
                       : ListView.builder(
                           physics: const BouncingScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 140),
+                          padding: EdgeInsets.fromLTRB(20, 0, 20, 140 + MediaQuery.of(context).padding.bottom),
                           itemCount: _visibleArenas.length,
                           itemBuilder: (context, i) {
                             final arena = _visibleArenas[i];
@@ -361,9 +361,11 @@ class _ArenaCard extends StatelessWidget {
                     children: [
                       Text(
                         arena.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.4,
                         ),

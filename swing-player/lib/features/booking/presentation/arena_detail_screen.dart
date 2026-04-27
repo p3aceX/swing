@@ -325,7 +325,7 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
           _SliverHeader(arena: arena),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 180),
+              padding: EdgeInsets.fromLTRB(24, 32, 24, 180 + MediaQuery.of(context).padding.bottom),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -337,9 +337,11 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(arena.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                     color: context.fg,
-                                    fontSize: 28,
+                                    fontSize: 26,
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: -1)),
                             const SizedBox(height: 4),
@@ -369,6 +371,7 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
                         _selectedDuration =
                             _durationForMinutes(unit.minSlotMins);
                         _selectedStartSlot = null;
+                        _selectedAddons.clear();
                       });
                       _loadAvailability();
                     },
@@ -429,16 +432,19 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
                     isGround: _isGroundUnit,
                   ),
                   const SizedBox(height: 40),
-                  if (_addons.isNotEmpty) ...[
+                  if ((_selectedUnit?.addons ?? _addons).isNotEmpty) ...[
                     _sectionTitle('4. ADD-ONS'),
                     const SizedBox(height: 16),
-                    ..._addons.map((addon) => _AddonTile(
-                          addon: addon,
-                          isSelected: _selectedAddons.contains(addon),
-                          onChanged: (v) => setState(() => v!
-                              ? _selectedAddons.add(addon)
-                              : _selectedAddons.remove(addon)),
-                        )),
+                    ...(_selectedUnit?.addons.isNotEmpty == true
+                            ? _selectedUnit!.addons
+                            : _addons)
+                        .map((addon) => _AddonTile(
+                              addon: addon,
+                              isSelected: _selectedAddons.contains(addon),
+                              onChanged: (v) => setState(() => v!
+                                  ? _selectedAddons.add(addon)
+                                  : _selectedAddons.remove(addon)),
+                            )),
                   ],
                   const SizedBox(height: 40),
                   _sectionTitle('ABOUT ARENA'),
@@ -769,11 +775,12 @@ class _UnitSelector extends StatelessWidget {
         itemBuilder: (context, i) {
           final unit = units[i];
           final isSelected = selectedId == unit.id;
+          final cardWidth = (MediaQuery.of(context).size.width * 0.38).clamp(120.0, 180.0);
           return GestureDetector(
             onTap: () => onSelect(unit),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
-              width: 150,
+              width: cardWidth,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: isSelected
@@ -1091,7 +1098,7 @@ class _SliverHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final imageUrl = arena.photoUrls.isNotEmpty ? arena.photoUrls.first : null;
     return SliverAppBar(
-      expandedHeight: 320,
+      expandedHeight: (MediaQuery.of(context).size.height * 0.38).clamp(220, 360),
       backgroundColor: context.bg,
       pinned: true,
       automaticallyImplyLeading: false,
@@ -1140,7 +1147,7 @@ class _BookingSummarySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+      padding: EdgeInsets.fromLTRB(24, 20, 24, 40 + MediaQuery.of(context).padding.bottom),
       decoration: BoxDecoration(
         color: context.bg,
         border: Border(top: BorderSide(color: context.stroke.withOpacity(0.3))),

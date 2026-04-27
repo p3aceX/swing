@@ -55,6 +55,67 @@ final _homeYearSummaryProvider = FutureProvider.autoDispose
   return results;
 });
 
+AsyncValue<List<T>> _combineAsyncLists<T>(List<AsyncValue<List<T>>> values) {
+  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
+  final error = values.where((v) => v.hasError).firstOrNull;
+  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
+  return AsyncValue.data(values.expand((v) => v.value ?? <T>[]).toList());
+}
+
+AsyncValue<ArenaPaymentsData> _combinePayments(
+  List<AsyncValue<ArenaPaymentsData>> values,
+) {
+  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
+  final error = values.where((v) => v.hasError).firstOrNull;
+  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
+
+  final rows = values.map((v) => v.value).whereType<ArenaPaymentsData>();
+  return AsyncValue.data(
+    ArenaPaymentsData(
+      checkedInBookings: rows.expand((r) => r.checkedInBookings).toList(),
+      pendingBookings: rows.expand((r) => r.pendingBookings).toList(),
+    ),
+  );
+}
+
+AsyncValue<Map<String, ArenaDaySummary>> _combineSummaries(
+  List<AsyncValue<Map<String, ArenaDaySummary>>> values,
+) {
+  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
+  final error = values.where((v) => v.hasError).firstOrNull;
+  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
+
+  final combined = <String, ArenaDaySummary>{};
+  for (final value in values) {
+    for (final entry in (value.value ?? const <String, ArenaDaySummary>{}).entries) {
+      final current = combined[entry.key];
+      combined[entry.key] = ArenaDaySummary(
+        count: (current?.count ?? 0) + entry.value.count,
+        revenuePaise: (current?.revenuePaise ?? 0) + entry.value.revenuePaise,
+      );
+    }
+  }
+  return AsyncValue.data(combined);
+}
+
+AsyncValue<List<(String, int)>> _combineYearSummaries(
+  List<AsyncValue<List<(String, int)>>> values,
+) {
+  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
+  final error = values.where((v) => v.hasError).firstOrNull;
+  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
+
+  final labels = <String>[];
+  final totals = <String, int>{};
+  for (final value in values) {
+    for (final row in value.value ?? const <(String, int)>[]) {
+      if (!totals.containsKey(row.$1)) labels.add(row.$1);
+      totals[row.$1] = (totals[row.$1] ?? 0) + row.$2;
+    }
+  }
+  return AsyncValue.data(labels.map((label) => (label, totals[label] ?? 0)).toList());
+}
+
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
   @override
@@ -208,8 +269,8 @@ class _HomeTab extends ConsumerWidget {
       error: (e, _) => Center(child: Text('$e')),
       data: (arenas) {
         if (arenas.isEmpty) return _HomeSplash(me: me);
-        final selId = ref.watch(_homeArenaProvider) ?? arenas.first.id;
-        final arena = arenas.firstWhere((a) => a.id == selId, orElse: () => arenas.first);
+        final selId = ref.watch(_homeArenaProvider); // null = All
+        final arena = selId == null ? null : arenas.firstWhere((a) => a.id == selId, orElse: () => arenas.first);
         return _HomeDashboard(arena: arena, arenas: arenas, me: me);
       },
     );
@@ -226,22 +287,40 @@ class _HomeSplash extends ConsumerWidget {
 
 class _HomeDashboard extends ConsumerWidget {
   const _HomeDashboard({required this.arena, required this.arenas, this.me});
-  final ArenaListing arena; final List<ArenaListing> arenas; final dynamic me;
+  final ArenaListing? arena; // null = All arenas
+  final List<ArenaListing> arenas; final dynamic me;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
     final greeting = now.hour < 12 ? 'Good morning' : now.hour < 17 ? 'Good afternoon' : 'Good evening';
     final businessName = me?.businessAccount?.businessName ?? me?.user.name ?? 'Arena';
-    final todayAsync = ref.watch(_homeTodayBookingsProvider(arena.id));
-    final monthAsync = ref.watch(_homeMonthPaymentsProvider(arena.id));
-    final summaryAsync = ref.watch(_homeMonthSummaryProvider(arena.id));
+    final chartArena = arena ?? arenas.first;
     final range = ref.watch(_graphRangeProvider);
 
+    // When "All" is selected, combine today bookings from every arena.
+    late final AsyncValue<List<ArenaReservation>> todayAsync;
+    if (arena != null) {
+      todayAsync = ref.watch(_homeTodayBookingsProvider(arena!.id));
+    } else {
+      todayAsync = _combineAsyncLists(
+        arenas.map((a) => ref.watch(_homeTodayBookingsProvider(a.id))).toList(),
+      );
+    }
+
+    final monthAsync = arena != null
+        ? ref.watch(_homeMonthPaymentsProvider(arena!.id))
+        : _combinePayments(
+            arenas.map((a) => ref.watch(_homeMonthPaymentsProvider(a.id))).toList(),
+          );
+
     void invalidateAll() {
-      ref.invalidate(_homeTodayBookingsProvider(arena.id));
-      ref.invalidate(_homeMonthPaymentsProvider(arena.id));
-      ref.invalidate(_homeMonthSummaryProvider(arena.id));
+      for (final a in arenas) {
+        ref.invalidate(_homeTodayBookingsProvider(a.id));
+        ref.invalidate(_homeMonthPaymentsProvider(a.id));
+        ref.invalidate(_homeMonthSummaryProvider(a.id));
+        ref.invalidate(_homeYearSummaryProvider(a.id));
+      }
     }
 
     return RefreshIndicator(
@@ -253,7 +332,7 @@ class _HomeDashboard extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
             child: Row(children: [
-              _QuickAction(icon: Icons.add_rounded, label: 'New Booking', accent: true, onTap: () => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.white, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))), builder: (_) => AddBookingSheet(arena: arena, date: now)).then((_) => invalidateAll())),
+              _QuickAction(icon: Icons.add_rounded, label: 'New Booking', accent: true, onTap: () => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.white, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))), builder: (_) => AddBookingSheet(arena: chartArena, date: now)).then((_) => invalidateAll())),
               const SizedBox(width: 12),
               _QuickAction(icon: Icons.account_balance_wallet_outlined, label: 'Record Payment', onTap: () => context.findAncestorStateOfType<_DashboardScreenState>()?._setIndex(3)),
             ]),
@@ -261,7 +340,7 @@ class _HomeDashboard extends ConsumerWidget {
           const SizedBox(height: 32),
           _RangePicker(selected: range, onSelect: (v) => ref.read(_graphRangeProvider.notifier).state = v),
           const SizedBox(height: 16),
-          _ProRevenueChart(range: range, arenaId: arena.id, now: now),
+          _ProRevenueChart(range: range, arena: arena, arenas: arenas, now: now),
           _buildBreakdown(range, todayAsync, monthAsync),
           if (range == 'Today')
             todayAsync.when(
@@ -276,8 +355,8 @@ class _HomeDashboard extends ConsumerWidget {
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(20, 32, 20, 0),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    if (inProgress.isNotEmpty) ...[_SectionHeader(title: 'In progress', badge: '${inProgress.length}', badgeColor: const Color(0xFFDC2626)), const SizedBox(height: 12), ...inProgress.map((b) => _ScheduleRow(booking: b, arenaName: arena.name, arenaId: arena.id, onRefresh: invalidateAll)), const SizedBox(height: 24)],
-                    if (upcoming.isNotEmpty) ...[_SectionHeader(title: 'Upcoming today', badge: '${upcoming.length}', onSeeAll: () => context.findAncestorStateOfType<_DashboardScreenState>()?._setIndex(2)), const SizedBox(height: 12), ...upcoming.take(4).map((b) => _ScheduleRow(booking: b, arenaName: arena.name, arenaId: arena.id, onRefresh: invalidateAll))],
+                    if (inProgress.isNotEmpty) ...[_SectionHeader(title: 'In progress', badge: '${inProgress.length}', badgeColor: const Color(0xFFDC2626)), const SizedBox(height: 12), ...inProgress.map((b) => _ScheduleRow(booking: b, arenaName: b.unitName ?? chartArena.name, arenaId: chartArena.id, onRefresh: invalidateAll)), const SizedBox(height: 24)],
+                    if (upcoming.isNotEmpty) ...[_SectionHeader(title: 'Upcoming today', badge: '${upcoming.length}', onSeeAll: () => context.findAncestorStateOfType<_DashboardScreenState>()?._setIndex(2)), const SizedBox(height: 12), ...upcoming.take(4).map((b) => _ScheduleRow(booking: b, arenaName: b.unitName ?? chartArena.name, arenaId: chartArena.id, onRefresh: invalidateAll))],
                   ]),
                 );
               },
@@ -334,7 +413,7 @@ class _HomeDashboard extends ConsumerWidget {
 
 class _HeroHeader extends StatelessWidget {
   const _HeroHeader({required this.greeting, required this.businessName, required this.todayAsync, required this.arena, required this.arenas, required this.ref});
-  final String greeting, businessName; final AsyncValue<List<ArenaReservation>> todayAsync; final ArenaListing arena; final List<ArenaListing> arenas; final WidgetRef ref;
+  final String greeting, businessName; final AsyncValue<List<ArenaReservation>> todayAsync; final ArenaListing? arena; final List<ArenaListing> arenas; final WidgetRef ref;
 
   @override
   Widget build(BuildContext context) {
@@ -348,16 +427,132 @@ class _HeroHeader extends StatelessWidget {
 
     return Container(
       padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 12, 20, 24),
-      decoration: const BoxDecoration(color: Color(0xFF101828), borderRadius: BorderRadius.vertical(bottom: Radius.circular(32))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(greeting, style: const TextStyle(fontSize: 12, color: Color(0xFF98A2B3), fontWeight: FontWeight.w600)), Text(businessName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white))]), Row(children: [GestureDetector(onTap: () {}, child: Container(width: 38, height: 38, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.notifications_outlined, size: 20, color: Colors.white))), const SizedBox(width: 10), GestureDetector(onTap: () => _showProfileSheet(context, ref), child: Container(width: 38, height: 38, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), alignment: Alignment.center, child: const _ProfileAvatar()))])]),
-        if (arenas.length > 1) ...[const SizedBox(height: 20), SizedBox(height: 32, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: arenas.length, separatorBuilder: (_, __) => const SizedBox(width: 8), itemBuilder: (_, i) { final a = arenas[i]; final sel = a.id == arena.id; return GestureDetector(onTap: () => ref.read(_homeArenaProvider.notifier).state = a.id, child: AnimatedContainer(duration: const Duration(milliseconds: 150), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), decoration: BoxDecoration(color: sel ? Colors.white : Colors.white.withAlpha(20), borderRadius: BorderRadius.circular(12)), child: Text(a.name, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: sel ? const Color(0xFF101828) : Colors.white70)))); }))],
-        const SizedBox(height: 28),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.end, children: [Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('₹${_compactRupees(col)}', style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1.5)), const SizedBox(height: 4), const Text('COLLECTED TODAY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFF059669), letterSpacing: 1.0))]), Column(crossAxisAlignment: CrossAxisAlignment.end, children: [_StatBadge(label: '₹${_compactRupees(bal)} DUE', color: const Color(0xFFFDA29B), large: true), const SizedBox(height: 8), GestureDetector(onTap: () => context.findAncestorStateOfType<_DashboardScreenState>()?._setIndex(2), child: _StatBadge(label: 'Today booking - ${active.length}', color: Colors.white, large: true))])]),
-        const SizedBox(height: 24), Text(dateStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF667085), letterSpacing: 0.5)),
-        const SizedBox(height: 24), const Divider(color: Colors.white10), const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_MiniMode(label: 'CASH', value: _compactRupees(cash), color: Colors.blue), _MiniMode(label: 'UPI', value: _compactRupees(upi), color: const Color(0xFF6366F1)), _MiniMode(label: 'ONLINE', value: _compactRupees(online), color: const Color(0xFF059669))]),
-      ]),
+      decoration: const BoxDecoration(
+        color: Color(0xFF101828),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top bar: greeting + action buttons
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(greeting,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF98A2B3), fontWeight: FontWeight.w600)),
+                    Text(businessName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: Colors.white)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: () {},
+                child: Container(
+                  width: 38, height: 38,
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.notifications_outlined, size: 20, color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: () => _showProfileSheet(context, ref),
+                child: Container(
+                  width: 38, height: 38,
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                  alignment: Alignment.center,
+                  child: const _ProfileAvatar(),
+                ),
+              ),
+            ],
+          ),
+
+          // Arena picker (multi-arena)
+          if (arenas.length > 1) ...[
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 32,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _ArenaChip(
+                    label: 'All',
+                    selected: arena == null,
+                    onTap: () => ref.read(_homeArenaProvider.notifier).state = null,
+                  ),
+                  const SizedBox(width: 8),
+                  ...arenas.map((a) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _ArenaChip(
+                      label: a.name,
+                      selected: a.id == arena?.id,
+                      onTap: () => ref.read(_homeArenaProvider.notifier).state = a.id,
+                    ),
+                  )),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 28),
+
+          // Revenue row
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text('₹${_compactRupees(col)}',
+                          style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1.5)),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('COLLECTED TODAY',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFF059669), letterSpacing: 1.0)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _StatBadge(label: '₹${_compactRupees(bal)} DUE', color: const Color(0xFFFDA29B), large: true),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () => context.findAncestorStateOfType<_DashboardScreenState>()?._setIndex(2),
+                    child: _StatBadge(label: '${active.length} today', color: Colors.white, large: true),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+          Text(dateStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF667085), letterSpacing: 0.5)),
+          const SizedBox(height: 24),
+          const Divider(color: Colors.white10),
+          const SizedBox(height: 16),
+
+          // Payment mode summary
+          Row(
+            children: [
+              Expanded(child: _MiniMode(label: 'CASH', value: _compactRupees(cash), color: Colors.blue)),
+              Expanded(child: _MiniMode(label: 'UPI', value: _compactRupees(upi), color: const Color(0xFF6366F1))),
+              Expanded(child: _MiniMode(label: 'ONLINE', value: _compactRupees(online), color: const Color(0xFF059669))),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -379,6 +574,25 @@ class _MiniMode extends StatelessWidget {
   Widget build(BuildContext context) => Row(children: [Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)), const SizedBox(width: 6), Text(label, style: const TextStyle(color: Color(0xFF98A2B3), fontSize: 9, fontWeight: FontWeight.w700)), const SizedBox(width: 4), Text('₹$value', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800))]);
 }
 
+class _ArenaChip extends StatelessWidget {
+  const _ArenaChip({required this.label, required this.selected, required this.onTap});
+  final String label; final bool selected; final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? Colors.white : Colors.white.withAlpha(20),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: selected ? const Color(0xFF101828) : Colors.white70)),
+    ),
+  );
+}
+
 class _RangePicker extends StatelessWidget {
   const _RangePicker({required this.selected, required this.onSelect}); final String selected; final ValueChanged<String> onSelect;
   @override
@@ -389,23 +603,48 @@ class _RangePicker extends StatelessWidget {
 }
 
 class _ProRevenueChart extends ConsumerWidget {
-  const _ProRevenueChart({required this.range, required this.arenaId, required this.now}); final String range, arenaId; final DateTime now;
+  const _ProRevenueChart({
+    required this.range,
+    required this.arena,
+    required this.arenas,
+    required this.now,
+  });
+  final String range;
+  final ArenaListing? arena;
+  final List<ArenaListing> arenas;
+  final DateTime now;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (range == 'Today') {
-      final todayAsync = ref.watch(_homeTodayBookingsProvider(arenaId));
+      final todayAsync = arena != null
+          ? ref.watch(_homeTodayBookingsProvider(arena!.id))
+          : _combineAsyncLists(
+              arenas.map((a) => ref.watch(_homeTodayBookingsProvider(a.id))).toList(),
+            );
       return todayAsync.when(loading: () => const _ChartSkeleton(), error: (_, __) => const SizedBox.shrink(), data: (bookings) {
-        final hourlyData = <int, double>{}; for (int i = 6; i <= 22; i++) hourlyData[i] = 0;
+        final hourlyData = <int, double>{};
+        for (int i = 6; i <= 22; i++) {
+          hourlyData[i] = 0;
+        }
         for (final b in bookings.where((b) => b.status != 'CANCELLED')) { final startH = int.tryParse(b.startTime.split(':').first) ?? 0; if (startH >= 6 && startH <= 22) { hourlyData[startH] = (hourlyData[startH] ?? 0) + (b.paidAt != null ? b.totalAmountPaise : b.advancePaise).toDouble(); } }
-        return _BaseBarChart(spots: hourlyData.entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList(), xLabels: {6: '6am', 12: '12pm', 18: '6pm', 22: '10pm'}, maxYScale: 1.3);
+        return _BaseBarChart(spots: hourlyData.entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList(), xLabels: const {6: '6am', 12: '12pm', 18: '6pm', 22: '10pm'}, maxYScale: 1.3);
       });
     } else if (range == 'Year') {
-      final yearAsync = ref.watch(_homeYearSummaryProvider(arenaId));
+      final yearAsync = arena != null
+          ? ref.watch(_homeYearSummaryProvider(arena!.id))
+          : _combineYearSummaries(
+              arenas.map((a) => ref.watch(_homeYearSummaryProvider(a.id))).toList(),
+            );
       return yearAsync.when(loading: () => const _ChartSkeleton(), error: (_, __) => const SizedBox.shrink(), data: (results) {
         return _BaseBarChart(spots: List.generate(results.length, (i) => FlSpot(i.toDouble(), results[i].$2.toDouble())), xLabels: {for (int i = 0; i < results.length; i++) i: results[i].$1}, maxYScale: 1.2);
       });
     } else {
-      final summaryAsync = ref.watch(_homeMonthSummaryProvider(arenaId));
+      final summaryAsync = arena != null
+          ? ref.watch(_homeMonthSummaryProvider(arena!.id))
+          : _combineSummaries(
+              arenas.map((a) => ref.watch(_homeMonthSummaryProvider(a.id))).toList(),
+            );
       return summaryAsync.when(loading: () => const _ChartSkeleton(), error: (_, __) => const SizedBox.shrink(), data: (summary) {
         final days = List.generate(14, (i) => now.subtract(Duration(days: 13 - i)));
         final spots = List.generate(days.length, (i) => FlSpot(i.toDouble(), (summary[DateFormat('yyyy-MM-dd').format(days[i])]?.revenuePaise ?? 0).toDouble()));
@@ -496,12 +735,6 @@ class _ArenaListItem extends StatelessWidget {
 class _BookingsTab extends StatelessWidget { const _BookingsTab(); @override Widget build(BuildContext context) => const BookingsPage(); }
 class _PaymentsTab extends StatelessWidget { const _PaymentsTab(); @override Widget build(BuildContext context) => const PaymentsPage(); }
 
-class _ComingSoon extends StatelessWidget {
-  const _ComingSoon({required this.icon, required this.title, required this.subtitle}); final IconData icon; final String title, subtitle;
-  @override
-  Widget build(BuildContext context) => Center(child: Padding(padding: const EdgeInsets.all(40), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 48, color: const Color(0xFFD0D5DD)), const SizedBox(height: 16), Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF101828))), const SizedBox(height: 8), Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Color(0xFF667085), fontWeight: FontWeight.w500))])));
-}
-
 class _PageHeader extends StatelessWidget {
   const _PageHeader({required this.title, required this.subtitle, this.action}); final String title, subtitle; final Widget? action;
   @override
@@ -516,9 +749,3 @@ class _CenteredMessage extends StatelessWidget {
 
 String _joinNonEmpty(List<String?> v, {String s = ', '}) => v.where((x) => x != null && x.trim().isNotEmpty).map((x) => x!.trim()).join(s);
 int _toMins(String t) { try { final p = t.split(':').map(int.parse).toList(); return p[0] * 60 + p[1]; } catch (_) { return 0; } }
-
-class _EmptyArenas extends StatelessWidget {
-  const _EmptyArenas();
-  @override
-  Widget build(BuildContext context) => const Center(child: Text('No arenas found.'));
-}

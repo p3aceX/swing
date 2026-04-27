@@ -63,7 +63,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
           ),
         ),
         data: (booking) => ListView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 120 + MediaQuery.of(context).padding.bottom),
           children: [
             _HeroTile(booking: booking),
             if ((booking.status == 'CONFIRMED' ||
@@ -203,9 +203,11 @@ class _HeroTile extends StatelessWidget {
           _StatusPill(status: booking.status),
           const SizedBox(height: 14),
           Text(booking.arenaName ?? 'Arena',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   color: context.fg,
-                  fontSize: 24,
+                  fontSize: 22,
                   fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           Text(

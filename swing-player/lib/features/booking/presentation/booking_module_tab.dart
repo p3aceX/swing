@@ -100,7 +100,7 @@ class _CoachingBookingPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 140),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, 140 + MediaQuery.of(context).padding.bottom),
       physics: const BouncingScrollPhysics(),
       children: [
         Container(
@@ -249,12 +249,17 @@ class _LocationChip extends StatelessWidget {
         children: [
           Icon(Icons.location_on_rounded, size: 12, color: context.accent),
           const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: context.fg,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 100),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],
