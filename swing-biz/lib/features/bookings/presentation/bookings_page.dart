@@ -158,9 +158,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
             data: (rawBookings) {
               final totalCount = rawBookings.length;
               final totalRev = rawBookings.fold(0, (sum, b) => sum + b.totalAmountPaise);
-              final collectedRev = rawBookings
-                  .where((b) => b.status == 'CHECKED_IN')
-                  .fold(0, (sum, b) => sum + b.totalAmountPaise);
+              final collectedRev = rawBookings.fold(0, (sum, b) => 
+                  sum + (b.isPaid ? b.totalAmountPaise : b.advancePaise));
 
               return _ModernHeader(
                 arena: widget.arena,
@@ -641,7 +640,10 @@ class BookingCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                         ],
-                        _StatusBadge(label: booking.status, color: statusColor),
+                        _StatusBadge(
+                          label: booking.isPaid ? 'PAID' : 'UNPAID', 
+                          color: booking.isPaid ? _accent : const Color(0xFFD97706)
+                        ),
                       ],
                     ),
                   ],
@@ -1031,6 +1033,50 @@ _See you at the arena!_ 🏏
     launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
+  Future<void> _recordPayment() async {
+    final result = await showModalBottomSheet<_PaymentResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (_) => _CheckoutSheet(booking: _booking),
+    );
+    
+    if (result == null) return;
+    
+    final repo = ref.read(hostArenaBookingRepositoryProvider);
+    
+    setState(() => _loading = true);
+    try {
+      // 1. Record payment with specific amount and mode
+      await repo.markBookingPaid(
+        _booking.id, 
+        paymentMode: result.mode,
+        amountPaise: result.amountPaise,
+      );
+      
+      // 2. Auto-checkin to finalize the occupancy state in one go
+      if (_booking.status == 'CONFIRMED') {
+        await repo.checkinByOwner(_booking.id);
+      }
+      
+      // 3. Refresh and update local UI
+      final updated = await repo.listArenaBookings(_booking.arenaId, date: _fmtDate(_booking.bookingDate!));
+      if (mounted) {
+        setState(() {
+          _booking = updated.firstWhere((b) => b.id == _booking.id);
+          _loading = false;
+        });
+        _snack('Booking settled via ${result.mode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        _snack('Error: $e', err: true);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(hostArenaBookingRepositoryProvider);
@@ -1041,6 +1087,8 @@ _See you at the arena!_ 🏏
     final shortId = _booking.id.length > 7
         ? _booking.id.substring(_booking.id.length - 7).toUpperCase()
         : _booking.id.toUpperCase();
+
+    final remainingPaise = _booking.totalAmountPaise - _booking.advancePaise;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -1295,20 +1343,228 @@ _See you at the arena!_ 🏏
             const CircularProgressIndicator(color: _accent)
           else ...[
             if (!_booking.isPaid && _booking.status != 'CANCELLED')
-              ArenaPrimaryButton(
-                  label: 'Mark as Paid',
-                  onPressed: () => _action(
-                      () => repo.markBookingPaid(_booking.id,
-                          paymentMode: 'CASH'),
-                      'Paid')),
-            const SizedBox(height: 12),
-            if (_booking.status == 'CONFIRMED')
-              ArenaPrimaryButton(
-                  label: 'Check In Guest',
-                  onPressed: () =>
-                      _action(() => repo.checkinByOwner(_booking.id), 'Checked In')),
+              Column(
+                children: [
+                  if (remainingPaise > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFEE2E2)),
+                        ),
+                        child: Text('BALANCE DUE: ₹${(remainingPaise / 100).toStringAsFixed(0)}',
+                            style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 0.5)),
+                      ),
+                    ),
+                  ArenaPrimaryButton(
+                      label: 'Record Payment & Checkout',
+                      onPressed: _recordPayment),
+                ],
+              )
+            else if (_booking.isPaid)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _accent.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.check_circle_rounded, color: _accent, size: 20),
+                    const SizedBox(width: 10),
+                    const Text('BOOKING SETTLED', 
+                      style: TextStyle(color: _accent, fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1.0)),
+                  ],
+                ),
+              ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _PaymentResult {
+  const _PaymentResult({required this.mode, required this.amountPaise});
+  final String mode;
+  final int amountPaise;
+}
+
+class _CheckoutSheet extends StatefulWidget {
+  const _CheckoutSheet({required this.booking});
+  final ArenaReservation booking;
+
+  @override
+  State<_CheckoutSheet> createState() => _CheckoutSheetState();
+}
+
+class _CheckoutSheetState extends State<_CheckoutSheet> {
+  final _amountCtrl = TextEditingController();
+  final _discountCtrl = TextEditingController();
+  
+  late int _remainingPaise;
+
+  @override
+  void initState() {
+    super.initState();
+    _remainingPaise = widget.booking.totalAmountPaise - widget.booking.advancePaise;
+    _amountCtrl.text = (_remainingPaise / 100).toStringAsFixed(0);
+  }
+
+  void _updateCalculations() {
+    final discount = (double.tryParse(_discountCtrl.text) ?? 0);
+    final discountPaise = (discount * 100).round();
+    final toCollect = (_remainingPaise - discountPaise).clamp(0, 99999999);
+    _amountCtrl.text = (toCollect / 100).toStringAsFixed(0);
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.booking.totalAmountPaise / 100;
+    final advance = widget.booking.advancePaise / 100;
+    final discount = (double.tryParse(_discountCtrl.text) ?? 0);
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(2)))),
+          const SizedBox(height: 24),
+          const Text('Checkout', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _text)),
+          const SizedBox(height: 24),
+          
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(20), border: Border.all(color: _border)),
+            child: Column(
+              children: [
+                _CheckoutRow('Booking Total', '₹${total.toStringAsFixed(0)}'),
+                if (advance > 0) ...[
+                  const SizedBox(height: 12),
+                  _CheckoutRow('Advance Paid', '- ₹${advance.toStringAsFixed(0)}', color: _accent),
+                ],
+                const Divider(height: 32),
+                Row(
+                  children: [
+                    const Text('Discount (₹)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _muted)),
+                    const Spacer(),
+                    SizedBox(
+                      width: 80,
+                      child: TextField(
+                        controller: _discountCtrl,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.right,
+                        onChanged: (_) => _updateCalculations(),
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                        decoration: const InputDecoration(isDense: true, border: InputBorder.none, hintText: '0'),
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 32),
+                _CheckoutRow('Net Payable', '₹${(_remainingPaise / 100 - discount).toStringAsFixed(0)}', isTotal: true),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 32),
+          const Text('AMOUNT TO COLLECT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _muted, letterSpacing: 1.0)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amountCtrl,
+            keyboardType: TextInputType.number,
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _text),
+            decoration: InputDecoration(
+              prefixText: '₹ ',
+              prefixStyle: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _muted),
+              filled: true,
+              fillColor: _bg,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+            ),
+          ),
+          
+          const SizedBox(height: 32),
+          const Text('PAYMENT MODE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _muted, letterSpacing: 1.0)),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _ModeTile(icon: Icons.payments_rounded, label: 'CASH', color: Colors.blue, onTap: () => _done('CASH')),
+              const SizedBox(width: 12),
+              _ModeTile(icon: Icons.qr_code_scanner_rounded, label: 'UPI', color: const Color(0xFF6366F1), onTap: () => _done('UPI')),
+              const SizedBox(width: 12),
+              _ModeTile(icon: Icons.account_balance_rounded, label: 'ONLINE', color: _accent, onTap: () => _done('ONLINE')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _done(String mode) {
+    final amount = (double.tryParse(_amountCtrl.text) ?? 0);
+    Navigator.pop(context, _PaymentResult(mode: mode, amountPaise: (amount * 100).round()));
+  }
+}
+
+class _CheckoutRow extends StatelessWidget {
+  const _CheckoutRow(this.label, this.value, {this.color, this.isTotal = false});
+  final String label;
+  final String value;
+  final Color? color;
+  final bool isTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(label, style: TextStyle(fontSize: isTotal ? 15 : 13, fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600, color: isTotal ? _text : _muted)),
+        const Spacer(),
+        Text(value, style: TextStyle(fontSize: isTotal ? 20 : 15, fontWeight: FontWeight.w900, color: color ?? _text)),
+      ],
+    );
+  }
+}
+
+class _ModeTile extends StatelessWidget {
+  const _ModeTile({required this.icon, required this.label, required this.color, required this.onTap});
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          decoration: BoxDecoration(
+            color: _bg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _border),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: color.withValues(alpha: .1), shape: BoxShape.circle),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(height: 12),
+              Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: _text, letterSpacing: 0.5)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1537,7 +1793,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   late DateTime _selectedDate;
   String? _unitId;
+  // Holds the single selected start time (duration-first model)
   final List<String> _selectedSlots = [];
+  int _selectedDurationIdx = 0;
   String _paymentMode = 'CASH';
   bool _loading = false;
   bool _totalEdited = false;
@@ -1546,19 +1804,28 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   bool _loadingAvail = true;
 
   ArenaUnitOption? get _unit => widget.arena.units.where((u) => u.id == _unitId).firstOrNull;
-  
+
+  int get _currentDurationMins {
+    final unit = _unit;
+    if (unit == null) return 60;
+    final opts = _buildSlotOptions(unit);
+    final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
+    return opts[idx].durationMins;
+  }
+
   String get _startTime => _selectedSlots.isEmpty ? '' : _selectedSlots.first;
   String get _endTime {
     if (_selectedSlots.isEmpty) return '';
-    // End time is the start of the next slot after the last selected one
-    return _addMinutes(_selectedSlots.last, 60);
+    return _addMinutes(_selectedSlots.first, _currentDurationMins);
   }
 
   int get _totalPaise {
     if (_totalEdited) return ((double.tryParse(_totalCtrl.text) ?? 0) * 100).round();
     final unit = _unit;
     if (unit == null || _selectedSlots.isEmpty) return 0;
-    return unit.pricePerHourPaise * _selectedSlots.length;
+    final opts = _buildSlotOptions(unit);
+    final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
+    return opts[idx].paise;
   }
 
   int get _advancePaise => ((double.tryParse(_advanceCtrl.text) ?? 0) * 100).round().clamp(0, _totalPaise);
@@ -1570,26 +1837,39 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     super.initState();
     _selectedDate = widget.date;
     _unitId = widget.lockedUnitId ?? widget.arena.units.firstOrNull?.id;
+    _initDuration();
     _rebuildTimes();
     _loadAvailability();
+  }
+
+  void _initDuration() {
+    final unit = _unit;
+    if (unit == null) { _selectedDurationIdx = 0; return; }
+    final opts = _buildSlotOptions(unit);
+    // Start at the option whose duration matches minSlotMins
+    final idx = opts.indexWhere((o) => o.durationMins >= unit.minSlotMins);
+    _selectedDurationIdx = idx >= 0 ? idx : 0;
   }
 
   void _rebuildTimes() {
     final unit = _unit;
     final arena = widget.arena;
     if (unit == null) { _allDaySlots = []; return; }
-    
+
     final openStr = unit.openTime ?? arena.openTime ?? '06:00';
     final closeStr = unit.closeTime ?? arena.closeTime ?? '23:00';
     final openMins = _toMins(openStr);
     final closeMins = _toMins(closeStr);
-    
+    final increment = unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60;
+    final durMins = _currentDurationMins;
+
     final isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
+    final bufferMins = arena.bufferMins;
     final nowMins = DateTime.now().hour * 60 + DateTime.now().minute;
 
     _allDaySlots = [];
-    for (var m = openMins; m + 60 <= closeMins; m += 60) {
-      if (isToday && m < nowMins) continue;
+    for (var m = openMins; m + durMins <= closeMins; m += increment) {
+      if (isToday && m < nowMins + bufferMins) continue;
       _allDaySlots.add(_fromMins(m));
     }
     _selectedSlots.clear();
@@ -1628,68 +1908,32 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     finally { if (mounted) setState(() => _loadingAvail = false); }
   }
 
-  // A slot is "busy" if:
-  // • It falls inside an existing booking (always), OR
-  // • Starting a fresh booking here (no slots selected yet, or non-contiguous tap)
-  //   the minimum required duration from this slot would overlap a booking.
-  // When the user is *extending* an existing contiguous selection we only check the
-  // single 1-hr window, because the start time is already fixed.
+  // A start time is busy if any part of [time, time + selectedDuration) overlaps an existing booking.
   bool _isBusy(String time) {
     final tMins = _toMins(time);
-    final minMins = _unit?.minSlotMins ?? 60;
-
-    final checkMins = () {
-      if (_selectedSlots.isNotEmpty) {
-        final lastMins = _toMins(_selectedSlots.last);
-        final firstMins = _toMins(_selectedSlots.first);
-        if (tMins == lastMins + 60 || tMins == firstMins - 60) return 60;
-      }
-      return minMins;
-    }();
-
+    final durMins = _currentDurationMins;
     return _existingBookings.any((b) {
       if (b.status == 'CANCELLED') return false;
-      return _toMins(b.startTime) < tMins + checkMins && _toMins(b.endTime) > tMins;
+      return _toMins(b.startTime) < tMins + durMins && _toMins(b.endTime) > tMins;
     });
   }
 
   void _onSlotTapped(String time) {
     if (_isBusy(time)) return;
-
-    List<String> next = List.from(_selectedSlots);
-
-    if (next.contains(time)) {
-      next.remove(time);
-    } else {
-      next.add(time);
-      next.sort((a, b) => _toMins(a).compareTo(_toMins(b)));
-
-      // Reset to single slot if selection would be non-contiguous
-      bool contiguous = true;
-      for (int i = 0; i < next.length - 1; i++) {
-        if (_toMins(next[i + 1]) - _toMins(next[i]) != 60) { contiguous = false; break; }
-      }
-      if (!contiguous) next = [time];
-
-      // Enforce max slot cap
-      final maxSlots = (_unit?.maxSlotMins ?? 99 * 60) ~/ 60;
-      if (next.length > maxSlots) {
-        _snack('Max ${maxSlots}hr booking for this unit', err: true);
-        return;
-      }
-    }
-
     setState(() {
-      _selectedSlots..clear()..addAll(next);
-      if (!_totalEdited) _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
+      if (_selectedSlots.length == 1 && _selectedSlots.first == time) {
+        _selectedSlots.clear();
+        _totalCtrl.clear();
+      } else {
+        _selectedSlots..clear()..add(time);
+        if (!_totalEdited) _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
+      }
     });
   }
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty || _phoneCtrl.text.trim().isEmpty) { _snack('Required fields missing', err: true); return; }
-    if (_selectedSlots.isEmpty) { _snack('Please select at least one slot', err: true); return; }
-    final minSlots = (_unit?.minSlotMins ?? 60) ~/ 60;
-    if (_selectedSlots.length < minSlots) { _snack('Min booking is ${minSlots}hr for this unit', err: true); return; }
+    if (_selectedSlots.isEmpty) { _snack('Please select a start time', err: true); return; }
     if (!_advanceOk) { _snack('Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required', err: true); return; }
     
     setState(() => _loading = true);
@@ -1785,22 +2029,25 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             if (widget.arena.units.length > 1) ...[
               const Text('Select Unit', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
               const SizedBox(height: 12),
-              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _rebuildTimes(); }); _loadAvailability(); }),
+              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _initDuration(); _rebuildTimes(); }); _loadAvailability(); }),
               const SizedBox(height: 24),
             ],
-            
-            Row(children: [
-              const Text('Select Slots', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-              const Spacer(),
-              if (_unit != null) ...[
-                if (_unit!.minSlotMins > 60)
-                  Text('min ${_unit!.minSlotMins ~/ 60}hr', style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
-                if (_unit!.minSlotMins > 60 && _unit!.maxSlotMins < 99 * 60)
-                  const Text(' · ', style: TextStyle(color: _muted, fontSize: 11)),
-                if (_unit!.maxSlotMins < 99 * 60)
-                  Text('max ${_unit!.maxSlotMins ~/ 60}hr', style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
-              ],
-            ]),
+
+            if (_unit != null) ...[
+              const Text('Duration', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              const SizedBox(height: 12),
+              _SlotPicker(
+                slots: _buildSlotOptions(_unit!),
+                selectedIdx: _selectedDurationIdx,
+                onSelect: (idx) {
+                  setState(() { _selectedDurationIdx = idx; _rebuildTimes(); });
+                  _loadAvailability();
+                },
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            const Text('Select Start Time', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
             const SizedBox(height: 12),
             if (_allDaySlots.isEmpty)
               Container(
@@ -1816,23 +2063,22 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 ),
               )
             else
-              _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped),
+              _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped, isGround: _unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND', durationMins: _currentDurationMins),
 
             if (_selectedSlots.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(color: _accent.withValues(alpha: .08), borderRadius: BorderRadius.circular(12), border: Border.all(color: _accent.withValues(alpha: .25))),
+                child: Row(children: [
+                  Icon(Icons.schedule_rounded, color: _accent, size: 18),
+                  const SizedBox(width: 12),
+                  Text('$_startTime → $_endTime', style: TextStyle(color: _accent, fontSize: 14, fontWeight: FontWeight.w800)),
+                  const SizedBox(width: 8),
+                  Text('· ${_durationLabel(_currentDurationMins)}', style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+                ]),
+              ),
               const SizedBox(height: 24),
-              // Min selection warning
-              Builder(builder: (_) {
-                final minSlots = (_unit?.minSlotMins ?? 60) ~/ 60;
-                final remaining = minSlots - _selectedSlots.length;
-                if (remaining <= 0) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'Select $remaining more hr to meet minimum',
-                    style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
-                  ),
-                );
-              }),
               Row(
                 children: [
                   Expanded(child: _FormTextField(label: 'Total (₹)', controller: _totalCtrl, keyboardType: TextInputType.number, onChanged: (_) => _totalEdited = true)),
@@ -1847,17 +2093,21 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              const Text('Payment Mode', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              const SizedBox(height: 12),
+              _SegmentPicker(
+                options: const [('CASH', 'Cash'), ('UPI', 'UPI'), ('ONLINE', 'Online')],
+                selected: _paymentMode,
+                onSelect: (m) => setState(() => _paymentMode = m),
+              ),
+              const SizedBox(height: 16),
+              _FormTextField(label: 'Notes (optional)', controller: _notesCtrl, icon: Icons.notes_rounded),
               const SizedBox(height: 32),
-              Builder(builder: (_) {
-                final minSlots = (_unit?.minSlotMins ?? 60) ~/ 60;
-                final metMin = _selectedSlots.length >= minSlots;
-                return ArenaPrimaryButton(
-                  label: metMin
-                      ? 'Confirm ${_selectedSlots.length}hr Booking'
-                      : 'Select ${minSlots - _selectedSlots.length} more hr',
-                  onPressed: (_loading || !metMin) ? () {} : _save,
-                );
-              }),
+              ArenaPrimaryButton(
+                label: _loading ? 'Saving…' : 'Confirm $_startTime – $_endTime Booking',
+                onPressed: _loading ? () {} : _save,
+              ),
             ],
             const SizedBox(height: 24),
           ],
@@ -1902,21 +2152,94 @@ class _FormTextField extends StatelessWidget {
 }
 
 class _StartTimeGrid extends StatelessWidget {
-  const _StartTimeGrid({required this.times, required this.selected, required this.busyTimes, required this.onSelect});
+  const _StartTimeGrid({required this.times, required this.selected, required this.busyTimes, required this.onSelect, this.isGround = false, this.durationMins = 60});
   final List<String> times; final dynamic selected; final Set<String> busyTimes; final ValueChanged<String> onSelect;
+  final bool isGround; final int durationMins;
+
+  String _periodLabel(String hhmm) {
+    final h = int.tryParse(hhmm.split(':').first) ?? 0;
+    if (h < 4) return 'Late Night';
+    if (h < 12) return 'Morning';
+    if (h < 16) return 'Afternoon';
+    if (h < 20) return 'Evening';
+    return 'Night';
+  }
+
+  IconData _periodIcon(String hhmm) {
+    final h = int.tryParse(hhmm.split(':').first) ?? 0;
+    if (h < 4) return Icons.bedtime_rounded;
+    if (h < 12) return Icons.wb_sunny_rounded;
+    if (h < 16) return Icons.wb_cloudy_rounded;
+    if (h < 20) return Icons.wb_twilight_rounded;
+    return Icons.nights_stay_rounded;
+  }
+
+  String _endTime(String start) => _addMinutes(start, durationMins);
+
+  String _fmt12(String hhmm) {
+    final parts = hhmm.split(':');
+    final h = int.tryParse(parts[0]) ?? 0;
+    final m = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+    final suffix = h < 12 ? 'am' : 'pm';
+    final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
+    return m == 0 ? '$h12$suffix' : '$h12:${m.toString().padLeft(2, '0')}$suffix';
+  }
+
   @override
   Widget build(BuildContext context) {
     final selList = selected is List<String> ? selected as List<String> : [selected as String];
+
+    if (isGround) {
+      return Column(
+        children: times.map((t) {
+          final busy = busyTimes.contains(t);
+          final sel = selList.contains(t);
+          final period = _periodLabel(t);
+          final icon = _periodIcon(t);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GestureDetector(
+              onTap: busy ? null : () => onSelect(t),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: sel ? _accent : (busy ? _bg : _surface),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: sel ? _accent : (busy ? _border.withValues(alpha: .3) : _border)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(icon, size: 18, color: sel ? Colors.white : (busy ? _muted.withValues(alpha: .3) : _accent)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(period, style: TextStyle(color: sel ? Colors.white : (busy ? _muted.withValues(alpha: .3) : _text), fontSize: 13, fontWeight: FontWeight.w800, decoration: busy ? TextDecoration.lineThrough : null)),
+                          Text('${_fmt12(t)} – ${_fmt12(_endTime(t))}', style: TextStyle(color: sel ? Colors.white.withOpacity(0.8) : (busy ? _muted.withValues(alpha: .25) : _muted), fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                    if (busy) const Icon(Icons.block_rounded, size: 16, color: _muted),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      );
+    }
+
     return Wrap(spacing: 8, runSpacing: 8, children: times.map((t) {
-      final busy = busyTimes.contains(t); 
+      final busy = busyTimes.contains(t);
       final sel = selList.contains(t);
       return GestureDetector(
         onTap: busy ? null : () => onSelect(t),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: sel ? _accent : (busy ? Colors.transparent : _surface), 
-            borderRadius: BorderRadius.circular(10), 
+            color: sel ? _accent : (busy ? Colors.transparent : _surface),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: sel ? _accent : (busy ? _border.withValues(alpha: .3) : _border))
           ),
           child: Text(t, style: TextStyle(color: sel ? Colors.white : (busy ? _muted.withValues(alpha: .3) : _text), fontSize: 12, fontWeight: FontWeight.w700, decoration: busy ? TextDecoration.lineThrough : null)),

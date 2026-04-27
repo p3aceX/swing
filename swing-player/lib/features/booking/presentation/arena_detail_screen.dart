@@ -4,7 +4,9 @@ import 'package:flutter_host_core/flutter_host_core.dart'
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../../core/theme/app_colors.dart';
+import '../data/player_booking_repository.dart';
 import '../domain/booking_models.dart';
 
 enum BookingDuration { hr1, hr4, hr8, fullDay }
@@ -26,19 +28,36 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
   BookingDuration _selectedDuration = BookingDuration.hr1;
   AvailabilitySlot? _selectedStartSlot;
   final Set<ArenaAddon> _selectedAddons = {};
+  late final Razorpay _razorpay;
 
-  Map<String, List<AvailabilitySlot>> _availability = {};
+  ArenaListing? _arena;
+  PlayerSlotsData? _playerSlots;
   List<ArenaAddon> _addons = [];
+  bool _loadingArena = false;
   bool _loadingAvailability = false;
+  bool _bookingInProgress = false;
+  String? _pendingBookingId;
 
   @override
   void initState() {
     super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
     _loadAddons();
-    if (widget.initialArena != null && widget.initialArena!.units.isNotEmpty) {
-      _selectedUnit = widget.initialArena!.units.first;
-      _loadAvailability();
+    _arena = widget.initialArena;
+    if (_arena != null) {
+      _configureInitialUnit(_arena!);
+    } else {
+      _loadArena();
     }
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
   }
 
   Future<void> _loadAddons() async {
@@ -55,18 +74,46 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
     }
   }
 
+  Future<void> _loadArena() async {
+    setState(() => _loadingArena = true);
+    try {
+      final arena = await ref
+          .read(hostArenaBookingRepositoryProvider)
+          .fetchArenaDetail(widget.arenaId);
+      if (!mounted) return;
+      setState(() {
+        _arena = arena;
+        _loadingArena = false;
+      });
+      _configureInitialUnit(arena);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingArena = false);
+    }
+  }
+
+  void _configureInitialUnit(ArenaListing arena) {
+    if (arena.units.isEmpty) return;
+    setState(() {
+      _selectedUnit = arena.units.first;
+      _selectedDuration = _durationForMinutes(_selectedUnit!.minSlotMins);
+    });
+    _loadAvailability();
+  }
+
   Future<void> _loadAvailability() async {
     if (_selectedUnit == null) return;
     setState(() => _loadingAvailability = true);
     try {
-      final avail =
-          await ref.read(hostArenaBookingRepositoryProvider).fetchAvailability(
+      final slots =
+          await ref.read(hostArenaBookingRepositoryProvider).fetchPlayerSlots(
                 arenaId: widget.arenaId,
                 date: _selectedDate,
+                durationMins: _durationMins,
               );
       if (!mounted) return;
       setState(() {
-        _availability = avail;
+        _playerSlots = slots;
         _loadingAvailability = false;
         _selectedStartSlot = null;
       });
@@ -89,6 +136,15 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
     }
   }
 
+  int get _durationMins => _durationHrs * 60;
+
+  BookingDuration _durationForMinutes(int mins) {
+    if (mins <= 60) return BookingDuration.hr1;
+    if (mins <= 240) return BookingDuration.hr4;
+    if (mins <= 480) return BookingDuration.hr8;
+    return BookingDuration.fullDay;
+  }
+
   ArenaBookingQuote get _pricingQuote {
     if (_selectedUnit == null) {
       return const ArenaBookingQuote(
@@ -100,21 +156,22 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
       );
     }
 
-    final start = _quoteStartDateTime();
-    return ArenaBookingPricing.quote(
-      unit: _selectedUnit!,
-      start: start,
-      durationMins: _durationHrs * 60,
-      addons: _selectedAddons
-          .map(
-            (addon) => ArenaSelectedAddon(
+    final addons = _selectedAddons
+        .map((addon) => ArenaSelectedAddon(
               id: addon.id,
               name: addon.name,
               pricePaise: addon.pricePaise,
               unit: addon.unit,
-            ),
-          )
-          .toList(),
+            ))
+        .toList();
+    // Use backend-computed price when available (already includes weekend + block pricing)
+    final precomputed = _selectedStartSlot?.totalSlotPaise;
+    return ArenaBookingPricing.quote(
+      unit: _selectedUnit!,
+      start: _quoteStartDateTime(),
+      durationMins: _durationMins,
+      addons: addons,
+      precomputedBasePaise: precomputed,
     );
   }
 
@@ -125,6 +182,13 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
   double get _gst => _pricingQuote.gstPaise / 100;
 
   double get _grandTotal => _pricingQuote.totalAmountPaise / 100;
+
+  bool get _isGroundUnit {
+    final t = _selectedUnit?.unitType;
+    return t == 'FULL_GROUND' || t == 'HALF_GROUND';
+  }
+
+  int get _unitMinAdvancePaise => _selectedUnit?.minAdvancePaise ?? 0;
 
   DateTime _quoteStartDateTime() {
     final slot = _selectedStartSlot;
@@ -145,17 +209,56 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
   List<AvailabilitySlot> _selectableSlots(ArenaListing arena) {
     final unit = _selectedUnit;
     if (unit == null) return const [];
-    final resolved = ArenaAvailabilityEngine.buildUnitSlots(
-      date: _selectedDate,
-      unit: unit,
-      arenaOpenTime: arena.openTime,
-      arenaCloseTime: arena.closeTime,
-      apiSlots: _availability[unit.id] ?? const [],
-    );
-    return ArenaAvailabilityEngine.selectableStartSlots(
-      slots: resolved,
-      durationMins: _durationHrs * 60,
-    );
+    final slotsData = _playerSlots;
+    if (slotsData == null) return const [];
+
+    final isNet =
+        unit.unitType == 'CRICKET_NET' || unit.unitType == 'INDOOR_NET';
+    PlayerUnitGroup? group;
+    if (isNet) {
+      group = slotsData.unitGroups
+          .where((g) => g.isNetsGroup)
+          .firstOrNull;
+    } else {
+      group = slotsData.unitGroups
+          .where((g) => g.groupKey == unit.id || g.unitId == unit.id)
+          .firstOrNull;
+    }
+    if (group == null) return const [];
+
+    return group.availableSlots.map((s) {
+      final perHour = _durationMins > 0
+          ? (s.totalAmountPaise * 60 / _durationMins).round()
+          : unit.pricePerHourPaise;
+      return AvailabilitySlot(
+        startTime: s.startTime,
+        endTime: s.endTime,
+        available: true,
+        pricePerHourPaise: perHour,
+        totalSlotPaise: s.totalAmountPaise,
+        assignedUnitId: s.assignedUnitId,
+      );
+    }).toList();
+  }
+
+  int _toMins(String value) {
+    final raw = value.trim();
+    try {
+      final dt =
+          raw.toUpperCase().contains('AM') || raw.toUpperCase().contains('PM')
+              ? DateFormat('h:mm a').parse(raw)
+              : DateFormat('HH:mm').parse(raw);
+      return dt.hour * 60 + dt.minute;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  String _timeAfter(String startTime, int minutes) {
+    final total = _toMins(startTime) + minutes;
+    final hour = (total ~/ 60).toString().padLeft(2, '0');
+    final minute = (total % 60).toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 
   AvailabilitySlot? _matchSelectedSlot(List<AvailabilitySlot> slots) {
@@ -175,9 +278,10 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final arena = widget.initialArena;
-    if (arena == null)
+    final arena = _arena;
+    if (arena == null || _loadingArena) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     final locality = arena.address.split(',').first.trim();
     final selectableSlots = _selectableSlots(arena);
@@ -232,6 +336,8 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
                     onSelect: (unit) {
                       setState(() {
                         _selectedUnit = unit;
+                        _selectedDuration =
+                            _durationForMinutes(unit.minSlotMins);
                         _selectedStartSlot = null;
                       });
                       _loadAvailability();
@@ -242,10 +348,26 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
                   const SizedBox(height: 16),
                   _DurationSelector(
                     selected: _selectedDuration,
-                    onSelect: (d) => setState(() {
-                      _selectedDuration = d;
-                      _selectedStartSlot = null;
-                    }),
+                    unit: _selectedUnit,
+                    isGround: _isGroundUnit,
+                    onSelect: (d) {
+                      final unit = _selectedUnit;
+                      final mins = _durationMinsFor(d);
+                      if (unit != null && mins < unit.minSlotMins) {
+                        _showSnack(
+                            'Minimum booking is ${unit.minSlotMins ~/ 60}hr');
+                        return;
+                      }
+                      if (unit != null && mins > unit.maxSlotMins) {
+                        _showSnack('Max ${unit.maxSlotMins ~/ 60}hr booking');
+                        return;
+                      }
+                      setState(() {
+                        _selectedDuration = d;
+                        _selectedStartSlot = null;
+                      });
+                      _loadAvailability();
+                    },
                   ),
                   const SizedBox(height: 40),
                   _sectionTitle('3. PICK DATE & START TIME'),
@@ -274,6 +396,7 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
                     slots: selectableSlots,
                     selected: selectedStartSlot,
                     onSelect: (s) => setState(() => _selectedStartSlot = s),
+                    isGround: _isGroundUnit,
                   ),
                   const SizedBox(height: 40),
                   if (_addons.isNotEmpty) ...[
@@ -322,20 +445,53 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
               addons: _addonTotal,
               gst: _gst,
               total: _grandTotal,
-              duration: _durationHrs,
+              durationMins: _durationMins,
+              advancePaise: _unitMinAdvancePaise,
               onReserve: _showPaymentOptions,
+              loading: _bookingInProgress,
             ),
     );
   }
 
+  int _durationMinsFor(BookingDuration duration) {
+    switch (duration) {
+      case BookingDuration.hr1:
+        return 60;
+      case BookingDuration.hr4:
+        return 240;
+      case BookingDuration.hr8:
+        return 480;
+      case BookingDuration.fullDay:
+        return 720;
+    }
+  }
+
   void _showPaymentOptions() {
+    final unit = _selectedUnit;
+    final slot = _selectedStartSlot;
+    if (unit == null || slot == null) return;
+    if (_durationMins < unit.minSlotMins) {
+      _showSnack('Minimum booking is ${unit.minSlotMins ~/ 60}hr');
+      return;
+    }
+    if (_durationMins > unit.maxSlotMins) {
+      _showSnack('Max ${unit.maxSlotMins ~/ 60}hr booking');
+      return;
+    }
     showModalBottomSheet(
       context: context,
       backgroundColor: context.bg,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       builder: (context) => _PaymentOptionsSheet(
+        unitName: unit.name,
+        date: _selectedDate,
+        startTime: slot.startTime,
+        endTime: _timeAfter(slot.startTime, _durationMins),
+        base: _basePrice,
+        gst: _gst,
         total: _grandTotal,
+        advancePaise: _unitMinAdvancePaise,
         onCash: () => _processBooking(isCash: true),
         onOnline: () => _processBooking(isCash: false),
       ),
@@ -344,11 +500,141 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
 
   Future<void> _processBooking({required bool isCash}) async {
     Navigator.pop(context);
-    // TODO: Implement actual repository calls for booking
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isCash
-            ? 'Booking requested (Pay at Arena)'
-            : 'Redirecting to payment...')));
+    if (isCash) {
+      _showSnack(
+          'Online-only bookings supported. Walk-ins accepted at the arena.');
+      return;
+    }
+    final unit = _selectedUnit;
+    final slot = _selectedStartSlot;
+    if (unit == null || slot == null) return;
+    setState(() => _bookingInProgress = true);
+    final repo = ref.read(playerBookingRepositoryProvider);
+    final bookingDate = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final endTime = _timeAfter(slot.startTime, _durationMins);
+    // Use assignedUnitId from the slot (important for NETS grouping where
+    // the backend picks a specific net unit at slot-generation time).
+    final effectiveUnitId =
+        slot.assignedUnitId?.isNotEmpty == true ? slot.assignedUnitId! : unit.id;
+    try {
+      await repo.holdSlot(
+        arenaUnitId: effectiveUnitId,
+        bookingDate: bookingDate,
+        startTime: slot.startTime,
+        endTime: endTime,
+      );
+      if (!mounted) return;
+      final confirmed = await _showHeldSlotSheet(
+        unitName: unit.name,
+        date: _selectedDate,
+        startTime: slot.startTime,
+        endTime: endTime,
+      );
+      if (confirmed != true) {
+        if (mounted) setState(() => _bookingInProgress = false);
+        return;
+      }
+      final booking = await repo.createBooking(
+        arenaUnitId: effectiveUnitId,
+        bookingDate: bookingDate,
+        startTime: slot.startTime,
+        endTime: endTime,
+        totalPricePaise: _pricingQuote.totalAmountPaise,
+      );
+      _pendingBookingId = booking.id;
+      final order = await repo.createPaymentOrder(booking.id);
+      if (order.orderId.isEmpty || order.amountPaise <= 0) {
+        throw Exception('Could not create payment order.');
+      }
+      _razorpay.open({
+        'key': order.key,
+        'amount': order.amountPaise,
+        'currency': order.currency,
+        'name': 'Swing Arena Booking',
+        'description': '${_arena?.name ?? 'Arena'} - ${unit.name}',
+        'order_id': order.orderId,
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _bookingInProgress = false);
+      final msg = repo.messageFor(error, fallback: 'Could not start booking.');
+      // If the slot was just taken by another user, refresh so the UI reflects reality
+      if (msg.toLowerCase().contains('already booked') ||
+          msg.toLowerCase().contains('too soon') ||
+          msg.toLowerCase().contains('slot')) {
+        setState(() => _selectedStartSlot = null);
+        _loadAvailability();
+      }
+      _showSnack(msg);
+    }
+  }
+
+  Future<bool?> _showHeldSlotSheet({
+    required String unitName,
+    required DateTime date,
+    required String startTime,
+    required String endTime,
+  }) {
+    return showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: context.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (context) => _HeldSlotSheet(
+        unitName: unitName,
+        date: date,
+        startTime: startTime,
+        endTime: endTime,
+        base: _basePrice,
+        gst: _gst,
+        total: _grandTotal,
+        advancePaise: _unitMinAdvancePaise,
+      ),
+    );
+  }
+
+  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
+    final bookingId = _pendingBookingId;
+    if (bookingId == null) return;
+    try {
+      final booking =
+          await ref.read(playerBookingRepositoryProvider).verifyPayment(
+                bookingId: bookingId,
+                razorpayPaymentId: response.paymentId ?? '',
+                razorpayOrderId: response.orderId ?? '',
+                razorpaySignature: response.signature ?? '',
+              );
+      if (!mounted) return;
+      setState(() => _bookingInProgress = false);
+      context.go('/booking/success', extra: booking);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _bookingInProgress = false);
+      _showSnack(ref.read(playerBookingRepositoryProvider).messageFor(
+            error,
+            fallback: 'Payment verification failed.',
+          ));
+      context.push('/bookings/$bookingId');
+    }
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    if (mounted) setState(() => _bookingInProgress = false);
+    final message = response.message?.trim().isNotEmpty == true
+        ? response.message!.trim()
+        : 'Payment was not completed.';
+    _showSnack(message);
+  }
+
+  void _onExternalWallet(ExternalWalletResponse response) {
+    _showSnack('${response.walletName ?? 'Wallet'} selected');
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _sectionTitle(String title) {
@@ -496,46 +782,59 @@ class _UnitSelector extends StatelessWidget {
 }
 
 class _DurationSelector extends StatelessWidget {
-  const _DurationSelector({required this.selected, required this.onSelect});
+  const _DurationSelector({
+    required this.selected,
+    required this.unit,
+    required this.onSelect,
+    this.isGround = false,
+  });
   final BookingDuration selected;
+  final ArenaUnitOption? unit;
   final ValueChanged<BookingDuration> onSelect;
+  final bool isGround;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _durationChip('1h', BookingDuration.hr1),
-        _durationChip('4h', BookingDuration.hr4),
-        _durationChip('8h', BookingDuration.hr8),
-        _durationChip('Day', BookingDuration.fullDay),
-      ],
-    );
-  }
+    const all = [
+      ('1h', BookingDuration.hr1, 60),
+      ('4h', BookingDuration.hr4, 240),
+      ('8h', BookingDuration.hr8, 480),
+      ('Day', BookingDuration.fullDay, 720),
+    ];
+    final visible = all.where((item) {
+      final mins = item.$3;
+      if (unit == null) return true;
+      return mins >= unit!.minSlotMins && mins <= unit!.maxSlotMins;
+    }).toList();
 
-  Widget _durationChip(String label, BookingDuration d) {
-    final isSelected = selected == d;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => onSelect(d),
-        child: Container(
-          margin: const EdgeInsets.only(right: 8),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color:
-                    isSelected ? Colors.white : Colors.grey.withOpacity(0.3)),
+    return Row(
+      children: visible.map((item) {
+        final isSelected = selected == item.$2;
+        return Expanded(
+          child: GestureDetector(
+            onTap: () => onSelect(item.$2),
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: isSelected
+                        ? Colors.white
+                        : Colors.grey.withOpacity(0.3)),
+              ),
+              child: Center(
+                child: Text(item.$1,
+                    style: TextStyle(
+                        color: isSelected ? Colors.black : Colors.grey,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13)),
+              ),
+            ),
           ),
-          child: Center(
-            child: Text(label,
-                style: TextStyle(
-                    color: isSelected ? Colors.black : Colors.grey,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 13)),
-          ),
-        ),
-      ),
+        );
+      }).toList(),
     );
   }
 }
@@ -575,26 +874,94 @@ class _DatePicker extends StatelessWidget {
 }
 
 class _SlotPicker extends StatelessWidget {
-  const _SlotPicker(
-      {required this.loading,
-      required this.slots,
-      this.selected,
-      required this.onSelect});
+  const _SlotPicker({
+    required this.loading,
+    required this.slots,
+    this.selected,
+    required this.onSelect,
+    this.isGround = false,
+  });
   final bool loading;
   final List<AvailabilitySlot> slots;
   final AvailabilitySlot? selected;
   final ValueChanged<AvailabilitySlot> onSelect;
+  final bool isGround;
 
   @override
   Widget build(BuildContext context) {
-    if (loading)
+    if (loading) {
       return const Center(
           child: Padding(
               padding: EdgeInsets.all(20),
               child: CircularProgressIndicator(strokeWidth: 2)));
-    if (slots.isEmpty)
+    }
+    if (slots.isEmpty) {
       return const Text('No slots available.',
           style: TextStyle(color: Colors.grey, fontSize: 13));
+    }
+
+    if (isGround) {
+      return Column(
+        children: slots.map((s) {
+          final isSel = selected == s;
+          final period = _slotPeriod(s.startTime);
+          final icon = _slotPeriodIcon(s.startTime);
+          final price = s.totalSlotPaise != null
+              ? '₹${(s.totalSlotPaise! / 100).toStringAsFixed(0)}'
+              : '';
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: GestureDetector(
+              onTap: () => onSelect(s),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isSel ? context.accent : context.panel.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: isSel ? context.accent : context.stroke.withOpacity(0.15)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(icon,
+                        color: isSel ? Colors.white : context.accent, size: 20),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(period,
+                              style: TextStyle(
+                                  color: isSel ? Colors.white : context.fg,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15)),
+                          const SizedBox(height: 2),
+                          Text(
+                              '${_fmt12h(s.startTime)} – ${_fmt12h(s.endTime)}',
+                              style: TextStyle(
+                                  color: isSel
+                                      ? Colors.white.withOpacity(0.8)
+                                      : context.fgSub,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                    if (price.isNotEmpty)
+                      Text(price,
+                          style: TextStyle(
+                              color: isSel ? Colors.white : context.fg,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16)),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      );
+    }
 
     return Wrap(
       spacing: 8,
@@ -718,16 +1085,27 @@ class _SliverHeader extends StatelessWidget {
 }
 
 class _BookingSummarySheet extends StatelessWidget {
-  const _BookingSummarySheet(
-      {required this.base,
-      required this.addons,
-      required this.gst,
-      required this.total,
-      required this.duration,
-      required this.onReserve});
+  const _BookingSummarySheet({
+    required this.base,
+    required this.addons,
+    required this.gst,
+    required this.total,
+    required this.durationMins,
+    required this.advancePaise,
+    required this.loading,
+    required this.onReserve,
+  });
   final double base, addons, gst, total;
-  final int duration;
+  final int durationMins;
+  final int advancePaise;
+  final bool loading;
   final VoidCallback onReserve;
+
+  String get _durationLabel {
+    if (durationMins >= 720) return 'FULL DAY';
+    final hrs = durationMins ~/ 60;
+    return 'FOR $hrs HOUR${hrs == 1 ? '' : 'S'}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -749,6 +1127,14 @@ class _BookingSummarySheet extends StatelessWidget {
           _summaryRow('Subtotal', '₹${(base + addons).toStringAsFixed(2)}'),
           const SizedBox(height: 4),
           _summaryRow('GST (18%)', '₹${gst.toStringAsFixed(2)}'),
+          if (advancePaise > 0) ...[
+            const SizedBox(height: 4),
+            _summaryRow(
+              'Advance required',
+              '₹${(advancePaise / 100).toStringAsFixed(0)}',
+              highlight: true,
+            ),
+          ],
           const Divider(height: 24),
           Row(
             children: [
@@ -761,7 +1147,7 @@ class _BookingSummarySheet extends StatelessWidget {
                             color: context.fg,
                             fontSize: 24,
                             fontWeight: FontWeight.w900)),
-                    Text('FOR $duration HOURS',
+                    Text(_durationLabel,
                         style: TextStyle(
                             color: context.accent,
                             fontSize: 10,
@@ -771,7 +1157,7 @@ class _BookingSummarySheet extends StatelessWidget {
                 ),
               ),
               ElevatedButton(
-                onPressed: onReserve,
+                onPressed: loading ? null : onReserve,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: context.accent,
                   foregroundColor: Colors.white,
@@ -780,9 +1166,15 @@ class _BookingSummarySheet extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
                 ),
-                child: const Text('Reserve Now',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                child: loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Reserve Now',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w900)),
               ),
             ],
           ),
@@ -791,25 +1183,43 @@ class _BookingSummarySheet extends StatelessWidget {
     );
   }
 
-  Widget _summaryRow(String label, String val) {
+  Widget _summaryRow(String label, String val, {bool highlight = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label,
-            style: const TextStyle(
-                color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w600)),
+            style: TextStyle(
+                color: highlight ? Colors.orange : Colors.grey,
+                fontSize: 13,
+                fontWeight: FontWeight.w600)),
         Text(val,
-            style: const TextStyle(
-                color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: highlight ? Colors.orange : Colors.grey,
+                fontSize: 13,
+                fontWeight: FontWeight.w700)),
       ],
     );
   }
 }
 
 class _PaymentOptionsSheet extends StatelessWidget {
-  const _PaymentOptionsSheet(
-      {required this.total, required this.onCash, required this.onOnline});
-  final double total;
+  const _PaymentOptionsSheet({
+    required this.unitName,
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.base,
+    required this.gst,
+    required this.total,
+    required this.advancePaise,
+    required this.onCash,
+    required this.onOnline,
+  });
+  final String unitName;
+  final DateTime date;
+  final String startTime, endTime;
+  final double base, gst, total;
+  final int advancePaise;
   final VoidCallback onCash, onOnline;
 
   @override
@@ -830,12 +1240,37 @@ class _PaymentOptionsSheet extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.5)),
             const SizedBox(height: 4),
-            Text('Final amount to pay: ₹${total.toStringAsFixed(2)}',
+            Text(
+                '$unitName • ${DateFormat('d MMM').format(date)} • $startTime-$endTime',
                 style: const TextStyle(
                     color: Colors.grey,
                     fontSize: 14,
                     fontWeight: FontWeight.w600)),
-            const SizedBox(height: 32),
+            const SizedBox(height: 18),
+            _sheetRow('Base', '₹${base.toStringAsFixed(2)}'),
+            _sheetRow('GST', '₹${gst.toStringAsFixed(2)}'),
+            _sheetRow('Total', '₹${total.toStringAsFixed(2)}', strong: true),
+            if (advancePaise > 0) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded, color: Colors.orange, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Advance of ₹${(advancePaise / 100).toStringAsFixed(0)} required at booking',
+                      style: const TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 24),
             _PaymentTile(
                 icon: Icons.flash_on_rounded,
                 title: 'Pay Online',
@@ -850,6 +1285,132 @@ class _PaymentOptionsSheet extends StatelessWidget {
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _sheetRow(String label, String value, {bool strong = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w600)),
+          Text(value,
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeldSlotSheet extends StatelessWidget {
+  const _HeldSlotSheet({
+    required this.unitName,
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.base,
+    required this.gst,
+    required this.total,
+    required this.advancePaise,
+  });
+
+  final String unitName;
+  final DateTime date;
+  final String startTime, endTime;
+  final double base, gst, total;
+  final int advancePaise;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Center(child: _Handle()),
+            const SizedBox(height: 22),
+            Text('Slot held for 10 min',
+                style: TextStyle(
+                    color: context.fg,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900)),
+            const SizedBox(height: 8),
+            Text(
+              '$unitName • ${DateFormat('EEEE, d MMM').format(date)} • $startTime-$endTime',
+              style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 22),
+            _HeldRow('Base', '₹${base.toStringAsFixed(2)}'),
+            _HeldRow('GST', '₹${gst.toStringAsFixed(2)}'),
+            _HeldRow('Total', '₹${total.toStringAsFixed(2)}', strong: true),
+            if (advancePaise > 0) ...[
+              const SizedBox(height: 8),
+              _HeldRow('Advance required', '₹${(advancePaise / 100).toStringAsFixed(0)}', accent: true),
+            ],
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.accent,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Confirm'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeldRow extends StatelessWidget {
+  const _HeldRow(this.label, this.value, {this.strong = false, this.accent = false});
+  final String label, value;
+  final bool strong;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = accent ? Colors.orange : (strong ? context.fg : context.fgSub);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontWeight: strong || accent ? FontWeight.w700 : FontWeight.w600)),
+          Text(value,
+              style: TextStyle(
+                  color: color,
+                  fontWeight: strong || accent ? FontWeight.w900 : FontWeight.w700)),
+        ],
       ),
     );
   }
@@ -921,4 +1482,33 @@ class _PaymentTile extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Ground slot period helpers ──────────────────────────────────────────────
+
+String _slotPeriod(String hhmm) {
+  final h = int.tryParse(hhmm.split(':').first) ?? 0;
+  if (h < 4) return 'Late Night';
+  if (h < 12) return 'Morning';
+  if (h < 16) return 'Afternoon';
+  if (h < 20) return 'Evening';
+  return 'Night';
+}
+
+IconData _slotPeriodIcon(String hhmm) {
+  final h = int.tryParse(hhmm.split(':').first) ?? 0;
+  if (h < 4) return Icons.bedtime_rounded;
+  if (h < 12) return Icons.wb_sunny_rounded;
+  if (h < 16) return Icons.wb_cloudy_rounded;
+  if (h < 20) return Icons.wb_twilight_rounded;
+  return Icons.nights_stay_rounded;
+}
+
+String _fmt12h(String hhmm) {
+  final parts = hhmm.split(':');
+  final h = int.tryParse(parts[0]) ?? 0;
+  final m = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+  final suffix = h < 12 ? 'am' : 'pm';
+  final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
+  return m == 0 ? '$h12$suffix' : '$h12:${m.toString().padLeft(2, '0')}$suffix';
 }

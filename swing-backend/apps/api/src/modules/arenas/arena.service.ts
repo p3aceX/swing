@@ -738,8 +738,9 @@ export class ArenaService {
 
     const computePricePaise = (unit: any): number => {
       let base: number
-      if (durationMins === 240 && unit.price4HrPaise) base = unit.price4HrPaise
+      if (durationMins >= 720 && unit.priceFullDayPaise) base = unit.priceFullDayPaise
       else if (durationMins === 480 && unit.price8HrPaise) base = unit.price8HrPaise
+      else if (durationMins === 240 && unit.price4HrPaise) base = unit.price4HrPaise
       else base = Math.round((unit.pricePerHourPaise * durationMins) / 60)
       const mult = isWeekend ? (unit.weekendMultiplier || 1.0) : 1.0
       return Math.round(base * mult)
