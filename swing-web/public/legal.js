@@ -8,7 +8,7 @@
   <!-- Motion arc: a stylized S formed by the bat's swing path -->
   <path d="M 78 16 C 56 16, 44 30, 44 44 C 44 54, 52 60, 64 62 C 76 64, 84 68, 84 78 C 84 90, 70 96, 50 96"
         fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round"/>
-  <!-- Cricket ball at point of impact (top-left of S) -->
+  <!-- Sports ball at point of impact (top-left of S) -->
   <circle cx="22" cy="22" r="10" fill="#FF3D5A"/>
   <!-- Ball seam -->
   <path d="M 14 22 Q 22 17 30 22" fill="none" stroke="#0A0B0A" stroke-width="1.2" stroke-linecap="round" opacity=".55"/>

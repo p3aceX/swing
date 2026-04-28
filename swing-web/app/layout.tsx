@@ -14,27 +14,49 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Swing Cricket",
-    template: "%s | Swing Cricket",
+    default: "Swing",
+    template: "%s | Swing",
   },
-  description: "Follow live cricket tournaments, scores, brackets and highlights on Swing Cricket.",
+  description:
+    "Swing is a sports ecosystem app for players, academies, coaches, facilities, organisers and broadcasters. Score matches, manage training, book venues, stream events and earn IP Points across sports.",
   metadataBase: new URL("https://www.swingcricketapp.com"),
+  keywords: [
+    "sports ecosystem app",
+    "sports scoring app",
+    "sports academy management",
+    "venue booking",
+    "tournament management",
+    "live scoring",
+    "player stats",
+    "Swing app",
+  ],
+  authors: [{ name: "Cricverse SportsTech Pvt Ltd" }],
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
-    siteName: "Swing Cricket",
+    title: "Swing — India's sports ecosystem app.",
+    description:
+      "One connected app for players, academies, coaches, facilities, organisers and broadcasters across sports.",
+    siteName: "Swing",
     type: "website",
     locale: "en_US",
+    url: "/",
     images: [
       {
-        url: "/og-default.png",
+        url: "/assets/logo-light.png",
         width: 1200,
         height: 630,
-        alt: "Swing Cricket",
+        alt: "Swing",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    site: "@swingcricket",
+    title: "Swing — India's sports ecosystem app.",
+    description:
+      "Score, train, book, stream and manage sport on one connected ecosystem.",
+    images: ["/assets/logo-light.png"],
   },
 };
 
