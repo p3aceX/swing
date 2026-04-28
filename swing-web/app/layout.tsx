@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "Swing — India's sports ecosystem app.",
+    title: "Swing | India's sports ecosystem app.",
     description:
       "One connected app for players, academies, coaches, facilities, organisers and broadcasters across sports.",
     siteName: "Swing",
@@ -53,7 +53,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Swing — India's sports ecosystem app.",
+    title: "Swing | India's sports ecosystem app.",
     description:
       "Score, train, book, stream and manage sport on one connected ecosystem.",
     images: ["/assets/logo-light.png"],

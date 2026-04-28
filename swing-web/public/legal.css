@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────
-   Swing — Legal page styles (Terms, Privacy, etc.)
+   Swing, Legal page styles (Terms, Privacy, etc.)
    Shares tokens + chrome with index.html
    ───────────────────────────────────────────────────── */
 
@@ -148,7 +148,7 @@ a { color: inherit; text-decoration: none; }
 }
 .legal-meta strong { color: var(--fg); font-weight: 600; }
 
-/* ──── BODY LAYOUT — TOC + content ──── */
+/* ──── BODY LAYOUT, TOC + content ──── */
 .legal-body {
   display: grid;
   grid-template-columns: 240px 1fr;

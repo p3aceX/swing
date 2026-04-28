@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────
-   Swing — Legal page chrome (nav + footer + JS)
+   Swing, Legal page chrome (nav + footer + JS)
    Uses document.write for inline injection.
    ───────────────────────────────────────────── */
 
