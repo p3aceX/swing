@@ -2769,4 +2769,87 @@ startRealtime();
       },
     });
   });
+
+  // ── Public Arena Page ─────────────────────────────────────────────────────
+
+  // GET /public/arena/:citySlug/:arenaSlug  OR  /public/arena/slug/:customSlug
+  app.get('/arena/:citySlug/:arenaSlug', async (request, reply) => {
+    const { citySlug, arenaSlug } = request.params as { citySlug: string; arenaSlug: string }
+    const arena = await prisma.arena.findFirst({
+      where: {
+        OR: [
+          { citySlug, arenaSlug, isPublicPage: true, isActive: true },
+          { customSlug: arenaSlug, isPublicPage: true, isActive: true },
+        ],
+      },
+      include: {
+        units: {
+          where: { isActive: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    })
+    if (!arena) return reply.code(404).send({ success: false, error: 'Arena not found' })
+    return reply.send({ success: true, data: arena })
+  })
+
+  // GET /public/arena/:citySlug/:arenaSlug/slots?date=YYYY-MM-DD&unitType=CRICKET_NET
+  app.get('/arena/:citySlug/:arenaSlug/slots', async (request, reply) => {
+    const { citySlug, arenaSlug } = request.params as { citySlug: string; arenaSlug: string }
+    const { date, unitType } = request.query as { date?: string; unitType?: string }
+
+    const arena = await prisma.arena.findFirst({
+      where: {
+        OR: [
+          { citySlug, arenaSlug, isPublicPage: true, isActive: true },
+          { customSlug: arenaSlug, isPublicPage: true, isActive: true },
+        ],
+      },
+      include: {
+        units: {
+          where: {
+            isActive: true,
+            ...(unitType ? { unitType: unitType as any } : {}),
+          },
+        },
+      },
+    })
+    if (!arena) return reply.code(404).send({ success: false, error: 'Arena not found' })
+
+    const bookingDate = date ? new Date(date) : new Date()
+    const existingBookings = await prisma.slotBooking.findMany({
+      where: {
+        arenaId: arena.id,
+        date: bookingDate,
+        status: { in: ['HELD', 'PENDING_PAYMENT', 'CONFIRMED', 'CHECKED_IN'] },
+      },
+      select: { unitId: true, startTime: true, endTime: true },
+    })
+
+    const bookedByUnit: Record<string, { startTime: string; endTime: string }[]> = {}
+    for (const b of existingBookings) {
+      if (!bookedByUnit[b.unitId]) bookedByUnit[b.unitId] = []
+      bookedByUnit[b.unitId].push({ startTime: b.startTime, endTime: b.endTime })
+    }
+
+    return reply.send({
+      success: true,
+      data: {
+        arena: { id: arena.id, name: arena.name, openTime: arena.openTime, closeTime: arena.closeTime },
+        units: arena.units.map(u => ({
+          id: u.id,
+          name: u.name,
+          unitType: u.unitType,
+          netType: u.netType,
+          pricePerHourPaise: u.pricePerHourPaise,
+          minSlotMins: u.minSlotMins,
+          maxSlotMins: u.maxSlotMins,
+          slotIncrementMins: u.slotIncrementMins,
+          minBulkDays: (u as any).minBulkDays ?? null,
+          bulkDayRatePaise: (u as any).bulkDayRatePaise ?? null,
+          bookedSlots: bookedByUnit[u.id] ?? [],
+        })),
+      },
+    })
+  })
 }

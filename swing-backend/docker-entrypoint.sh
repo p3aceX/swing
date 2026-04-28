@@ -51,6 +51,13 @@ run_migrations() {
     # All statements use IF NOT EXISTS so this is safe to run repeatedly
     npx prisma db execute --file packages/db/prisma/migrations/20260409_library_entities/migration.sql --schema "$SCHEMA" || true
 
+    # The 20260428_unit_booking_rules migration previously failed with wrong table name
+    # ("arena_units" vs "ArenaUnit"). Roll it back to clear the failed state, then execute
+    # the corrected SQL directly and mark as applied so migrate deploy proceeds cleanly.
+    npx prisma migrate resolve --rolled-back 20260428_unit_booking_rules --schema "$SCHEMA" || true
+    npx prisma db execute --file packages/db/prisma/migrations/20260428_unit_booking_rules/migration.sql --schema "$SCHEMA" || true
+    npx prisma migrate resolve --applied 20260428_unit_booking_rules --schema "$SCHEMA" || true
+
     echo "Running final check..."
     npx prisma migrate deploy --schema "$SCHEMA"
     echo "Database synchronization complete."

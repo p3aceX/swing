@@ -9,6 +9,8 @@ type NotificationPreferenceKey =
   | 'rankUpdates'
   | 'matchResults'
   | 'productAnnouncements'
+  | 'arenaBookings'
+  | 'bookingReminders'
 
 export class NotificationService {
   private async getOrCreatePreferences(userId: string) {
@@ -80,6 +82,8 @@ export class NotificationService {
     rankUpdates?: boolean
     matchResults?: boolean
     productAnnouncements?: boolean
+    arenaBookings?: boolean
+    bookingReminders?: boolean
   }) {
     return prisma.notificationPreference.upsert({
       where: { userId },
@@ -242,5 +246,98 @@ export class NotificationService {
     }
 
     return { sent: notifs.count }
+  }
+
+  async notifyBookingConfirmed(booking: {
+    id: string
+    arenaId: string
+    unitId: string
+    date: Date
+    startTime: string
+    endTime: string
+    bookedById: string
+  }) {
+    const [arena, unit, bookedBy] = await Promise.all([
+      prisma.arena.findUnique({ where: { id: booking.arenaId }, select: { name: true, ownerId: true } }),
+      prisma.arenaUnit.findUnique({ where: { id: booking.unitId }, select: { name: true } }),
+      prisma.playerProfile.findUnique({ where: { id: booking.bookedById }, select: { userId: true, name: true } }),
+    ])
+    if (!arena || !unit || !bookedBy) return
+
+    const dateStr = booking.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+    const slotStr = `${booking.startTime} – ${booking.endTime}`
+
+    // Notify player
+    await this.createNotification(bookedBy.userId, {
+      type: 'BOOKING_CONFIRMED',
+      title: 'Booking Confirmed!',
+      body: `${unit.name} at ${arena.name} · ${dateStr} · ${slotStr}`,
+      entityType: 'booking',
+      entityId: booking.id,
+      sendPush: true,
+      preferenceKey: 'arenaBookings',
+    })
+
+    // Notify arena owner
+    const owner = await prisma.arenaOwnerProfile.findUnique({
+      where: { id: arena.ownerId },
+      select: { userId: true },
+    })
+    if (owner) {
+      await this.createNotification(owner.userId, {
+        type: 'NEW_BOOKING',
+        title: 'New Booking',
+        body: `${bookedBy.name ?? 'Someone'} booked ${unit.name} · ${dateStr} · ${slotStr}`,
+        entityType: 'booking',
+        entityId: booking.id,
+        sendPush: true,
+        preferenceKey: 'arenaBookings',
+      })
+    }
+  }
+
+  async notifyBookingCancelled(booking: {
+    id: string
+    arenaId: string
+    unitId: string
+    date: Date
+    startTime: string
+    endTime: string
+    bookedById: string
+  }) {
+    const [arena, unit, bookedBy] = await Promise.all([
+      prisma.arena.findUnique({ where: { id: booking.arenaId }, select: { name: true, ownerId: true } }),
+      prisma.arenaUnit.findUnique({ where: { id: booking.unitId }, select: { name: true } }),
+      prisma.playerProfile.findUnique({ where: { id: booking.bookedById }, select: { userId: true, name: true } }),
+    ])
+    if (!arena || !unit || !bookedBy) return
+
+    const dateStr = booking.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+
+    await this.createNotification(bookedBy.userId, {
+      type: 'BOOKING_CANCELLED',
+      title: 'Booking Cancelled',
+      body: `${unit.name} at ${arena.name} on ${dateStr} has been cancelled`,
+      entityType: 'booking',
+      entityId: booking.id,
+      sendPush: true,
+      preferenceKey: 'arenaBookings',
+    })
+
+    const owner = await prisma.arenaOwnerProfile.findUnique({
+      where: { id: arena.ownerId },
+      select: { userId: true },
+    })
+    if (owner) {
+      await this.createNotification(owner.userId, {
+        type: 'BOOKING_CANCELLED',
+        title: 'Booking Cancelled',
+        body: `${bookedBy.name ?? 'A player'} cancelled ${unit.name} on ${dateStr}`,
+        entityType: 'booking',
+        entityId: booking.id,
+        sendPush: true,
+        preferenceKey: 'arenaBookings',
+      })
+    }
   }
 }

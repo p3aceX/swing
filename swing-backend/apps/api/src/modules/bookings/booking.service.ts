@@ -1,6 +1,7 @@
 import { prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { holdSlot, releaseSlot, isSlotHeld } from '../../lib/redis'
+import { NotificationService } from '../notifications/notification.service'
 import Razorpay from 'razorpay'
 import crypto from 'crypto'
 
@@ -85,6 +86,10 @@ export class BookingService {
     endTime: string
     totalPricePaise: number
     notes?: string
+    endDate?: string
+    isBulkBooking?: boolean
+    bulkDayRatePaise?: number
+    bookingSource?: string
   }) {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
     if (!player) throw Errors.notFound('Player profile')
@@ -132,7 +137,11 @@ export class BookingService {
         status: 'PENDING_PAYMENT',
         paymentMode: 'ONLINE',
         notes: data.notes,
-      },
+        ...(data.endDate ? { endDate: this.startOfDay(data.endDate) } : {}),
+        ...(data.isBulkBooking !== undefined ? { isBulkBooking: data.isBulkBooking } : {}),
+        ...(data.bulkDayRatePaise !== undefined ? { bulkDayRatePaise: data.bulkDayRatePaise } : {}),
+        ...(data.bookingSource ? { bookingSource: data.bookingSource } : {}),
+      } as any,
       include: { unit: { include: { arena: true } } },
     })
 
@@ -247,6 +256,26 @@ export class BookingService {
         : []),
     ])
 
+    if (payment.slotBookingId) {
+      const confirmedBooking = await prisma.slotBooking.findUnique({ where: { id: payment.slotBookingId } })
+      if (confirmedBooking) {
+        try {
+          const notifSvc = new NotificationService()
+          await notifSvc.notifyBookingConfirmed({
+            id: confirmedBooking.id,
+            arenaId: confirmedBooking.arenaId,
+            unitId: confirmedBooking.unitId,
+            date: confirmedBooking.date,
+            startTime: confirmedBooking.startTime,
+            endTime: confirmedBooking.endTime,
+            bookedById: confirmedBooking.bookedById,
+          })
+        } catch (e) {
+          console.error('[Notification] bookingConfirmed error:', e)
+        }
+      }
+    }
+
     return { payment: updatedPayment }
   }
 
@@ -305,6 +334,10 @@ export class BookingService {
     amountPaise: number
     advancePaise?: number   // 0 = collect later, ==amountPaise = fully paid
     notes?: string
+    endDate?: string
+    isBulkBooking?: boolean
+    bulkDayRatePaise?: number
+    bookingSource?: string
   }) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
@@ -363,7 +396,11 @@ export class BookingService {
         paymentMode: hasAdvance ? data.paymentMode : null,
         paidAt: fullyPaid ? new Date() : null,
         notes: data.notes,
-      },
+        bookingSource: data.bookingSource ?? 'OFFLINE',
+        ...(data.endDate ? { endDate: this.startOfDay(data.endDate) } : {}),
+        ...(data.isBulkBooking !== undefined ? { isBulkBooking: data.isBulkBooking } : {}),
+        ...(data.bulkDayRatePaise !== undefined ? { bulkDayRatePaise: data.bulkDayRatePaise } : {}),
+      } as any,
       include: { unit: true },
     })
 
@@ -444,10 +481,29 @@ export class BookingService {
       }),
     ])
 
-    return prisma.slotBooking.findUnique({
+    const confirmedManualBooking = await prisma.slotBooking.findUnique({
       where: { id: bookingId },
       include: { unit: true, payment: true },
     })
+
+    if (confirmedManualBooking) {
+      try {
+        const notifSvc = new NotificationService()
+        await notifSvc.notifyBookingConfirmed({
+          id: confirmedManualBooking.id,
+          arenaId: confirmedManualBooking.arenaId,
+          unitId: confirmedManualBooking.unitId,
+          date: confirmedManualBooking.date,
+          startTime: confirmedManualBooking.startTime,
+          endTime: confirmedManualBooking.endTime,
+          bookedById: confirmedManualBooking.bookedById,
+        })
+      } catch (e) {
+        console.error('[Notification] bookingConfirmed error:', e)
+      }
+    }
+
+    return confirmedManualBooking
   }
 
   // ─── Owner: cancel any booking ───────────────────────────────────────────
@@ -485,6 +541,21 @@ export class BookingService {
       } catch {
         // refund failure shouldn't block cancellation; log in production
       }
+    }
+
+    try {
+      const notifSvc = new NotificationService()
+      await notifSvc.notifyBookingCancelled({
+        id: booking.id,
+        arenaId: booking.arenaId,
+        unitId: booking.unitId,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        bookedById: booking.bookedById,
+      })
+    } catch (e) {
+      console.error('[Notification] bookingCancelled error:', e)
     }
 
     return updated
@@ -782,6 +853,21 @@ export class BookingService {
           data: { status: 'REFUND_PENDING', refundReason: 'Player cancelled' },
         })
       } catch { /* refund failure non-blocking */ }
+    }
+
+    try {
+      const notifSvc = new NotificationService()
+      await notifSvc.notifyBookingCancelled({
+        id: booking.id,
+        arenaId: booking.arenaId,
+        unitId: booking.unitId,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        bookedById: booking.bookedById,
+      })
+    } catch (e) {
+      console.error('[Notification] bookingCancelled error:', e)
     }
 
     return updated

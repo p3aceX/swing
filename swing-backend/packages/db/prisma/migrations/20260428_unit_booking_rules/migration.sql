@@ -1,0 +1,3 @@
+ALTER TABLE "ArenaUnit" ADD COLUMN IF NOT EXISTS "advanceBookingDays" INT;
+ALTER TABLE "ArenaUnit" ADD COLUMN IF NOT EXISTS "bufferMins" INT;
+ALTER TABLE "ArenaUnit" ADD COLUMN IF NOT EXISTS "cancellationHours" INT;

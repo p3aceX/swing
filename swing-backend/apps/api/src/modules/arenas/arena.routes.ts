@@ -21,6 +21,12 @@ const createArenaSchema = z.object({
   phone: z.string().optional(),
   sports: z.array(z.enum(['CRICKET', 'FUTSAL', 'PICKLEBALL', 'BADMINTON', 'FOOTBALL', 'OTHER'])).default(['CRICKET']),
   photoUrls: z.array(z.string()).default([]),
+  hasParking: z.boolean().default(false),
+  hasLights: z.boolean().default(false),
+  hasWashrooms: z.boolean().default(false),
+  hasCanteen: z.boolean().default(false),
+  hasCCTV: z.boolean().default(false),
+  hasScorer: z.boolean().default(false),
 })
 
 const addManagerSchema = z.object({
@@ -35,7 +41,6 @@ const addUnitSchema = z.object({
   netType: z.string().trim().max(80).optional(),
   sport: z.enum(['CRICKET', 'FUTSAL', 'PICKLEBALL', 'BADMINTON', 'FOOTBALL', 'OTHER']).optional(),
   description: z.string().trim().max(500).optional(),
-  photoUrls: z.array(z.string().url()).max(3).default([]),
   pricePerHourPaise: z.number().int().min(0),
   peakPricePaise: z.number().int().min(0).optional(),
   peakHoursStart: z.string().regex(timePattern).optional(),
@@ -43,6 +48,10 @@ const addUnitSchema = z.object({
   price4HrPaise: z.number().int().min(0).optional(),
   price8HrPaise: z.number().int().min(0).optional(),
   priceFullDayPaise: z.number().int().min(0).optional(),
+  minBulkDays: z.number().int().min(2).optional().nullable(),
+  bulkDayRatePaise: z.number().int().min(0).optional().nullable(),
+  monthlyPassEnabled: z.boolean().default(false),
+  monthlyPassRatePaise: z.number().int().min(0).optional().nullable(),
   weekendMultiplier: z.number().min(0).max(5).optional(),
   minSlotMins: z.number().int().default(60),
   maxSlotMins: z.number().int().default(240),
@@ -52,6 +61,11 @@ const addUnitSchema = z.object({
   closeTime: z.string().regex(timePattern).optional(),
   operatingDays: z.array(z.number().int().min(1).max(7)).default([]),
   hasFloodlights: z.boolean().default(false),
+  minAdvancePaise: z.number().int().min(0).optional(),
+  advanceBookingDays: z.number().int().min(0).optional().nullable(),
+  cancellationHours: z.number().int().min(0).optional().nullable(),
+  parentUnitId: z.string().optional().nullable(),
+  turnaroundMins: z.number().int().min(0).optional(),
 })
 
 const updateUnitSchema = addUnitSchema.partial().extend({
@@ -101,10 +115,30 @@ const arenaTimeBlockSchema = z.object({
   }
 })
 
+const updateArenaSchema = createArenaSchema.partial().extend({
+  customSlug: z.string().min(3).max(60).optional().nullable(),
+  isPublicPage: z.boolean().optional(),
+})
+
 const arenaTimeBlockQuerySchema = z.object({
   date: z.string().optional(),
   unitId: z.string().optional(),
   recurringOnly: z.enum(['true', 'false']).optional(),
+})
+
+const monthlyPassSchema = z.object({
+  unitId: z.string(),
+  guestName: z.string().trim().min(1),
+  guestPhone: z.string().trim().min(10),
+  startTime: z.string().regex(timePattern),
+  endTime: z.string().regex(timePattern),
+  daysOfWeek: z.array(z.number().int().min(1).max(7)).min(1),
+  startDate: z.string(), // YYYY-MM-DD
+  endDate: z.string(),   // YYYY-MM-DD
+  totalAmountPaise: z.number().int().min(0),
+  advancePaise: z.number().int().min(0).default(0),
+  paymentMode: z.enum(['CASH', 'UPI', 'ONLINE']).default('CASH'),
+  notes: z.string().trim().max(300).optional(),
 })
 
 export async function arenaRoutes(app: FastifyInstance) {
@@ -237,7 +271,15 @@ export async function arenaRoutes(app: FastifyInstance) {
   app.put('/:id', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
-    return reply.send({ success: true, data: await svc.updateArena(id, user.userId, request.body) })
+    const body = updateArenaSchema.parse(request.body)
+    return reply.send({ success: true, data: await svc.updateArena(id, user.userId, body) })
+  })
+
+  app.delete('/:id', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    await svc.deleteArena(id, user.userId)
+    return reply.send({ success: true })
   })
 
   app.get('/:id/slots', async (request, reply) => {
@@ -269,5 +311,33 @@ export async function arenaRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string }
     const body = addManagerSchema.parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.addManager(id, user.userId, body) })
+  })
+
+  // ─── Monthly Passes ───────────────────────────────────────────────────────
+
+  app.post('/:id/monthly-passes', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = monthlyPassSchema.parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.createMonthlyPass(id, user.userId, body) })
+  })
+
+  app.get('/:id/monthly-passes', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const q = request.query as { month?: string; status?: string }
+    return reply.send({ success: true, data: await svc.listMonthlyPasses(id, user.userId, q) })
+  })
+
+  app.get('/monthly-passes/:passId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { passId } = request.params as { passId: string }
+    return reply.send({ success: true, data: await svc.getMonthlyPass(passId, user.userId) })
+  })
+
+  app.post('/monthly-passes/:passId/cancel', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { passId } = request.params as { passId: string }
+    return reply.send({ success: true, data: await svc.cancelMonthlyPass(passId, user.userId) })
   })
 }

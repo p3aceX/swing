@@ -156,6 +156,11 @@ export class BizService {
     }
     await this.addRole(userId, UserRole.ARENA_OWNER)
 
+    const { toSlug, generateArenaSlug } = await import('../../lib/slug')
+    const citySlug = toSlug(data.city || '')
+    const baseArenaSlug = toSlug(data.name || '')
+    const arenaSlug = await generateArenaSlug(citySlug, baseArenaSlug)
+
     return prisma.arena.create({
       data: {
         ownerId: ownerProfile.id,
@@ -177,6 +182,9 @@ export class BizService {
         hasCanteen: data.hasCanteen ?? false,
         hasCCTV: data.hasCCTV ?? false,
         hasScorer: data.hasScorer ?? false,
+        citySlug,
+        arenaSlug,
+        isPublicPage: true,
       },
     })
   }

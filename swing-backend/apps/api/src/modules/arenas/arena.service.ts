@@ -47,6 +47,11 @@ export class ArenaService {
         },
       })
     }
+    const { toSlug, generateArenaSlug } = await import('../../lib/slug')
+    const citySlug = toSlug(data.city || '')
+    const baseArenaSlug = toSlug(data.name || '')
+    const arenaSlug = await generateArenaSlug(citySlug, baseArenaSlug)
+
     return prisma.arena.create({
       data: {
         ownerId: owner.id,
@@ -61,7 +66,16 @@ export class ArenaService {
         phone: data.phone || null,
         sports: data.sports || ['CRICKET'],
         photoUrls: data.photoUrls && data.photoUrls.length > 0 ? data.photoUrls : [],
+        hasParking: data.hasParking ?? false,
+        hasLights: data.hasLights ?? false,
+        hasWashrooms: data.hasWashrooms ?? false,
+        hasCanteen: data.hasCanteen ?? false,
+        hasCCTV: data.hasCCTV ?? false,
+        hasScorer: data.hasScorer ?? false,
         isActive: true,
+        citySlug,
+        arenaSlug,
+        isPublicPage: true,
       },
     })
   }
@@ -247,7 +261,14 @@ export class ArenaService {
     for (const f of fields) {
       if (f in data) allowed[f] = data[f]
     }
+    if (data.customSlug !== undefined) allowed.customSlug = data.customSlug || null
+    if (data.isPublicPage !== undefined) allowed.isPublicPage = data.isPublicPage
     return prisma.arena.update({ where: { id: arenaId }, data: allowed })
+  }
+
+  async deleteArena(arenaId: string, userId: string) {
+    await this.verifyOwner(arenaId, userId)
+    return prisma.arena.update({ where: { id: arenaId }, data: { isActive: false } })
   }
 
   async addUnit(arenaId: string, userId: string, data: any) {
@@ -261,7 +282,6 @@ export class ArenaService {
         netType: data.netType || null,
         sport: data.sport || 'CRICKET',
         description: data.description || null,
-        photoUrls: (data.photoUrls || []).slice(0, 3),
         pricePerHourPaise: data.pricePerHourPaise,
         peakPricePaise: data.peakPricePaise || null,
         peakHoursStart: data.peakHoursStart || null,
@@ -269,6 +289,10 @@ export class ArenaService {
         price4HrPaise: data.price4HrPaise || null,
         price8HrPaise: data.price8HrPaise || null,
         priceFullDayPaise: data.priceFullDayPaise || null,
+        minBulkDays: data.minBulkDays ?? null,
+        bulkDayRatePaise: data.bulkDayRatePaise ?? null,
+        monthlyPassEnabled: data.monthlyPassEnabled ?? false,
+        monthlyPassRatePaise: data.monthlyPassRatePaise ?? null,
         weekendMultiplier: data.weekendMultiplier ?? 1.0,
         minSlotMins: data.minSlotMins ?? 60,
         maxSlotMins: data.maxSlotMins ?? 240,
@@ -281,6 +305,8 @@ export class ArenaService {
         closeTime: data.closeTime || null,
         operatingDays: data.operatingDays || [],
         hasFloodlights: data.hasFloodlights ?? false,
+        advanceBookingDays: data.advanceBookingDays ?? null,
+        cancellationHours: data.cancellationHours ?? null,
         isActive: true,
       },
     })
@@ -293,10 +319,12 @@ export class ArenaService {
 
     const allowed: any = {}
     const fields = [
-      'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'photoUrls', 'pricePerHourPaise', 'peakPricePaise',
+      'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'pricePerHourPaise', 'peakPricePaise',
       'peakHoursStart', 'peakHoursEnd', 'price4HrPaise', 'price8HrPaise', 'priceFullDayPaise',
+      'minBulkDays', 'bulkDayRatePaise', 'monthlyPassEnabled', 'monthlyPassRatePaise',
       'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins', 'turnaroundMins', 'minAdvancePaise',
-      'boundarySize', 'parentUnitId', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights', 'isActive',
+      'boundarySize', 'parentUnitId', 'openTime', 'closeTime', 'operatingDays', 'hasFloodlights',
+      'advanceBookingDays', 'cancellationHours', 'isActive',
     ]
     for (const f of fields) {
       if (f in data) allowed[f] = data[f] === '' ? null : data[f]
@@ -728,9 +756,10 @@ export class ArenaService {
       const step = unit.slotIncrementMins || 60
       const openMins = this.timeToMinutes(openTime)
       const closeMins = this.timeToMinutes(closeTime)
+      const unitLeadMins = unit.bufferMins ?? leadTimeMins
       const starts: string[] = []
       for (let cur = openMins; cur + durationMins <= closeMins; cur += step) {
-        if (isToday && cur < nowISTMins + leadTimeMins) continue
+        if (isToday && cur < nowISTMins + unitLeadMins) continue
         starts.push(this.minutesToTime(cur))
       }
       return starts
@@ -891,6 +920,216 @@ export class ArenaService {
       advanceBookingDays: Math.max(arena.advanceBookingDays ?? 14, 14),
       cancellationHours: arena.cancellationHours ?? 24,
     }
+  }
+
+  // ─── Monthly Passes ─────────────────────────────────────────────────────────
+
+  async createMonthlyPass(arenaId: string, userId: string, data: {
+    unitId: string
+    guestName: string
+    guestPhone: string
+    startTime: string
+    endTime: string
+    daysOfWeek: number[]
+    startDate: string
+    endDate: string
+    totalAmountPaise: number
+    advancePaise: number
+    paymentMode: string
+    notes?: string
+  }) {
+    await this.verifyOwner(arenaId, userId)
+
+    const unit = await (prisma.arenaUnit as any).findUnique({ where: { id: data.unitId } })
+    if (!unit || unit.arenaId !== arenaId) throw Errors.notFound('Unit')
+
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    // Compute all matching dates in range
+    const start = new Date(data.startDate + 'T00:00:00Z')
+    const end = new Date(data.endDate + 'T00:00:00Z')
+    const matchingDates: Date[] = []
+    for (let d = new Date(start); d <= end; d = this.addDays(d, 1)) {
+      if (data.daysOfWeek.includes(this.weekdayNumber(d))) {
+        matchingDates.push(new Date(d))
+      }
+    }
+
+    // Check conflicts for each date — skip conflicted ones
+    const conflictUnitIds = await this.getConflictUnitIds(data.unitId)
+    const skippedDates: string[] = []
+    const bookedDates: Date[] = []
+
+    for (const date of matchingDates) {
+      const existing = await prisma.slotBooking.findFirst({
+        where: {
+          unitId: { in: conflictUnitIds },
+          date,
+          status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+          startTime: { lt: data.endTime },
+          endTime: { gt: data.startTime },
+        },
+      })
+      if (existing) {
+        skippedDates.push(this.formatDate(date))
+      } else {
+        bookedDates.push(date)
+      }
+    }
+
+    // Get/create walk-in player for the sessions
+    const walkinPlayer = await this.getOrCreateWalkInPlayerByArena(arenaId)
+
+    // Create the pass record
+    const pass = await (prisma as any).monthlyPass.create({
+      data: {
+        arenaId,
+        unitId: data.unitId,
+        guestName: data.guestName,
+        guestPhone: data.guestPhone,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        daysOfWeek: data.daysOfWeek,
+        startDate: start,
+        endDate: end,
+        totalAmountPaise: data.totalAmountPaise,
+        advancePaise: data.advancePaise,
+        paymentMode: data.paymentMode,
+        notes: data.notes || null,
+        status: 'ACTIVE',
+        bookingSource: 'BIZ',
+      },
+    })
+
+    const durationMins = this.timeToMinutes(data.endTime) - this.timeToMinutes(data.startTime)
+    const fullyPaid = data.advancePaise >= data.totalAmountPaise && data.totalAmountPaise > 0
+
+    // Batch-create SlotBookings
+    await Promise.all(bookedDates.map(date =>
+      prisma.slotBooking.create({
+        data: {
+          arenaId,
+          unitId: data.unitId,
+          bookedById: walkinPlayer.id,
+          date,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          durationMins,
+          baseAmountPaise: 0,
+          totalAmountPaise: 0,
+          totalPricePaise: 0,
+          advancePaise: 0,
+          status: 'CONFIRMED',
+          isOfflineBooking: true,
+          createdByOwnerId: owner.id,
+          guestName: data.guestName,
+          guestPhone: data.guestPhone,
+          paymentMode: data.paymentMode as any,
+          paidAt: fullyPaid ? new Date() : null,
+          bookingSource: 'BIZ',
+          monthlyPassId: pass.id,
+        } as any,
+      })
+    ))
+
+    return { ...pass, sessionCount: bookedDates.length, skippedDates }
+  }
+
+  async listMonthlyPasses(arenaId: string, userId: string, filters: { month?: string; status?: string }) {
+    await this.verifyOwner(arenaId, userId)
+    const where: any = { arenaId }
+    if (filters.status) where.status = filters.status
+    if (filters.month) {
+      const [year, month] = filters.month.split('-').map(Number)
+      where.startDate = { lte: new Date(Date.UTC(year, month - 1, 31)) }
+      where.endDate = { gte: new Date(Date.UTC(year, month - 1, 1)) }
+    }
+    const passes = await (prisma as any).monthlyPass.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    })
+    // Attach session counts
+    return Promise.all(passes.map(async (p: any) => {
+      const sessionCount = await prisma.slotBooking.count({ where: { monthlyPassId: p.id } as any })
+      return { ...p, sessionCount }
+    }))
+  }
+
+  async getMonthlyPass(passId: string, userId: string) {
+    const pass = await (prisma as any).monthlyPass.findUnique({ where: { id: passId } })
+    if (!pass) throw Errors.notFound('Monthly pass')
+    await this.verifyOwner(pass.arenaId, userId)
+    const bookings = await prisma.slotBooking.findMany({
+      where: { monthlyPassId: passId } as any,
+      orderBy: { date: 'asc' },
+    })
+    return { ...pass, bookings, sessionCount: bookings.length }
+  }
+
+  async cancelMonthlyPass(passId: string, userId: string) {
+    const pass = await (prisma as any).monthlyPass.findUnique({ where: { id: passId } })
+    if (!pass) throw Errors.notFound('Monthly pass')
+    await this.verifyOwner(pass.arenaId, userId)
+
+    const today = new Date()
+    today.setUTCHours(0, 0, 0, 0)
+
+    // Cancel all future sessions
+    await prisma.slotBooking.updateMany({
+      where: {
+        monthlyPassId: passId,
+        date: { gte: today },
+        status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] },
+      } as any,
+      data: { status: 'CANCELLED_BY_OWNER' as any },
+    })
+
+    return (prisma as any).monthlyPass.update({
+      where: { id: passId },
+      data: { status: 'CANCELLED' },
+    })
+  }
+
+  private async getOrCreateWalkInPlayer(arenaId: string) {
+    const walkinEmail = `walkin+${arenaId}@swing.internal`
+    let user = await prisma.user.findUnique({ where: { email: walkinEmail } })
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          phone: `000000000000_${arenaId.slice(0, 8)}`,
+          email: walkinEmail,
+          name: 'Walk-in Guest',
+          roles: ['PLAYER'],
+        },
+      })
+    }
+    let player = await prisma.playerProfile.findUnique({ where: { userId: user.id } })
+    if (!player) {
+      player = await prisma.playerProfile.create({ data: { userId: user.id } })
+    }
+    return { id: player.id, userId: user.id }
+  }
+
+  private async getConflictUnitIds(unitId: string): Promise<string[]> {
+    const unit: { id: string; parentUnitId: string | null } | null =
+      await (prisma.arenaUnit as any).findUnique({
+        where: { id: unitId },
+        select: { id: true, parentUnitId: true },
+      })
+    if (!unit) return [unitId]
+    const ids = [unitId]
+    if (unit.parentUnitId) ids.push(unit.parentUnitId)
+    const children: { id: string }[] = await (prisma.arenaUnit as any).findMany({
+      where: { parentUnitId: unitId },
+      select: { id: true },
+    })
+    ids.push(...children.map(c => c.id))
+    return ids
+  }
+
+  private formatDate(d: Date): string {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
   }
 
   async getArenaStats(arenaId: string, userId: string) {

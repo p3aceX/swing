@@ -2293,10 +2293,18 @@ model Arena {
   timeBlocks      ArenaTimeBlock[]
   reviews         Review[]
   managers        ArenaManager[]
+  monthlyPasses   MonthlyPass[]
+
+  citySlug      String?
+  arenaSlug     String?
+  customSlug    String?
+  isPublicPage  Boolean  @default(true)
 
   @@index([businessAccountId])
   @@index([city, isVerified])
   @@index([latitude, longitude])
+  @@unique([citySlug, arenaSlug])
+  @@unique([customSlug])
 }
 
 model ArenaUnit {
@@ -2324,12 +2332,19 @@ model ArenaUnit {
   slotIncrementMins Int              @default(60)
   turnaroundMins    Int              @default(0)
   minAdvancePaise   Int              @default(0)
-  openTime          String?
-  closeTime         String?
-  operatingDays     Int[]            @default([])
-  hasFloodlights    Boolean          @default(false)
-  parentUnitId      String?
-  isActive          Boolean          @default(true)
+  openTime             String?
+  closeTime            String?
+  operatingDays        Int[]            @default([])
+  hasFloodlights       Boolean          @default(false)
+  parentUnitId         String?
+  advanceBookingDays   Int?
+  bufferMins           Int?
+  cancellationHours    Int?
+  minBulkDays          Int?
+  bulkDayRatePaise     Int?
+  monthlyPassEnabled   Boolean          @default(false)
+  monthlyPassRatePaise Int?
+  isActive             Boolean          @default(true)
   createdAt         DateTime         @default(now())
 
   arena        Arena            @relation(fields: [arenaId], references: [id])
@@ -2339,6 +2354,7 @@ model ArenaUnit {
   bookings     SlotBooking[]
   timeBlocks   ArenaTimeBlock[]
   pricingRules PricingRule[]
+  monthlyPasses MonthlyPass[]
 }
 
 model PricingRule {
@@ -2433,17 +2449,24 @@ model SlotBooking {
   guestPhone         String?
   paymentMode        String?      // ONLINE | CASH | UPI | CARD | BANK_TRANSFER
   advancePaise       Int          @default(0)
+  endDate            DateTime?    @db.Date
+  isBulkBooking      Boolean      @default(false)
+  bulkDayRatePaise   Int?
+  bookingSource      String       @default("APP")
+  monthlyPassId      String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  arena    Arena              @relation(fields: [arenaId], references: [id])
-  unit     ArenaUnit          @relation(fields: [unitId], references: [id])
-  bookedBy PlayerProfile      @relation("SlotBookingBookedBy", fields: [bookedById], references: [id])
-  addons   SlotBookingAddon[]
-  payment  Payment?
+  arena        Arena              @relation(fields: [arenaId], references: [id])
+  unit         ArenaUnit          @relation(fields: [unitId], references: [id])
+  bookedBy     PlayerProfile      @relation("SlotBookingBookedBy", fields: [bookedById], references: [id])
+  addons       SlotBookingAddon[]
+  payment      Payment?
+  monthlyPass  MonthlyPass?       @relation(fields: [monthlyPassId], references: [id])
 
   @@index([arenaId, date, status])
   @@index([unitId, date])
+  @@index([monthlyPassId])
 }
 
 model SlotBookingAddon {
@@ -2455,6 +2478,33 @@ model SlotBookingAddon {
 
   booking SlotBooking @relation(fields: [bookingId], references: [id])
   addon   ArenaAddon  @relation(fields: [addonId], references: [id])
+}
+
+model MonthlyPass {
+  id                 String   @id @default(cuid())
+  arenaId            String
+  unitId             String
+  guestName          String
+  guestPhone         String
+  startTime          String
+  endTime            String
+  daysOfWeek         Int[]
+  startDate          DateTime @db.Date
+  endDate            DateTime @db.Date
+  totalAmountPaise   Int
+  advancePaise       Int      @default(0)
+  paymentMode        String   @default("CASH")
+  notes              String?
+  status             String   @default("ACTIVE")
+  bookingSource      String   @default("BIZ")
+  createdAt          DateTime @default(now())
+
+  arena    Arena         @relation(fields: [arenaId], references: [id])
+  unit     ArenaUnit     @relation(fields: [unitId], references: [id])
+  sessions SlotBooking[]
+
+  @@index([arenaId])
+  @@index([unitId])
 }
 
 // ============================================================
@@ -2819,6 +2869,8 @@ model NotificationPreference {
   rankUpdates          Boolean  @default(true)
   matchResults         Boolean  @default(true)
   productAnnouncements Boolean  @default(true)
+  arenaBookings        Boolean  @default(true)
+  bookingReminders     Boolean  @default(true)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
