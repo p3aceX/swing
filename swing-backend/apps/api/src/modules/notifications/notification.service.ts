@@ -260,7 +260,7 @@ export class NotificationService {
     const [arena, unit, bookedBy] = await Promise.all([
       prisma.arena.findUnique({ where: { id: booking.arenaId }, select: { name: true, ownerId: true } }),
       prisma.arenaUnit.findUnique({ where: { id: booking.unitId }, select: { name: true } }),
-      prisma.playerProfile.findUnique({ where: { id: booking.bookedById }, select: { userId: true, name: true } }),
+      prisma.playerProfile.findUnique({ where: { id: booking.bookedById }, select: { userId: true, user: { select: { name: true } } } }),
     ])
     if (!arena || !unit || !bookedBy) return
 
@@ -287,7 +287,7 @@ export class NotificationService {
       await this.createNotification(owner.userId, {
         type: 'NEW_BOOKING',
         title: 'New Booking',
-        body: `${bookedBy.name ?? 'Someone'} booked ${unit.name} · ${dateStr} · ${slotStr}`,
+        body: `${bookedBy.user?.name ?? 'Someone'} booked ${unit.name} · ${dateStr} · ${slotStr}`,
         entityType: 'booking',
         entityId: booking.id,
         sendPush: true,
@@ -308,7 +308,7 @@ export class NotificationService {
     const [arena, unit, bookedBy] = await Promise.all([
       prisma.arena.findUnique({ where: { id: booking.arenaId }, select: { name: true, ownerId: true } }),
       prisma.arenaUnit.findUnique({ where: { id: booking.unitId }, select: { name: true } }),
-      prisma.playerProfile.findUnique({ where: { id: booking.bookedById }, select: { userId: true, name: true } }),
+      prisma.playerProfile.findUnique({ where: { id: booking.bookedById }, select: { userId: true, user: { select: { name: true } } } }),
     ])
     if (!arena || !unit || !bookedBy) return
 
@@ -332,7 +332,7 @@ export class NotificationService {
       await this.createNotification(owner.userId, {
         type: 'BOOKING_CANCELLED',
         title: 'Booking Cancelled',
-        body: `${bookedBy.name ?? 'A player'} cancelled ${unit.name} on ${dateStr}`,
+        body: `${bookedBy.user?.name ?? 'A player'} cancelled ${unit.name} on ${dateStr}`,
         entityType: 'booking',
         entityId: booking.id,
         sendPush: true,

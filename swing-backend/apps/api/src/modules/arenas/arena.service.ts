@@ -47,7 +47,7 @@ export class ArenaService {
         },
       })
     }
-    const { toSlug, generateArenaSlug } = await import('../../lib/slug')
+    const { toSlug, generateArenaSlug } = await import('../../lib/slug.js')
     const citySlug = toSlug(data.city || '')
     const baseArenaSlug = toSlug(data.name || '')
     const arenaSlug = await generateArenaSlug(citySlug, baseArenaSlug)
@@ -979,7 +979,7 @@ export class ArenaService {
     }
 
     // Get/create walk-in player for the sessions
-    const walkinPlayer = await this.getOrCreateWalkInPlayerByArena(arenaId)
+    const walkinPlayer = await this.getOrCreateWalkInPlayer(arenaId)
 
     // Create the pass record
     const pass = await (prisma as any).monthlyPass.create({

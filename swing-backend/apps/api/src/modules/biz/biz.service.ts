@@ -156,7 +156,7 @@ export class BizService {
     }
     await this.addRole(userId, UserRole.ARENA_OWNER)
 
-    const { toSlug, generateArenaSlug } = await import('../../lib/slug')
+    const { toSlug, generateArenaSlug } = await import('../../lib/slug.js')
     const citySlug = toSlug(data.city || '')
     const baseArenaSlug = toSlug(data.name || '')
     const arenaSlug = await generateArenaSlug(citySlug, baseArenaSlug)
