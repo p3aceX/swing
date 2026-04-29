@@ -1106,8 +1106,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       _unitType == 'FULL_GROUND' || _unitType == 'HALF_GROUND';
   bool get _canHaveParent => _unitType == 'HALF_GROUND';
   bool get _isNetsWithVariants => _unitType == 'CRICKET_NET' && _netVariants.isNotEmpty;
-  // Nets skip the dedicated pricing step (price is per-variant in step 0)
-  int get _maxStep => _isNetsWithVariants ? 3 : 4;
+  int get _maxStep => 4;
 
   @override
   void initState() {
@@ -1214,7 +1213,6 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       if (close.isNotEmpty && !RegExp(r'^\d{2}:\d{2}$').hasMatch(close)) return false;
       return true;
     }
-    // Pricing step only exists for non-nets (step 2)
     if (!_isNetsWithVariants && _step == 2) {
       if (_isGround) {
         return _price4Ctrl.text.trim().isNotEmpty &&
@@ -1501,18 +1499,10 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   }
 
   Widget _stepBody() {
-    if (_isNetsWithVariants) {
-      return switch (_step) {
-        0 => _typeAndDetailsStep(),
-        1 => _scheduleStep(),
-        2 => _bookingRulesStep(),
-        _ => _photosAndAddonsStep(),
-      };
-    }
     return switch (_step) {
       0 => _typeAndDetailsStep(),
       1 => _scheduleStep(),
-      2 => _pricingStep(),
+      2 => _isNetsWithVariants ? _netsPricingStep() : _pricingStep(),
       3 => _bookingRulesStep(),
       _ => _photosAndAddonsStep(),
     };
@@ -1668,66 +1658,6 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           ),
         ],
 
-        // Weekend + monthly pass for nets (shown inline since pricing step is skipped)
-        if (_isNetsWithVariants) ...[
-          const SizedBox(height: 28),
-          const _SectionLabel('Weekend Pricing'),
-          const SizedBox(height: 10),
-          _SegmentedOptions(
-            value: _weekendMultiplier == 1.0 ? '1.0' : _weekendMultiplier.toString(),
-            options: const [
-              ('1.0', 'None'),
-              ('1.25', '1.25×'),
-              ('1.5', '1.5×'),
-              ('2.0', '2×'),
-            ],
-            onChanged: (v) => setState(() => _weekendMultiplier = double.parse(v)),
-          ),
-          if (_weekendMultiplier != 1.0) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Weekend rate: ${(_weekendMultiplier * 100 - 100).toStringAsFixed(0)}% premium applies to all variants',
-              style: const TextStyle(color: _accent, fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          ],
-          const SizedBox(height: 24),
-          const _SectionLabel('Monthly Pass'),
-          const SizedBox(height: 4),
-          const Text(
-            'Let customers lock a recurring time slot for the whole month.',
-            style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Expanded(
-                child: Text('Offer monthly pass', style: TextStyle(color: _text, fontSize: 14, fontWeight: FontWeight.w700)),
-              ),
-              Switch(
-                value: _monthlyPassEnabled,
-                onChanged: (v) => setState(() => _monthlyPassEnabled = v),
-                activeThumbColor: _accent,
-              ),
-            ],
-          ),
-          if (_monthlyPassEnabled) ...[
-            const SizedBox(height: 10),
-            TextField(
-              controller: _monthlyPassRateCtrl,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Pass rate (₹ / month)',
-                prefixText: '₹ ',
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)),
-              ),
-            ),
-          ],
-        ],
       ],
     );
   }
@@ -1868,6 +1798,76 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             closeCtrl: _closeTimeCtrl,
             slotMins: _slotMins,
             breatherMins: _breatherMins,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _netsPricingStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _LargeStepTitle('Pricing'),
+        const _SectionLabel('Weekend Pricing'),
+        const SizedBox(height: 4),
+        const Text(
+          'Apply a premium rate on Saturdays and Sundays.',
+          style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
+        ),
+        const SizedBox(height: 12),
+        _SegmentedOptions(
+          value: _weekendMultiplier == 1.0 ? '1.0' : _weekendMultiplier.toString(),
+          options: const [
+            ('1.0', 'None'),
+            ('1.25', '1.25×'),
+            ('1.5', '1.5×'),
+            ('2.0', '2×'),
+          ],
+          onChanged: (v) => setState(() => _weekendMultiplier = double.parse(v)),
+        ),
+        if (_weekendMultiplier != 1.0) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Weekend rate: ${(_weekendMultiplier * 100 - 100).toStringAsFixed(0)}% premium on all variants',
+            style: const TextStyle(color: _accent, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ],
+        const SizedBox(height: 28),
+        const _SectionLabel('Monthly Pass'),
+        const SizedBox(height: 4),
+        const Text(
+          'Let customers lock a recurring time slot for the whole month.',
+          style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Offer monthly pass', style: TextStyle(color: _text, fontSize: 14, fontWeight: FontWeight.w700)),
+            ),
+            Switch(
+              value: _monthlyPassEnabled,
+              onChanged: (v) => setState(() => _monthlyPassEnabled = v),
+              activeThumbColor: _accent,
+            ),
+          ],
+        ),
+        if (_monthlyPassEnabled) ...[
+          const SizedBox(height: 10),
+          TextField(
+            controller: _monthlyPassRateCtrl,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Pass rate (₹ / month)',
+              prefixText: '₹ ',
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)),
+            ),
           ),
         ],
       ],
