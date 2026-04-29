@@ -3281,7 +3281,7 @@ class _NetVariantRow extends StatelessWidget {
                   keyboardType: TextInputType.number,
                   style: const TextStyle(color: _text, fontSize: 13),
                   decoration: const InputDecoration(
-                    hintText: 'Price/hr (optional)',
+                    hintText: 'Price/hr',
                     hintStyle: TextStyle(color: _muted, fontSize: 12),
                     prefixText: '₹ ',
                     prefixStyle: TextStyle(color: _muted, fontSize: 13),
