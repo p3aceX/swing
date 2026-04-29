@@ -131,12 +131,14 @@ class NetVariant {
     required this.label,
     this.count = 1,
     this.pricePaise,
+    this.hasFloodlights = false,
   });
 
   final String type;
   final String label;
   final int count;
   final int? pricePaise;
+  final bool hasFloodlights;
 
   factory NetVariant.fromJson(Map<String, dynamic> json) {
     return NetVariant(
@@ -144,6 +146,7 @@ class NetVariant {
       label: '${json['label'] ?? json['type'] ?? ''}',
       count: _intValue(json['count'] ?? 1),
       pricePaise: _intOrNull(json['pricePaise']),
+      hasFloodlights: json['hasFloodlights'] == true,
     );
   }
 
@@ -152,6 +155,7 @@ class NetVariant {
     'label': label,
     'count': count,
     if (pricePaise != null) 'pricePaise': pricePaise,
+    'hasFloodlights': hasFloodlights,
   };
 }
 

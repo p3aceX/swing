@@ -1268,6 +1268,9 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           'netVariants': _unitType == 'CRICKET_NET' && _netVariants.isNotEmpty
               ? _netVariants.map((v) => v.toJson()).toList()
               : null,
+          'hasFloodlights': _unitType == 'CRICKET_NET' && _netVariants.isNotEmpty
+              ? _netVariants.any((v) => v.hasFloodlights)
+              : _hasFloodlights,
           'sport': 'CRICKET',
           'pricePerHourPaise': _isGround
               ? (_rupeesToPaise(_price4Ctrl.text) ~/ 4)
@@ -1299,7 +1302,6 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           if (_closeTimeCtrl.text.trim().isNotEmpty)
             'closeTime': _closeTimeCtrl.text.trim(),
           'operatingDays': _scheduleOpDays,
-          'hasFloodlights': _hasFloodlights,
           if (_advanceBookingDaysCtrl.text.trim().isNotEmpty)
             'advanceBookingDays':
                 int.tryParse(_advanceBookingDaysCtrl.text.trim()),
@@ -1535,31 +1537,66 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             children: [
               const Expanded(
                 child: Text(
-                  'Surface variants',
+                  'Surface types',
                   style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15),
                 ),
               ),
-              TextButton.icon(
-                onPressed: () {
-                  final usedTypes = _netVariants.map((v) => v.type).toSet();
-                  final nextType = _NetVariantDraft._surfaceOptions
-                      .firstWhere((o) => !usedTypes.contains(o.$1), orElse: () => _NetVariantDraft._surfaceOptions.first);
-                  setState(() => _netVariants.add(_NetVariantDraft(type: nextType.$1, label: nextType.$2)));
-                },
-                icon: const Icon(Icons.add, size: 16, color: _accent),
-                label: const Text('Add', style: TextStyle(color: _accent, fontSize: 13)),
-                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-              ),
+              if (_netVariants.length < _NetVariantDraft._surfaceOptions.length)
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      for (final (t, l) in _NetVariantDraft._surfaceOptions) {
+                        if (!_netVariants.any((v) => v.type == t)) {
+                          _netVariants.add(_NetVariantDraft(type: t, label: l));
+                        }
+                      }
+                    });
+                  },
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                  child: const Text('Add all', style: TextStyle(color: _accent, fontSize: 13, fontWeight: FontWeight.w700)),
+                ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Text('Each surface type can have its own count and optional per-hour price.',
-              style: TextStyle(color: _muted, fontSize: 12)),
           const SizedBox(height: 10),
-          if (_netVariants.isEmpty)
-            const Text('No variants — all bookings go to this unit.',
-                style: TextStyle(color: _muted, fontSize: 13))
-          else
+          // Multi-select surface chips
+          Row(
+            children: [
+              for (final (t, l) in _NetVariantDraft._surfaceOptions) ...[
+                if (t != _NetVariantDraft._surfaceOptions.first.$1) const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        final idx = _netVariants.indexWhere((v) => v.type == t);
+                        if (idx >= 0) {
+                          _netVariants[idx].dispose();
+                          _netVariants.removeAt(idx);
+                        } else {
+                          _netVariants.add(_NetVariantDraft(type: t, label: l));
+                        }
+                      });
+                    },
+                    child: Builder(builder: (ctx) {
+                      final selected = _netVariants.any((v) => v.type == t);
+                      return Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: selected ? _accent : _surface,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: selected ? _accent : _line),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(l, style: TextStyle(color: selected ? Colors.white : _text, fontWeight: FontWeight.w700, fontSize: 14)),
+                      );
+                    }),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          // Config rows for selected variants
+          if (_netVariants.isNotEmpty) ...[
+            const SizedBox(height: 12),
             for (var i = 0; i < _netVariants.length; i++) ...[
               if (i > 0) const SizedBox(height: 8),
               _NetVariantRow(
@@ -1568,6 +1605,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 onChanged: () => setState(() {}),
               ),
             ],
+          ],
         ],
         if (_canHaveParent) ...[
           const SizedBox(height: 20),
@@ -1589,36 +1627,30 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             onChanged: (id) => setState(() => _parentUnitId = id),
           ),
         ],
-        const SizedBox(height: 20),
-        Row(
-          children: [
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Floodlights',
-                    style: TextStyle(
-                      color: _text,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                    ),
-                  ),
-                  Text(
-                    'Available for night play',
-                    style: TextStyle(color: _muted, fontSize: 12),
-                  ),
-                ],
+        // Global floodlights only shown for non-net units or nets with no variants
+        if (_unitType != 'CRICKET_NET' || _netVariants.isEmpty) ...[
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Floodlights', style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15)),
+                    Text('Available for night play', style: TextStyle(color: _muted, fontSize: 12)),
+                  ],
+                ),
               ),
-            ),
-            Switch(
-              value: _hasFloodlights,
-              onChanged: (v) => setState(() => _hasFloodlights = v),
-              activeThumbColor: _accent,
-            ),
-          ],
-        ),
-        if (!_editing) ...[
+              Switch(
+                value: _hasFloodlights,
+                onChanged: (v) => setState(() => _hasFloodlights = v),
+                activeThumbColor: _accent,
+              ),
+            ],
+          ),
+        ],
+        // Quantity only shown for non-net units (net variants handle count per type)
+        if (!_editing && (_unitType != 'CRICKET_NET' || _netVariants.isEmpty)) ...[
           const SizedBox(height: 20),
           _QuantityStepper(
             value: _quantity,
@@ -3134,7 +3166,7 @@ class _NetVariantRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: _bg,
         borderRadius: BorderRadius.circular(10),
@@ -3143,67 +3175,67 @@ class _NetVariantRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header: surface label
+          Text(draft.label, style: const TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 14)),
+          const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: _SegmentedOptions(
-                  value: draft.type,
-                  options: _NetVariantDraft._surfaceOptions,
-                  onChanged: (v) {
-                    draft.type = v;
-                    draft.label = _NetVariantDraft._surfaceOptions.firstWhere((o) => o.$1 == v, orElse: () => (v, v)).$2;
-                    onChanged();
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.close, size: 18, color: _muted),
-                onPressed: onRemove,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Text('Count:', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+              // Count stepper
+              const Text('Count', style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: draft.count > 1 ? () { draft.count--; onChanged(); } : null,
                 child: Container(
-                  width: 28, height: 28,
+                  width: 26, height: 26,
                   decoration: BoxDecoration(color: _surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _line)),
-                  child: const Icon(Icons.remove, size: 16, color: _text),
+                  child: Icon(Icons.remove, size: 14, color: draft.count > 1 ? _text : _muted),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Text('${draft.count}', style: const TextStyle(color: _text, fontWeight: FontWeight.w700, fontSize: 15)),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               GestureDetector(
                 onTap: () { draft.count++; onChanged(); },
                 child: Container(
-                  width: 28, height: 28,
+                  width: 26, height: 26,
                   decoration: BoxDecoration(color: _surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _line)),
-                  child: const Icon(Icons.add, size: 16, color: _text),
+                  child: const Icon(Icons.add, size: 14, color: _text),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
+              // Price field
               Expanded(
                 child: TextFormField(
                   controller: draft.priceCtrl,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: _text, fontSize: 14),
+                  style: const TextStyle(color: _text, fontSize: 13),
                   decoration: const InputDecoration(
                     hintText: 'Price/hr (optional)',
                     hintStyle: TextStyle(color: _muted, fontSize: 12),
                     prefixText: '₹ ',
-                    prefixStyle: TextStyle(color: _muted, fontSize: 14),
+                    prefixStyle: TextStyle(color: _muted, fontSize: 13),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
                     border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
                   ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Floodlights toggle
+          Row(
+            children: [
+              const Icon(Icons.lightbulb_outline_rounded, size: 16, color: _muted),
+              const SizedBox(width: 6),
+              const Expanded(child: Text('Floodlights', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600))),
+              SizedBox(
+                height: 24,
+                child: Switch(
+                  value: draft.hasFloodlights,
+                  onChanged: (v) { draft.hasFloodlights = v; onChanged(); },
+                  activeThumbColor: _accent,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
             ],
@@ -3219,12 +3251,14 @@ class _NetVariantDraft {
     this.type = 'TURF',
     this.label = 'Turf',
     this.count = 1,
+    this.hasFloodlights = false,
     String price = '',
   }) : priceCtrl = TextEditingController(text: price);
 
   String type;
   String label;
   int count;
+  bool hasFloodlights;
   final TextEditingController priceCtrl;
 
   static const _surfaceOptions = [
@@ -3237,6 +3271,7 @@ class _NetVariantDraft {
     'type': type,
     'label': label,
     'count': count,
+    'hasFloodlights': hasFloodlights,
     if (priceCtrl.text.trim().isNotEmpty)
       'pricePaise': (int.tryParse(priceCtrl.text.trim()) ?? 0) * 100,
   };
@@ -3245,6 +3280,7 @@ class _NetVariantDraft {
     type: v.type,
     label: v.label,
     count: v.count,
+    hasFloodlights: v.hasFloodlights,
     price: v.pricePaise != null ? (v.pricePaise! ~/ 100).toString() : '',
   );
 
