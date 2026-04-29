@@ -265,6 +265,11 @@ class HostArenaBookingRepository {
     required int amountPaise,
     int advancePaise = 0,
     String? notes,
+    String? endDate,
+    bool isBulkBooking = false,
+    int? bulkDayRatePaise,
+    String bookingSource = 'BIZ',
+    String? netVariantType,
   }) async {
     final response = await _dio.post(
       _paths.arenaManualBooking(arenaId),
@@ -279,6 +284,11 @@ class HostArenaBookingRepository {
         'amountPaise': amountPaise,
         'advancePaise': advancePaise,
         if (notes != null) 'notes': notes,
+        if (endDate != null) 'endDate': endDate,
+        if (isBulkBooking) 'isBulkBooking': true,
+        if (bulkDayRatePaise != null) 'bulkDayRatePaise': bulkDayRatePaise,
+        'bookingSource': bookingSource,
+        if (netVariantType != null) 'netVariantType': netVariantType,
       },
     );
     final data = _extractMap(response.data);
@@ -390,6 +400,50 @@ class HostArenaBookingRepository {
       debugPrint('[customers] fetchArenaGuests ERROR: $e\n$st');
       rethrow;
     }
+  }
+
+  Future<MonthlyPass> createMonthlyPass(
+    String arenaId,
+    Map<String, dynamic> input,
+  ) async {
+    final response = await _dio.post(_paths.arenaMonthlyPasses(arenaId), data: input);
+    final data = _extractMap(response.data);
+    final payload = _extractMap(data['data'] ?? data);
+    return MonthlyPass.fromJson(payload);
+  }
+
+  Future<List<MonthlyPass>> listMonthlyPasses(
+    String arenaId, {
+    String? month,
+    String? status,
+  }) async {
+    final response = await _dio.get(
+      _paths.arenaMonthlyPasses(arenaId),
+      queryParameters: {
+        if (month != null) 'month': month,
+        if (status != null) 'status': status,
+      },
+    );
+    final data = _extractMap(response.data);
+    final list = ((data['data'] ?? const []) as List)
+        .whereType<Map>()
+        .map((e) => MonthlyPass.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    return list;
+  }
+
+  Future<MonthlyPass> fetchMonthlyPass(String passId) async {
+    final response = await _dio.get(_paths.monthlyPass(passId));
+    final data = _extractMap(response.data);
+    final payload = _extractMap(data['data'] ?? data);
+    return MonthlyPass.fromJson(payload);
+  }
+
+  Future<MonthlyPass> cancelMonthlyPass(String passId) async {
+    final response = await _dio.post(_paths.monthlyPassCancel(passId));
+    final data = _extractMap(response.data);
+    final payload = _extractMap(data['data'] ?? data);
+    return MonthlyPass.fromJson(payload);
   }
 
   Future<ArenaReservation> checkinByOwner(String bookingId) async {

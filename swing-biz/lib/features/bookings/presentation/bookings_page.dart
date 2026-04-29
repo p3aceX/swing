@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -1754,10 +1755,14 @@ class _SlotOption {
 }
 
 List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit) {
-  final increment = unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60;
-  final minMins = unit.minSlotMins > 0 ? unit.minSlotMins : increment;
+  final minMins = unit.minSlotMins > 0 ? unit.minSlotMins : 60;
+  // Step by minSlotMins when min >= 60; this way 4hr min → 4hr, 8hr, 12hr steps
+  final increment = minMins >= 60 ? minMins : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
   final isGround = unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
-  final maxMins = unit.maxSlotMins > 0 ? unit.maxSlotMins : (isGround ? 720 : 240);
+  // Always allow at least 3× min or 720 min (full day), whichever is larger
+  final configuredMax = unit.maxSlotMins > minMins ? unit.maxSlotMins : 0;
+  final autoMax = (minMins * 3).clamp(240, 720);
+  final maxMins = configuredMax > 0 ? configuredMax : (isGround ? 720 : autoMax);
   final opts = <_SlotOption>[];
   for (var m = minMins; m <= maxMins; m += increment) {
     final int paise;
@@ -1768,7 +1773,7 @@ List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit) {
     final label = (m >= 720 && unit.priceFullDayPaise != null) ? 'Full day' : _durationLabel(m);
     opts.add(_SlotOption(durationMins: m, label: label, paise: paise));
   }
-  return opts.isEmpty ? [_SlotOption(durationMins: 60, label: '1 hr', paise: unit.pricePerHourPaise)] : opts;
+  return opts.isEmpty ? [_SlotOption(durationMins: minMins, label: _durationLabel(minMins), paise: ((unit.pricePerHourPaise * minMins) / 60).round())] : opts;
 }
 
 String _fmtDate(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
@@ -1796,12 +1801,26 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   final _notesCtrl = TextEditingController();
   final _totalCtrl = TextEditingController();
   final _advanceCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  final _dateStripCtrl = ScrollController();
+
+  // Wizard step state
+  static const _stepLabels = ['Court', 'Slot', 'Confirm'];
+  int _step = 0;
+  bool _stepForward = true;
 
   late DateTime _selectedDate;
+  late DateTime _endDate;
+  bool _isMultiDay = false;
+  bool _endDatePicked = false;
+  bool _isCustomDates = false;
+  final Set<DateTime> _customDates = {};
+  final Map<String, bool> _dateBusyMap = {};
+  bool _loadingBusyMap = false;
   String? _unitId;
-  // Holds the single selected start time (duration-first model)
+  String? _netVariantType;
   final List<String> _selectedSlots = [];
-  int _selectedDurationIdx = 0;
+  int _selectedDurationIdx = -1;
   String _paymentMode = 'CASH';
   bool _loading = false;
   bool _totalEdited = false;
@@ -1810,6 +1829,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   bool _loadingAvail = true;
   List<ArenaAddon> _addons = [];
   final Set<ArenaAddon> _selectedAddons = {};
+  bool _searchingUser = false;
+  ArenaGuest? _foundGuest;
+  bool _lookupDone = false;
 
   ArenaUnitOption? get _unit => widget.arena.units.where((u) => u.id == _unitId).firstOrNull;
 
@@ -1821,8 +1843,29 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     return opts[idx].durationMins;
   }
 
-  String get _startTime => _selectedSlots.isEmpty ? '' : _selectedSlots.first;
+  bool get _isFullDay => _currentDurationMins >= 720;
+
+  String get _fullDayOpen {
+    final unit = _unit;
+    return unit?.openTime ?? widget.arena.openTime ?? '06:00';
+  }
+
+  String get _fullDayClose {
+    final unit = _unit;
+    return unit?.closeTime ?? widget.arena.closeTime ?? '23:00';
+  }
+
+  bool get _fullDayBusy =>
+      _existingBookings.any((b) => b.status != 'CANCELLED');
+
+  // For full day, the slot is always "selected" (the whole day)
+  String get _startTime {
+    if (_isMultiDay || _isFullDay) return _fullDayOpen;
+    return _selectedSlots.isEmpty ? '' : _selectedSlots.first;
+  }
+
   String get _endTime {
+    if (_isMultiDay || _isFullDay) return _fullDayClose;
     if (_selectedSlots.isEmpty) return '';
     return _addMinutes(_selectedSlots.first, _currentDurationMins);
   }
@@ -1834,28 +1877,154 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     return _addons.where((a) => a.unitId == null || a.unitId == unitId).toList();
   }
 
+  bool get _isBulkApplied {
+    final unit = _unit;
+    if (!_isMultiDay || unit == null) return false;
+    final days = _endDate.difference(_selectedDate).inDays + 1;
+    return unit.minBulkDays != null && unit.bulkDayRatePaise != null && days >= unit.minBulkDays!;
+  }
+
+  int get _bulkDays => _endDate.difference(_selectedDate).inDays + 1;
+
+  int get _variantPricePerHour {
+    final unit = _unit;
+    if (unit == null || _netVariantType == null) return 0;
+    try {
+      return unit.netVariants.firstWhere((v) => v.type == _netVariantType).pricePaise ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   int get _totalPaise {
     if (_totalEdited) return ((double.tryParse(_totalCtrl.text) ?? 0) * 100).round();
     final unit = _unit;
-    if (unit == null || _selectedSlots.isEmpty) return 0;
-    final opts = _buildSlotOptions(unit);
-    final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
-    return opts[idx].paise + _addonPaise;
+    if (unit == null) return 0;
+    final variantOverride = _variantPricePerHour;
+    if (_isMultiDay) {
+      final days = _isCustomDates ? _customDates.length : _bulkDays;
+      if (unit.bulkDayRatePaise != null) return unit.bulkDayRatePaise! * days + _addonPaise;
+      final opts = _buildSlotOptions(unit);
+      final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
+      final base = variantOverride > 0 ? (variantOverride * opts[idx].durationMins / 60).round() : opts[idx].paise;
+      return base * days + _addonPaise;
+    }
+    if (_isFullDay || _selectedSlots.isNotEmpty) {
+      final opts = _buildSlotOptions(unit);
+      final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
+      final base = variantOverride > 0 ? (variantOverride * opts[idx].durationMins / 60).round() : opts[idx].paise;
+      return base + _addonPaise;
+    }
+    return 0;
   }
 
   int get _advancePaise => ((double.tryParse(_advanceCtrl.text) ?? 0) * 100).round().clamp(0, _totalPaise);
   int get _minAdvancePaise => _unit?.minAdvancePaise ?? 0;
-  bool get _advanceOk => _minAdvancePaise == 0 || _advancePaise >= _minAdvancePaise;
+  bool get _advanceOk => _isMultiDay || _minAdvancePaise == 0 || _advancePaise >= _minAdvancePaise;
 
   @override
   void initState() {
     super.initState();
     _selectedDate = widget.date;
+    _endDate = widget.date;
     _unitId = widget.lockedUnitId ?? widget.arena.units.firstOrNull?.id;
     _initDuration();
     _rebuildTimes();
     _loadAvailability();
     _loadAddons();
+
+    _phoneCtrl.addListener(_onPhoneChanged);
+  }
+
+  void _onPhoneChanged() {
+    final phone = _phoneCtrl.text.trim();
+    if (_foundGuest != null || _lookupDone) {
+      setState(() { _foundGuest = null; _lookupDone = false; _nameCtrl.clear(); });
+    }
+    if (phone.length == 10 && !_searchingUser) {
+      _lookupUser(phone);
+    }
+  }
+
+  Future<void> _lookupUser(String phone) async {
+    setState(() => _searchingUser = true);
+    try {
+      final repo = ref.read(hostArenaBookingRepositoryProvider);
+      final guests = await repo.fetchArenaGuests(widget.arena.id, search: phone);
+      if (!mounted) return;
+      if (guests.isNotEmpty) {
+        final found = guests.first;
+        _nameCtrl.text = found.name;
+        setState(() { _foundGuest = found; _lookupDone = true; });
+      } else {
+        setState(() { _foundGuest = null; _lookupDone = true; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _foundGuest = null; _lookupDone = true; });
+    } finally {
+      if (mounted) setState(() => _searchingUser = false);
+    }
+  }
+
+  void _clearGuest() {
+    setState(() { _foundGuest = null; _lookupDone = false; _nameCtrl.clear(); _phoneCtrl.clear(); });
+  }
+
+  @override
+  void dispose() {
+    _phoneCtrl.removeListener(_onPhoneChanged);
+    for (final ctrl in [_nameCtrl, _phoneCtrl, _notesCtrl, _totalCtrl, _advanceCtrl]) {
+      ctrl.dispose();
+    }
+    _scrollCtrl.dispose();
+    _dateStripCtrl.dispose();
+    super.dispose();
+  }
+
+  void _scrollToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) _scrollCtrl.jumpTo(0);
+    });
+  }
+
+  bool get _canAdvance {
+    switch (_step) {
+      case 0:
+        if (_unitId == null) return false;
+        if (_unit?.hasVariants == true && _netVariantType == null) return false;
+        return _isMultiDay || _selectedDurationIdx >= 0;
+      case 1:
+        if (_isMultiDay) return _isCustomDates ? _customDates.isNotEmpty : _endDatePicked;
+        if (_isFullDay) return !_loadingAvail && !_fullDayBusy;
+        return _selectedSlots.isNotEmpty;
+      default: return true;
+    }
+  }
+
+  void _nextStep() {
+    if (!_canAdvance) return;
+    setState(() { _stepForward = true; _step++; });
+    _scrollToTop();
+  }
+
+  void _prevStep() {
+    if (_step == 0) { Navigator.pop(context); return; }
+    setState(() { _stepForward = false; _step--; });
+    _scrollToTop();
+  }
+
+  Widget _stepTransition(Widget child, Animation<double> animation) {
+    final isEntering = (child.key as ValueKey?)?.value == _step;
+    final enterOffset = _stepForward ? const Offset(1.0, 0) : const Offset(-1.0, 0);
+    final exitOffset = _stepForward ? const Offset(-1.0, 0) : const Offset(1.0, 0);
+    final slide = Tween<Offset>(
+      begin: isEntering ? enterOffset : exitOffset,
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+    return SlideTransition(
+      position: slide,
+      child: FadeTransition(opacity: animation, child: child),
+    );
   }
 
   Future<void> _loadAddons() async {
@@ -1869,11 +2038,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   void _initDuration() {
     final unit = _unit;
-    if (unit == null) { _selectedDurationIdx = 0; return; }
+    if (unit == null) { _selectedDurationIdx = -1; return; }
     final opts = _buildSlotOptions(unit);
-    // Start at the option whose duration matches minSlotMins
-    final idx = opts.indexWhere((o) => o.durationMins >= unit.minSlotMins);
-    _selectedDurationIdx = idx >= 0 ? idx : 0;
+    _selectedDurationIdx = -1;
   }
 
   void _rebuildTimes() {
@@ -1888,15 +2055,34 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final increment = unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60;
     final durMins = _currentDurationMins;
 
-    final isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
-    final bufferMins = arena.bufferMins;
-    final nowMins = DateTime.now().hour * 60 + DateTime.now().minute;
-
-    _allDaySlots = [];
-    for (var m = openMins; m + durMins <= closeMins; m += increment) {
-      if (isToday && m < nowMins + bufferMins) continue;
-      _allDaySlots.add(_fromMins(m));
+    List<String> _slotsForDate(DateTime date) {
+      final isToday = DateUtils.isSameDay(date, DateTime.now());
+      final bufferMins = arena.bufferMins;
+      final nowMins = DateTime.now().hour * 60 + DateTime.now().minute;
+      final slots = <String>[];
+      for (var m = openMins; m + durMins <= closeMins; m += increment) {
+        if (isToday && m < nowMins + bufferMins) continue;
+        slots.add(_fromMins(m));
+      }
+      return slots;
     }
+
+    var slots = _slotsForDate(_selectedDate);
+
+    // If today yields no slots (full-ground late in the day), advance to tomorrow
+    if (slots.isEmpty && DateUtils.isSameDay(_selectedDate, DateTime.now())) {
+      final tomorrow = DateTime.now().add(const Duration(days: 1));
+      final tomorrowSlots = _slotsForDate(tomorrow);
+      if (tomorrowSlots.isNotEmpty) {
+        _selectedDate = tomorrow;
+        slots = tomorrowSlots;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _loadAvailability();
+        });
+      }
+    }
+
+    _allDaySlots = slots;
     _selectedSlots.clear();
     _selectedAddons.clear();
     _totalEdited = false;
@@ -1917,7 +2103,6 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       final repo = ref.read(hostArenaBookingRepositoryProvider);
       final date = _fmtDate(_selectedDate);
 
-      // Collect related unit IDs: the unit itself + parent + children
       final relatedIds = <String>{_unitId!};
       final parentId = _unit?.parentUnitId;
       if (parentId != null) relatedIds.add(parentId);
@@ -1925,13 +2110,61 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         if (u.parentUnitId == _unitId) relatedIds.add(u.id);
       }
 
+      debugPrint('[booking] _loadAvailability unitId=$_unitId date=$date relatedIds=$relatedIds isFullDay=$_isFullDay');
       final results = await Future.wait(
         relatedIds.map((id) => repo.listArenaBookings(widget.arena.id, date: date, unitId: id)),
       );
       final merged = results.expand((b) => b).toList();
+      debugPrint('[booking] _loadAvailability fetched ${merged.length} bookings: ${merged.map((b) => '${b.unitId} ${b.startTime}-${b.endTime} ${b.status}').toList()}');
       if (mounted) setState(() => _existingBookings = merged);
-    } catch (_) { if (mounted) setState(() => _existingBookings = []); }
-    finally { if (mounted) setState(() => _loadingAvail = false); }
+    } catch (e) {
+      debugPrint('[booking] _loadAvailability ERROR: $e');
+      if (mounted) setState(() => _existingBookings = []);
+    } finally {
+      if (mounted) setState(() => _loadingAvail = false);
+    }
+  }
+
+  Future<void> _loadBusyDates() async {
+    if (_unitId == null || _loadingBusyMap) return;
+    setState(() => _loadingBusyMap = true);
+    try {
+      final repo = ref.read(hostArenaBookingRepositoryProvider);
+      final results = await Future.wait([
+        repo.listArenaBookings(widget.arena.id, unitId: _unitId),
+        repo.listUnitTimeBlocks(widget.arena.id, unitId: _unitId!),
+      ]);
+      final bookings = results[0] as List<ArenaReservation>;
+      final blocks = results[1] as List<ArenaTimeBlock>;
+      final busy = <String, bool>{};
+      for (final b in bookings) {
+        if (b.status == 'CANCELLED') continue;
+        if (b.bookingDate != null) busy[_fmtDate(b.bookingDate!)] = true;
+      }
+      for (final bl in blocks) {
+        if (bl.date != null && bl.date!.length >= 10) {
+          busy[bl.date!.substring(0, 10)] = true;
+        } else if (bl.isRecurring && bl.weekdays.isNotEmpty) {
+          // Mark recurring block weekdays for the next 42 days
+          final today = DateTime.now();
+          for (var i = 0; i < 42; i++) {
+            final d = today.add(Duration(days: i));
+            if (bl.weekdays.contains(d.weekday)) {
+              busy[_fmtDate(d)] = true;
+            }
+          }
+        } else if (bl.isHoliday) {
+          if (bl.date != null) busy[bl.date!.substring(0, 10)] = true;
+        }
+      }
+      if (mounted) setState(() => _dateBusyMap
+        ..clear()
+        ..addAll(busy));
+    } catch (e) {
+      debugPrint('[booking] _loadBusyDates ERROR: $e');
+    } finally {
+      if (mounted) setState(() => _loadingBusyMap = false);
+    }
   }
 
   // A start time is busy if any part of [time, time + selectedDuration) overlaps an existing booking.
@@ -1946,6 +2179,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   void _onSlotTapped(String time) {
     if (_isBusy(time)) return;
+    final wasEmpty = _selectedSlots.isEmpty;
     setState(() {
       if (_selectedSlots.length == 1 && _selectedSlots.first == time) {
         _selectedSlots.clear();
@@ -1955,30 +2189,93 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         if (!_totalEdited) _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
       }
     });
+    if (wasEmpty && _selectedSlots.isNotEmpty) _scrollToTop();
   }
 
   Future<void> _save() async {
-    if (_nameCtrl.text.trim().isEmpty || _phoneCtrl.text.trim().isEmpty) { _snack('Required fields missing', err: true); return; }
-    if (_selectedSlots.isEmpty) { _snack('Please select a start time', err: true); return; }
-    if (!_advanceOk) { _snack('Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required', err: true); return; }
-    
+    debugPrint('[booking] _save isFullDay=$_isFullDay loadingAvail=$_loadingAvail fullDayBusy=$_fullDayBusy existingBookings=${_existingBookings.length} startTime=$_startTime endTime=$_endTime totalPaise=$_totalPaise loading=$_loading advanceOk=$_advanceOk minAdv=$_minAdvancePaise adv=$_advancePaise name="${_nameCtrl.text.trim()}" phone="${_phoneCtrl.text.trim()}"');
+    final guestName = _foundGuest?.name ?? _nameCtrl.text.trim();
+    if (guestName.isEmpty || _phoneCtrl.text.trim().isEmpty) { debugPrint('[booking] BLOCKED: name/phone'); _snack('Required fields missing', err: true); return; }
+    if (!_isMultiDay && !_isFullDay && _selectedSlots.isEmpty) { debugPrint('[booking] BLOCKED: no slot'); _snack('Please select a start time', err: true); return; }
+    if (_isFullDay && (_loadingAvail || _fullDayBusy)) { debugPrint('[booking] BLOCKED: fullDay busy'); _snack('This day is already booked', err: true); return; }
+    if (!_advanceOk) { debugPrint('[booking] BLOCKED: advance min=$_minAdvancePaise actual=$_advancePaise'); _snack('Min advance ₹${(_minAdvancePaise / 100).toStringAsFixed(0)} required', err: true); return; }
+    if (_loading) { debugPrint('[booking] BLOCKED: already loading'); return; }
     setState(() => _loading = true);
     try {
-      await ref.read(hostArenaBookingRepositoryProvider).createManualBooking(
-        widget.arena.id, unitId: _unitId!, date: _fmtDate(_selectedDate),
-        startTime: _startTime, endTime: _endTime, guestName: _nameCtrl.text.trim(),
-        guestPhone: _phoneCtrl.text.trim(), paymentMode: _paymentMode,
-        amountPaise: _totalPaise, advancePaise: _advancePaise,
-        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-      );
+      final payload = {
+        'arenaId': widget.arena.id,
+        'unitId': _unitId,
+        'date': _fmtDate(_selectedDate),
+        'startTime': _startTime,
+        'endTime': _endTime,
+        'guestName': _foundGuest?.name ?? _nameCtrl.text.trim(),
+        'guestPhone': _phoneCtrl.text.trim(),
+        'paymentMode': _paymentMode,
+        'amountPaise': _totalPaise,
+        'advancePaise': _advancePaise,
+      };
+      debugPrint('[booking] createManualBooking payload=$payload');
+      final repo = ref.read(hostArenaBookingRepositoryProvider);
+      final guestName = _foundGuest?.name ?? _nameCtrl.text.trim();
+      final guestPhone = _phoneCtrl.text.trim();
+      final notes = _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim();
+
+      if (_isMultiDay && _isCustomDates) {
+        final sortedDates = _customDates.toList()..sort();
+        final perDayPaise = _customDates.isNotEmpty ? (_totalPaise / _customDates.length).round() : _totalPaise;
+        final perDayAdvance = _customDates.isNotEmpty ? (_advancePaise / _customDates.length).round() : _advancePaise;
+        final skipped = <String>[];
+        for (final d in sortedDates) {
+          try {
+            await repo.createManualBooking(
+              widget.arena.id, unitId: _unitId!, date: _fmtDate(d),
+              startTime: _startTime, endTime: _endTime, guestName: guestName,
+              guestPhone: guestPhone, paymentMode: _paymentMode,
+              amountPaise: perDayPaise, advancePaise: perDayAdvance,
+              notes: notes, bookingSource: 'BIZ',
+              netVariantType: _netVariantType,
+            );
+          } catch (e) {
+            skipped.add(DateFormat('d MMM').format(d));
+          }
+        }
+        if (mounted) {
+          Navigator.pop(context);
+          if (skipped.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Skipped ${skipped.length} conflicting date(s): ${skipped.join(', ')}'),
+              backgroundColor: const Color(0xFFD97706),
+            ));
+          }
+        }
+        return;
+      } else {
+        await repo.createManualBooking(
+          widget.arena.id, unitId: _unitId!, date: _fmtDate(_selectedDate),
+          startTime: _startTime, endTime: _endTime, guestName: guestName,
+          guestPhone: guestPhone, paymentMode: _paymentMode,
+          amountPaise: _totalPaise, advancePaise: _advancePaise,
+          notes: notes,
+          endDate: _isMultiDay ? _fmtDate(_endDate) : null,
+          isBulkBooking: _isBulkApplied,
+          bulkDayRatePaise: _isBulkApplied ? _unit?.bulkDayRatePaise : null,
+          bookingSource: 'BIZ',
+          netVariantType: _netVariantType,
+        );
+      }
+      debugPrint('[booking] createManualBooking SUCCESS');
       if (mounted) Navigator.pop(context);
-    } catch (e) { if (mounted) _snack('$e', err: true); }
+    } catch (e, st) {
+      debugPrint('[booking] createManualBooking ERROR: $e\n$st');
+      if (mounted) _snack('$e', err: true);
+    }
     finally { if (mounted) setState(() => _loading = false); }
   }
 
   void _snack(String m, {bool err = false}) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _bg));
 
-  Future<void> _selectDate() async {
+
+  Future<void> _selectStartDate() async {
     final today = DateTime.now();
     final picked = await showDatePicker(
       context: context,
@@ -1993,195 +2290,916 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
+        if (_endDate.isBefore(_selectedDate)) _endDate = _selectedDate;
         _rebuildTimes();
+        if (!_totalEdited) _syncPrice();
       });
       _loadAvailability();
+      // Scroll the date strip to the picked date
+      final today = DateTime.now();
+      final dayOffset = picked.difference(DateTime(today.year, today.month, today.day)).inDays;
+      if (dayOffset >= 0 && _dateStripCtrl.hasClients) {
+        _dateStripCtrl.animateTo(
+          (dayOffset * 60.0).clamp(0, _dateStripCtrl.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    }
+  }
+
+  Future<void> _selectEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _endDate.isBefore(_selectedDate) ? _selectedDate : _endDate,
+      firstDate: _selectedDate,
+      lastDate: _selectedDate.add(const Duration(days: 90)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(colorScheme: ColorScheme.light(primary: _accent, onPrimary: Colors.white, onSurface: _text)),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      final wasShowing = _endDatePicked;
+      setState(() {
+        _endDate = picked;
+        _endDatePicked = true;
+        if (!_totalEdited) _syncPrice();
+      });
+      if (!wasShowing) _scrollToTop();
+    }
+  }
+
+  void _syncPrice() {
+    if (_totalEdited) return;
+    final unit = _unit;
+    if (unit == null) return;
+    if (_isMultiDay) {
+      final days = _isCustomDates ? _customDates.length : _bulkDays;
+      if (unit.bulkDayRatePaise != null) {
+        _totalCtrl.text = (unit.bulkDayRatePaise! * days / 100).toStringAsFixed(0);
+      } else {
+        final opts = _buildSlotOptions(unit);
+        final opt = opts[_selectedDurationIdx.clamp(0, opts.length - 1)];
+        _totalCtrl.text = (opt.paise * days / 100).toStringAsFixed(0);
+      }
+    } else if (_isFullDay) {
+      final opts = _buildSlotOptions(unit);
+      final opt = opts[_selectedDurationIdx.clamp(0, opts.length - 1)];
+      _totalCtrl.text = (opt.paise / 100).toStringAsFixed(0);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isLastStep = _step == _stepLabels.length - 1;
+
+    // Progressive visibility gates
+    final showBookingType = _unitId != null;
+    final showDates = _unitId != null;
+    final showDuration = _unitId != null && !_isMultiDay;
+    final showSlotGrid = _unitId != null && !_isMultiDay;
+    final showGuestPayment = _isMultiDay
+        ? _endDatePicked
+        : (_isFullDay || _selectedSlots.isNotEmpty);
+
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 24),
       decoration: const BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(child: Container(width: 44, height: 5, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(10)))),
-            const SizedBox(height: 24),
-            const Text('New Booking', style: TextStyle(color: _text, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.8)),
-            const SizedBox(height: 16),
-            
-            GestureDetector(
-              onTap: _selectDate,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(16), border: Border.all(color: _border)),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: _accent.withValues(alpha: .12), borderRadius: BorderRadius.circular(12)),
-                      child: Icon(Icons.calendar_today_rounded, color: _accent, size: 20),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('BOOKING DATE', style: TextStyle(color: _muted, fontSize: 10, fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 2),
-                          Text(DateFormat('EEEE, d MMMM yyyy').format(_selectedDate), style: const TextStyle(color: _text, fontSize: 15, fontWeight: FontWeight.w800)),
-                        ],
-                      ),
-                    ),
-                    Icon(Icons.unfold_more_rounded, color: _muted, size: 20),
-                  ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          const SizedBox(height: 12),
+          Center(child: Container(width: 44, height: 5, decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(10)))),
+          const SizedBox(height: 16),
+
+          // Title
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text('Add Booking', style: const TextStyle(color: _text, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+          ),
+          const SizedBox(height: 16),
+
+          // Step indicator
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _BookingStepBar(step: _step, labels: _stepLabels),
+          ),
+          const SizedBox(height: 20),
+
+          // Step content — slides horizontally
+          Flexible(
+            child: SingleChildScrollView(
+              controller: _scrollCtrl,
+              padding: EdgeInsets.only(
+                left: 24, right: 24,
+                bottom: MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 24,
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                transitionBuilder: _stepTransition,
+                layoutBuilder: (cur, prev) => ClipRect(
+                  child: Stack(
+                    alignment: Alignment.topLeft,
+                    children: [...prev, if (cur != null) cur],
+                  ),
+                ),
+                child: KeyedSubtree(
+                  key: ValueKey(_step),
+                  child: _buildStepContent(),
                 ),
               ),
             ),
-            
-            const SizedBox(height: 24),
-            _FormTextField(label: 'Guest Name', controller: _nameCtrl, icon: Icons.person_outline_rounded),
-            const SizedBox(height: 16),
-            _FormTextField(label: 'Phone Number', controller: _phoneCtrl, icon: Icons.phone_android_rounded, keyboardType: TextInputType.phone),
-            const SizedBox(height: 24),
-            
-            if (widget.arena.units.length > 1) ...[
-              const Text('Select Unit', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-              const SizedBox(height: 12),
-              _SegmentPicker(options: widget.arena.units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _selectedAddons.clear(); _initDuration(); _rebuildTimes(); }); _loadAvailability(); }),
-              const SizedBox(height: 24),
-            ],
+          ),
 
-            if (_unit != null) ...[
-              const Text('Duration', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-              const SizedBox(height: 12),
-              _SlotPicker(
-                slots: _buildSlotOptions(_unit!),
-                selectedIdx: _selectedDurationIdx,
-                onSelect: (idx) {
-                  setState(() { _selectedDurationIdx = idx; _rebuildTimes(); });
-                  _loadAvailability();
-                },
-              ),
-              const SizedBox(height: 24),
-            ],
-
-            if (_unitId != null && _unitAddons.isNotEmpty) ...[
-              const Text('Add-ons', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-              const SizedBox(height: 12),
-              ..._unitAddons.map((a) {
-                final isSel = _selectedAddons.contains(a);
-                return GestureDetector(
-                  onTap: () => setState(() {
-                    if (isSel) _selectedAddons.remove(a); else _selectedAddons.add(a);
-                    if (_selectedSlots.isNotEmpty && !_totalEdited) {
-                      _totalCtrl.text = (_totalPaise / 100).toStringAsFixed(0);
-                    }
-                  }),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSel ? _accent.withValues(alpha: .08) : _bg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isSel ? _accent : _border),
-                    ),
-                    child: Row(children: [
-                      Icon(isSel ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, color: isSel ? _accent : _muted, size: 20),
-                      const SizedBox(width: 12),
-                      Expanded(child: Text(a.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w700, fontSize: 14))),
-                      Text('₹${(a.pricePaise / 100).toStringAsFixed(0)} / ${a.unit}', style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
-                    ]),
+          // Nav buttons
+          Padding(
+            padding: EdgeInsets.fromLTRB(24, 8, 24, MediaQuery.of(context).padding.bottom + 20),
+            child: Row(children: [
+              GestureDetector(
+                onTap: _prevStep,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _bg,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _border),
                   ),
-                );
-              }),
-              const SizedBox(height: 24),
-            ],
-
-            const Text('Select Start Time', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-            const SizedBox(height: 12),
-            if (_allDaySlots.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                width: double.infinity,
-                decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: _border)),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline_rounded, color: _muted, size: 18),
-                    const SizedBox(width: 12),
-                    const Text('No slots available.', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
-                  ],
+                  child: Icon(
+                    _step == 0 ? Icons.close_rounded : Icons.arrow_back_rounded,
+                    color: _text, size: 20,
+                  ),
                 ),
-              )
-            else
-              _StartTimeGrid(times: _allDaySlots, selected: _selectedSlots, busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t}, onSelect: _onSlotTapped, isGround: (_unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND' || (_unit?.minSlotMins ?? 0) >= 240), durationMins: _currentDurationMins),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: isLastStep
+                  ? _BookingActionButton(
+                      label: _loading ? 'Saving…' : _confirmLabel,
+                      enabled: !_loading && !(!_isMultiDay && _isFullDay && (_loadingAvail || _fullDayBusy)),
+                      onTap: _save,
+                    )
+                  : _BookingActionButton(
+                      label: 'Next',
+                      enabled: _canAdvance,
+                      onTap: _nextStep,
+                      trailing: Icons.arrow_forward_rounded,
+                    )),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
 
-            if (_selectedSlots.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(color: _accent.withValues(alpha: .08), borderRadius: BorderRadius.circular(12), border: Border.all(color: _accent.withValues(alpha: .25))),
-                child: Row(children: [
-                  Icon(Icons.schedule_rounded, color: _accent, size: 18),
-                  const SizedBox(width: 12),
-                  Text('$_startTime → $_endTime', style: TextStyle(color: _accent, fontSize: 14, fontWeight: FontWeight.w800)),
-                  const SizedBox(width: 8),
-                  Text('· ${_durationLabel(_currentDurationMins)}', style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
-                ]),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(child: _FormTextField(label: 'Total (₹)', controller: _totalCtrl, keyboardType: TextInputType.number, onChanged: (_) => _totalEdited = true)),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _FormTextField(
-                      label: _minAdvancePaise > 0 ? 'Advance (min ₹${(_minAdvancePaise / 100).toStringAsFixed(0)})' : 'Advance (₹)',
-                      controller: _advanceCtrl,
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setState(() {}),
-                    ),
+  Widget _buildStepContent() {
+    switch (_step) {
+      case 0: return _buildCourtStep();
+      case 1: return _buildSlotStep();
+      case 2: return _buildConfirmStep();
+      default: return const SizedBox.shrink();
+    }
+  }
+
+  // ── Step 0: Court + Duration ───────────────────────────────────────────────
+  Widget _buildCourtStep() {
+    final units = widget.arena.units;
+    final hasGrounds = units.any((u) => u.unitType == 'FULL_GROUND' || u.unitType == 'HALF_GROUND');
+    final hasNets = units.any((u) => u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET');
+    final selectedIsGround = _unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND';
+    final selectedIsNet = _unit?.unitType == 'CRICKET_NET' || _unit?.unitType == 'INDOOR_NET';
+    final netUnits = units.where((u) => u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET').toList();
+    final netTypes = <String>{for (final u in netUnits) if (u.netType != null && u.netType!.isNotEmpty) u.netType!}.toList();
+    final unit = _unit;
+    final bulkAvailable = unit != null && (unit.minBulkDays ?? 0) > 0 && unit.bulkDayRatePaise != null;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Court type
+      if (hasGrounds && hasNets) ...[
+        Row(children: [
+          Expanded(child: _BizTypeTile(
+            icon: Icons.grass_rounded, label: 'Full Ground', sublabel: _groundPriceLabel(units),
+            selected: selectedIsGround,
+            onTap: () {
+              final g = units.firstWhere((u) => u.unitType == 'FULL_GROUND' || u.unitType == 'HALF_GROUND');
+              setState(() { _unitId = g.id; _selectedAddons.clear(); _selectedSlots.clear(); _initDuration(); _rebuildTimes(); });
+              _loadAvailability();
+            },
+          )),
+          const SizedBox(width: 12),
+          Expanded(child: _BizTypeTile(
+            icon: Icons.sports_cricket_rounded, label: 'Nets', sublabel: _netPriceLabel(units),
+            selected: selectedIsNet,
+            onTap: () {
+              final n = units.firstWhere((u) => u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET');
+              setState(() { _unitId = n.id; _selectedAddons.clear(); _selectedSlots.clear(); _initDuration(); _rebuildTimes(); });
+              _loadAvailability();
+            },
+          )),
+        ]),
+        if (selectedIsNet && netTypes.length > 1) ...[
+          const SizedBox(height: 12),
+          SizedBox(height: 40, child: ListView.separated(
+            scrollDirection: Axis.horizontal, itemCount: netTypes.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (ctx, i) {
+              final type = netTypes[i]; final isSel = _unit?.netType == type;
+              final count = netUnits.where((u) => u.netType == type).length;
+              return GestureDetector(
+                onTap: () { final m = netUnits.firstWhere((u) => u.netType == type); setState(() { _unitId = m.id; _selectedAddons.clear(); _initDuration(); _rebuildTimes(); }); _loadAvailability(); },
+                child: AnimatedContainer(duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(color: isSel ? _accent : _bg, borderRadius: BorderRadius.circular(20), border: Border.all(color: isSel ? _accent : _border)),
+                  child: Text('${type[0].toUpperCase()}${type.substring(1).toLowerCase()} ($count)', style: TextStyle(color: isSel ? Colors.white : _text, fontWeight: FontWeight.w700, fontSize: 13)),
+                ),
+              );
+            },
+          )),
+        ],
+        if (selectedIsNet && netTypes.length <= 1 && netUnits.length > 1) ...[
+          const SizedBox(height: 12),
+          _SegmentPicker(options: netUnits.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _netVariantType = null; _selectedAddons.clear(); _initDuration(); _rebuildTimes(); }); _loadAvailability(); }),
+        ],
+      ] else if (units.length > 1) ...[
+        _SegmentPicker(options: units.map((u) => (u.id, u.name)).toList(), selected: _unitId ?? '', onSelect: (id) { setState(() { _unitId = id; _netVariantType = null; _selectedAddons.clear(); _initDuration(); _rebuildTimes(); }); _loadAvailability(); }),
+      ] else if (units.length == 1) ...[
+        Text(units.first.name, style: const TextStyle(color: _text, fontSize: 16, fontWeight: FontWeight.w700)),
+      ],
+
+      // Net variant picker — shown when selected unit has netVariants
+      if (unit != null && unit.hasVariants) ...[
+        const SizedBox(height: 16),
+        const Text('SURFACE TYPE', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final v in unit.netVariants)
+              GestureDetector(
+                onTap: () => setState(() => _netVariantType = v.type),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _netVariantType == v.type ? _accent : _surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _netVariantType == v.type ? _accent : _border),
                   ),
-                ],
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(v.label, style: TextStyle(color: _netVariantType == v.type ? Colors.white : _text, fontWeight: FontWeight.w700, fontSize: 13)),
+                      if (v.pricePaise != null)
+                        Text('₹${(v.pricePaise! / 100).toStringAsFixed(0)}/hr', style: TextStyle(color: _netVariantType == v.type ? Colors.white70 : _muted, fontSize: 11)),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 16),
-              const Text('Payment Mode', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-              const SizedBox(height: 12),
-              _SegmentPicker(
-                options: const [('CASH', 'Cash'), ('UPI', 'UPI'), ('ONLINE', 'Online')],
-                selected: _paymentMode,
-                onSelect: (m) => setState(() => _paymentMode = m),
-              ),
-              const SizedBox(height: 16),
-              _FormTextField(label: 'Notes (optional)', controller: _notesCtrl, icon: Icons.notes_rounded),
-              const SizedBox(height: 32),
-              ArenaPrimaryButton(
-                label: _loading ? 'Saving…' : 'Confirm $_startTime – $_endTime Booking',
-                onPressed: _loading ? () {} : _save,
-              ),
-            ],
-            const SizedBox(height: 24),
           ],
         ),
+      ],
+
+      // Duration — revealed after court selected, hidden when multi-day active
+      AnimatedSize(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        child: (unit == null || _isMultiDay) ? const SizedBox(width: double.infinity) : Padding(
+          padding: const EdgeInsets.only(top: 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('DURATION', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+            const SizedBox(height: 12),
+            _SlotPicker(
+              slots: _buildSlotOptions(unit),
+              selectedIdx: _selectedDurationIdx,
+              onSelect: (idx) {
+                setState(() {
+                  _selectedDurationIdx = idx;
+                  _isMultiDay = false; _endDatePicked = false;
+                  _selectedSlots.clear(); _totalEdited = false; _totalCtrl.clear();
+                  _rebuildTimes();
+                  final opt = _buildSlotOptions(unit)[idx.clamp(0, _buildSlotOptions(unit).length - 1)];
+                  if (opt.durationMins >= 720 && !_totalEdited) _totalCtrl.text = (opt.paise / 100).toStringAsFixed(0);
+                });
+                _loadAvailability();
+              },
+            ),
+          ]),
+        ),
+      ),
+
+      // Multi-Day toggle — lives outside the collapsed block so it stays visible
+      if (unit != null && bulkAvailable) ...[
+        const SizedBox(height: 20),
+        Row(children: [
+          const Expanded(child: Divider(color: _border)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text('or book multiple days', style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+          ),
+          const Expanded(child: Divider(color: _border)),
+        ]),
+        const SizedBox(height: 12),
+        GestureDetector(
+          onTap: () => setState(() { _isMultiDay = !_isMultiDay; _totalEdited = false; _totalCtrl.clear(); _selectedSlots.clear(); if (!_isMultiDay) { _endDatePicked = false; _isCustomDates = false; _customDates.clear(); } }),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(color: _isMultiDay ? _accent.withValues(alpha: .08) : _bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: _isMultiDay ? _accent : _border)),
+            child: Row(children: [
+              Icon(Icons.date_range_rounded, color: _isMultiDay ? _accent : _muted, size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text('Multi-Day · ₹${unit.bulkDayRatePaise! ~/ 100}/day for ${unit.minBulkDays}+ days',
+                  style: TextStyle(color: _isMultiDay ? _accent : _text, fontWeight: FontWeight.w700, fontSize: 13))),
+              Container(width: 20, height: 20,
+                decoration: BoxDecoration(color: _isMultiDay ? _accent : Colors.transparent, shape: BoxShape.circle, border: Border.all(color: _isMultiDay ? _accent : _border, width: 2)),
+                child: _isMultiDay ? const Icon(Icons.check_rounded, color: Colors.white, size: 12) : null),
+            ]),
+          ),
+        ),
+      ],
+
+      // Add-ons
+      if (unit != null && _unitAddons.isNotEmpty) ...[
+        const SizedBox(height: 20),
+        const Text('ADD-ONS', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        ..._unitAddons.map((a) {
+          final isSel = _selectedAddons.contains(a);
+          return GestureDetector(
+            onTap: () => setState(() { if (isSel) _selectedAddons.remove(a); else _selectedAddons.add(a); }),
+            child: Container(margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(color: isSel ? _accent.withValues(alpha: .08) : _bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: isSel ? _accent : _border)),
+              child: Row(children: [
+                Icon(isSel ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, color: isSel ? _accent : _muted, size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Text(a.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w700, fontSize: 13))),
+                Text('₹${(a.pricePaise / 100).toStringAsFixed(0)}/${a.unit}', style: const TextStyle(color: _muted, fontSize: 12)),
+              ]),
+            ),
+          );
+        }),
+      ],
+      const SizedBox(height: 24),
+    ]);
+  }
+
+  // ── Step 2: Date & Slot ────────────────────────────────────────────────────
+  Widget _buildSlotStep() {
+    if (_isMultiDay) {
+      final today = DateTime.now();
+      final gridDates = List.generate(42, (i) => DateTime(today.year, today.month, today.day + i));
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Pick dates', style: TextStyle(color: _text, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+        const SizedBox(height: 12),
+        // Mode toggle
+        Row(children: [
+          _ModeChip(label: 'Date Range', selected: !_isCustomDates, onTap: () => setState(() { _isCustomDates = false; _customDates.clear(); _syncPrice(); })),
+          const SizedBox(width: 8),
+          _ModeChip(label: 'Custom Dates', selected: _isCustomDates, onTap: () { setState(() { _isCustomDates = true; _endDatePicked = false; _customDates.clear(); _syncPrice(); }); _loadBusyDates(); }),
+        ]),
+        const SizedBox(height: 20),
+        if (!_isCustomDates) ...[
+          Row(children: [
+            Expanded(child: _BizDateTile(label: 'START DATE', date: _selectedDate, onTap: _selectStartDate)),
+            const SizedBox(width: 12),
+            Expanded(child: _BizDateTile(label: 'END DATE', date: _endDate, onTap: _selectEndDate, highlight: !_endDatePicked)),
+          ]),
+          if (_unit != null && _endDatePicked) ...[
+            const SizedBox(height: 12),
+            _BizBulkRateInfo(unit: _unit!, days: _bulkDays),
+          ],
+        ] else ...[
+          Row(children: [
+            Expanded(child: Text('Tap dates to select · ${_customDates.length} selected', style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600))),
+            if (_loadingBusyMap) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+          ]),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: gridDates.map((d) {
+            final dateKey = _fmtDate(d);
+            final isSel = _customDates.any((c) => c.year == d.year && c.month == d.month && c.day == d.day);
+            final isBusy = _dateBusyMap[dateKey] == true;
+            final isToday = d.year == today.year && d.month == today.month && d.day == today.day;
+            return GestureDetector(
+              onTap: isBusy ? null : () {
+                setState(() {
+                  final key = _customDates.firstWhere((c) => c.year == d.year && c.month == d.month && c.day == d.day, orElse: () => DateTime(0));
+                  if (key.year == 0) _customDates.add(d); else _customDates.remove(key);
+                  _totalEdited = false;
+                  _syncPrice();
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 52, height: 60,
+                decoration: BoxDecoration(
+                  color: isBusy ? const Color(0xFFFEF2F2) : (isSel ? _accent : _bg),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isBusy ? const Color(0xFFFCA5A5) : (isSel ? _accent : (isToday ? _accent.withValues(alpha: .5) : _border))),
+                ),
+                child: Stack(children: [
+                  Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Text(DateFormat('EEE').format(d), style: TextStyle(color: isBusy ? const Color(0xFFEF4444) : (isSel ? Colors.white : _muted), fontSize: 10, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text('${d.day}', style: TextStyle(color: isBusy ? const Color(0xFFEF4444) : (isSel ? Colors.white : _text), fontSize: 16, fontWeight: FontWeight.w900)),
+                    Text(DateFormat('MMM').format(d), style: TextStyle(color: isBusy ? const Color(0xFFEF4444).withValues(alpha: .7) : (isSel ? Colors.white.withValues(alpha: .8) : _muted), fontSize: 9, fontWeight: FontWeight.w600)),
+                  ])),
+                  if (isBusy) Positioned(top: 4, right: 4, child: Icon(Icons.block_rounded, size: 10, color: const Color(0xFFEF4444))),
+                ]),
+              ),
+            );
+          }).toList()),
+          if (_customDates.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(color: _accent.withValues(alpha: .08), borderRadius: BorderRadius.circular(12), border: Border.all(color: _accent.withValues(alpha: .3))),
+              child: Row(children: [
+                Icon(Icons.calculate_outlined, color: _accent, size: 18),
+                const SizedBox(width: 10),
+                Expanded(child: Text('${_customDates.length} days × ₹${(_totalPaise ~/ _customDates.length / 100).toStringAsFixed(0)}/day', style: TextStyle(color: _accent, fontWeight: FontWeight.w700, fontSize: 13))),
+                Text('₹${(_totalPaise / 100).toStringAsFixed(0)}', style: TextStyle(color: _accent, fontWeight: FontWeight.w900, fontSize: 15)),
+              ]),
+            ),
+          ],
+        ],
+        const SizedBox(height: 24),
+      ]);
+    }
+
+    final today = DateTime.now();
+    final stripDates = List.generate(30, (i) => DateTime(today.year, today.month, today.day + i));
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Pick a date', style: TextStyle(color: _text, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+          const SizedBox(height: 2),
+          Text('${_durationLabel(_currentDurationMins)} · ${_unit?.name ?? ''}', style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w500)),
+        ])),
+        GestureDetector(
+          onTap: _selectStartDate,
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _border)),
+            child: Icon(Icons.calendar_month_rounded, color: _muted, size: 20),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 16),
+
+      // Horizontal date strip
+      SizedBox(
+        height: 70,
+        child: ListView.separated(
+          controller: _dateStripCtrl,
+          scrollDirection: Axis.horizontal,
+          itemCount: stripDates.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (ctx, i) {
+            final d = stripDates[i];
+            final isSel = d.year == _selectedDate.year && d.month == _selectedDate.month && d.day == _selectedDate.day;
+            final isToday = i == 0;
+            return GestureDetector(
+              onTap: () {
+                setState(() { _selectedDate = d; _selectedSlots.clear(); _totalEdited = false; });
+                _loadAvailability();
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 52,
+                decoration: BoxDecoration(
+                  color: isSel ? _accent : _bg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: isSel ? _accent : _border),
+                ),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text(
+                    isToday ? 'Today' : DateFormat('EEE').format(d),
+                    style: TextStyle(color: isSel ? Colors.white : _muted, fontSize: isToday ? 9 : 11, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${d.day}',
+                    style: TextStyle(color: isSel ? Colors.white : _text, fontSize: 18, fontWeight: FontWeight.w900),
+                  ),
+                  Text(
+                    DateFormat('MMM').format(d),
+                    style: TextStyle(color: isSel ? Colors.white.withValues(alpha: .8) : _muted, fontSize: 10, fontWeight: FontWeight.w600),
+                  ),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+      const SizedBox(height: 20),
+
+      // Slot or full-day status
+      if (_isFullDay) ...[
+        if (_loadingAvail)
+          const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 24), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: _accent))))
+        else if (_fullDayBusy)
+          Container(padding: const EdgeInsets.all(16), width: double.infinity,
+            decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFFCA5A5))),
+            child: Row(children: [
+              const Icon(Icons.block_rounded, color: Color(0xFFEF4444), size: 18),
+              const SizedBox(width: 12),
+              Expanded(child: Text('Already booked · $_fullDayOpen – $_fullDayClose', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13, fontWeight: FontWeight.w700))),
+            ]))
+        else
+          Container(padding: const EdgeInsets.all(16), width: double.infinity,
+            decoration: BoxDecoration(color: _accent.withValues(alpha: .06), borderRadius: BorderRadius.circular(12), border: Border.all(color: _accent.withValues(alpha: .3))),
+            child: Row(children: [
+              Icon(Icons.check_circle_rounded, color: _accent, size: 18),
+              const SizedBox(width: 12),
+              Expanded(child: Text('Available · $_fullDayOpen to $_fullDayClose', style: TextStyle(color: _accent, fontSize: 13, fontWeight: FontWeight.w700))),
+            ])),
+      ] else ...[
+        const Text('SELECT START TIME', style: TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+        const SizedBox(height: 12),
+        if (_loadingAvail)
+          const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 24), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: _accent))))
+        else if (_allDaySlots.isEmpty)
+          Container(padding: const EdgeInsets.all(16), width: double.infinity,
+            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: _border)),
+            child: Row(children: [
+              Icon(Icons.info_outline_rounded, color: _muted, size: 18),
+              const SizedBox(width: 12),
+              const Text('No slots available for this date.', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+            ]))
+        else
+          _StartTimeGrid(
+            times: _allDaySlots,
+            selected: _selectedSlots,
+            busyTimes: {for (final t in _allDaySlots) if (_isBusy(t)) t},
+            onSelect: _onSlotTapped,
+            isGround: (_unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND' || (_unit?.minSlotMins ?? 0) >= 240),
+            durationMins: _currentDurationMins,
+          ),
+        if (_selectedSlots.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(color: _accent.withValues(alpha: .08), borderRadius: BorderRadius.circular(12), border: Border.all(color: _accent.withValues(alpha: .25))),
+            child: Row(children: [
+              Icon(Icons.schedule_rounded, color: _accent, size: 18),
+              const SizedBox(width: 12),
+              Text('$_startTime → $_endTime', style: TextStyle(color: _accent, fontSize: 14, fontWeight: FontWeight.w800)),
+              const SizedBox(width: 8),
+              Text('· ${_durationLabel(_currentDurationMins)}', style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ],
+      ],
+      const SizedBox(height: 24),
+    ]);
+  }
+
+  // ── Step 2: Confirm (Guest + Payment) ────────────────────────────────────
+  Widget _buildConfirmStep() {
+    if (!_totalEdited && _totalCtrl.text.isEmpty) _syncPrice();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Phone lookup
+      TextField(
+        controller: _phoneCtrl,
+        keyboardType: TextInputType.phone,
+        maxLength: 10,
+        autofocus: true,
+        inputFormatters: [LengthLimitingTextInputFormatter(10)],
+        style: const TextStyle(color: _text, fontSize: 16, fontWeight: FontWeight.w700),
+        decoration: InputDecoration(
+          hintText: 'Guest mobile number',
+          prefixIcon: const Icon(Icons.phone_android_rounded, size: 18, color: _accent),
+          suffixIcon: _searchingUser
+              ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _accent)))
+              : _foundGuest != null
+                  ? const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20)
+                  : (_lookupDone && _phoneCtrl.text.length == 10)
+                      ? const Icon(Icons.person_add_rounded, color: _muted, size: 20)
+                      : null,
+          filled: true, fillColor: _bg, counterText: '',
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _foundGuest != null ? Colors.green.withValues(alpha: .4) : _border)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _foundGuest != null ? Colors.green : _accent, width: 1.8)),
+        ),
+      ),
+      const SizedBox(height: 10),
+      // Found guest card
+      AnimatedSize(duration: const Duration(milliseconds: 240), curve: Curves.easeInOut,
+        child: _foundGuest != null
+            ? Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: Colors.green.withValues(alpha: .06), borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.green.withValues(alpha: .25))),
+                child: Row(children: [
+                  Container(width: 40, height: 40,
+                    decoration: BoxDecoration(color: Colors.green.withValues(alpha: .12), shape: BoxShape.circle),
+                    child: Center(child: Text(_foundGuest!.name.isNotEmpty ? _foundGuest!.name[0].toUpperCase() : '?',
+                        style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w900, fontSize: 16)))),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(_foundGuest!.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Row(children: [
+                      Text('${_foundGuest!.totalBookings} booking${_foundGuest!.totalBookings != 1 ? "s" : ""}',
+                          style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+                      if (_foundGuest!.balanceDuePaise > 0) ...[
+                        const SizedBox(width: 6),
+                        Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(6)),
+                          child: Text('₹${(_foundGuest!.balanceDuePaise / 100).toStringAsFixed(0)} due',
+                              style: const TextStyle(color: Color(0xFFEF4444), fontSize: 10, fontWeight: FontWeight.w800))),
+                      ],
+                    ]),
+                  ])),
+                  GestureDetector(onTap: _clearGuest,
+                    child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.close_rounded, color: _muted, size: 15))),
+                ]),
+              )
+            : const SizedBox(width: double.infinity, height: 0),
+      ),
+      // New customer name
+      AnimatedSize(duration: const Duration(milliseconds: 240), curve: Curves.easeInOut,
+        child: (_lookupDone && _foundGuest == null)
+            ? Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(color: _accent.withValues(alpha: .08), borderRadius: BorderRadius.circular(8)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.person_add_rounded, size: 13, color: _accent),
+                      const SizedBox(width: 5),
+                      Text('New customer', style: TextStyle(color: _accent, fontSize: 11, fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                  _FormTextField(label: 'Guest Name', controller: _nameCtrl, icon: Icons.person_outline_rounded),
+                ]),
+              )
+            : const SizedBox(width: double.infinity, height: 0),
+      ),
+      const SizedBox(height: 20),
+      // Payment
+      Row(children: [
+        Expanded(child: _FormTextField(label: 'Total (₹)', controller: _totalCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() => _totalEdited = true))),
+        const SizedBox(width: 12),
+        Expanded(child: _FormTextField(
+          label: _minAdvancePaise > 0 ? 'Advance (min ₹${(_minAdvancePaise / 100).toStringAsFixed(0)})' : 'Advance (₹)',
+          controller: _advanceCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}),
+        )),
+      ]),
+      const SizedBox(height: 16),
+      _SegmentPicker(options: const [('CASH', 'Cash'), ('UPI', 'UPI'), ('ONLINE', 'Online')], selected: _paymentMode, onSelect: (m) => setState(() => _paymentMode = m)),
+      const SizedBox(height: 14),
+      _FormTextField(label: 'Notes (optional)', controller: _notesCtrl, icon: Icons.notes_rounded),
+      const SizedBox(height: 24),
+    ]);
+  }
+
+  String get _confirmLabel {
+    if (_isMultiDay && _isCustomDates) return 'Confirm ${_customDates.length}-Day Booking';
+    if (_isMultiDay) return 'Confirm $_bulkDays-Day Booking';
+    if (_isFullDay) return 'Confirm Full Day';
+    return 'Confirm $_startTime – $_endTime';
+  }
+}
+
+String _groundPriceLabel(List<ArenaUnitOption> units) {
+  final u = units.where((u) => u.unitType == 'FULL_GROUND' || u.unitType == 'HALF_GROUND').firstOrNull;
+  if (u == null) return '';
+  final paise = u.price4HrPaise ?? (u.pricePerHourPaise * 4);
+  return '₹${paise ~/ 100}/4hr';
+}
+
+String _netPriceLabel(List<ArenaUnitOption> units) {
+  final u = units.where((u) => u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET').firstOrNull;
+  if (u == null) return '';
+  return '₹${u.pricePerHourPaise ~/ 100}/hr';
+}
+
+// ── Step indicator ────────────────────────────────────────────────────────────
+class _BookingStepBar extends StatelessWidget {
+  const _BookingStepBar({required this.step, required this.labels});
+  final int step; final List<String> labels;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: List.generate(labels.length * 2 - 1, (i) {
+        if (i.isOdd) {
+          final idx = i ~/ 2;
+          final done = idx < step;
+          return Expanded(child: Container(
+            height: 2,
+            color: done ? _accent : _border,
+          ));
+        }
+        final idx = i ~/ 2;
+        final done = idx < step;
+        final current = idx == step;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          width: current ? 24 : 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: done || current ? _accent : _border,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        );
+      })),
+      const SizedBox(height: 10),
+      Row(children: [
+        Text(labels[step].toUpperCase(), style: const TextStyle(color: _accent, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.0)),
+        const SizedBox(width: 8),
+        Text('${step + 1} of ${labels.length}', style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+      ]),
+    ]);
+  }
+}
+
+// ── Next / Confirm button with disabled state ─────────────────────────────────
+class _BookingActionButton extends StatelessWidget {
+  const _BookingActionButton({required this.label, required this.enabled, required this.onTap, this.trailing});
+  final String label; final bool enabled; final VoidCallback onTap; final IconData? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: enabled ? _accent : _border,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text(label, style: TextStyle(color: enabled ? Colors.white : _muted, fontWeight: FontWeight.w800, fontSize: 15)),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            Icon(trailing, size: 18, color: enabled ? Colors.white : _muted),
+          ],
+        ]),
       ),
     );
   }
 }
 
+
+class _BizTypeTile extends StatelessWidget {
+  const _BizTypeTile({required this.icon, required this.label, required this.sublabel, required this.selected, required this.onTap});
+  final IconData icon; final String label; final String sublabel; final bool selected; final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected ? _accent : _bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: selected ? _accent : _border),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 22, color: selected ? Colors.white : _muted),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: TextStyle(color: selected ? Colors.white : _text, fontWeight: FontWeight.w800, fontSize: 14)),
+            if (sublabel.isNotEmpty) Text(sublabel, style: TextStyle(color: selected ? Colors.white70 : _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+          ])),
+          if (selected) const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+        ]),
+      ),
+    );
+  }
+}
+
+class _BizBookingTypeTile extends StatelessWidget {
+  const _BizBookingTypeTile({required this.label, required this.icon, required this.selected, required this.onTap, this.badge});
+  final String label; final IconData icon; final bool selected; final VoidCallback onTap; final String? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected ? _accent : _bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: selected ? _accent : _border),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 18, color: selected ? Colors.white : _muted),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label, style: TextStyle(color: selected ? Colors.white : _text, fontWeight: FontWeight.w800, fontSize: 13))),
+          if (badge != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: selected ? Colors.white24 : _accent.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(badge!, style: TextStyle(color: selected ? Colors.white : _accent, fontSize: 9, fontWeight: FontWeight.w800)),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _BizDateTile extends StatelessWidget {
+  const _BizDateTile({required this.label, required this.date, required this.onTap, this.highlight = false});
+  final String label; final DateTime date; final VoidCallback onTap; final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: highlight ? _accent.withValues(alpha: .06) : _bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: highlight ? _accent.withValues(alpha: .5) : _border),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text(label, style: TextStyle(color: highlight ? _accent : _muted, fontSize: 10, fontWeight: FontWeight.w700))),
+            if (highlight) Icon(Icons.touch_app_rounded, size: 14, color: _accent.withValues(alpha: .6)),
+          ]),
+          const SizedBox(height: 4),
+          Text(DateFormat('d MMM yyyy').format(date), style: TextStyle(color: highlight ? _accent : _text, fontSize: 14, fontWeight: FontWeight.w800)),
+          Text(DateFormat('EEEE').format(date), style: TextStyle(color: highlight ? _accent.withValues(alpha: .7) : _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _BizBulkRateInfo extends StatelessWidget {
+  const _BizBulkRateInfo({required this.unit, required this.days});
+  final ArenaUnitOption unit; final int days;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBulkConfig = unit.minBulkDays != null && unit.bulkDayRatePaise != null;
+    if (!hasBulkConfig) return const SizedBox.shrink();
+    if (days < unit.minBulkDays!) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text('Add ${unit.minBulkDays! - days} more day${unit.minBulkDays! - days > 1 ? 's' : ''} to unlock bulk rate',
+            style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+      );
+    }
+    final bulkTotal = (unit.bulkDayRatePaise! * days) ~/ 100;
+    final normalPaise = unit.price4HrPaise ?? (unit.pricePerHourPaise * 4);
+    final normalTotal = (normalPaise * days) ~/ 100;
+    final saving = normalTotal - bulkTotal;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.green.withValues(alpha: .2)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.check_circle_rounded, size: 15, color: Colors.green),
+          const SizedBox(width: 6),
+          Text('Bulk rate unlocked — $days days', style: const TextStyle(color: Colors.green, fontSize: 13, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 6),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('₹${unit.bulkDayRatePaise! ~/ 100}/day × $days days', style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('₹$bulkTotal total', style: const TextStyle(color: _text, fontSize: 13, fontWeight: FontWeight.w900)),
+        ]),
+        if (saving > 0) ...[
+          const SizedBox(height: 4),
+          Text('Save ₹$saving vs normal rate', style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.w700)),
+        ],
+      ]),
+    );
+  }
+}
+
 class _FormTextField extends StatelessWidget {
-  const _FormTextField({required this.label, required this.controller, this.icon, this.keyboardType, this.onChanged});
+  const _FormTextField({required this.label, required this.controller, this.icon, this.keyboardType, this.onChanged, this.maxLength});
   final String label;
   final TextEditingController controller;
   final IconData? icon;
   final TextInputType? keyboardType;
   final ValueChanged<String>? onChanged;
+  final int? maxLength;
 
   @override
   Widget build(BuildContext context) {
@@ -2194,11 +3212,14 @@ class _FormTextField extends StatelessWidget {
           controller: controller,
           keyboardType: keyboardType,
           onChanged: onChanged,
+          maxLength: maxLength,
+          inputFormatters: maxLength != null ? [LengthLimitingTextInputFormatter(maxLength)] : null,
           style: const TextStyle(color: _text, fontSize: 14, fontWeight: FontWeight.w700),
           decoration: InputDecoration(
             prefixIcon: icon != null ? Icon(icon, size: 18, color: _accent.withValues(alpha: .5)) : null,
             filled: true,
             fillColor: _surface,
+            counterText: '',
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _border)),
             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _accent, width: 1.6)),
@@ -2314,15 +3335,41 @@ class _SlotPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     return Wrap(spacing: 8, runSpacing: 8, children: List.generate(slots.length, (i) {
       final sel = i == selectedIdx;
+      final price = '₹${(slots[i].paise / 100).toStringAsFixed(0)}';
       return GestureDetector(
         onTap: () => onSelect(i),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(color: sel ? _accent : _surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? _accent : _border)),
-          child: Text(slots[i].label, style: TextStyle(color: sel ? Colors.black : _text, fontSize: 12, fontWeight: FontWeight.w700)),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(color: sel ? _accent : _surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: sel ? _accent : _border)),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(slots[i].label, style: TextStyle(color: sel ? Colors.black : _text, fontSize: 13, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 2),
+            Text(price, style: TextStyle(color: sel ? Colors.black.withValues(alpha: .6) : _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+          ]),
         ),
       );
     }));
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({required this.label, required this.selected, required this.onTap});
+  final String label; final bool selected; final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? _accent : _bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? _accent : _border),
+        ),
+        child: Text(label, style: TextStyle(color: selected ? Colors.black : _text, fontSize: 13, fontWeight: FontWeight.w700)),
+      ),
+    );
   }
 }
 

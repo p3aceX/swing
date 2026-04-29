@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/router/app_router.dart';
@@ -24,17 +25,19 @@ const _deep = Color(0xFF064E3B);
 
 void _arenaUploadLog(String message, [Object? error, StackTrace? stackTrace]) {
   if (!kDebugMode) return;
-  debugPrint('[arena-profile-upload] $message');
   if (error != null) debugPrint('[arena-profile-upload] error=$error');
-  if (stackTrace != null) debugPrint('[arena-profile-upload] stack=$stackTrace');
+  if (stackTrace != null) {
+    debugPrint('[arena-profile-upload] stack=$stackTrace');
+  }
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 class ArenaProfilePage extends ConsumerStatefulWidget {
-  const ArenaProfilePage({super.key, this.arenaId});
+  const ArenaProfilePage({super.key, this.arenaId, this.startEditing = false});
 
   final String? arenaId;
+  final bool startEditing;
 
   @override
   ConsumerState<ArenaProfilePage> createState() => _ArenaProfilePageState();
@@ -45,7 +48,8 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     required String folder,
     required int remainingSlots,
   }) async {
-    _arenaUploadLog('unit picker requested folder=$folder remainingSlots=$remainingSlots');
+    _arenaUploadLog(
+        'unit picker requested folder=$folder remainingSlots=$remainingSlots');
     if (remainingSlots <= 0) return const [];
     final files = await ImagePicker().pickMultiImage();
     _arenaUploadLog('unit picker returned ${files.length} file(s)');
@@ -53,18 +57,21 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
 
     final uploads = <String>[];
     for (final file in files.take(remainingSlots)) {
-      _arenaUploadLog('unit compress start name=${file.name} path=${file.path}');
+      _arenaUploadLog(
+          'unit compress start name=${file.name} path=${file.path}');
       final compressedFile = await ImageCompressor.compress(file.path);
       if (compressedFile == null) {
         _arenaUploadLog('unit compression returned null for ${file.name}');
         continue;
       }
       final compressedSize = await compressedFile.length();
-      _arenaUploadLog('unit compress done original=${file.path} compressed=${compressedFile.path} size=$compressedSize');
+      _arenaUploadLog(
+          'unit compress done original=${file.path} compressed=${compressedFile.path} size=$compressedSize');
 
       final form = FormData.fromMap({
         'folder': folder,
-        'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
+        'file': await MultipartFile.fromFile(compressedFile.path,
+            filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
       });
       _arenaUploadLog(
         'unit upload request baseUrl=${ApiClient.instance.dio.options.baseUrl} folder=$folder filename=${p.basenameWithoutExtension(file.name)}.jpg size=$compressedSize',
@@ -80,7 +87,8 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
         onSendProgress: (sent, total) =>
             _arenaUploadLog('unit upload progress sent=$sent total=$total'),
       );
-      _arenaUploadLog('unit upload response status=${response.statusCode} data=${response.data}');
+      _arenaUploadLog(
+          'unit upload response status=${response.statusCode} data=${response.data}');
       final payload = response.data as Map<String, dynamic>;
       final data = (payload['data'] ?? payload) as Map<String, dynamic>;
       final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
@@ -101,10 +109,6 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       builder: (context) => UnitEditorSheet(
         arenaId: arena.id,
         unit: unit,
-        onPickPhotos: (currentCount) => _pickAndUploadUnitPhotos(
-          folder: 'arenas/${arena.id}/units',
-          remainingSlots: 3 - currentCount,
-        ),
       ),
     );
     if (changed == true) {
@@ -150,13 +154,16 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     }
   }
 
-  void _openArenaDetailSheet(ArenaListing arena) {
+  bool _didAutoOpenSheet = false;
+
+  void _openArenaDetailSheet(ArenaListing arena, {bool startEditing = false}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: _bg,
-      builder: (_) => _ArenaDetailSheet(arena: arena),
+      builder: (_) =>
+          _ArenaDetailSheet(arena: arena, startEditing: startEditing),
     );
   }
 
@@ -166,105 +173,216 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
         ? ref.watch(arenaDetailProvider)
         : ref.watch(arenaDetailByIdProvider(widget.arenaId!));
 
+    if (widget.startEditing && !_didAutoOpenSheet) {
+      arenaAsync.whenData((arena) {
+        if (arena != null) {
+          _didAutoOpenSheet = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _openArenaDetailSheet(arena, startEditing: true);
+          });
+        }
+      });
+    }
+
     return Scaffold(
       backgroundColor: _bg,
-      appBar: AppBar(
-        backgroundColor: _bg,
-        title: const Text(
-          'Arena Setup',
-          style: TextStyle(
-            color: _text,
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: _text),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go(AppRoutes.dashboard);
-            }
-          },
-        ),
-      ),
       body: arenaAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => _ErrorState(message: '$error'),
         data: (arena) {
           if (arena == null) return const _EmptyState();
+          final loc = _joinNonEmpty([arena.city, arena.state]);
           return CustomScrollView(
             slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                sliver: SliverToBoxAdapter(
-                  child: _ArenaSummaryCard(
-                    arena: arena,
-                    onTap: () => _openArenaDetailSheet(arena),
+              // ── AppBar with arena name ──────────────────────────────────
+              SliverAppBar(
+                backgroundColor: _bg,
+                foregroundColor: _text,
+                pinned: true,
+                elevation: 0,
+                scrolledUnderElevation: 1,
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded, color: _text),
+                  onPressed: () => context.canPop()
+                      ? context.pop()
+                      : context.go(AppRoutes.dashboard),
+                ),
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      arena.name,
+                      style: const TextStyle(
+                          color: _text,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900),
+                    ),
+                    if (loc.isNotEmpty)
+                      Text(
+                        loc,
+                        style: const TextStyle(
+                            color: _muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500),
+                      ),
+                  ],
+                ),
+                actions: [
+                  TextButton.icon(
+                    onPressed: () => _openArenaDetailSheet(arena),
+                    icon: const Icon(Icons.tune_rounded, size: 15),
+                    label: const Text('Arena'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: _muted,
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+
+              // ── Arena quick-info strip ──────────────────────────────────
+              SliverToBoxAdapter(
+                child: GestureDetector(
+                  onTap: () => _openArenaDetailSheet(arena),
+                  child: Container(
+                    color: _surface,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.schedule_rounded,
+                            size: 14, color: _muted),
+                        const SizedBox(width: 5),
+                        Text('${arena.openTime} – ${arena.closeTime}',
+                            style: const TextStyle(
+                                color: _muted,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600)),
+                        if (arena.sports.isNotEmpty) ...[
+                          const SizedBox(width: 14),
+                          const Icon(Icons.sports_cricket_rounded,
+                              size: 14, color: _muted),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              arena.sports
+                                  .map((s) =>
+                                      s[0].toUpperCase() +
+                                      s.substring(1).toLowerCase())
+                                  .join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: _muted,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ] else
+                          const Spacer(),
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 16, color: _muted),
+                      ],
+                    ),
                   ),
                 ),
               ),
+
+              // ── Section header ──────────────────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
                 sliver: SliverToBoxAdapter(
                   child: Row(
                     children: [
                       const Expanded(
-                        child: Text(
-                          'UNITS',
-                          style: TextStyle(
-                            color: _muted,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.1,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Units',
+                                style: TextStyle(
+                                    color: _text,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900)),
+                            SizedBox(height: 2),
+                            Text('Courts, nets, or spaces inside this arena',
+                                style: TextStyle(
+                                    color: _muted,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500)),
+                          ],
                         ),
                       ),
                       FilledButton.icon(
                         onPressed: () => _openUnitSheet(arena),
-                        icon: const Icon(Icons.add_rounded, size: 17),
-                        label: const Text('Add unit'),
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        label: const Text('Add Unit'),
                         style: FilledButton.styleFrom(
                           backgroundColor: _deep,
                           foregroundColor: Colors.white,
-                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           textStyle: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                          ),
+                              fontSize: 13, fontWeight: FontWeight.w700),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
+
+              // ── Units list or empty state ───────────────────────────────
               if (arena.units.isEmpty)
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 40),
-                  sliver: SliverToBoxAdapter(
-                    child: Container(
-                      width: double.infinity,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: _surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: _line),
-                      ),
-                      child: const Icon(
-                        Icons.sports_cricket_rounded,
-                        color: _muted,
-                        size: 28,
-                      ),
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.add_box_outlined,
+                            size: 52, color: _muted),
+                        const SizedBox(height: 16),
+                        const Text('No units yet',
+                            style: TextStyle(
+                                color: _text,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800),
+                            textAlign: TextAlign.center),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Add your first unit — a cricket net, full ground, or any bookable space.',
+                          style: TextStyle(
+                              color: _muted, fontSize: 14, height: 1.6),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 28),
+                        FilledButton.icon(
+                          onPressed: () => _openUnitSheet(arena),
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Add Unit'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _deep,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 28, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                            textStyle: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 )
               else
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 40),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
                   sliver: SliverList.separated(
                     itemCount: arena.units.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -288,156 +406,13 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
   }
 }
 
-// ─── Arena summary card (hero, tappable) ────────────────────────────────────
-
-class _ArenaSummaryCard extends StatelessWidget {
-  const _ArenaSummaryCard({required this.arena, required this.onTap});
-
-  final ArenaListing arena;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasPhoto = arena.photoUrls.isNotEmpty;
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: SizedBox(
-          height: 172,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (hasPhoto)
-                Image.network(
-                  arena.photoUrls.first,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      Container(color: _deep),
-                )
-              else
-                Container(
-                  color: _deep,
-                  child: const Icon(
-                    Icons.stadium_rounded,
-                    color: Colors.white70,
-                    size: 52,
-                  ),
-                ),
-              // gradient overlay
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black87],
-                    stops: [0.25, 1.0],
-                  ),
-                ),
-              ),
-              // content
-              Positioned(
-                left: 16,
-                right: 56,
-                bottom: 14,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      arena.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w900,
-                        height: 1.2,
-                      ),
-                    ),
-                    if (arena.city.isNotEmpty || arena.state.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 3),
-                        child: Text(
-                          _joinNonEmpty([arena.city, arena.state]),
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 6,
-                      children: [
-                        if (arena.sports.isNotEmpty)
-                          _CardChip(arena.sports.first),
-                        _CardChip('${arena.openTime} – ${arena.closeTime}'),
-                        if (arena.units.isNotEmpty)
-                          _CardChip('${arena.units.length} units'),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // edit icon
-              Positioned(
-                top: 12,
-                right: 12,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black38,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.edit_rounded,
-                    color: Colors.white,
-                    size: 16,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CardChip extends StatelessWidget {
-  const _CardChip(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Arena detail bottom sheet ───────────────────────────────────────────────
 
 class _ArenaDetailSheet extends ConsumerStatefulWidget {
-  const _ArenaDetailSheet({required this.arena});
+  const _ArenaDetailSheet({required this.arena, this.startEditing = false});
 
   final ArenaListing arena;
+  final bool startEditing;
 
   @override
   ConsumerState<_ArenaDetailSheet> createState() => _ArenaDetailSheetState();
@@ -469,12 +444,6 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
   bool _hasCanteen = false;
   bool _hasCctv = false;
   bool _hasScorer = false;
-  bool _hasFoodArea = false;
-  bool _hasSeating = false;
-  bool _hasChangingRoom = false;
-  bool _hasDrinkingWater = false;
-  bool _hasFirstAid = false;
-  bool _hasEquipmentRental = false;
   List<int> _operatingDays = const [];
   List<String> _photoUrls = const [];
   List<String> _sports = const [];
@@ -482,6 +451,7 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
   @override
   void initState() {
     super.initState();
+    _editing = widget.startEditing;
     _initFrom(widget.arena);
   }
 
@@ -510,7 +480,6 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
     _hasCanteen = arena.hasCanteen;
     _hasCctv = arena.hasCCTV;
     _hasScorer = arena.hasScorer;
-    _hasFoodArea = arena.hasCanteen;
     _operatingDays = arena.operatingDays.isEmpty
         ? const [1, 2, 3, 4, 5, 6, 7]
         : List<int>.from(arena.operatingDays);
@@ -540,7 +509,6 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
     _hasCanteen = arena.hasCanteen;
     _hasCctv = arena.hasCCTV;
     _hasScorer = arena.hasScorer;
-    _hasFoodArea = arena.hasCanteen;
     _operatingDays = arena.operatingDays.isEmpty
         ? const [1, 2, 3, 4, 5, 6, 7]
         : List<int>.from(arena.operatingDays);
@@ -572,6 +540,7 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
   }
 
   Future<void> _pickAndUploadPhotos() async {
+    if (_photoUrls.length >= 3) return;
     _arenaUploadLog('arena picker requested arenaId=${widget.arena.id}');
     final files = await ImagePicker().pickMultiImage();
     _arenaUploadLog('arena picker returned ${files.length} file(s)');
@@ -580,18 +549,21 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
     try {
       final uploads = <String>[];
       for (final file in files) {
-        _arenaUploadLog('arena compress start name=${file.name} path=${file.path}');
+        _arenaUploadLog(
+            'arena compress start name=${file.name} path=${file.path}');
         final compressedFile = await ImageCompressor.compress(file.path);
         if (compressedFile == null) {
           _arenaUploadLog('arena compression returned null for ${file.name}');
           continue;
         }
         final compressedSize = await compressedFile.length();
-        _arenaUploadLog('arena compress done original=${file.path} compressed=${compressedFile.path} size=$compressedSize');
+        _arenaUploadLog(
+            'arena compress done original=${file.path} compressed=${compressedFile.path} size=$compressedSize');
 
         final form = FormData.fromMap({
           'folder': 'arenas/${widget.arena.id}',
-          'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
+          'file': await MultipartFile.fromFile(compressedFile.path,
+              filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
         });
         _arenaUploadLog(
           'arena upload request baseUrl=${ApiClient.instance.dio.options.baseUrl} folder=arenas/${widget.arena.id} filename=${p.basenameWithoutExtension(file.name)}.jpg size=$compressedSize',
@@ -607,10 +579,12 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
           onSendProgress: (sent, total) =>
               _arenaUploadLog('arena upload progress sent=$sent total=$total'),
         );
-        _arenaUploadLog('arena upload response status=${response.statusCode} data=${response.data}');
+        _arenaUploadLog(
+            'arena upload response status=${response.statusCode} data=${response.data}');
         final payload = response.data as Map<String, dynamic>;
         final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-        final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
+        final url =
+            (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
         _arenaUploadLog('arena upload extracted url=$url');
         if (url != null && url.isNotEmpty) uploads.add(url);
       }
@@ -619,7 +593,7 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
         _arenaUploadLog('arena upload produced no urls mounted=$mounted');
         return;
       }
-      setState(() => _photoUrls = [..._photoUrls, ...uploads]);
+      setState(() => _photoUrls = [..._photoUrls, ...uploads].take(3).toList());
       _arenaUploadLog('arena local photoUrls count=${_photoUrls.length}');
     } catch (error) {
       if (!mounted) return;
@@ -669,11 +643,13 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
         'hasCCTV': _hasCctv,
         'hasScorer': _hasScorer,
       };
-      _arenaUploadLog('save arena request arenaId=${widget.arena.id} photoUrls=${_photoUrls.length} input=$input');
+      _arenaUploadLog(
+          'save arena request arenaId=${widget.arena.id} photoUrls=${_photoUrls.length} input=$input');
       final updated = await ref
           .read(hostArenaBookingRepositoryProvider)
           .updateArena(widget.arena.id, input);
-      _arenaUploadLog('save arena response photoUrls=${updated.photoUrls.length} first=${updated.photoUrls.isEmpty ? null : updated.photoUrls.first}');
+      _arenaUploadLog(
+          'save arena response photoUrls=${updated.photoUrls.length} first=${updated.photoUrls.isEmpty ? null : updated.photoUrls.first}');
       ref.invalidate(arenaDetailProvider);
       ref.invalidate(arenaDetailByIdProvider);
       ref.invalidate(ownedArenasProvider);
@@ -693,6 +669,7 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    const tabs = ['Details', 'Location', 'Photos', 'Facilities', 'Share'];
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: DraggableScrollableSheet(
@@ -700,257 +677,114 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
         initialChildSize: 0.92,
         minChildSize: 0.6,
         maxChildSize: 0.96,
-        builder: (ctx, controller) => Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              // sheet header
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.arena.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+        builder: (ctx, controller) => DefaultTabController(
+          length: tabs.length,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                // Drag handle
+                const SizedBox(height: 10),
+                Center(
+                    child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                            color: _line,
+                            borderRadius: BorderRadius.circular(2)))),
+                const SizedBox(height: 14),
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 8, 0),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Arena Details',
+                          style: TextStyle(
                               color: _text,
                               fontSize: 19,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          Text(
-                            _editing ? 'Editing' : 'Arena details',
-                            style: const TextStyle(
-                              color: _muted,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                              fontWeight: FontWeight.w900),
+                        ),
                       ),
-                    ),
-                    if (_editing)
-                      TextButton(
-                        onPressed: _saving
-                            ? null
-                            : () => setState(() {
-                                  _reset();
-                                  _editing = false;
-                                }),
-                        child: const Text('Cancel'),
-                      ),
-                    if (!_editing)
+                      if (_editing)
+                        TextButton(
+                          onPressed: _saving
+                              ? null
+                              : () => setState(() {
+                                    _reset();
+                                    _editing = false;
+                                  }),
+                          child: const Text('Cancel'),
+                        ),
+                      const SizedBox(width: 4),
                       IconButton(
-                        onPressed: () => setState(() => _editing = true),
-                        icon: const Icon(Icons.edit_rounded, size: 18),
-                        style: IconButton.styleFrom(
-                          backgroundColor: _deep,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, color: _line),
-              Expanded(
-                child: ListView(
-                  controller: controller,
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                  children: [
-                    _overviewSection(),
-                    const SizedBox(height: 20),
-                    _rulesSection(),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
-              if (_editing)
-                SafeArea(
-                  top: false,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                    decoration: const BoxDecoration(
-                      color: _bg,
-                      border: Border(top: BorderSide(color: _line)),
-                    ),
-                    child: FilledButton(
-                      onPressed: _saving || _uploading ? null : _saveArena,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _deep,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size.fromHeight(52),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: _saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Save Arena'),
-                    ),
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded)),
+                    ],
                   ),
                 ),
-            ],
+                const SizedBox(height: 6),
+                // Tab bar
+                TabBar(
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  labelColor: _deep,
+                  unselectedLabelColor: _muted,
+                  labelStyle: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 13),
+                  unselectedLabelStyle: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13),
+                  indicatorColor: _deep,
+                  indicatorSize: TabBarIndicatorSize.label,
+                  dividerColor: _line,
+                  tabs: tabs.map((t) => Tab(text: t)).toList(),
+                ),
+                // Tab content
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _DetailsTab(parent: this, scrollCtrl: controller),
+                      _LocationTab(parent: this, scrollCtrl: controller),
+                      _PhotosTab(parent: this, scrollCtrl: controller),
+                      _FacilitiesTab(parent: this, scrollCtrl: controller),
+                      _ShareTab(arena: widget.arena),
+                    ],
+                  ),
+                ),
+                // Save bar
+                if (_editing)
+                  SafeArea(
+                    top: false,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                      decoration: const BoxDecoration(
+                          color: _bg,
+                          border: Border(top: BorderSide(color: _line))),
+                      child: FilledButton(
+                        onPressed: _saving ? null : _saveArena,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _deep,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: _saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : const Text('Save Arena'),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _overviewSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _SectionLabel('OVERVIEW'),
-        _Panel(children: [
-          _field('Arena name', _nameCtrl, widget.arena.name, required: true),
-          _field('Description', _descriptionCtrl,
-              _fallback(widget.arena.description),
-              maxLines: 3),
-          _field(
-            'Booking phone',
-            _phoneCtrl,
-            _fallback(widget.arena.phone),
-            keyboardType: TextInputType.phone,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(10),
-            ],
-          ),
-          _readRow(
-              'Primary sport', _sports.isEmpty ? 'Not set' : _sports.first),
-        ]),
-        const SizedBox(height: 16),
-        const _SectionLabel('LOCATION'),
-        _Panel(children: [
-          _field('Pincode', _pincodeCtrl, _fallback(widget.arena.pincode)),
-          _field('City', _cityCtrl, _fallback(widget.arena.city),
-              required: true),
-          _field('State', _stateCtrl, _fallback(widget.arena.state),
-              required: true),
-          _field('Address', _addressCtrl, _fallback(widget.arena.address),
-              required: true, maxLines: 2),
-          Row(
-            children: [
-              Expanded(
-                child: _field(
-                  'Latitude',
-                  _latitudeCtrl,
-                  widget.arena.latitude?.toString() ?? 'Not set',
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true, signed: true),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _field(
-                  'Longitude',
-                  _longitudeCtrl,
-                  widget.arena.longitude?.toString() ?? 'Not set',
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true, signed: true),
-                ),
-              ),
-            ],
-          ),
-        ]),
-        const SizedBox(height: 16),
-        _PhotoSection(
-          photoUrls: _photoUrls,
-          editing: _editing,
-          uploading: _uploading,
-          onAdd: _pickAndUploadPhotos,
-          onRemove: (url) => setState(() {
-            _photoUrls = _photoUrls.where((item) => item != url).toList();
-          }),
-        ),
-        const SizedBox(height: 16),
-        const _SectionLabel('FACILITIES'),
-        _FeatureGrid(
-          editing: _editing,
-          items: [
-            _EditableFeatureItem('Parking', _hasParking,
-                (v) => setState(() => _hasParking = v)),
-            _EditableFeatureItem('Lights', _hasLights,
-                (v) => setState(() => _hasLights = v)),
-            _EditableFeatureItem('Washrooms', _hasWashrooms,
-                (v) => setState(() => _hasWashrooms = v)),
-            _EditableFeatureItem('Canteen', _hasCanteen,
-                (v) => setState(() => _hasCanteen = v)),
-            _EditableFeatureItem('Food area', _hasFoodArea,
-                (v) => setState(() => _hasFoodArea = v)),
-            _EditableFeatureItem('Seating', _hasSeating,
-                (v) => setState(() => _hasSeating = v)),
-            _EditableFeatureItem('Changing room', _hasChangingRoom,
-                (v) => setState(() => _hasChangingRoom = v)),
-            _EditableFeatureItem('Drinking water', _hasDrinkingWater,
-                (v) => setState(() => _hasDrinkingWater = v)),
-            _EditableFeatureItem('First aid', _hasFirstAid,
-                (v) => setState(() => _hasFirstAid = v)),
-            _EditableFeatureItem('Equipment rental', _hasEquipmentRental,
-                (v) => setState(() => _hasEquipmentRental = v)),
-            _EditableFeatureItem(
-                'CCTV', _hasCctv, (v) => setState(() => _hasCctv = v)),
-            _EditableFeatureItem('Scorer', _hasScorer,
-                (v) => setState(() => _hasScorer = v)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _rulesSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _SectionLabel('BOOKING RULES'),
-        _Panel(children: [
-          _field(
-            'Advance booking days',
-            _advanceBookingDaysCtrl,
-            '${widget.arena.advanceBookingDays}',
-            required: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            validator: _numberRequired,
-          ),
-          _field(
-            'Buffer minutes',
-            _bufferMinsCtrl,
-            '${widget.arena.bufferMins}',
-            required: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            validator: _numberRequired,
-          ),
-          _field(
-            'Cancellation hours',
-            _cancellationHoursCtrl,
-            '${widget.arena.cancellationHours}',
-            required: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            validator: _numberRequired,
-          ),
-        ]),
-      ],
     );
   }
 
@@ -1026,12 +860,7 @@ class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
     );
   }
 
-  String? _numberRequired(String? value) {
-    final raw = value?.trim() ?? '';
-    if (raw.isEmpty) return 'Required';
-    if (int.tryParse(raw) == null) return 'Enter a number';
-    return null;
-  }
+  void rebuild(VoidCallback fn) => setState(fn);
 }
 
 // ─── Unit card ───────────────────────────────────────────────────────────────
@@ -1053,12 +882,16 @@ class _UnitCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final title =
         _fallback(unit.unitTypeLabel).replaceAll('Not set', unit.unitType);
+    final variantLabel = unit.hasVariants
+        ? unit.netVariants.map((v) => v.label).join(' / ')
+        : unit.netType;
     final subtitle = _joinNonEmpty([
       title,
-      unit.netType,
+      variantLabel,
       '${unit.minSlotMins ~/ 60}h min',
     ]);
-    final isGround = unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
+    final isGround =
+        unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
     final priceRows = [
       if (!isGround) _money(unit.pricePerHourPaise),
       if (unit.price4HrPaise != null)
@@ -1069,8 +902,7 @@ class _UnitCard extends StatelessWidget {
       if (unit.priceFullDayPaise != null)
         'Day ${_money(unit.priceFullDayPaise!)}',
     ];
-    final hasSchedule =
-        unit.openTime != null && unit.closeTime != null;
+    final hasSchedule = unit.openTime != null && unit.closeTime != null;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1196,7 +1028,8 @@ class _SmallPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: highlight ? _accent.withValues(alpha: 0.08) : _bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: highlight ? _accent.withValues(alpha: 0.3) : _line),
+        border: Border.all(
+            color: highlight ? _accent.withValues(alpha: 0.3) : _line),
       ),
       child: Text(
         label,
@@ -1216,13 +1049,11 @@ class UnitEditorSheet extends ConsumerStatefulWidget {
   const UnitEditorSheet({
     super.key,
     required this.arenaId,
-    required this.onPickPhotos,
     this.unit,
   });
 
   final String arenaId;
   final ArenaUnitOption? unit;
-  final Future<List<String>> Function(int currentCount) onPickPhotos;
 
   @override
   ConsumerState<UnitEditorSheet> createState() => UnitEditorSheetState();
@@ -1238,19 +1069,24 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   final _minAdvanceCtrl = TextEditingController();
   final _openTimeCtrl = TextEditingController();
   final _closeTimeCtrl = TextEditingController();
+  final _advanceBookingDaysCtrl = TextEditingController();
+  final _unitCancellationHoursCtrl = TextEditingController();
   String _unitType = 'CRICKET_NET';
-  String _netType = '';
+  List<_NetVariantDraft> _netVariants = [];
   int _slotMins = 60;
   int _breatherMins = 0;
   double _weekendMultiplier = 1.0;
   int _quantity = 1;
   bool _showBulkPricing = false;
   bool _hasFloodlights = false;
+  bool _bulkEnabled = false;
+  int _minBulkDays = 3;
+  final _bulkRateCtrl = TextEditingController();
+  bool _monthlyPassEnabled = false;
+  final _monthlyPassRateCtrl = TextEditingController();
   List<int> _scheduleOpDays = const [];
   int _step = 0;
   bool _saving = false;
-  bool _uploading = false;
-  late List<String> _photos;
   late List<_AddonDraft> _addons;
 
   static const _kStandardAddons = [
@@ -1268,8 +1104,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   bool get _editing => widget.unit != null;
   bool get _isGround =>
       _unitType == 'FULL_GROUND' || _unitType == 'HALF_GROUND';
-  bool get _canHaveParent =>
-      _unitType == 'CENTER_WICKET' || _unitType == 'HALF_GROUND';
+  bool get _canHaveParent => _unitType == 'HALF_GROUND';
 
   @override
   void initState() {
@@ -1278,7 +1113,9 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
     _unitType = unit?.unitType ?? 'CRICKET_NET';
     _parentUnitId = unit?.parentUnitId;
     _labelCtrl.text = unit?.unitTypeLabel ?? _labelForType(_unitType);
-    _netType = unit?.netType ?? '';
+    _netVariants = unit?.netVariants.isNotEmpty == true
+        ? unit!.netVariants.map(_NetVariantDraft.fromVariant).toList()
+        : (unit?.netType != null ? [_NetVariantDraft(type: unit!.netType!.toUpperCase(), label: unit.netType!)] : []);
     _slotMins = unit?.minSlotMins ?? (_isGround ? 240 : 60);
     final increment = unit?.slotIncrementMins ?? _slotMins;
     _breatherMins = _isGround ? (increment - _slotMins).clamp(0, 60) : 0;
@@ -1287,20 +1124,31 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
     _price4Ctrl.text = _rupeesText(unit?.price4HrPaise);
     _price8Ctrl.text = _rupeesText(unit?.price8HrPaise);
     _priceDayCtrl.text = _rupeesText(unit?.priceFullDayPaise);
-    _minAdvanceCtrl.text = unit?.minAdvancePaise != null && unit!.minAdvancePaise > 0
-        ? (unit.minAdvancePaise / 100).toStringAsFixed(0)
-        : '';
+    _minAdvanceCtrl.text =
+        unit?.minAdvancePaise != null && unit!.minAdvancePaise > 0
+            ? (unit.minAdvancePaise / 100).toStringAsFixed(0)
+            : '';
     _showBulkPricing = unit != null &&
         (unit.price4HrPaise != null ||
             unit.price8HrPaise != null ||
             unit.priceFullDayPaise != null);
+    _bulkEnabled = unit != null && (unit.minBulkDays ?? 0) > 0;
+    _minBulkDays = unit?.minBulkDays ?? 3;
+    _bulkRateCtrl.text = unit?.bulkDayRatePaise != null
+        ? (unit!.bulkDayRatePaise! ~/ 100).toString()
+        : '';
+    _monthlyPassEnabled = unit?.monthlyPassEnabled ?? false;
+    _monthlyPassRateCtrl.text = unit?.monthlyPassRatePaise != null
+        ? (unit!.monthlyPassRatePaise! ~/ 100).toString()
+        : '';
     _openTimeCtrl.text = unit?.openTime ?? '';
     _closeTimeCtrl.text = unit?.closeTime ?? '';
     _hasFloodlights = unit?.hasFloodlights ?? false;
+    _advanceBookingDaysCtrl.text = unit?.advanceBookingDays?.toString() ?? '';
+    _unitCancellationHoursCtrl.text = unit?.cancellationHours?.toString() ?? '';
     _scheduleOpDays = unit?.operatingDays.isNotEmpty == true
         ? List<int>.from(unit!.operatingDays)
         : const [1, 2, 3, 4, 5, 6, 7];
-    _photos = List<String>.from(unit?.photoUrls ?? const []);
 
     for (final (type, _) in _kStandardAddons) {
       _stdAddonEnabled[type] = false;
@@ -1337,6 +1185,10 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       _minAdvanceCtrl,
       _openTimeCtrl,
       _closeTimeCtrl,
+      _advanceBookingDaysCtrl,
+      _unitCancellationHoursCtrl,
+      _bulkRateCtrl,
+      _monthlyPassRateCtrl,
       ..._stdAddonPrice.values,
     ]) {
       ctrl.dispose();
@@ -1344,28 +1196,10 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
     for (final addon in _addons) {
       addon.dispose();
     }
-    super.dispose();
-  }
-
-  Future<void> _pickPhotos() async {
-    if (_photos.length >= 3) return;
-    setState(() => _uploading = true);
-    try {
-      final uploads = await widget.onPickPhotos(_photos.length);
-      if (!mounted || uploads.isEmpty) return;
-      setState(() => _photos = [..._photos, ...uploads].take(3).toList());
-    } catch (error) {
-      if (!mounted) return;
-      String msg = error.toString();
-      if (error is DioException) {
-        msg = error.response?.data?['message'] ?? error.message ?? msg;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Photo upload failed: $msg')),
-      );
-    } finally {
-      if (mounted) setState(() => _uploading = false);
+    for (final v in _netVariants) {
+      v.dispose();
     }
+    super.dispose();
   }
 
   bool _validateStep() {
@@ -1400,11 +1234,10 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           : _isGround
               ? 'Set a 4 hr price to continue'
               : 'Set a price per hour to continue';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       return;
     }
-    if (_step < 3) setState(() => _step += 1);
+    if (_step < 4) setState(() => _step += 1);
   }
 
   void _back() {
@@ -1432,9 +1265,10 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           'name': _editing ? widget.unit!.name : unitName,
           'unitType': _unitType,
           'unitTypeLabel': _emptyToNull(_labelCtrl.text),
-          'netType': _netType.isEmpty ? null : _netType,
+          'netVariants': _unitType == 'CRICKET_NET' && _netVariants.isNotEmpty
+              ? _netVariants.map((v) => v.toJson()).toList()
+              : null,
           'sport': 'CRICKET',
-          'photoUrls': _photos,
           'pricePerHourPaise': _isGround
               ? (_rupeesToPaise(_price4Ctrl.text) ~/ 4)
               : _rupeesToPaise(_priceHourCtrl.text),
@@ -1443,6 +1277,16 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               : _optionalRupeesToPaise(_price4Ctrl.text),
           'price8HrPaise': _optionalRupeesToPaise(_price8Ctrl.text),
           'priceFullDayPaise': _optionalRupeesToPaise(_priceDayCtrl.text),
+          'minBulkDays': _bulkEnabled && _minBulkDays > 0 ? _minBulkDays : null,
+          'bulkDayRatePaise':
+              _bulkEnabled && _bulkRateCtrl.text.trim().isNotEmpty
+                  ? (int.tryParse(_bulkRateCtrl.text.trim()) ?? 0) * 100
+                  : null,
+          'monthlyPassEnabled': _monthlyPassEnabled,
+          'monthlyPassRatePaise':
+              _monthlyPassEnabled && _monthlyPassRateCtrl.text.trim().isNotEmpty
+                  ? (int.tryParse(_monthlyPassRateCtrl.text.trim()) ?? 0) * 100
+                  : null,
           'weekendMultiplier': _weekendMultiplier,
           'minSlotMins': _slotMins,
           'maxSlotMins': _slotMins,
@@ -1456,6 +1300,12 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             'closeTime': _closeTimeCtrl.text.trim(),
           'operatingDays': _scheduleOpDays,
           'hasFloodlights': _hasFloodlights,
+          if (_advanceBookingDaysCtrl.text.trim().isNotEmpty)
+            'advanceBookingDays':
+                int.tryParse(_advanceBookingDaysCtrl.text.trim()),
+          if (_unitCancellationHoursCtrl.text.trim().isNotEmpty)
+            'cancellationHours':
+                int.tryParse(_unitCancellationHoursCtrl.text.trim()),
         };
         input.removeWhere((_, v) => v == null);
         final savedUnit = _editing
@@ -1538,7 +1388,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    final isLastStep = _step == 3;
+    final isLastStep = _step == 4;
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: DraggableScrollableSheet(
@@ -1573,7 +1423,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                child: _StepDots(count: 4, activeIndex: _step),
+                child: _StepDots(count: 5, activeIndex: _step),
               ),
               Expanded(
                 child: ListView(
@@ -1595,7 +1445,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                       if (_step > 0)
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _saving || _uploading ? null : _back,
+                            onPressed: _saving ? null : _back,
                             style: OutlinedButton.styleFrom(
                               foregroundColor: _deep,
                               minimumSize: const Size.fromHeight(52),
@@ -1610,7 +1460,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                       Expanded(
                         flex: 2,
                         child: FilledButton(
-                          onPressed: _saving || _uploading
+                          onPressed: _saving
                               ? null
                               : isLastStep
                                   ? _save
@@ -1627,8 +1477,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : Text(isLastStep
                                   ? (_editing ? 'Save Unit' : 'Create Units')
@@ -1651,6 +1501,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       0 => _typeAndDetailsStep(),
       1 => _scheduleStep(),
       2 => _pricingStep(),
+      3 => _bookingRulesStep(),
       _ => _photosAndAddonsStep(),
     };
   }
@@ -1665,43 +1516,65 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           options: const [
             ('FULL_GROUND', 'Full ground'),
             ('CRICKET_NET', 'Nets'),
-            ('CENTER_WICKET', 'Center wicket'),
           ],
           onChanged: (value) {
             setState(() {
               _unitType = value;
               _labelCtrl.text = _labelForType(value);
-              if (value != 'CRICKET_NET') _netType = '';
+              if (value != 'CRICKET_NET') {
+                for (final v in _netVariants) { v.dispose(); }
+                _netVariants = [];
+              }
               _slotMins = value == 'FULL_GROUND' ? 240 : 60;
             });
           },
         ),
         if (_unitType == 'CRICKET_NET') ...[
           const SizedBox(height: 20),
-          const Text(
-            'Surface type',
-            style: TextStyle(
-              color: _text,
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _SegmentedOptions(
-            value: _netType,
-            options: const [
-              ('Turf', 'Turf'),
-              ('Mat', 'Mat'),
-              ('Cement', 'Cement'),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Surface variants',
+                  style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  final usedTypes = _netVariants.map((v) => v.type).toSet();
+                  final nextType = _NetVariantDraft._surfaceOptions
+                      .firstWhere((o) => !usedTypes.contains(o.$1), orElse: () => _NetVariantDraft._surfaceOptions.first);
+                  setState(() => _netVariants.add(_NetVariantDraft(type: nextType.$1, label: nextType.$2)));
+                },
+                icon: const Icon(Icons.add, size: 16, color: _accent),
+                label: const Text('Add', style: TextStyle(color: _accent, fontSize: 13)),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              ),
             ],
-            onChanged: (v) => setState(() => _netType = v),
           ),
+          const SizedBox(height: 4),
+          const Text('Each surface type can have its own count and optional per-hour price.',
+              style: TextStyle(color: _muted, fontSize: 12)),
+          const SizedBox(height: 10),
+          if (_netVariants.isEmpty)
+            const Text('No variants — all bookings go to this unit.',
+                style: TextStyle(color: _muted, fontSize: 13))
+          else
+            for (var i = 0; i < _netVariants.length; i++) ...[
+              if (i > 0) const SizedBox(height: 8),
+              _NetVariantRow(
+                draft: _netVariants[i],
+                onRemove: () => setState(() { _netVariants[i].dispose(); _netVariants.removeAt(i); }),
+                onChanged: () => setState(() {}),
+              ),
+            ],
         ],
         if (_canHaveParent) ...[
           const SizedBox(height: 20),
           const Text(
             'Part of ground',
-            style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15),
+            style: TextStyle(
+                color: _text, fontWeight: FontWeight.w800, fontSize: 15),
           ),
           const SizedBox(height: 4),
           const Text(
@@ -1906,6 +1779,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         final v = double.tryParse(raw.trim()) ?? 0;
         if (v > 0) rows.add((label, (v * _weekendMultiplier * 100).round()));
       }
+
       if (_isGround) {
         add('4 hr', _price4Ctrl.text);
         add('8 hr', _price8Ctrl.text);
@@ -2024,9 +1898,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         ),
         const SizedBox(height: 10),
         _SegmentedOptions(
-          value: _weekendMultiplier == 1.0
-              ? '1.0'
-              : _weekendMultiplier.toString(),
+          value:
+              _weekendMultiplier == 1.0 ? '1.0' : _weekendMultiplier.toString(),
           options: const [
             ('1.0', 'None'),
             ('1.25', '1.25×'),
@@ -2055,25 +1928,230 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           ),
         ],
         const SizedBox(height: 24),
-        const Text(
-          'Booking advance',
-          style: TextStyle(
-            color: _text,
-            fontWeight: FontWeight.w800,
-            fontSize: 15,
-          ),
-        ),
+        const _SectionLabel('Bulk / Multi-Day Booking'),
         const SizedBox(height: 4),
         const Text(
-          'Minimum amount customer must pay when booking',
-          style: TextStyle(color: _muted, fontSize: 12),
+          'Offer a special daily rate when customers book multiple consecutive days.',
+          style: TextStyle(
+              color: _muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              height: 1.5),
         ),
-        const SizedBox(height: 10),
-        _SheetField(
-          label: 'Min advance (₹)  ·  leave blank = no advance',
-          controller: _minAdvanceCtrl,
-          keyboardType: TextInputType.number,
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Offer bulk rate',
+                style: TextStyle(
+                    color: _text, fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+            ),
+            Switch(
+              value: _bulkEnabled,
+              onChanged: (v) => setState(() => _bulkEnabled = v),
+              activeThumbColor: _accent,
+            ),
+          ],
         ),
+        if (_bulkEnabled) ...[
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Min days to unlock',
+                  style: TextStyle(
+                      color: _text, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                onPressed: _minBulkDays > 2
+                    ? () => setState(() => _minBulkDays--)
+                    : null,
+                icon: const Icon(Icons.remove_rounded),
+                color: _text,
+              ),
+              SizedBox(
+                width: 32,
+                child: Text(
+                  '$_minBulkDays',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: _text, fontSize: 15, fontWeight: FontWeight.w800),
+                ),
+              ),
+              IconButton(
+                onPressed: _minBulkDays < 30
+                    ? () => setState(() => _minBulkDays++)
+                    : null,
+                icon: const Icon(Icons.add_rounded),
+                color: _text,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _bulkRateCtrl,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Rate per day (₹)',
+              prefixText: '₹ ',
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: _line)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: _line)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: _deep, width: 1.4)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Builder(builder: (context) {
+            final bulkRate = int.tryParse(_bulkRateCtrl.text.trim()) ?? 0;
+            if (bulkRate <= 0) return const SizedBox.shrink();
+            final normalDay = _isGround
+                ? ((_rupeesToPaise(_price4Ctrl.text) > 0
+                        ? _rupeesToPaise(_price4Ctrl.text)
+                        : _rupeesToPaise(_priceHourCtrl.text) * 4) /
+                    100)
+                : (_rupeesToPaise(_priceHourCtrl.text) / 100) * 8;
+            final saving = normalDay.round() - bulkRate;
+            if (saving <= 0) return const SizedBox.shrink();
+            return Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(children: [
+                const Icon(Icons.trending_down_rounded,
+                    size: 16, color: _accent),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(
+                  'Customer saves ₹$saving/day vs normal rate. Good for events & tournaments.',
+                  style: const TextStyle(
+                      color: _accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4),
+                )),
+              ]),
+            );
+          }),
+        ],
+        // Monthly pass — nets only
+        if (!_isGround) ...[
+          const SizedBox(height: 24),
+          const _SectionLabel('Monthly Pass'),
+          const SizedBox(height: 4),
+          const Text(
+            'Let customers lock a recurring time slot for the whole month.',
+            style: TextStyle(
+                color: _muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                height: 1.5),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Offer monthly pass',
+                  style: TextStyle(
+                      color: _text, fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Switch(
+                value: _monthlyPassEnabled,
+                onChanged: (v) => setState(() => _monthlyPassEnabled = v),
+                activeThumbColor: _accent,
+              ),
+            ],
+          ),
+          if (_monthlyPassEnabled) ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: _monthlyPassRateCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Pass rate (₹ / month)',
+                prefixText: '₹ ',
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _line)),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _line)),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _deep, width: 1.4)),
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _bookingRulesStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _LargeStepTitle('Booking Rules'),
+        const Text(
+          'Override arena defaults for this unit. Leave blank to inherit arena settings.',
+          style: TextStyle(color: _muted, fontSize: 13, height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        _RuleCard(
+          icon: Icons.payments_outlined,
+          title: 'Advance payment',
+          subtitle: 'Minimum amount a customer must pay at booking time',
+          child: _SheetField(
+            label: 'Min advance (₹)  ·  leave blank = no advance',
+            controller: _minAdvanceCtrl,
+            keyboardType: TextInputType.number,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _RuleCard(
+          icon: Icons.event_available_outlined,
+          title: 'Advance booking window',
+          subtitle: 'How many days ahead customers can book this unit',
+          child: _SheetField(
+            label: 'Days  (e.g. 30)',
+            controller: _advanceBookingDaysCtrl,
+            keyboardType: TextInputType.number,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _RuleCard(
+          icon: Icons.cancel_outlined,
+          title: 'Cancellation window',
+          subtitle: 'Minimum hours notice required to cancel without penalty',
+          child: _SheetField(
+            label: 'Hours  (e.g. 24)',
+            controller: _unitCancellationHoursCtrl,
+            keyboardType: TextInputType.number,
+          ),
+        ),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -2082,15 +2160,6 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _LargeStepTitle('Photos'),
-        _UnitPhotoPicker(
-          photos: _photos,
-          uploading: _uploading,
-          onAdd: _pickPhotos,
-          onRemove: (url) =>
-              setState(() => _photos = _photos.where((u) => u != url).toList()),
-        ),
-        const SizedBox(height: 20),
         const _LargeStepTitle('Add-ons'),
         for (final (type, name) in _kStandardAddons)
           _AddonToggleTile(
@@ -2170,6 +2239,7 @@ class _SlotPreviewState extends State<_SlotPreview> {
       if (h < 0 || m < 0) return -1;
       return h * 60 + m;
     }
+
     final openMins = parseTime(openTime);
     final closeMins = parseTime(closeTime);
     if (openMins < 0 || closeMins < 0 || closeMins <= openMins) return const [];
@@ -2183,8 +2253,11 @@ class _SlotPreviewState extends State<_SlotPreview> {
         final m = total % 60;
         final suffix = h < 12 ? 'am' : 'pm';
         final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
-        return m == 0 ? '$h12$suffix' : '$h12:${m.toString().padLeft(2, '0')}$suffix';
+        return m == 0
+            ? '$h12$suffix'
+            : '$h12:${m.toString().padLeft(2, '0')}$suffix';
       }
+
       slots.add('${fmt(start)} – ${fmt(start + widget.slotMins)}');
       start += step;
     }
@@ -2210,24 +2283,93 @@ class _SlotPreviewState extends State<_SlotPreview> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: slots.map((s) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: _deep.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _deep.withValues(alpha: 0.2)),
-            ),
-            child: Text(
-              s,
-              style: const TextStyle(
-                color: _deep,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          )).toList(),
+          children: slots
+              .map((s) => Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _deep.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _deep.withValues(alpha: 0.2)),
+                    ),
+                    child: Text(
+                      s,
+                      style: const TextStyle(
+                        color: _deep,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ))
+              .toList(),
         ),
       ],
+    );
+  }
+}
+
+// ─── Rule card ────────────────────────────────────────────────────────────────
+
+class _RuleCard extends StatelessWidget {
+  const _RuleCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.child,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: _bg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 18, color: _deep),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            color: _text,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: const TextStyle(
+                            color: _muted, fontSize: 12, height: 1.4)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
     );
   }
 }
@@ -2278,8 +2420,9 @@ class _ParentUnitPicker extends ConsumerWidget {
     final arenasAsync = ref.watch(ownedArenasProvider);
     final arenas = arenasAsync.valueOrNull ?? [];
     final arena = arenas.cast<ArenaListing?>().firstWhere(
-      (a) => a?.id == arenaId, orElse: () => null,
-    );
+          (a) => a?.id == arenaId,
+          orElse: () => null,
+        );
     final grounds = (arena?.units ?? [])
         .where((u) => u.unitType == 'FULL_GROUND' && u.id != currentUnitId)
         .toList();
@@ -2323,7 +2466,9 @@ class _ParentUnitPicker extends ConsumerWidget {
                   ),
                 ),
               ),
-              if (selected) const Icon(Icons.check_circle_rounded, size: 18, color: _accent),
+              if (selected)
+                const Icon(Icons.check_circle_rounded,
+                    size: 18, color: _accent),
             ]),
           ),
         );
@@ -2383,8 +2528,7 @@ class _SegmentedOptions extends StatelessWidget {
             fontWeight: FontWeight.w800,
           ),
           side: BorderSide(color: selected ? _deep : _line),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
       }).toList(),
     );
@@ -2472,8 +2616,7 @@ class _TimePickerField extends StatelessWidget {
           child: GestureDetector(
             onTap: () => _pick(context),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
                 color: _surface,
                 borderRadius: BorderRadius.circular(10),
@@ -2482,8 +2625,7 @@ class _TimePickerField extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(Icons.schedule_rounded,
-                      size: 16,
-                      color: hasValue ? _deep : _muted),
+                      size: 16, color: hasValue ? _deep : _muted),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(label,
@@ -2503,8 +2645,7 @@ class _TimePickerField extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
                   Icon(Icons.expand_more_rounded,
-                      size: 18,
-                      color: hasValue ? _deep : _muted),
+                      size: 18, color: hasValue ? _deep : _muted),
                 ],
               ),
             ),
@@ -2549,8 +2690,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
     _hour = widget.initialHour;
     _minute = _nearestMinute(widget.initialMinute);
     _hourCtrl = FixedExtentScrollController(initialItem: _hour);
-    _minCtrl =
-        FixedExtentScrollController(initialItem: _mins.indexOf(_minute));
+    _minCtrl = FixedExtentScrollController(initialItem: _mins.indexOf(_minute));
   }
 
   @override
@@ -2597,12 +2737,12 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                   },
                   style: TextButton.styleFrom(
                     foregroundColor: _accent,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   ),
                   child: const Text('Done',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w800)),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                 ),
               ],
             ),
@@ -2630,8 +2770,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                         perspective: 0.002,
                         diameterRatio: 2.0,
                         physics: const FixedExtentScrollPhysics(),
-                        onSelectedItemChanged: (i) =>
-                            setState(() => _hour = i),
+                        onSelectedItemChanged: (i) => setState(() => _hour = i),
                         childDelegate: ListWheelChildBuilderDelegate(
                           childCount: 24,
                           builder: (_, i) {
@@ -2642,9 +2781,8 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                                 style: TextStyle(
                                   color: sel ? _text : _muted,
                                   fontSize: sel ? 28 : 22,
-                                  fontWeight: sel
-                                      ? FontWeight.w900
-                                      : FontWeight.w400,
+                                  fontWeight:
+                                      sel ? FontWeight.w900 : FontWeight.w400,
                                 ),
                               ),
                             );
@@ -2676,9 +2814,8 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                                 style: TextStyle(
                                   color: sel ? _text : _muted,
                                   fontSize: sel ? 28 : 22,
-                                  fontWeight: sel
-                                      ? FontWeight.w900
-                                      : FontWeight.w400,
+                                  fontWeight:
+                                      sel ? FontWeight.w900 : FontWeight.w400,
                                 ),
                               ),
                             );
@@ -2803,7 +2940,7 @@ class _QuantityStepper extends StatelessWidget {
       children: [
         const Expanded(
           child: Text(
-            'How many?',
+            'Total Units',
             style: TextStyle(
               color: _text,
               fontWeight: FontWeight.w800,
@@ -2987,160 +3124,131 @@ class _AddonDraft {
   }
 }
 
-class _PhotoSection extends StatelessWidget {
-  const _PhotoSection({
-    required this.photoUrls,
-    required this.editing,
-    required this.uploading,
-    required this.onAdd,
-    required this.onRemove,
-  });
+class _NetVariantRow extends StatelessWidget {
+  const _NetVariantRow({required this.draft, required this.onRemove, required this.onChanged});
 
-  final List<String> photoUrls;
-  final bool editing;
-  final bool uploading;
-  final VoidCallback onAdd;
-  final ValueChanged<String> onRemove;
+  final _NetVariantDraft draft;
+  final VoidCallback onRemove;
+  final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return _Panel(
-      children: [
-        Row(
-          children: [
-            const Expanded(child: _SectionLabel('Photos')),
-            if (editing)
-              TextButton.icon(
-                onPressed: uploading ? null : onAdd,
-                icon: uploading
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.upload_rounded),
-                label: const Text('Upload'),
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _SegmentedOptions(
+                  value: draft.type,
+                  options: _NetVariantDraft._surfaceOptions,
+                  onChanged: (v) {
+                    draft.type = v;
+                    draft.label = _NetVariantDraft._surfaceOptions.firstWhere((o) => o.$1 == v, orElse: () => (v, v)).$2;
+                    onChanged();
+                  },
+                ),
               ),
-          ],
-        ),
-        if (photoUrls.isEmpty)
-          const _StaticText('No arena photos yet.')
-        else
-          SizedBox(
-            height: 116,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: photoUrls.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                final url = photoUrls[index];
-                return Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        url,
-                        width: 140,
-                        height: 116,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          width: 140,
-                          height: 116,
-                          color: _line,
-                          child: const Icon(Icons.broken_image_outlined),
-                        ),
-                      ),
-                    ),
-                    if (editing)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: InkWell(
-                          onTap: () => onRemove(url),
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: const BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.close_rounded,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18, color: _muted),
+                onPressed: onRemove,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
           ),
-      ],
-    );
-  }
-}
-
-class _FeatureGrid extends StatelessWidget {
-  const _FeatureGrid({required this.items, required this.editing});
-
-  final List<_EditableFeatureItem> items;
-  final bool editing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: items
-          .map(
-            (item) => InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: editing ? () => item.onChanged(!item.enabled) : null,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: item.enabled ? _deep : _surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border:
-                      Border.all(color: item.enabled ? _deep : _line),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      item.enabled
-                          ? Icons.check_circle_rounded
-                          : Icons.remove_circle_outline_rounded,
-                      size: 16,
-                      color: item.enabled ? Colors.white70 : _muted,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      item.label,
-                      style: TextStyle(
-                        color: item.enabled ? Colors.white : _text,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('Count:', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: draft.count > 1 ? () { draft.count--; onChanged(); } : null,
+                child: Container(
+                  width: 28, height: 28,
+                  decoration: BoxDecoration(color: _surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _line)),
+                  child: const Icon(Icons.remove, size: 16, color: _text),
                 ),
               ),
-            ),
-          )
-          .toList(),
+              const SizedBox(width: 10),
+              Text('${draft.count}', style: const TextStyle(color: _text, fontWeight: FontWeight.w700, fontSize: 15)),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: () { draft.count++; onChanged(); },
+                child: Container(
+                  width: 28, height: 28,
+                  decoration: BoxDecoration(color: _surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _line)),
+                  child: const Icon(Icons.add, size: 16, color: _text),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: TextFormField(
+                  controller: draft.priceCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: _text, fontSize: 14),
+                  decoration: const InputDecoration(
+                    hintText: 'Price/hr (optional)',
+                    hintStyle: TextStyle(color: _muted, fontSize: 12),
+                    prefixText: '₹ ',
+                    prefixStyle: TextStyle(color: _muted, fontSize: 14),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _EditableFeatureItem {
-  const _EditableFeatureItem(this.label, this.enabled, this.onChanged);
+class _NetVariantDraft {
+  _NetVariantDraft({
+    this.type = 'TURF',
+    this.label = 'Turf',
+    this.count = 1,
+    String price = '',
+  }) : priceCtrl = TextEditingController(text: price);
 
-  final String label;
-  final bool enabled;
-  final ValueChanged<bool> onChanged;
+  String type;
+  String label;
+  int count;
+  final TextEditingController priceCtrl;
+
+  static const _surfaceOptions = [
+    ('TURF', 'Turf'),
+    ('CEMENT', 'Cement'),
+    ('MAT', 'Mat'),
+  ];
+
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    'label': label,
+    'count': count,
+    if (priceCtrl.text.trim().isNotEmpty)
+      'pricePaise': (int.tryParse(priceCtrl.text.trim()) ?? 0) * 100,
+  };
+
+  factory _NetVariantDraft.fromVariant(NetVariant v) => _NetVariantDraft(
+    type: v.type,
+    label: v.label,
+    count: v.count,
+    price: v.pricePaise != null ? (v.pricePaise! ~/ 100).toString() : '',
+  );
+
+  void dispose() => priceCtrl.dispose();
 }
 
 class _Panel extends StatelessWidget {
@@ -3254,6 +3362,599 @@ OutlineInputBorder _inputBorder(Color color) {
   );
 }
 
+// ─── Arena detail tab widgets ─────────────────────────────────────────────────
+
+class _DetailsTab extends StatelessWidget {
+  const _DetailsTab({required this.parent, required this.scrollCtrl});
+
+  final _ArenaDetailSheetState parent;
+  final ScrollController scrollCtrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = parent;
+    final dayLabels = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return ListView(
+      controller: scrollCtrl,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      children: [
+        p._field('Name', p._nameCtrl, p._nameCtrl.text, required: true),
+        p._field('Description', p._descriptionCtrl, p._descriptionCtrl.text,
+            maxLines: 3),
+        p._field('Phone', p._phoneCtrl, p._phoneCtrl.text,
+            keyboardType: TextInputType.phone),
+        // Sports — fixed, not editable after creation
+        const _TabSectionLabel('Sports'),
+        p._readRow(
+            'Sports',
+            p._sports.isEmpty
+                ? 'Not set'
+                : p._sports.map(_sportLabel).join(', ')),
+        // Operating days
+        const _TabSectionLabel('Operating Days'),
+        if (!p._editing)
+          p._readRow(
+              'Days',
+              p._operatingDays.isEmpty
+                  ? 'Not set'
+                  : p._operatingDays.map((d) => dayLabels[d]).join(', '))
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (int day = 1; day <= 7; day++)
+                FilterChip(
+                  label: Text(dayLabels[day]),
+                  selected: p._operatingDays.contains(day),
+                  onSelected: (v) {
+                    p.rebuild(() {
+                      if (v) {
+                        p._operatingDays = [...p._operatingDays, day]..sort();
+                      } else {
+                        p._operatingDays =
+                            p._operatingDays.where((d) => d != day).toList();
+                      }
+                    });
+                  },
+                  selectedColor: _accent.withValues(alpha: 0.15),
+                  checkmarkColor: _accent,
+                  side: BorderSide(
+                      color: p._operatingDays.contains(day) ? _accent : _line),
+                  labelStyle: TextStyle(
+                    color: p._operatingDays.contains(day) ? _accent : _text,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                  backgroundColor: _surface,
+                ),
+            ],
+          ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+}
+
+class _LocationTab extends StatelessWidget {
+  const _LocationTab({required this.parent, required this.scrollCtrl});
+
+  final _ArenaDetailSheetState parent;
+  final ScrollController scrollCtrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = parent;
+    return ListView(
+      controller: scrollCtrl,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      children: [
+        p._field('Address', p._addressCtrl, p._addressCtrl.text,
+            required: true, maxLines: 2),
+        p._field('City', p._cityCtrl, p._cityCtrl.text, required: true),
+        p._field('State', p._stateCtrl, p._stateCtrl.text, required: true),
+        p._field('Pincode', p._pincodeCtrl, p._pincodeCtrl.text,
+            keyboardType: TextInputType.number),
+        const _TabSectionLabel('Coordinates (optional)'),
+        p._field('Latitude', p._latitudeCtrl, p._latitudeCtrl.text,
+            keyboardType: const TextInputType.numberWithOptions(
+                decimal: true, signed: true)),
+        p._field('Longitude', p._longitudeCtrl, p._longitudeCtrl.text,
+            keyboardType: const TextInputType.numberWithOptions(
+                decimal: true, signed: true)),
+      ],
+    );
+  }
+}
+
+class _PhotosTab extends StatelessWidget {
+  const _PhotosTab({required this.parent, required this.scrollCtrl});
+
+  final _ArenaDetailSheetState parent;
+  final ScrollController scrollCtrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = parent;
+    final urls = p._photoUrls;
+    return ListView(
+      controller: scrollCtrl,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      children: [
+        Text(
+          'Photos (${urls.length}/3)',
+          style: const TextStyle(
+              color: _muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5),
+        ),
+        const SizedBox(height: 12),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          children: [
+            for (int i = 0; i < urls.length; i++)
+              Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(urls[i],
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(color: _line)),
+                  ),
+                  if (p._editing)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: GestureDetector(
+                        onTap: () => p.rebuild(() => p._photoUrls =
+                            List<String>.from(urls)..removeAt(i)),
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(6)),
+                          child: const Icon(Icons.close_rounded,
+                              color: Colors.white, size: 14),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            if (p._editing && urls.length < 3)
+              GestureDetector(
+                onTap: p._uploading ? null : p._pickAndUploadPhotos,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: _surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _line, style: BorderStyle.solid),
+                  ),
+                  child: p._uploading
+                      ? const Center(
+                          child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2)))
+                      : const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_photo_alternate_rounded,
+                                color: _muted, size: 26),
+                            SizedBox(height: 4),
+                            Text('Add',
+                                style: TextStyle(
+                                    color: _muted,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                ),
+              ),
+          ],
+        ),
+        if (!p._editing && urls.isEmpty)
+          Container(
+            height: 100,
+            decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _line)),
+            child: const Center(
+                child: Text('No photos added',
+                    style: TextStyle(color: _muted, fontSize: 13))),
+          ),
+      ],
+    );
+  }
+}
+
+class _FacilitiesTab extends StatelessWidget {
+  const _FacilitiesTab({required this.parent, required this.scrollCtrl});
+
+  final _ArenaDetailSheetState parent;
+  final ScrollController scrollCtrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = parent;
+    final amenities = [
+      (
+        Icons.local_parking_rounded,
+        'Parking',
+        () => p._hasParking,
+        (bool v) => p.rebuild(() => p._hasParking = v)
+      ),
+      (
+        Icons.lightbulb_rounded,
+        'Floodlights',
+        () => p._hasLights,
+        (bool v) => p.rebuild(() => p._hasLights = v)
+      ),
+      (
+        Icons.wc_rounded,
+        'Washrooms',
+        () => p._hasWashrooms,
+        (bool v) => p.rebuild(() => p._hasWashrooms = v)
+      ),
+      (
+        Icons.restaurant_rounded,
+        'Canteen / Food',
+        () => p._hasCanteen,
+        (bool v) => p.rebuild(() => p._hasCanteen = v)
+      ),
+      (
+        Icons.videocam_rounded,
+        'CCTV',
+        () => p._hasCctv,
+        (bool v) => p.rebuild(() => p._hasCctv = v)
+      ),
+      (
+        Icons.scoreboard_rounded,
+        'Scorer',
+        () => p._hasScorer,
+        (bool v) => p.rebuild(() => p._hasScorer = v)
+      ),
+    ];
+    return ListView.separated(
+      controller: scrollCtrl,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      itemCount: amenities.length,
+      separatorBuilder: (_, __) => const Divider(height: 1, color: _line),
+      itemBuilder: (_, i) {
+        final (icon, label, getter, setter) = amenities[i];
+        final enabled = getter();
+        return ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
+          leading: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: enabled ? _accent.withValues(alpha: 0.1) : _bg,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 18, color: enabled ? _accent : _muted),
+          ),
+          title: Text(label,
+              style: TextStyle(
+                  color: enabled ? _text : _muted,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14)),
+          trailing: p._editing
+              ? Switch(
+                  value: enabled,
+                  onChanged: setter,
+                  activeThumbColor: _accent,
+                )
+              : Icon(
+                  enabled ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                  color: enabled ? _accent : _line,
+                  size: 20,
+                ),
+        );
+      },
+    );
+  }
+}
+
+class _TabSectionLabel extends StatelessWidget {
+  const _TabSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
+      child: Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+            color: _muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.8),
+      ),
+    );
+  }
+}
+
+class _ShareTab extends ConsumerStatefulWidget {
+  const _ShareTab({required this.arena});
+  final ArenaListing arena;
+
+  @override
+  ConsumerState<_ShareTab> createState() => _ShareTabState();
+}
+
+class _ShareTabState extends ConsumerState<_ShareTab> {
+  final _slugCtrl = TextEditingController();
+  bool _saving = false;
+  bool _saved = false;
+  String? _customSlug;
+  String? _citySlug;
+  String? _arenaSlug;
+
+  String get _publicUrl {
+    final a = widget.arena;
+    final customSlug = _customSlug?.trim();
+    final citySlug = _citySlug?.trim();
+    final arenaSlug = _arenaSlug?.trim();
+    if (customSlug != null && customSlug.isNotEmpty) {
+      return 'swingcricketapp.com/$customSlug';
+    }
+    if (citySlug != null &&
+        citySlug.isNotEmpty &&
+        arenaSlug != null &&
+        arenaSlug.isNotEmpty) {
+      return 'swingcricketapp.com/$citySlug/$arenaSlug';
+    }
+    return 'swingcricketapp.com/${_normaliseSlug(a.name)}';
+  }
+
+  String _normaliseSlug(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _customSlug = widget.arena.customSlug;
+    _citySlug = widget.arena.citySlug;
+    _arenaSlug = widget.arena.arenaSlug;
+    _slugCtrl.text = _customSlug ?? '';
+  }
+
+  @override
+  void dispose() {
+    _slugCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveSlug() async {
+    final rawSlug = _slugCtrl.text.trim();
+    final slug = _normaliseSlug(rawSlug);
+    if (rawSlug.isNotEmpty && slug.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Custom link must be at least 3 letters or numbers')),
+      );
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _saved = false;
+    });
+    try {
+      final updated =
+          await ref.read(hostArenaBookingRepositoryProvider).updateArena(
+        widget.arena.id,
+        {'customSlug': slug.isEmpty ? null : slug},
+      );
+      ref.invalidate(arenaDetailProvider);
+      ref.invalidate(arenaDetailByIdProvider(widget.arena.id));
+      ref.invalidate(ownedArenasProvider);
+      setState(() {
+        _customSlug = updated.customSlug;
+        _citySlug = updated.citySlug;
+        _arenaSlug = updated.arenaSlug;
+        _slugCtrl.text = updated.customSlug ?? '';
+        _saved = true;
+      });
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) setState(() => _saved = false);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _copyLink() {
+    Clipboard.setData(ClipboardData(text: 'https://$_publicUrl'));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('Link copied!'), duration: Duration(seconds: 2)),
+    );
+  }
+
+  void _shareLink() {
+    Share.share('https://$_publicUrl', subject: widget.arena.name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+      children: [
+        // Public link display
+        const _TabSectionLabel('Your Booking Link'),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: _bg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _line),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.link_rounded, size: 16, color: _muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _publicUrl,
+                  style: const TextStyle(
+                    color: _text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _copyLink,
+                icon: const Icon(Icons.copy_rounded, size: 15),
+                label: const Text('Copy'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _text,
+                  side: const BorderSide(color: _line),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _shareLink,
+                icon: const Icon(Icons.share_rounded, size: 15),
+                label: const Text('Share'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _deep,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 28),
+
+        // Custom slug
+        const _TabSectionLabel('Custom Link'),
+        const SizedBox(height: 4),
+        const Text(
+          'Set a short name so customers can remember your link easily.',
+          style: TextStyle(
+              color: _muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              height: 1.5),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 14),
+              child: Text(
+                'swingcricketapp.com/',
+                style: TextStyle(
+                    color: _muted, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Expanded(
+              child: TextField(
+                controller: _slugCtrl,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: _text),
+                decoration: InputDecoration(
+                  hintText: 'your-arena-name',
+                  hintStyle: const TextStyle(color: _muted, fontSize: 13),
+                  filled: true,
+                  fillColor: _surface,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: _line)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: _line)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: _deep, width: 1.4)),
+                ),
+                onChanged: (value) => setState(() {
+                  _saved = false;
+                  _customSlug = _normaliseSlug(value);
+                }),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        FilledButton(
+          onPressed: _saving ? null : _saveSlug,
+          style: FilledButton.styleFrom(
+            backgroundColor: _saved ? Colors.green : _deep,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(_saved ? 'Saved!' : 'Save Custom Link',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+      ],
+    );
+  }
+}
+
+String _sportLabel(String sport) {
+  return switch (sport) {
+    'CRICKET' => 'Cricket',
+    'FOOTBALL' => 'Football',
+    'BADMINTON' => 'Badminton',
+    'TENNIS' => 'Tennis',
+    'BASKETBALL' => 'Basketball',
+    'FUTSAL' => 'Futsal',
+    'PICKLEBALL' => 'Pickleball',
+    _ => 'Other',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 String _fallback(String? value) {
   final safe = value?.trim() ?? '';
   return safe.isEmpty ? 'Not set' : safe;
@@ -3285,7 +3986,6 @@ String _labelForType(String type) {
     'HALF_GROUND' => 'Half ground',
     'CRICKET_NET' => 'Net',
     'INDOOR_NET' => 'Indoor net',
-    'CENTER_WICKET' => 'Center wicket',
     'TURF' => 'Turf',
     'MULTI_SPORT' => 'Multi sport',
     _ => 'Other',

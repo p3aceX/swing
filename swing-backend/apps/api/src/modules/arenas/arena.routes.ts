@@ -66,6 +66,12 @@ const addUnitSchema = z.object({
   cancellationHours: z.number().int().min(0).optional().nullable(),
   parentUnitId: z.string().optional().nullable(),
   turnaroundMins: z.number().int().min(0).optional(),
+  netVariants: z.array(z.object({
+    type: z.string().trim().min(1),
+    label: z.string().trim().min(1),
+    count: z.number().int().min(1).default(1),
+    pricePaise: z.number().int().min(0).optional(),
+  })).optional().nullable(),
 })
 
 const updateUnitSchema = addUnitSchema.partial().extend({

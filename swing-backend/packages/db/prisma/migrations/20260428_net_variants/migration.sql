@@ -1,0 +1,2 @@
+ALTER TABLE "ArenaUnit" ADD COLUMN IF NOT EXISTS "netVariants" JSONB;
+ALTER TABLE "SlotBooking" ADD COLUMN IF NOT EXISTS "netVariantType" TEXT;

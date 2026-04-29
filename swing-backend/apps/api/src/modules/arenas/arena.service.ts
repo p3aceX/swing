@@ -280,6 +280,7 @@ export class ArenaService {
         unitType: data.unitType,
         unitTypeLabel: data.unitTypeLabel || null,
         netType: data.netType || null,
+        netVariants: data.netVariants ?? null,
         sport: data.sport || 'CRICKET',
         description: data.description || null,
         pricePerHourPaise: data.pricePerHourPaise,
@@ -319,7 +320,7 @@ export class ArenaService {
 
     const allowed: any = {}
     const fields = [
-      'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'sport', 'pricePerHourPaise', 'peakPricePaise',
+      'name', 'description', 'unitType', 'unitTypeLabel', 'netType', 'netVariants', 'sport', 'pricePerHourPaise', 'peakPricePaise',
       'peakHoursStart', 'peakHoursEnd', 'price4HrPaise', 'price8HrPaise', 'priceFullDayPaise',
       'minBulkDays', 'bulkDayRatePaise', 'monthlyPassEnabled', 'monthlyPassRatePaise',
       'weekendMultiplier', 'minSlotMins', 'maxSlotMins', 'slotIncrementMins', 'turnaroundMins', 'minAdvancePaise',

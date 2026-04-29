@@ -2314,6 +2314,7 @@ model ArenaUnit {
   unitType          FacilityUnitType
   unitTypeLabel     String?
   netType           String?
+  netVariants       Json?
   sport             Sport            @default(CRICKET)
   capacity          Int              @default(22)
   description       String?
@@ -2454,6 +2455,7 @@ model SlotBooking {
   bulkDayRatePaise   Int?
   bookingSource      String       @default("APP")
   monthlyPassId      String?
+  netVariantType     String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 

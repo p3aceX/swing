@@ -338,6 +338,7 @@ export class BookingService {
     isBulkBooking?: boolean
     bulkDayRatePaise?: number
     bookingSource?: string
+    netVariantType?: string
   }) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
@@ -355,16 +356,39 @@ export class BookingService {
     const effectiveManualStart = turnaroundMins3 > 0
       ? this.minutesToTime(Math.max(0, this.timeToMinutes(data.startTime) - turnaroundMins3))
       : data.startTime
-    const conflict = await prisma.slotBooking.findFirst({
-      where: {
-        unitId: { in: conflictUnitIds3 },
-        date: bookingDate,
-        status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
-        startTime: { lt: data.endTime },
-        endTime: { gt: effectiveManualStart },
-      },
-    })
-    if (conflict) throw Errors.slotAlreadyBooked()
+
+    const variantType = data.netVariantType ?? null
+    const unitNetVariants = (unit as any).netVariants as Array<{ type: string; count: number }> | null
+    const matchingVariant = variantType && unitNetVariants
+      ? unitNetVariants.find((v) => v.type === variantType) ?? null
+      : null
+
+    if (matchingVariant && matchingVariant.count > 1) {
+      // For multi-count variants, allow up to variant.count simultaneous bookings
+      const variantBookingCount = await prisma.slotBooking.count({
+        where: {
+          unitId: data.unitId,
+          date: bookingDate,
+          status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+          startTime: { lt: data.endTime },
+          endTime: { gt: effectiveManualStart },
+          netVariantType: variantType,
+        } as any,
+      })
+      if (variantBookingCount >= matchingVariant.count) throw Errors.slotAlreadyBooked()
+    } else {
+      const conflict = await prisma.slotBooking.findFirst({
+        where: {
+          unitId: { in: conflictUnitIds3 },
+          date: bookingDate,
+          status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+          startTime: { lt: data.endTime },
+          endTime: { gt: effectiveManualStart },
+          ...(variantType ? { netVariantType: variantType } as any : {}),
+        },
+      })
+      if (conflict) throw Errors.slotAlreadyBooked()
+    }
 
     await this.assertNoArenaBlock(arenaId, data.unitId, bookingDate, data.startTime, data.endTime)
 
@@ -400,6 +424,7 @@ export class BookingService {
         ...(data.endDate ? { endDate: this.startOfDay(data.endDate) } : {}),
         ...(data.isBulkBooking !== undefined ? { isBulkBooking: data.isBulkBooking } : {}),
         ...(data.bulkDayRatePaise !== undefined ? { bulkDayRatePaise: data.bulkDayRatePaise } : {}),
+        ...(variantType ? { netVariantType: variantType } : {}),
       } as any,
       include: { unit: true },
     })

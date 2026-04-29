@@ -140,6 +140,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       amountPaise: z.number().int().min(0),
       advancePaise: z.number().int().min(0).optional(),
       notes: z.string().optional(),
+      netVariantType: z.string().optional(),
     }).parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.createManualBooking(user.userId, arenaId, body) })
   })

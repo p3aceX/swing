@@ -27,6 +27,10 @@ class ArenaListing {
     this.hasScorer = false,
     this.latitude,
     this.longitude,
+    this.citySlug,
+    this.arenaSlug,
+    this.customSlug,
+    this.isPublicPage = true,
   });
 
   final String id;
@@ -54,9 +58,30 @@ class ArenaListing {
   final List<ArenaUnitOption> units;
   final double? latitude;
   final double? longitude;
+  final String? citySlug;
+  final String? arenaSlug;
+  final String? customSlug;
+  final bool isPublicPage;
 
   factory ArenaListing.fromJson(Map<String, dynamic> json) {
     final rawUnits = (json['units'] as List?) ?? const [];
+    final units = rawUnits
+        .whereType<Map>()
+        .map((e) => ArenaUnitOption.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+
+    // Derive arena hours from units: earliest open → latest close
+    final arenaOpen = '${json['openTime'] ?? '06:00'}';
+    final arenaClose = '${json['closeTime'] ?? '23:00'}';
+    final unitOpenTimes = units.map((u) => u.openTime).whereType<String>().toList();
+    final unitCloseTimes = units.map((u) => u.closeTime).whereType<String>().toList();
+    final effectiveOpen = unitOpenTimes.isEmpty
+        ? arenaOpen
+        : unitOpenTimes.reduce((a, b) => a.compareTo(b) <= 0 ? a : b);
+    final effectiveClose = unitCloseTimes.isEmpty
+        ? arenaClose
+        : unitCloseTimes.reduce((a, b) => a.compareTo(b) >= 0 ? a : b);
+
     return ArenaListing(
       id: '${json['id'] ?? ''}',
       name: '${json['name'] ?? 'Arena'}',
@@ -64,8 +89,8 @@ class ArenaListing {
       city: '${json['city'] ?? ''}',
       state: '${json['state'] ?? ''}',
       pincode: '${json['pincode'] ?? ''}',
-      openTime: '${json['openTime'] ?? '06:00'}',
-      closeTime: '${json['closeTime'] ?? '23:00'}',
+      openTime: effectiveOpen,
+      closeTime: effectiveClose,
       photoUrls: ((json['photoUrls'] as List?) ?? const [])
           .map((e) => '$e')
           .where((e) => e.isNotEmpty)
@@ -89,14 +114,45 @@ class ArenaListing {
       hasCanteen: json['hasCanteen'] == true,
       hasCCTV: json['hasCCTV'] == true,
       hasScorer: json['hasScorer'] == true,
-      units: rawUnits
-          .whereType<Map>()
-          .map((e) => ArenaUnitOption.fromJson(Map<String, dynamic>.from(e)))
-          .toList(),
+      units: units,
       latitude: _doubleOrNull(json['latitude']),
       longitude: _doubleOrNull(json['longitude']),
+      citySlug: _stringOrNull(json['citySlug']),
+      arenaSlug: _stringOrNull(json['arenaSlug']),
+      customSlug: _stringOrNull(json['customSlug']),
+      isPublicPage: json['isPublicPage'] != false,
     );
   }
+}
+
+class NetVariant {
+  const NetVariant({
+    required this.type,
+    required this.label,
+    this.count = 1,
+    this.pricePaise,
+  });
+
+  final String type;
+  final String label;
+  final int count;
+  final int? pricePaise;
+
+  factory NetVariant.fromJson(Map<String, dynamic> json) {
+    return NetVariant(
+      type: '${json['type'] ?? ''}',
+      label: '${json['label'] ?? json['type'] ?? ''}',
+      count: _intValue(json['count'] ?? 1),
+      pricePaise: _intOrNull(json['pricePaise']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    'label': label,
+    'count': count,
+    if (pricePaise != null) 'pricePaise': pricePaise,
+  };
 }
 
 class ArenaUnitOption {
@@ -129,6 +185,14 @@ class ArenaUnitOption {
     this.closeTime,
     this.operatingDays = const [],
     this.hasFloodlights = false,
+    this.advanceBookingDays,
+    this.bufferMins,
+    this.cancellationHours,
+    this.minBulkDays,
+    this.bulkDayRatePaise,
+    this.monthlyPassEnabled = false,
+    this.monthlyPassRatePaise,
+    this.netVariants = const [],
   });
 
   final String id;
@@ -136,6 +200,7 @@ class ArenaUnitOption {
   final String unitType;
   final String? unitTypeLabel;
   final String? netType;
+  final List<NetVariant> netVariants;
   final String sport;
   final String description;
   final List<String> photoUrls;
@@ -159,6 +224,16 @@ class ArenaUnitOption {
   final String? closeTime;
   final List<int> operatingDays;
   final bool hasFloodlights;
+  final int? advanceBookingDays;
+  final int? bufferMins;
+  final int? cancellationHours;
+  final int? minBulkDays;
+  final int? bulkDayRatePaise;
+  final bool monthlyPassEnabled;
+  final int? monthlyPassRatePaise;
+
+  bool get isNet => unitType == 'CRICKET_NET' || unitType == 'INDOOR_NET';
+  bool get isGround => unitType == 'FULL_GROUND' || unitType == 'HALF_GROUND';
 
   factory ArenaUnitOption.fromJson(Map<String, dynamic> json) {
     return ArenaUnitOption(
@@ -198,6 +273,103 @@ class ArenaUnitOption {
           .map((e) => _intValue(e))
           .toList(),
       hasFloodlights: json['hasFloodlights'] == true,
+      advanceBookingDays: _intOrNull(json['advanceBookingDays']),
+      bufferMins: _intOrNull(json['bufferMins']),
+      cancellationHours: _intOrNull(json['cancellationHours']),
+      minBulkDays: _intOrNull(json['minBulkDays']),
+      bulkDayRatePaise: _intOrNull(json['bulkDayRatePaise']),
+      monthlyPassEnabled: json['monthlyPassEnabled'] == true,
+      monthlyPassRatePaise: _intOrNull(json['monthlyPassRatePaise']),
+      netVariants: ((json['netVariants'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => NetVariant.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+    );
+  }
+
+  bool get hasVariants => netVariants.isNotEmpty;
+}
+
+// ── Monthly Pass ──────────────────────────────────────────────────────────────
+
+class MonthlyPass {
+  const MonthlyPass({
+    required this.id,
+    required this.arenaId,
+    required this.unitId,
+    required this.guestName,
+    required this.guestPhone,
+    required this.startTime,
+    required this.endTime,
+    required this.daysOfWeek,
+    required this.startDate,
+    required this.endDate,
+    required this.totalAmountPaise,
+    required this.advancePaise,
+    required this.paymentMode,
+    required this.status,
+    this.notes,
+    this.sessionCount = 0,
+    this.skippedDates = const [],
+    this.bookings = const [],
+  });
+
+  final String id;
+  final String arenaId;
+  final String unitId;
+  final String guestName;
+  final String guestPhone;
+  final String startTime;
+  final String endTime;
+  final List<int> daysOfWeek;
+  final String startDate;
+  final String endDate;
+  final int totalAmountPaise;
+  final int advancePaise;
+  final String paymentMode;
+  final String status;
+  final String? notes;
+  final int sessionCount;
+  final List<String> skippedDates;
+  final List<ArenaReservation> bookings;
+
+  bool get isActive => status == 'ACTIVE';
+  int get balancePaise => (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
+
+  static const _dayNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  String get daysLabel => daysOfWeek
+      .where((d) => d >= 1 && d <= 7)
+      .map((d) => _dayNames[d])
+      .join(' / ');
+
+  factory MonthlyPass.fromJson(Map<String, dynamic> json) {
+    return MonthlyPass(
+      id: '${json['id'] ?? ''}',
+      arenaId: '${json['arenaId'] ?? ''}',
+      unitId: '${json['unitId'] ?? ''}',
+      guestName: '${json['guestName'] ?? ''}',
+      guestPhone: '${json['guestPhone'] ?? ''}',
+      startTime: '${json['startTime'] ?? ''}',
+      endTime: '${json['endTime'] ?? ''}',
+      daysOfWeek: ((json['daysOfWeek'] as List?) ?? const [])
+          .map((e) => _intValue(e))
+          .where((d) => d >= 1 && d <= 7)
+          .toList(),
+      startDate: '${json['startDate'] ?? ''}'.substring(0, 10),
+      endDate: '${json['endDate'] ?? ''}'.substring(0, 10),
+      totalAmountPaise: _intValue(json['totalAmountPaise']),
+      advancePaise: _intValue(json['advancePaise']),
+      paymentMode: '${json['paymentMode'] ?? 'CASH'}',
+      status: '${json['status'] ?? 'ACTIVE'}',
+      notes: _stringOrNull(json['notes']),
+      sessionCount: _intValue(json['sessionCount']),
+      skippedDates: ((json['skippedDates'] as List?) ?? const [])
+          .map((e) => '$e')
+          .toList(),
+      bookings: ((json['bookings'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
     );
   }
 }
