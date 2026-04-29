@@ -1,18 +1,9 @@
 import { Queue } from 'bullmq'
+import { buildRedisConnection } from './redis'
 
 const redisUrl = process.env.REDIS_URL
 const queuesEnabled = process.env.ENABLE_QUEUES === 'true' && !!redisUrl
-const connection = queuesEnabled && redisUrl
-  ? (() => {
-      const parsed = new URL(redisUrl)
-      return {
-        host: parsed.hostname,
-        port: Number(parsed.port) || 6379,
-        password: parsed.password || undefined,
-        db: 0,
-      }
-    })()
-  : null
+const connection = queuesEnabled ? buildRedisConnection(redisUrl) : null
 
 function buildQueue(name: string) {
   if (!connection) {

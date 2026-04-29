@@ -20,8 +20,17 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.get('/', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const q = request.query as { page?: string; limit?: string }
-    return reply.send({ success: true, data: await svc.getNotifications(user.userId, Number(q.page) || 1, Number(q.limit) || 20) })
+    const q = request.query as { page?: string; limit?: string; types?: string }
+    const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
+    return reply.send({
+      success: true,
+      data: await svc.getNotifications(
+        user.userId,
+        Number(q.page) || 1,
+        Number(q.limit) || 20,
+        types,
+      ),
+    })
   })
 
   app.get('/summary', auth, async (request, reply) => {
@@ -43,6 +52,8 @@ export async function notificationRoutes(app: FastifyInstance) {
       rankUpdates: z.boolean().optional(),
       matchResults: z.boolean().optional(),
       productAnnouncements: z.boolean().optional(),
+      arenaBookings: z.boolean().optional(),
+      bookingReminders: z.boolean().optional(),
     }).parse(request.body)
     return reply.send({ success: true, data: await svc.updatePreferences(user.userId, body) })
   })
@@ -55,6 +66,25 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.post('/read-all', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    return reply.send({ success: true, data: await svc.markAllRead(user.userId) })
+    const q = request.query as { types?: string }
+    const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
+    return reply.send({ success: true, data: await svc.markAllRead(user.userId, types) })
+  })
+
+  app.post('/sync', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const body = z.object({
+      notificationId: z.string().min(1),
+      type: z.string().optional(),
+      title: z.string().optional(),
+      body: z.string().min(1),
+      entityType: z.string().optional(),
+      entityId: z.string().optional(),
+      data: z.any().optional(),
+    }).parse(request.body)
+    return reply.send({
+      success: true,
+      data: await svc.syncOneSignalNotification(user.userId, body),
+    })
   })
 }

@@ -1,12 +1,8 @@
 import { Worker, Job } from 'bullmq'
+import { buildRedisConnection } from '../lib/redis'
 import { NotificationService } from '../modules/notifications/notification.service'
 
-const redisUrl = new URL(process.env.REDIS_URL || 'redis://localhost:6379')
-const connection = {
-  host: redisUrl.hostname,
-  port: Number(redisUrl.port) || 6379,
-  password: redisUrl.password || undefined,
-}
+const connection = buildRedisConnection() ?? buildRedisConnection('redis://localhost:6379')!
 
 const notificationSvc = new NotificationService()
 
@@ -14,7 +10,8 @@ export function createNotificationWorker() {
   const worker = new Worker(
     'notifications',
     async (job: Job) => {
-      const { userId, title, body, data } = job.data
+      const payload = job.data?.data ?? job.data
+      const { userId, title, body, data } = payload
 
       try {
         await notificationSvc.sendPush(userId, title, body, data)

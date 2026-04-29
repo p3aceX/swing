@@ -1,9 +1,29 @@
 import IORedis from 'ioredis'
 
-export const redis = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-})
+export function buildRedisConnection(redisUrl = process.env.REDIS_URL) {
+  if (!redisUrl) return null
+
+  const parsed = new URL(redisUrl)
+  const usesTls =
+    parsed.protocol === 'rediss:' ||
+    process.env.REDIS_TLS === 'true' ||
+    process.env.UPSTASH_REDIS_REST_URL != null
+
+  return {
+    host: parsed.hostname,
+    port: Number(parsed.port) || 6379,
+    username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+    password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+    db: parsed.pathname.length > 1 ? Number(parsed.pathname.slice(1)) || 0 : 0,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    ...(usesTls ? { tls: {} } : {}),
+  }
+}
+
+export const redis = new IORedis(
+  buildRedisConnection(process.env.REDIS_URL || 'redis://localhost:6379')!,
+)
 
 redis.on('connect', () => console.log('Redis connected'))
 redis.on('error', (err) => console.error('Redis error:', err))

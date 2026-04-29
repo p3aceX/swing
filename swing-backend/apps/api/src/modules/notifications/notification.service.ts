@@ -1,7 +1,9 @@
 import { prisma } from '@swing/db'
+import { AppError } from '../../lib/errors'
 import { Errors } from '../../lib/errors'
 import { enqueueNotification } from '../../lib/queue'
 import { sendPushNotification } from '../../lib/firebase'
+import { sendOneSignalPushNotification } from '../../lib/onesignal'
 
 type NotificationPreferenceKey =
   | 'chatMessages'
@@ -33,18 +35,26 @@ export class NotificationService {
 
   async sendPush(userId: string, title: string, body: string, data?: Record<string, string>) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { fcmTokens: true } })
-    if (!user || user.fcmTokens.length === 0) return
+    if (!user) return
+
+    if (user.fcmTokens.length > 0) {
+      try {
+        const { invalidTokens } = await sendPushNotification(user.fcmTokens, title, body, data)
+        if (invalidTokens.length > 0) {
+          await prisma.user.update({
+            where: { id: userId },
+            data: { fcmTokens: { set: user.fcmTokens.filter(t => !invalidTokens.includes(t)) } },
+          })
+        }
+      } catch (err) {
+        console.error('[FCM] Send error:', err)
+      }
+    }
 
     try {
-      const { invalidTokens } = await sendPushNotification(user.fcmTokens, title, body, data)
-      if (invalidTokens.length > 0) {
-        await prisma.user.update({
-          where: { id: userId },
-          data: { fcmTokens: { set: user.fcmTokens.filter(t => !invalidTokens.includes(t)) } },
-        })
-      }
+      await sendOneSignalPushNotification(userId, title, body, data)
     } catch (err) {
-      console.error('[FCM] Send error:', err)
+      console.error('[OneSignal] Send error:', err)
     }
   }
 
@@ -160,16 +170,26 @@ export class NotificationService {
     }
   }
 
-  async getNotifications(userId: string, page: number, limit: number) {
+  async getNotifications(
+    userId: string,
+    page: number,
+    limit: number,
+    types?: string[],
+  ) {
+    const typeFilter = types && types.length > 0 ? { in: types } : undefined
+    const where = {
+      userId,
+      ...(typeFilter ? { type: typeFilter } : {}),
+    }
     const [notifications, total, unreadCount] = await prisma.$transaction([
       prisma.notification.findMany({
-        where: { userId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.notification.count({ where: { userId } }),
-      prisma.notification.count({ where: { userId, isRead: false } }),
+      prisma.notification.count({ where }),
+      prisma.notification.count({ where: { ...where, isRead: false } }),
     ])
     return { notifications, total, unreadCount, page, limit }
   }
@@ -181,9 +201,14 @@ export class NotificationService {
     return prisma.notification.update({ where: { id: notificationId }, data: { isRead: true, readAt: new Date(), status: 'READ' } })
   }
 
-  async markAllRead(userId: string) {
+  async markAllRead(userId: string, types?: string[]) {
+    const typeFilter = types && types.length > 0 ? { in: types } : undefined
     await prisma.notification.updateMany({
-      where: { userId, isRead: false },
+      where: {
+        userId,
+        isRead: false,
+        ...(typeFilter ? { type: typeFilter } : {}),
+      },
       data: { isRead: true, readAt: new Date(), status: 'READ' },
     })
     return { message: 'All notifications marked as read' }
@@ -208,7 +233,10 @@ export class NotificationService {
         body: data.body,
         entityType: data.entityType,
         entityId: data.entityId,
-        data: data.data,
+        data: {
+          ...(data.data && typeof data.data === 'object' ? data.data : {}),
+          source: 'backend',
+        },
       },
     })
 
@@ -220,6 +248,48 @@ export class NotificationService {
     }
 
     return notif
+  }
+
+  async syncOneSignalNotification(userId: string, data: {
+    notificationId: string
+    type?: string
+    title?: string
+    body: string
+    entityType?: string
+    entityId?: string
+    data?: any
+  }) {
+    if (!data.notificationId) throw new AppError('VALIDATION_ERROR', 'notificationId is required', 400)
+
+    const existing = await prisma.notification.findFirst({
+      where: {
+        userId,
+        provider: 'ONESIGNAL',
+        providerId: data.notificationId,
+      },
+    })
+    if (existing) return existing
+
+    return prisma.notification.create({
+      data: {
+        userId,
+        type: data.type || 'SYSTEM',
+        channel: 'PUSH',
+        status: 'SENT',
+        title: data.title || null,
+        body: data.body,
+        entityType: data.entityType,
+        entityId: data.entityId,
+        data: {
+          ...(data.data && typeof data.data === 'object' ? data.data : {}),
+          source: 'onesignal',
+        },
+        provider: 'ONESIGNAL',
+        providerId: data.notificationId,
+        sentAt: new Date(),
+        deliveredAt: new Date(),
+      },
+    })
   }
 
   async broadcastToUsers(userIds: string[], notification: {
