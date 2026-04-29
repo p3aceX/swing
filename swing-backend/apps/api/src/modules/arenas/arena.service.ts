@@ -259,7 +259,7 @@ export class ArenaService {
       'advanceBookingDays', 'bufferMins', 'cancellationHours', 'isActive',
     ]
     for (const f of fields) {
-      if (f in data) allowed[f] = data[f]
+      if (f in data && data[f] !== null && data[f] !== undefined) allowed[f] = data[f]
     }
     if (data.customSlug !== undefined) allowed.customSlug = data.customSlug || null
     if (data.isPublicPage !== undefined) allowed.isPublicPage = data.isPublicPage
