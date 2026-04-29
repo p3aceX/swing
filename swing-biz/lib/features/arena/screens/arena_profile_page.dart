@@ -3273,24 +3273,6 @@ class _NetVariantRow extends StatelessWidget {
                   child: const Icon(Icons.add, size: 14, color: _text),
                 ),
               ),
-              const SizedBox(width: 12),
-              // Price field
-              Expanded(
-                child: TextFormField(
-                  controller: draft.priceCtrl,
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(color: _text, fontSize: 13),
-                  decoration: const InputDecoration(
-                    hintText: 'Price/hr (optional)',
-                    hintStyle: TextStyle(color: _muted, fontSize: 12),
-                    prefixText: '₹ ',
-                    prefixStyle: TextStyle(color: _muted, fontSize: 13),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
-                  ),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 8),
