@@ -1754,26 +1754,30 @@ class _SlotOption {
   final int paise;
 }
 
-List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit) {
+List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit, {int? pricePerHourOverride}) {
+  final pricePerHour = (pricePerHourOverride != null && pricePerHourOverride > 0)
+      ? pricePerHourOverride
+      : unit.pricePerHourPaise;
   final minMins = unit.minSlotMins > 0 ? unit.minSlotMins : 60;
-  // Step by minSlotMins when min >= 60; this way 4hr min → 4hr, 8hr, 12hr steps
   final increment = minMins >= 60 ? minMins : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
   final isGround = unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
-  // Always allow at least 3× min or 720 min (full day), whichever is larger
   final configuredMax = unit.maxSlotMins > minMins ? unit.maxSlotMins : 0;
   final autoMax = (minMins * 3).clamp(240, 720);
   final maxMins = configuredMax > 0 ? configuredMax : (isGround ? 720 : autoMax);
   final opts = <_SlotOption>[];
   for (var m = minMins; m <= maxMins; m += increment) {
     final int paise;
-    if (m == 240 && unit.price4HrPaise != null) paise = unit.price4HrPaise!;
-    else if (m == 480 && unit.price8HrPaise != null) paise = unit.price8HrPaise!;
-    else if (m >= 720 && unit.priceFullDayPaise != null) paise = unit.priceFullDayPaise!;
-    else paise = ((unit.pricePerHourPaise * m) / 60).round();
-    final label = (m >= 720 && unit.priceFullDayPaise != null) ? 'Full day' : _durationLabel(m);
+    // Only use fixed bundle prices when no variant override is active
+    if (pricePerHourOverride == null || pricePerHourOverride == 0) {
+      if (m == 240 && unit.price4HrPaise != null) { opts.add(_SlotOption(durationMins: m, label: _durationLabel(m), paise: unit.price4HrPaise!)); continue; }
+      if (m == 480 && unit.price8HrPaise != null) { opts.add(_SlotOption(durationMins: m, label: _durationLabel(m), paise: unit.price8HrPaise!)); continue; }
+      if (m >= 720 && unit.priceFullDayPaise != null) { opts.add(_SlotOption(durationMins: m, label: 'Full day', paise: unit.priceFullDayPaise!)); continue; }
+    }
+    paise = ((pricePerHour * m) / 60).round();
+    final label = (m >= 720 && unit.priceFullDayPaise != null && (pricePerHourOverride == null || pricePerHourOverride == 0)) ? 'Full day' : _durationLabel(m);
     opts.add(_SlotOption(durationMins: m, label: label, paise: paise));
   }
-  return opts.isEmpty ? [_SlotOption(durationMins: minMins, label: _durationLabel(minMins), paise: ((unit.pricePerHourPaise * minMins) / 60).round())] : opts;
+  return opts.isEmpty ? [_SlotOption(durationMins: minMins, label: _durationLabel(minMins), paise: ((pricePerHour * minMins) / 60).round())] : opts;
 }
 
 String _fmtDate(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
@@ -1900,20 +1904,15 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     if (_totalEdited) return ((double.tryParse(_totalCtrl.text) ?? 0) * 100).round();
     final unit = _unit;
     if (unit == null) return 0;
-    final variantOverride = _variantPricePerHour;
+    final opts = _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour);
+    final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
     if (_isMultiDay) {
       final days = _isCustomDates ? _customDates.length : _bulkDays;
-      if (unit.bulkDayRatePaise != null) return unit.bulkDayRatePaise! * days + _addonPaise;
-      final opts = _buildSlotOptions(unit);
-      final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
-      final base = variantOverride > 0 ? (variantOverride * opts[idx].durationMins / 60).round() : opts[idx].paise;
-      return base * days + _addonPaise;
+      if (unit.bulkDayRatePaise != null && _variantPricePerHour == 0) return unit.bulkDayRatePaise! * days + _addonPaise;
+      return opts[idx].paise * days + _addonPaise;
     }
     if (_isFullDay || _selectedSlots.isNotEmpty) {
-      final opts = _buildSlotOptions(unit);
-      final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
-      final base = variantOverride > 0 ? (variantOverride * opts[idx].durationMins / 60).round() : opts[idx].paise;
-      return base + _addonPaise;
+      return opts[idx].paise + _addonPaise;
     }
     return 0;
   }
