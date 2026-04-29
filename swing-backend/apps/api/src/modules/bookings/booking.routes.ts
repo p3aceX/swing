@@ -113,6 +113,13 @@ export async function bookingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.listArenaGuests(user.userId, arenaId, q.search) })
   })
 
+  app.get('/arena/:arenaId/customers/lookup', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { arenaId } = request.params as { arenaId: string }
+    const q = z.object({ phone: z.string().min(1) }).parse(request.query)
+    return reply.send({ success: true, data: await svc.lookupArenaCustomer(user.userId, arenaId, q.phone) })
+  })
+
   // ─── Owner: monthly summary for calendar badges ──────────────────────────
   // GET /bookings/arena/:arenaId/summary?month=2026-04
   app.get('/arena/:arenaId/summary', auth, async (request, reply) => {
@@ -141,6 +148,9 @@ export async function bookingRoutes(app: FastifyInstance) {
       advancePaise: z.number().int().min(0).optional(),
       notes: z.string().optional(),
       netVariantType: z.string().optional(),
+      guestUserId: z.string().optional(),
+      guestPlayerProfileId: z.string().optional(),
+      createGuestUser: z.boolean().optional(),
     }).parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.createManualBooking(user.userId, arenaId, body) })
   })

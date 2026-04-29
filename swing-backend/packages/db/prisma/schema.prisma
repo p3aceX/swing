@@ -462,6 +462,8 @@ model User {
   language      String     @default("en")
   deviceTokens  String[]
   fcmTokens     String[]
+  sourceLabels  String[]   @default([])
+  createdVia    String?
   lastLoginAt   DateTime?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -482,6 +484,7 @@ model User {
   refreshTokens          RefreshToken[]
   notificationPreference NotificationPreference?
   businessAccount        BusinessAccount?
+  arenaGuestBookings     SlotBooking[]           @relation("SlotBookingGuestUser")
 
   storeOwnerProfile      StoreOwnerProfile?
   deliveryPartnerProfile DeliveryPartnerProfile?
@@ -654,6 +657,7 @@ model PlayerProfile {
   playerMilestones         PlayerMilestone[]
   academyEnrollments       AcademyEnrollment[]
   slotBookings             SlotBooking[]                 @relation("SlotBookingBookedBy")
+  guestSlotBookings        SlotBooking[]                 @relation("SlotBookingGuestPlayer")
   gigBookings              GigBooking[]
   studentSessionLogs       StudentSessionLog[]
   ipTransactions           IpTransaction[]
@@ -2295,44 +2299,44 @@ model Arena {
   managers        ArenaManager[]
   monthlyPasses   MonthlyPass[]
 
-  citySlug      String?
-  arenaSlug     String?
-  customSlug    String?
-  isPublicPage  Boolean  @default(true)
+  citySlug     String?
+  arenaSlug    String?
+  customSlug   String?
+  isPublicPage Boolean @default(true)
 
+  @@unique([citySlug, arenaSlug])
+  @@unique([customSlug])
   @@index([businessAccountId])
   @@index([city, isVerified])
   @@index([latitude, longitude])
-  @@unique([citySlug, arenaSlug])
-  @@unique([customSlug])
 }
 
 model ArenaUnit {
-  id                String           @id @default(cuid())
-  arenaId           String
-  name              String
-  unitType          FacilityUnitType
-  unitTypeLabel     String?
-  netType           String?
-  netVariants       Json?
-  sport             Sport            @default(CRICKET)
-  capacity          Int              @default(22)
-  description       String?
-  photoUrls         String[]
-  pricePerHourPaise Int
-  peakPricePaise    Int?
-  peakHoursStart    String?
-  peakHoursEnd      String?
-  price4HrPaise     Int?
-  price8HrPaise     Int?
-  priceFullDayPaise Int?
-  boundarySize      Int?
-  weekendMultiplier Float            @default(1.0)
-  minSlotMins       Int              @default(60)
-  maxSlotMins       Int              @default(240)
-  slotIncrementMins Int              @default(60)
-  turnaroundMins    Int              @default(0)
-  minAdvancePaise   Int              @default(0)
+  id                   String           @id @default(cuid())
+  arenaId              String
+  name                 String
+  unitType             FacilityUnitType
+  unitTypeLabel        String?
+  netType              String?
+  netVariants          Json?
+  sport                Sport            @default(CRICKET)
+  capacity             Int              @default(22)
+  description          String?
+  photoUrls            String[]
+  pricePerHourPaise    Int
+  peakPricePaise       Int?
+  peakHoursStart       String?
+  peakHoursEnd         String?
+  price4HrPaise        Int?
+  price8HrPaise        Int?
+  priceFullDayPaise    Int?
+  boundarySize         Int?
+  weekendMultiplier    Float            @default(1.0)
+  minSlotMins          Int              @default(60)
+  maxSlotMins          Int              @default(240)
+  slotIncrementMins    Int              @default(60)
+  turnaroundMins       Int              @default(0)
+  minAdvancePaise      Int              @default(0)
   openTime             String?
   closeTime            String?
   operatingDays        Int[]            @default([])
@@ -2346,15 +2350,15 @@ model ArenaUnit {
   monthlyPassEnabled   Boolean          @default(false)
   monthlyPassRatePaise Int?
   isActive             Boolean          @default(true)
-  createdAt         DateTime         @default(now())
+  createdAt            DateTime         @default(now())
 
-  arena        Arena            @relation(fields: [arenaId], references: [id])
-  parentUnit   ArenaUnit?       @relation("UnitHierarchy", fields: [parentUnitId], references: [id], onDelete: SetNull)
-  childUnits   ArenaUnit[]      @relation("UnitHierarchy")
-  addons       ArenaAddon[]
-  bookings     SlotBooking[]
-  timeBlocks   ArenaTimeBlock[]
-  pricingRules PricingRule[]
+  arena         Arena            @relation(fields: [arenaId], references: [id])
+  parentUnit    ArenaUnit?       @relation("UnitHierarchy", fields: [parentUnitId], references: [id], onDelete: SetNull)
+  childUnits    ArenaUnit[]      @relation("UnitHierarchy")
+  addons        ArenaAddon[]
+  bookings      SlotBooking[]
+  timeBlocks    ArenaTimeBlock[]
+  pricingRules  PricingRule[]
   monthlyPasses MonthlyPass[]
 }
 
@@ -2413,62 +2417,69 @@ model ArenaAddon {
 }
 
 model SlotBooking {
-  id                 String       @id @default(cuid())
-  arenaId            String
-  unitId             String
-  arenaUnitId        String?
-  bookedById         String
-  playerProfileId    String?
-  bookingDate        DateTime?    @db.Date
-  date               DateTime     @db.Date
-  startTime          String
-  endTime            String
-  durationMins       Int
-  sport              Sport        @default(CRICKET)
-  format             MatchFormat?
-  teamSize           Int          @default(11)
-  baseAmountPaise    Int          @default(0)
-  addonAmountPaise   Int          @default(0)
-  discountPaise      Int          @default(0)
-  totalAmountPaise   Int
-  totalPricePaise    Int          @default(0)
-  status             SlotStatus   @default(HELD)
-  heldUntil          DateTime?
-  checkInQrCode      String?      @unique
-  checkedInAt        DateTime?
-  paidAt             DateTime?
-  matchId            String?
-  matchmakingId      String?
-  academyId          String?
-  notes              String?
-  cancellationReason String?
-  cancelledAt        DateTime?
+  id                   String       @id @default(cuid())
+  arenaId              String
+  unitId               String
+  arenaUnitId          String?
+  bookedById           String
+  playerProfileId      String?
+  bookingDate          DateTime?    @db.Date
+  date                 DateTime     @db.Date
+  startTime            String
+  endTime              String
+  durationMins         Int
+  sport                Sport        @default(CRICKET)
+  format               MatchFormat?
+  teamSize             Int          @default(11)
+  baseAmountPaise      Int          @default(0)
+  addonAmountPaise     Int          @default(0)
+  discountPaise        Int          @default(0)
+  totalAmountPaise     Int
+  totalPricePaise      Int          @default(0)
+  status               SlotStatus   @default(HELD)
+  heldUntil            DateTime?
+  checkInQrCode        String?      @unique
+  checkedInAt          DateTime?
+  paidAt               DateTime?
+  matchId              String?
+  matchmakingId        String?
+  academyId            String?
+  notes                String?
+  cancellationReason   String?
+  cancelledAt          DateTime?
   // Offline / walk-in booking fields
-  isOfflineBooking   Boolean      @default(false)
-  createdByOwnerId   String?
-  guestName          String?
-  guestPhone         String?
-  paymentMode        String?      // ONLINE | CASH | UPI | CARD | BANK_TRANSFER
-  advancePaise       Int          @default(0)
-  endDate            DateTime?    @db.Date
-  isBulkBooking      Boolean      @default(false)
-  bulkDayRatePaise   Int?
-  bookingSource      String       @default("APP")
-  monthlyPassId      String?
-  netVariantType     String?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  isOfflineBooking     Boolean      @default(false)
+  createdByOwnerId     String?
+  guestName            String?
+  guestPhone           String?
+  guestUserId          String?
+  guestPlayerProfileId String?
+  guestSource          String?
+  paymentMode          String? // ONLINE | CASH | UPI | CARD | BANK_TRANSFER
+  advancePaise         Int          @default(0)
+  endDate              DateTime?    @db.Date
+  isBulkBooking        Boolean      @default(false)
+  bulkDayRatePaise     Int?
+  bookingSource        String       @default("APP")
+  monthlyPassId        String?
+  netVariantType       String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
-  arena        Arena              @relation(fields: [arenaId], references: [id])
-  unit         ArenaUnit          @relation(fields: [unitId], references: [id])
-  bookedBy     PlayerProfile      @relation("SlotBookingBookedBy", fields: [bookedById], references: [id])
-  addons       SlotBookingAddon[]
-  payment      Payment?
-  monthlyPass  MonthlyPass?       @relation(fields: [monthlyPassId], references: [id])
+  arena              Arena              @relation(fields: [arenaId], references: [id])
+  unit               ArenaUnit          @relation(fields: [unitId], references: [id])
+  bookedBy           PlayerProfile      @relation("SlotBookingBookedBy", fields: [bookedById], references: [id])
+  guestUser          User?              @relation("SlotBookingGuestUser", fields: [guestUserId], references: [id])
+  guestPlayerProfile PlayerProfile?     @relation("SlotBookingGuestPlayer", fields: [guestPlayerProfileId], references: [id])
+  addons             SlotBookingAddon[]
+  payment            Payment?
+  monthlyPass        MonthlyPass?       @relation(fields: [monthlyPassId], references: [id])
 
   @@index([arenaId, date, status])
   @@index([unitId, date])
   @@index([monthlyPassId])
+  @@index([guestUserId])
+  @@index([guestPlayerProfileId])
 }
 
 model SlotBookingAddon {
@@ -2483,23 +2494,23 @@ model SlotBookingAddon {
 }
 
 model MonthlyPass {
-  id                 String   @id @default(cuid())
-  arenaId            String
-  unitId             String
-  guestName          String
-  guestPhone         String
-  startTime          String
-  endTime            String
-  daysOfWeek         Int[]
-  startDate          DateTime @db.Date
-  endDate            DateTime @db.Date
-  totalAmountPaise   Int
-  advancePaise       Int      @default(0)
-  paymentMode        String   @default("CASH")
-  notes              String?
-  status             String   @default("ACTIVE")
-  bookingSource      String   @default("BIZ")
-  createdAt          DateTime @default(now())
+  id               String   @id @default(cuid())
+  arenaId          String
+  unitId           String
+  guestName        String
+  guestPhone       String
+  startTime        String
+  endTime          String
+  daysOfWeek       Int[]
+  startDate        DateTime @db.Date
+  endDate          DateTime @db.Date
+  totalAmountPaise Int
+  advancePaise     Int      @default(0)
+  paymentMode      String   @default("CASH")
+  notes            String?
+  status           String   @default("ACTIVE")
+  bookingSource    String   @default("BIZ")
+  createdAt        DateTime @default(now())
 
   arena    Arena         @relation(fields: [arenaId], references: [id])
   unit     ArenaUnit     @relation(fields: [unitId], references: [id])

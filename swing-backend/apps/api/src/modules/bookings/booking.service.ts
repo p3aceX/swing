@@ -6,6 +6,13 @@ import Razorpay from 'razorpay'
 import crypto from 'crypto'
 
 type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE'
+type LinkedArenaGuest = {
+  userId: string
+  playerProfileId: string
+  name: string
+  phone: string
+  created: boolean
+} | null
 
 let _razorpay: Razorpay | null = null
 function getRazorpay() {
@@ -339,6 +346,9 @@ export class BookingService {
     bulkDayRatePaise?: number
     bookingSource?: string
     netVariantType?: string
+    guestUserId?: string
+    guestPlayerProfileId?: string
+    createGuestUser?: boolean
   }) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
@@ -392,7 +402,13 @@ export class BookingService {
 
     await this.assertNoArenaBlock(arenaId, data.unitId, bookingDate, data.startTime, data.endTime)
 
-    const walkinPlayer = await this.getOrCreateWalkInPlayer(arenaId)
+    const linkedGuest = await this.resolveArenaGuest(data.guestPhone, data.guestName, {
+      guestUserId: data.guestUserId,
+      guestPlayerProfileId: data.guestPlayerProfileId,
+      createGuestUser: data.createGuestUser,
+    })
+    const walkinPlayer = linkedGuest ? null : await this.getOrCreateWalkInPlayer(arenaId)
+    const bookedById = linkedGuest?.playerProfileId ?? walkinPlayer!.id
     const durationMins = this.calcDurationMins(data.startTime, data.endTime)
 
     const advance = data.advancePaise ?? 0
@@ -403,7 +419,7 @@ export class BookingService {
       data: {
         arenaId,
         unitId: data.unitId,
-        bookedById: walkinPlayer.id,
+        bookedById,
         date: bookingDate,
         startTime: data.startTime,
         endTime: data.endTime,
@@ -417,6 +433,9 @@ export class BookingService {
         createdByOwnerId: owner.id,
         guestName: data.guestName,
         guestPhone: data.guestPhone,
+        guestUserId: linkedGuest?.userId ?? null,
+        guestPlayerProfileId: linkedGuest?.playerProfileId ?? null,
+        guestSource: linkedGuest ? 'ARENA_BOOKING' : 'MANUAL',
         paymentMode: hasAdvance ? data.paymentMode : null,
         paidAt: fullyPaid ? new Date() : null,
         notes: data.notes,
@@ -433,7 +452,7 @@ export class BookingService {
     if (hasAdvance) {
       await prisma.payment.create({
         data: {
-          userId: walkinPlayer.userId,
+          userId: linkedGuest?.userId ?? walkinPlayer!.userId,
           entityType: 'SLOT_BOOKING',
           entityId: booking.id,
           amountPaise: advance,
@@ -654,6 +673,11 @@ export class BookingService {
         unitId: true,
         isOfflineBooking: true,
         paymentMode: true,
+        guestUserId: true,
+        guestPlayerProfileId: true,
+        guestSource: true,
+        guestUser: { select: { id: true, name: true, phone: true, avatarUrl: true, sourceLabels: true, createdVia: true } },
+        guestPlayerProfile: { select: { id: true, username: true } },
         unit: { select: { name: true } },
         bookedBy: { include: { user: { select: { name: true, phone: true } } } },
       },
@@ -667,24 +691,31 @@ export class BookingService {
       totalBookings: number
       totalSpentPaise: number
       balanceDuePaise: number
+      userId: string | null
+      playerProfileId: string | null
+      isLinkedUser: boolean
       lastDate: Date | null
       bookings: typeof bookings
     }>()
 
     for (const b of bookings) {
-      const phone = b.guestPhone!
-      if (!map.has(phone)) {
-        map.set(phone, {
+      const phone = b.guestUser?.phone ?? b.guestPhone!
+      const key = b.guestUserId ?? phone
+      if (!map.has(key)) {
+        map.set(key, {
           phone,
-          name: b.guestName ?? 'Guest',
+          name: b.guestUser?.name ?? b.guestName ?? 'Guest',
           totalBookings: 0,
           totalSpentPaise: 0,
           balanceDuePaise: 0,
+          userId: b.guestUserId ?? null,
+          playerProfileId: b.guestPlayerProfileId ?? null,
+          isLinkedUser: b.guestUserId != null,
           lastDate: null,
           bookings: [],
         })
       }
-      const entry = map.get(phone)!
+      const entry = map.get(key)!
       entry.totalBookings++
       // collected = checked-in bookings; balance = confirmed but not yet checked in
       entry.totalSpentPaise += b.checkedInAt != null ? b.totalAmountPaise : 0
@@ -725,19 +756,76 @@ export class BookingService {
   async listUserBookings(userId: string, page: number, limit: number) {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
     if (!player) return { bookings: [], total: 0 }
+    const where = {
+      OR: [
+        { bookedById: player.id },
+        { guestPlayerProfileId: player.id } as any,
+        { guestUserId: userId } as any,
+      ],
+    }
 
     const [bookings, total] = await prisma.$transaction([
       prisma.slotBooking.findMany({
-        where: { bookedById: player.id },
+        where: where as any,
         include: { unit: { include: { arena: { select: { name: true, city: true } } } } },
         orderBy: { date: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.slotBooking.count({ where: { bookedById: player.id } }),
+      prisma.slotBooking.count({ where: where as any }),
     ])
 
     return { bookings, total, page, limit }
+  }
+
+  async lookupArenaCustomer(userId: string, arenaId: string, phone: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+    const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
+    if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    const normalizedPhone = this.normalizePhone(phone)
+    const user = await this.findUserByPhone(normalizedPhone, {
+      playerProfile: { select: { id: true, username: true } },
+    })
+    if (user) {
+      const playerProfileId = user.playerProfile?.id ?? null
+      const username = user.playerProfile?.username ?? null
+      return {
+        exists: true,
+        user: {
+          id: user.id,
+          name: user.name,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl,
+          playerProfileId,
+          username,
+          sourceLabels: user.sourceLabels ?? [],
+          createdVia: user.createdVia ?? null,
+        },
+      }
+    }
+
+    const guest = await this.latestArenaGuestByPhone(arenaId, normalizedPhone)
+    return {
+      exists: false,
+      user: null,
+      guest,
+    }
+  }
+
+  private async findUserByPhone(normalizedPhone: string, include: object) {
+    return prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: normalizedPhone },
+          { phone: `91${normalizedPhone}` },
+          { phone: `+91${normalizedPhone}` },
+          { phone: { endsWith: normalizedPhone } },
+        ],
+      },
+      include,
+    } as any) as Promise<any>
   }
 
   // ─── Owner: list arena bookings ───────────────────────────────────────────
@@ -935,6 +1023,100 @@ export class BookingService {
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  private normalizePhone(phone: string) {
+    const digits = `${phone}`.replace(/\D/g, '')
+    if (digits.length > 10 && digits.startsWith('91')) return digits.slice(-10)
+    return digits
+  }
+
+  private async latestArenaGuestByPhone(arenaId: string, phone: string) {
+    const booking = await prisma.slotBooking.findFirst({
+      where: {
+        arenaId,
+        isOfflineBooking: true,
+        guestPhone: phone,
+      },
+      select: {
+        guestName: true,
+        guestPhone: true,
+        date: true,
+      },
+      orderBy: { date: 'desc' },
+    })
+    if (!booking) return null
+    return {
+      name: booking.guestName ?? 'Guest',
+      phone: booking.guestPhone ?? phone,
+      lastDate: booking.date,
+    }
+  }
+
+  private async resolveArenaGuest(phone: string, name: string, options: {
+    guestUserId?: string
+    guestPlayerProfileId?: string
+    createGuestUser?: boolean
+  }): Promise<LinkedArenaGuest> {
+    const normalizedPhone = this.normalizePhone(phone)
+    if (!normalizedPhone || normalizedPhone.length < 10) return null
+
+    let user = options.guestUserId
+      ? await prisma.user.findUnique({
+          where: { id: options.guestUserId },
+          include: { playerProfile: true },
+        })
+      : await this.findUserByPhone(normalizedPhone, { playerProfile: true })
+
+    if (user && this.normalizePhone(user.phone) !== normalizedPhone) {
+      throw new AppError('PHONE_USER_MISMATCH', 'Selected user does not match guest phone', 400)
+    }
+
+    if (!user && options.createGuestUser) {
+      user = await prisma.user.create({
+        data: {
+          phone: normalizedPhone,
+          name: name.trim() || `Player ${normalizedPhone.slice(-4)}`,
+          roles: ['PLAYER'],
+          activeRole: 'PLAYER',
+          createdVia: 'ARENA_BOOKING',
+          sourceLabels: ['VIA_ARENA_BOOKING'],
+        } as any,
+        include: { playerProfile: true },
+      })
+    }
+
+    if (!user) return null
+
+    let player = user.playerProfile
+    if (options.guestPlayerProfileId && player?.id !== options.guestPlayerProfileId) {
+      player = await prisma.playerProfile.findUnique({ where: { id: options.guestPlayerProfileId } })
+      if (!player || player.userId !== user.id) {
+        throw new AppError('PLAYER_USER_MISMATCH', 'Selected player profile does not match guest user', 400)
+      }
+    }
+    if (!player) {
+      player = await prisma.playerProfile.create({ data: { userId: user.id } })
+    }
+
+    const labels = new Set([...(user.sourceLabels ?? []), 'VIA_ARENA_BOOKING'])
+    if (!user.sourceLabels?.includes('VIA_ARENA_BOOKING') || !user.createdVia) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          sourceLabels: [...labels],
+          createdVia: user.createdVia ?? 'ARENA_BOOKING',
+        } as any,
+      })
+    }
+
+    return {
+      userId: user.id,
+      playerProfileId: player.id,
+      name: user.name,
+      phone: user.phone,
+      created: !options.guestUserId,
+    }
+  }
 
   private async getOrCreateWalkInPlayer(arenaId: string) {
     const walkinEmail = `walkin+${arenaId}@swing.internal`

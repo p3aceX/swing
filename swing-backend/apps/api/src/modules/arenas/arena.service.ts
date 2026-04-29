@@ -18,6 +18,11 @@ type ArenaTimeBlockFilters = {
   recurringOnly?: 'true' | 'false'
 }
 
+type LinkedArenaGuest = {
+  userId: string
+  playerProfileId: string
+} | null
+
 export class ArenaService {
   async createArena(userId: string, data: any) {
     let owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
@@ -979,8 +984,9 @@ export class ArenaService {
       }
     }
 
-    // Get/create walk-in player for the sessions
-    const walkinPlayer = await this.getOrCreateWalkInPlayer(arenaId)
+    const linkedGuest = await this.resolveArenaGuest(data.guestPhone, data.guestName)
+    const walkinPlayer = linkedGuest ? null : await this.getOrCreateWalkInPlayer(arenaId)
+    const bookedById = linkedGuest?.playerProfileId ?? walkinPlayer!.id
 
     // Create the pass record
     const pass = await (prisma as any).monthlyPass.create({
@@ -1012,7 +1018,7 @@ export class ArenaService {
         data: {
           arenaId,
           unitId: data.unitId,
-          bookedById: walkinPlayer.id,
+          bookedById,
           date,
           startTime: data.startTime,
           endTime: data.endTime,
@@ -1026,6 +1032,9 @@ export class ArenaService {
           createdByOwnerId: owner.id,
           guestName: data.guestName,
           guestPhone: data.guestPhone,
+          guestUserId: linkedGuest?.userId ?? null,
+          guestPlayerProfileId: linkedGuest?.playerProfileId ?? null,
+          guestSource: linkedGuest ? 'ARENA_BOOKING' : 'MANUAL',
           paymentMode: data.paymentMode as any,
           paidAt: fullyPaid ? new Date() : null,
           bookingSource: 'BIZ',
@@ -1110,6 +1119,54 @@ export class ArenaService {
       player = await prisma.playerProfile.create({ data: { userId: user.id } })
     }
     return { id: player.id, userId: user.id }
+  }
+
+  private normalizePhone(phone: string) {
+    const digits = `${phone}`.replace(/\D/g, '')
+    if (digits.length > 10 && digits.startsWith('91')) return digits.slice(-10)
+    return digits
+  }
+
+  private async resolveArenaGuest(phone: string, name: string): Promise<LinkedArenaGuest> {
+    const normalizedPhone = this.normalizePhone(phone)
+    if (!normalizedPhone || normalizedPhone.length < 10) return null
+
+    let user = await prisma.user.findFirst({
+      where: { phone: normalizedPhone },
+      include: { playerProfile: true },
+    })
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          phone: normalizedPhone,
+          name: name.trim() || `Player ${normalizedPhone.slice(-4)}`,
+          roles: ['PLAYER'],
+          activeRole: 'PLAYER',
+          createdVia: 'ARENA_BOOKING',
+          sourceLabels: ['VIA_ARENA_BOOKING'],
+        },
+        include: { playerProfile: true },
+      })
+    }
+
+    let player = user.playerProfile
+    if (!player) {
+      player = await prisma.playerProfile.create({ data: { userId: user.id } })
+    }
+
+    const labels = new Set([...(user.sourceLabels ?? []), 'VIA_ARENA_BOOKING'])
+    if (!user.sourceLabels?.includes('VIA_ARENA_BOOKING') || !user.createdVia) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          sourceLabels: [...labels],
+          createdVia: user.createdVia ?? 'ARENA_BOOKING',
+        },
+      })
+    }
+
+    return { userId: user.id, playerProfileId: player.id }
   }
 
   private async getConflictUnitIds(unitId: string): Promise<string[]> {
