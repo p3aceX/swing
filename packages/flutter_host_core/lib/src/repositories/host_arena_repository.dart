@@ -137,7 +137,9 @@ class HostArenaBookingRepository {
     final root = _extractMap(response.data);
     final payload = (root['data'] ?? root) as Map?;
     return PlayerSlotsData.fromJson(
-      payload != null ? Map<String, dynamic>.from(payload) : <String, dynamic>{},
+      payload != null
+          ? Map<String, dynamic>.from(payload)
+          : <String, dynamic>{},
     );
   }
 
@@ -270,6 +272,9 @@ class HostArenaBookingRepository {
     int? bulkDayRatePaise,
     String bookingSource = 'BIZ',
     String? netVariantType,
+    String? guestUserId,
+    String? guestPlayerProfileId,
+    bool createGuestUser = true,
   }) async {
     final response = await _dio.post(
       _paths.arenaManualBooking(arenaId),
@@ -289,6 +294,10 @@ class HostArenaBookingRepository {
         if (bulkDayRatePaise != null) 'bulkDayRatePaise': bulkDayRatePaise,
         'bookingSource': bookingSource,
         if (netVariantType != null) 'netVariantType': netVariantType,
+        if (guestUserId != null) 'guestUserId': guestUserId,
+        if (guestPlayerProfileId != null)
+          'guestPlayerProfileId': guestPlayerProfileId,
+        'createGuestUser': createGuestUser,
       },
     );
     final data = _extractMap(response.data);
@@ -333,7 +342,8 @@ class HostArenaBookingRepository {
     String? month,
     String? mode,
   }) async {
-    debugPrint('[payments] fetchArenaPayments arena=$arenaId month=$month mode=$mode');
+    debugPrint(
+        '[payments] fetchArenaPayments arena=$arenaId month=$month mode=$mode');
     try {
       final response = await _dio.get(
         _paths.arenaPayments(arenaId),
@@ -342,7 +352,8 @@ class HostArenaBookingRepository {
           if (mode != null) 'mode': mode,
         },
       );
-      debugPrint('[payments] status=${response.statusCode} type=${response.data.runtimeType}');
+      debugPrint(
+          '[payments] status=${response.statusCode} type=${response.data.runtimeType}');
       debugPrint('[payments] raw: ${response.data}');
       final data = _extractMap(response.data);
       debugPrint('[payments] top-level keys: ${data.keys.toList()}');
@@ -350,8 +361,10 @@ class HostArenaBookingRepository {
       debugPrint('[payments] payload keys: ${payload.keys.toList()}');
       final rawCheckedIn = payload['checkedInBookings'];
       final rawPending = payload['pendingBookings'];
-      debugPrint('[payments] checkedInBookings type=${rawCheckedIn.runtimeType} value=$rawCheckedIn');
-      debugPrint('[payments] pendingBookings type=${rawPending.runtimeType} value=$rawPending');
+      debugPrint(
+          '[payments] checkedInBookings type=${rawCheckedIn.runtimeType} value=$rawCheckedIn');
+      debugPrint(
+          '[payments] pendingBookings type=${rawPending.runtimeType} value=$rawPending');
       final checkedIn = ((rawCheckedIn ?? const []) as List)
           .whereType<Map>()
           .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
@@ -360,16 +373,20 @@ class HostArenaBookingRepository {
           .whereType<Map>()
           .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
           .toList();
-      debugPrint('[payments] parsed: ${checkedIn.length} checked-in, ${pending.length} pending');
+      debugPrint(
+          '[payments] parsed: ${checkedIn.length} checked-in, ${pending.length} pending');
       if (checkedIn.isNotEmpty) {
         final b = checkedIn.first;
-        debugPrint('[payments] first checked-in: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} total=${b.totalAmountPaise}');
+        debugPrint(
+            '[payments] first checked-in: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} total=${b.totalAmountPaise}');
       }
       if (pending.isNotEmpty) {
         final b = pending.first;
-        debugPrint('[payments] first pending: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} total=${b.totalAmountPaise}');
+        debugPrint(
+            '[payments] first pending: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} total=${b.totalAmountPaise}');
       }
-      return ArenaPaymentsData(checkedInBookings: checkedIn, pendingBookings: pending);
+      return ArenaPaymentsData(
+          checkedInBookings: checkedIn, pendingBookings: pending);
     } catch (e, st) {
       debugPrint('[payments] fetchArenaPayments ERROR: $e\n$st');
       rethrow;
@@ -402,11 +419,25 @@ class HostArenaBookingRepository {
     }
   }
 
+  Future<ArenaCustomerLookup> lookupArenaCustomer(
+    String arenaId, {
+    required String phone,
+  }) async {
+    final response = await _dio.get(
+      '/bookings/arena/$arenaId/customers/lookup',
+      queryParameters: {'phone': phone},
+    );
+    final data = _extractMap(response.data);
+    final payload = _extractMap(data['data'] ?? data);
+    return ArenaCustomerLookup.fromJson(payload);
+  }
+
   Future<MonthlyPass> createMonthlyPass(
     String arenaId,
     Map<String, dynamic> input,
   ) async {
-    final response = await _dio.post(_paths.arenaMonthlyPasses(arenaId), data: input);
+    final response =
+        await _dio.post(_paths.arenaMonthlyPasses(arenaId), data: input);
     final data = _extractMap(response.data);
     final payload = _extractMap(data['data'] ?? data);
     return MonthlyPass.fromJson(payload);

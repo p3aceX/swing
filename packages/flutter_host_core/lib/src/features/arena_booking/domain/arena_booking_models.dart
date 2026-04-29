@@ -73,8 +73,10 @@ class ArenaListing {
     // Derive arena hours from units: earliest open → latest close
     final arenaOpen = '${json['openTime'] ?? '06:00'}';
     final arenaClose = '${json['closeTime'] ?? '23:00'}';
-    final unitOpenTimes = units.map((u) => u.openTime).whereType<String>().toList();
-    final unitCloseTimes = units.map((u) => u.closeTime).whereType<String>().toList();
+    final unitOpenTimes =
+        units.map((u) => u.openTime).whereType<String>().toList();
+    final unitCloseTimes =
+        units.map((u) => u.closeTime).whereType<String>().toList();
     final effectiveOpen = unitOpenTimes.isEmpty
         ? arenaOpen
         : unitOpenTimes.reduce((a, b) => a.compareTo(b) <= 0 ? a : b);
@@ -151,12 +153,12 @@ class NetVariant {
   }
 
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'label': label,
-    'count': count,
-    if (pricePaise != null) 'pricePaise': pricePaise,
-    'hasFloodlights': hasFloodlights,
-  };
+        'type': type,
+        'label': label,
+        'count': count,
+        if (pricePaise != null) 'pricePaise': pricePaise,
+        'hasFloodlights': hasFloodlights,
+      };
 }
 
 class ArenaUnitOption {
@@ -338,9 +340,19 @@ class MonthlyPass {
   final List<ArenaReservation> bookings;
 
   bool get isActive => status == 'ACTIVE';
-  int get balancePaise => (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
+  int get balancePaise =>
+      (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
 
-  static const _dayNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _dayNames = [
+    '',
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+    'Sun'
+  ];
   String get daysLabel => daysOfWeek
       .where((d) => d >= 1 && d <= 7)
       .map((d) => _dayNames[d])
@@ -437,8 +449,10 @@ class AvailabilitySlot {
   final String? bookingId;
   final String? customerName;
   final String? reason;
+
   /// Backend-computed total for the full slot duration (base only, no GST). Populated from /slots endpoint.
   final int? totalSlotPaise;
+
   /// The specific unit assigned for this slot (used for NETS grouping). Populated from /slots endpoint.
   final String? assignedUnitId;
 
@@ -488,6 +502,7 @@ class ArenaReservation {
     this.paidAt,
     this.cancellationReason,
     this.advancePaise = 0,
+    this.netVariantType,
   });
 
   final String id;
@@ -513,6 +528,7 @@ class ArenaReservation {
   final DateTime? paidAt;
   final String? cancellationReason;
   final int advancePaise;
+  final String? netVariantType;
 
   int get balancePaise =>
       (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
@@ -555,6 +571,7 @@ class ArenaReservation {
       paidAt: _dateOrNull(json['paidAt']),
       cancellationReason: _stringOrNull(json['cancellationReason']),
       advancePaise: _intValue(json['advancePaise']),
+      netVariantType: _stringOrNull(json['netVariantType']),
     );
   }
 }
@@ -689,6 +706,9 @@ class ArenaGuest {
     required this.totalBookings,
     required this.totalSpentPaise,
     required this.balanceDuePaise,
+    this.userId,
+    this.playerProfileId,
+    this.isLinkedUser = false,
     this.lastDate,
     this.recentBookings = const [],
   });
@@ -698,6 +718,9 @@ class ArenaGuest {
   final int totalBookings;
   final int totalSpentPaise;
   final int balanceDuePaise;
+  final String? userId;
+  final String? playerProfileId;
+  final bool isLinkedUser;
   final DateTime? lastDate;
   final List<ArenaReservation> recentBookings;
 
@@ -712,8 +735,57 @@ class ArenaGuest {
       totalBookings: _intValue(json['totalBookings']),
       totalSpentPaise: _intValue(json['totalSpentPaise']),
       balanceDuePaise: _intValue(json['balanceDuePaise']),
+      userId: _stringOrNull(json['userId'] ?? json['guestUserId']),
+      playerProfileId: _stringOrNull(
+          json['playerProfileId'] ?? json['guestPlayerProfileId']),
+      isLinkedUser: json['isLinkedUser'] == true ||
+          _stringOrNull(json['userId'] ?? json['guestUserId']) != null,
       lastDate: _dateOrNull(json['lastDate']),
       recentBookings: bookingsList,
+    );
+  }
+}
+
+class ArenaCustomerLookup {
+  const ArenaCustomerLookup({
+    required this.exists,
+    this.userId,
+    this.playerProfileId,
+    this.name,
+    this.phone,
+    this.username,
+    this.guest,
+  });
+
+  final bool exists;
+  final String? userId;
+  final String? playerProfileId;
+  final String? name;
+  final String? phone;
+  final String? username;
+  final ArenaGuest? guest;
+
+  factory ArenaCustomerLookup.fromJson(Map<String, dynamic> json) {
+    final user = (json['user'] as Map?)?.cast<String, dynamic>();
+    final guest = (json['guest'] as Map?)?.cast<String, dynamic>();
+    return ArenaCustomerLookup(
+      exists: json['exists'] == true,
+      userId: _stringOrNull(user?['id'] ?? json['userId']),
+      playerProfileId:
+          _stringOrNull(user?['playerProfileId'] ?? json['playerProfileId']),
+      name: _stringOrNull(user?['name'] ?? json['name']),
+      phone: _stringOrNull(user?['phone'] ?? json['phone']),
+      username: _stringOrNull(user?['username'] ?? json['username']),
+      guest: guest == null
+          ? null
+          : ArenaGuest(
+              phone: '${guest['phone'] ?? ''}',
+              name: '${guest['name'] ?? 'Guest'}',
+              totalBookings: 0,
+              totalSpentPaise: 0,
+              balanceDuePaise: 0,
+              lastDate: _dateOrNull(guest['lastDate']),
+            ),
     );
   }
 }
@@ -940,9 +1012,7 @@ class PlayerUnitGroup {
         .whereType<Map>()
         .map((e) => PlayerAvailableSlot.fromJson(Map<String, dynamic>.from(e)))
         .toList();
-    final netTypes = (json['netTypes'] as List?)
-        ?.map((e) => '$e')
-        .toList();
+    final netTypes = (json['netTypes'] as List?)?.map((e) => '$e').toList();
     return PlayerUnitGroup(
       groupKey: '${json['groupKey'] ?? ''}',
       displayName: '${json['displayName'] ?? ''}',
@@ -958,7 +1028,8 @@ class PlayerUnitGroup {
       maxSlotMins: _intValue(json['maxSlotMins'] ?? 480),
       minAdvancePaise: _intValue(json['minAdvancePaise'] ?? 0),
       hasFloodlights: json['hasFloodlights'] == true,
-      photoUrls: (json['photoUrls'] as List? ?? const []).map((e) => '$e').toList(),
+      photoUrls:
+          (json['photoUrls'] as List? ?? const []).map((e) => '$e').toList(),
       description: _stringOrNull(json['description']),
       availableSlots: slots,
     );

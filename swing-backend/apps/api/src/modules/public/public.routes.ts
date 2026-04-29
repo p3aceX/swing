@@ -2772,6 +2772,22 @@ startRealtime();
 
   // ── Public Arena Page ─────────────────────────────────────────────────────
 
+  // GET /public/arena/id/:arenaId
+  app.get('/arena/id/:arenaId', async (request, reply) => {
+    const { arenaId } = request.params as { arenaId: string }
+    const arena = await prisma.arena.findFirst({
+      where: { id: arenaId, isPublicPage: true, isActive: true },
+      include: {
+        units: {
+          where: { isActive: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    })
+    if (!arena) return reply.code(404).send({ success: false, error: 'Arena not found' })
+    return reply.send({ success: true, data: arena })
+  })
+
   // GET /public/arena/:citySlug/:arenaSlug  OR  /public/arena/slug/:customSlug
   app.get('/arena/:citySlug/:arenaSlug', async (request, reply) => {
     const { citySlug, arenaSlug } = request.params as { citySlug: string; arenaSlug: string }
@@ -2849,6 +2865,105 @@ startRealtime();
           bulkDayRatePaise: (u as any).bulkDayRatePaise ?? null,
           bookedSlots: bookedByUnit[u.id] ?? [],
         })),
+      },
+    })
+  })
+
+  // POST /public/bookings — guest booking (no auth)
+  app.post('/bookings', async (request, reply) => {
+    const bodySchema = z.object({
+      arenaUnitId: z.string(),
+      bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      startTime: z.string().regex(/^\d{2}:\d{2}$/),
+      endTime: z.string().regex(/^\d{2}:\d{2}$/),
+      totalPricePaise: z.number().int().min(0),
+      guestName: z.string().min(1).max(100),
+      guestPhone: z.string().min(5).max(20),
+    })
+
+    const parsed = bodySchema.safeParse(request.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ success: false, error: 'Invalid request', details: parsed.error.flatten() })
+    }
+
+    const { arenaUnitId, bookingDate, startTime, endTime, totalPricePaise, guestName, guestPhone } = parsed.data
+
+    const unit = await prisma.arenaUnit.findUnique({
+      where: { id: arenaUnitId },
+      include: { arena: true },
+    })
+    if (!unit || !unit.isActive) return reply.code(404).send({ success: false, error: 'Unit not found' })
+    if (!(unit.arena as any).isPublicPage || !(unit.arena as any).isActive) {
+      return reply.code(404).send({ success: false, error: 'Arena not found' })
+    }
+
+    const dateObj = new Date(bookingDate)
+
+    // conflict check
+    const conflict = await prisma.slotBooking.findFirst({
+      where: {
+        unitId: arenaUnitId,
+        date: dateObj,
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+        startTime: { lt: endTime },
+        endTime: { gt: startTime },
+      },
+    })
+    if (conflict) return reply.code(409).send({ success: false, error: 'Slot already booked' })
+
+    // resolve or create walk-in player for this arena
+    const arenaId = unit.arenaId
+    const walkinEmail = `walkin+${arenaId}@swing.internal`
+    let walkinUser = await prisma.user.findUnique({ where: { email: walkinEmail } })
+    if (!walkinUser) {
+      walkinUser = await prisma.user.create({
+        data: {
+          phone: `000000000000_${arenaId.slice(0, 8)}`,
+          email: walkinEmail,
+          name: 'Walk-in Guest',
+          roles: ['PLAYER'],
+        },
+      })
+    }
+    let walkinPlayer = await prisma.playerProfile.findUnique({ where: { userId: walkinUser.id } })
+    if (!walkinPlayer) {
+      walkinPlayer = await prisma.playerProfile.create({ data: { userId: walkinUser.id } })
+    }
+
+    const startMins = parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1])
+    const endMins = parseInt(endTime.split(':')[0]) * 60 + parseInt(endTime.split(':')[1])
+    const durationMins = endMins - startMins
+
+    const booking = await prisma.slotBooking.create({
+      data: {
+        arenaId,
+        unitId: arenaUnitId,
+        bookedById: walkinPlayer.id,
+        date: dateObj,
+        startTime,
+        endTime,
+        durationMins,
+        baseAmountPaise: totalPricePaise,
+        totalAmountPaise: totalPricePaise,
+        totalPricePaise,
+        status: 'CONFIRMED',
+        isOfflineBooking: true,
+        guestName,
+        guestPhone,
+        guestSource: 'PUBLIC_WEB',
+        paymentMode: 'CASH',
+      } as any,
+    })
+
+    return reply.code(201).send({
+      success: true,
+      data: {
+        id: booking.id,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        guestName: booking.guestName,
+        status: booking.status,
       },
     })
   })
