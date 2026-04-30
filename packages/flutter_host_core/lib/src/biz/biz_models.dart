@@ -60,6 +60,10 @@ class BusinessAccount {
     this.pincode,
     this.gstNumber,
     this.panNumber,
+    this.beneficiaryName,
+    this.accountNumber,
+    this.ifscCode,
+    this.upiId,
     this.onboardingComplete = false,
   });
 
@@ -76,6 +80,10 @@ class BusinessAccount {
   final String? pincode;
   final String? gstNumber;
   final String? panNumber;
+  final String? beneficiaryName;
+  final String? accountNumber;
+  final String? ifscCode;
+  final String? upiId;
   final bool onboardingComplete;
 
   factory BusinessAccount.fromJson(Map<String, dynamic> json) =>
@@ -93,6 +101,10 @@ class BusinessAccount {
         pincode: _nullableString(json['pincode']),
         gstNumber: _nullableString(json['gstNumber']),
         panNumber: _nullableString(json['panNumber']),
+        beneficiaryName: _nullableString(json['beneficiaryName']),
+        accountNumber: _nullableString(json['accountNumber']),
+        ifscCode: _nullableString(json['ifscCode']),
+        upiId: _nullableString(json['upiId']),
         onboardingComplete: json['onboardingComplete'] as bool? ?? false,
       );
 }
@@ -227,6 +239,10 @@ class BusinessDetailsInput {
     this.pincode,
     this.gstNumber,
     this.panNumber,
+    this.beneficiaryName,
+    this.accountNumber,
+    this.ifscCode,
+    this.upiId,
   });
 
   final String businessName;
@@ -239,6 +255,10 @@ class BusinessDetailsInput {
   final String? pincode;
   final String? gstNumber;
   final String? panNumber;
+  final String? beneficiaryName;
+  final String? accountNumber;
+  final String? ifscCode;
+  final String? upiId;
 
   Map<String, dynamic> toJson() => {
         'businessName': businessName,
@@ -251,6 +271,10 @@ class BusinessDetailsInput {
         if (_hasValue(pincode)) 'pincode': pincode,
         if (_hasValue(gstNumber)) 'gstNumber': gstNumber,
         if (_hasValue(panNumber)) 'panNumber': panNumber,
+        if (_hasValue(beneficiaryName)) 'beneficiaryName': beneficiaryName,
+        if (_hasValue(accountNumber)) 'accountNumber': accountNumber,
+        if (_hasValue(ifscCode)) 'ifscCode': ifscCode,
+        if (_hasValue(upiId)) 'upiId': upiId,
       };
 }
 

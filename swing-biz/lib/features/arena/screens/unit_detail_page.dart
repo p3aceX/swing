@@ -108,31 +108,6 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
       builder: (ctx) => UnitEditorSheet(
         arenaId: arena.id,
         unit: unit,
-        onPickPhotos: (currentCount) async {
-          if (currentCount >= 3) return const [];
-          final files = await ImagePicker().pickMultiImage();
-          if (files.isEmpty) return const [];
-          final uploads = <String>[];
-          for (final file in files.take(3 - currentCount)) {
-            final compressedFile = await ImageCompressor.compress(file.path);
-            if (compressedFile == null) continue;
-
-            final form = FormData.fromMap({
-              'folder': 'arenas/${arena.id}/units',
-              'file': await MultipartFile.fromFile(compressedFile.path, filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
-            });
-            final resp = await ApiClient.instance.dio.post(
-              '/media/upload',
-              data: form,
-              options: Options(contentType: 'multipart/form-data'),
-            );
-            final payload = resp.data as Map<String, dynamic>;
-            final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-            final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
-            if (url != null && url.isNotEmpty) uploads.add(url);
-          }
-          return uploads;
-        },
       ),
     );
     if (changed == true && mounted) {
@@ -1180,6 +1155,7 @@ class _BookingsTab extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: BookingCard(
                           booking: b,
+                          arenas: const [],
                           onTap: () => _openDetail(context, b),
                         ),
                       )),

@@ -117,6 +117,9 @@ class HostPathConfig {
   String arenaSlots(String arenaId) => '$arenasBase/$arenaId/slots';
   String arenaBlocks(String arenaId) => '$arenasBase/$arenaId/blocks';
   String arenaBlock(String blockId) => '$arenasBase/blocks/$blockId';
+  String arenaMonthlyPasses(String arenaId) => '$arenasBase/$arenaId/monthly-passes';
+  String monthlyPass(String passId) => '$arenasBase/monthly-passes/$passId';
+  String monthlyPassCancel(String passId) => '$arenasBase/monthly-passes/$passId/cancel';
 
   // ── Bookings / reservations ─────────────────────────────────────────────
   String arenaReservations(String arenaId) => '/bookings/arena/$arenaId';

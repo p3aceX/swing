@@ -3113,6 +3113,8 @@ startRealtime();
       startTime,
       endTime,
       bookedById: walkinPlayer.id,
+      notifyPlayer: false,
+      customerName: guestName,
     }).catch((err) => console.error('[notify] booking confirmed failed:', err))
 
     return reply.code(201).send({
@@ -3255,6 +3257,8 @@ startRealtime();
         startTime,
         endTime,
         bookedById: walkinPlayer.id,
+        notifyPlayer: false,
+        customerName: guestName,
       }).catch((err) => console.error('[notify] bulk booking confirmed failed:', err))
     }
 

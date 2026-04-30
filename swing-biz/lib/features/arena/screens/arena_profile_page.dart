@@ -194,7 +194,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
           final loc = _joinNonEmpty([arena.city, arena.state]);
           return CustomScrollView(
             slivers: [
-              // ── AppBar with arena name ──────────────────────────────────
+              // ── AppBar ──────────────────────────────────────────────────
               SliverAppBar(
                 backgroundColor: _bg,
                 foregroundColor: _text,
@@ -211,127 +211,67 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      arena.name,
-                      style: const TextStyle(
-                          color: _text,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w900),
-                    ),
+                    Text(arena.name,
+                        style: const TextStyle(color: _text, fontSize: 17, fontWeight: FontWeight.w900)),
                     if (loc.isNotEmpty)
-                      Text(
-                        loc,
-                        style: const TextStyle(
-                            color: _muted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500),
-                      ),
+                      Text(loc, style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500)),
                   ],
                 ),
                 actions: [
-                  TextButton.icon(
-                    onPressed: () => _openArenaDetailSheet(arena),
-                    icon: const Icon(Icons.tune_rounded, size: 15),
-                    label: const Text('Arena'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: _muted,
-                      textStyle: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w700),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: FilledButton.icon(
+                      onPressed: () => _openUnitSheet(arena),
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('Add Unit'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _deep,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
                     ),
                   ),
                 ],
               ),
 
-              // ── Arena quick-info strip ──────────────────────────────────
+              // ── Arena info strip ────────────────────────────────────────
               SliverToBoxAdapter(
-                child: GestureDetector(
-                  onTap: () => _openArenaDetailSheet(arena),
-                  child: Container(
-                    color: _surface,
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.schedule_rounded,
-                            size: 14, color: _muted),
-                        const SizedBox(width: 5),
-                        Text('${arena.openTime} – ${arena.closeTime}',
-                            style: const TextStyle(
-                                color: _muted,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600)),
-                        if (arena.sports.isNotEmpty) ...[
-                          const SizedBox(width: 14),
-                          const Icon(Icons.sports_cricket_rounded,
-                              size: 14, color: _muted),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text(
-                              arena.sports
-                                  .map((s) =>
-                                      s[0].toUpperCase() +
-                                      s.substring(1).toLowerCase())
-                                  .join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: _muted,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ] else
-                          const Spacer(),
-                        const Icon(Icons.chevron_right_rounded,
-                            size: 16, color: _muted),
-                      ],
-                    ),
-                  ),
+                child: Container(
+                  color: _surface,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(children: [
+                    const Icon(Icons.schedule_rounded, size: 13, color: _muted),
+                    const SizedBox(width: 5),
+                    Text('${arena.openTime} – ${arena.closeTime}',
+                        style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+                    if (arena.sports.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      const Icon(Icons.sports_cricket_rounded, size: 13, color: _muted),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          arena.sports.map((s) => s[0].toUpperCase() + s.substring(1).toLowerCase()).join(' · '),
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ] else
+                      const Spacer(),
+                    Text('${arena.units.length} units',
+                        style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
                 ),
               ),
 
-              // ── Section header ──────────────────────────────────────────
+              // ── Section label ────────────────────────────────────────────
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
                 sliver: SliverToBoxAdapter(
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Units',
-                                style: TextStyle(
-                                    color: _text,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w900)),
-                            SizedBox(height: 2),
-                            Text('Courts, nets, or spaces inside this arena',
-                                style: TextStyle(
-                                    color: _muted,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      ),
-                      FilledButton.icon(
-                        onPressed: () => _openUnitSheet(arena),
-                        icon: const Icon(Icons.add_rounded, size: 16),
-                        label: const Text('Add Unit'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _deep,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          textStyle: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w700),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: Text('Units', style: const TextStyle(color: _text, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
                 ),
               ),
 
@@ -880,133 +820,177 @@ class _UnitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title =
+    final typeLabel =
         _fallback(unit.unitTypeLabel).replaceAll('Not set', unit.unitType);
-    final variantLabel = unit.hasVariants
-        ? unit.netVariants.map((v) => v.label).join(' / ')
-        : unit.netType;
-    final subtitle = _joinNonEmpty([
-      title,
-      variantLabel,
-      '${unit.minSlotMins ~/ 60}h min',
-    ]);
-    final isGround =
-        unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
-    final priceRows = [
-      if (!isGround) _money(unit.pricePerHourPaise),
-      if (unit.price4HrPaise != null)
-        '4h ${_money(unit.price4HrPaise!)}'
-      else if (isGround)
-        '4h ${_money(unit.pricePerHourPaise * 4)}',
-      if (unit.price8HrPaise != null) '8h ${_money(unit.price8HrPaise!)}',
-      if (unit.priceFullDayPaise != null)
-        'Day ${_money(unit.priceFullDayPaise!)}',
-    ];
+    final isGround = unit.isGround;
+    final isNet = unit.isNet;
+    // Only courts (/hr bookings) show a prominent base price row.
+    // Grounds use slot-based pricing (chips); nets use per-variant prices (chips).
+    final String? basePrice =
+        (!isGround && !isNet) ? '${_money(unit.pricePerHourPaise)}/hr' : null;
     final hasSchedule = unit.openTime != null && unit.closeTime != null;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: _surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _line),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: 50,
-                    height: 50,
-                    child: unit.photoUrls.isEmpty
-                        ? Container(
-                            color: _deep,
-                            child: const Icon(
-                              Icons.sports_cricket_rounded,
-                              color: Colors.white70,
-                              size: 22,
-                            ),
-                          )
-                        : Image.network(
-                            unit.photoUrls.first,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: _deep,
-                              child: const Icon(
-                                Icons.sports_cricket_rounded,
-                                color: Colors.white70,
-                                size: 22,
+            // ── Info section ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 4, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── name + type badge + menu ───────────────────────────
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              unit.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _text,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        unit.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _text,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 15,
+                            const SizedBox(height: 3),
+                            Text(
+                              typeLabel,
+                              style: const TextStyle(
+                                color: _muted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _muted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert_rounded,
+                            color: _muted, size: 20),
+                        color: _surface,
+                        onSelected: (value) {
+                          if (value == 'edit') onEdit();
+                          if (value == 'delete') onDelete();
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                              value: 'edit', child: Text('Edit')),
+                          PopupMenuItem(
+                              value: 'delete', child: Text('Remove')),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // price + slot row (hidden for nets — per-hour is meaningless)
+                  if (basePrice != null)
+                    Row(
+                      children: [
+                        Text(
+                          basePrice,
+                          style: const TextStyle(
+                            color: _text,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          '· ${unit.minSlotMins ~/ 60}h min slot',
+                          style: const TextStyle(
+                            color: _muted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (basePrice != null) const SizedBox(height: 10),
+                  // chip row
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
+                      // net variant prices
+                      for (final v in unit.netVariants)
+                        if (v.pricePaise != null)
+                          _SmallPill('${v.label} ${_money(v.pricePaise!)}'),
+                      // ground slot prices
+                      if (isGround) ...[
+                        _SmallPill(
+                            '4h ${_money(unit.price4HrPaise ?? unit.pricePerHourPaise * 4)}'),
+                        if (unit.price8HrPaise != null)
+                          _SmallPill('8h ${_money(unit.price8HrPaise!)}'),
+                        if (unit.priceFullDayPaise != null)
+                          _SmallPill(
+                              'Day ${_money(unit.priceFullDayPaise!)}'),
+                        if (unit.weekendMultiplier != 1)
+                          _SmallPill(
+                            'Wknd ${_money(((unit.price4HrPaise ?? unit.pricePerHourPaise * 4) * unit.weekendMultiplier).round())}/4hr',
+                            highlight: true,
+                          ),
+                      ],
+                      if (hasSchedule)
+                        _SmallPill(
+                            '${unit.openTime} – ${unit.closeTime}'),
+                      if (unit.hasFloodlights)
+                        const _SmallPill('Floodlights', highlight: true),
+                      // weekend chip for non-ground, non-net courts
+                      if (!isGround && !isNet && unit.weekendMultiplier != 1)
+                        _SmallPill(
+                          'Wknd ${_money((unit.pricePerHourPaise * unit.weekendMultiplier).round())}/hr',
+                          highlight: true,
+                        ),
+                      if (!isGround && unit.price8HrPaise != null)
+                        _SmallPill('8h ${_money(unit.price8HrPaise!)}'),
+                      if (!isGround && unit.priceFullDayPaise != null)
+                        _SmallPill(
+                            'Day ${_money(unit.priceFullDayPaise!)}'),
+                      if (unit.addons.isNotEmpty)
+                        _SmallPill('${unit.addons.length} add-ons'),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // action buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: onEdit,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _accent,
+                            side: BorderSide(
+                                color: _accent.withValues(alpha: 0.4)),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            'Edit',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert_rounded, color: _muted),
-                  onSelected: (value) {
-                    if (value == 'edit') onEdit();
-                    if (value == 'delete') onDelete();
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 'edit', child: Text('Edit')),
-                    PopupMenuItem(value: 'delete', child: Text('Remove')),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: [
-                for (final row in priceRows) _SmallPill(row),
-                if (hasSchedule)
-                  _SmallPill('${unit.openTime} – ${unit.closeTime}'),
-                if (unit.hasFloodlights)
-                  const _SmallPill('Floodlights', highlight: true),
-                if (unit.weekendMultiplier != 1)
-                  _SmallPill(
-                    isGround
-                        ? 'Wknd ${_money(((unit.price4HrPaise ?? unit.pricePerHourPaise * 4) * unit.weekendMultiplier).round())}/4hr'
-                        : 'Wknd ${_money((unit.pricePerHourPaise * unit.weekendMultiplier).round())}/hr',
-                    highlight: true,
-                  ),
-                if (unit.addons.isNotEmpty)
-                  _SmallPill('${unit.addons.length} add-ons'),
-              ],
+                ],
+              ),
             ),
           ],
         ),

@@ -2,6 +2,7 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../notifications/onesignal_service.dart';
 import 'token_storage.dart';
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
@@ -37,7 +38,8 @@ class SessionController extends StateNotifier<SessionState> {
     final profileRaw = await TokenStorage.getActiveProfile();
     final profile =
         profileRaw == null ? null : bizProfileTypeFromString(profileRaw);
-    debugPrint('[biz session] bootstrap token=${token != null} profileRaw=$profileRaw');
+    debugPrint(
+        '[biz session] bootstrap token=${token != null} profileRaw=$profileRaw');
     state = SessionState(
       status:
           token == null ? AuthStatus.unauthenticated : AuthStatus.authenticated,
@@ -49,11 +51,13 @@ class SessionController extends StateNotifier<SessionState> {
     required String accessToken,
     required String refreshToken,
   }) async {
-    debugPrint('[biz session] signIn start access=${accessToken.isNotEmpty} refresh=${refreshToken.isNotEmpty}');
+    debugPrint(
+        '[biz session] signIn start access=${accessToken.isNotEmpty} refresh=${refreshToken.isNotEmpty}');
     await TokenStorage.saveTokens(
       accessToken: accessToken,
       refreshToken: refreshToken,
     );
+    await OneSignalService.instance.identifyFromStoredToken();
     await TokenStorage.saveActiveProfile(null);
     state = state.copyWith(
       status: AuthStatus.authenticated,
@@ -71,8 +75,14 @@ class SessionController extends StateNotifier<SessionState> {
 
   Future<void> signOut() async {
     debugPrint('[biz session] signOut');
+    await OneSignalService.instance.logout();
     await TokenStorage.clear();
     state = const SessionState(status: AuthStatus.unauthenticated);
+  }
+
+  Future<void> unlockSession() async {
+    debugPrint('[biz session] unlockSession');
+    await _bootstrap();
   }
 
   String? _nameOf(BizProfileType? p) {

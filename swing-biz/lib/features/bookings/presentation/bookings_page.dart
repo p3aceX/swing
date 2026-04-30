@@ -14,7 +14,6 @@ import 'dart:io';
 import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
-import '../../arena/widgets/arena_widgets.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
 const _bg = Color(0xFFF9FAFB);
@@ -29,10 +28,20 @@ const _muted = Color(0xFF6B7280);
 
 final _selectedArenaProvider = StateProvider<String?>((ref) => null);
 
-final _allBookingsProvider = FutureProvider.autoDispose
-    .family<List<ArenaReservation>, String>((ref, arenaId) async {
+final _bookingsProvider = FutureProvider.autoDispose<List<ArenaReservation>>((ref) async {
+  final selectedId = ref.watch(_selectedArenaProvider);
+  final arenasAsync = ref.watch(ownedArenasProvider);
+  final arenas = arenasAsync.valueOrNull ?? [];
+  
   final repo = ref.watch(hostArenaBookingRepositoryProvider);
-  return repo.listArenaBookings(arenaId);
+  
+  if (selectedId != null) {
+    return repo.listArenaBookings(selectedId);
+  } else {
+    if (arenas.isEmpty) return [];
+    final results = await Future.wait(arenas.map((a) => repo.listArenaBookings(a.id)));
+    return results.expand((x) => x).toList();
+  }
 });
 
 // ─── Main page ───────────────────────────────────────────────────────────────
@@ -51,9 +60,10 @@ class BookingsPage extends ConsumerWidget {
       data: (arenas) {
         if (arenas.isEmpty) return const _EmptyArenas();
 
-        final selectedId = ref.watch(_selectedArenaProvider) ?? arenas.first.id;
-        final arena = arenas.firstWhere((a) => a.id == selectedId,
-            orElse: () => arenas.first);
+        final selectedId = ref.watch(_selectedArenaProvider);
+        final arena = selectedId == null 
+            ? null 
+            : arenas.firstWhere((a) => a.id == selectedId, orElse: () => arenas.first);
 
         return Scaffold(
           backgroundColor: _bg,
@@ -68,7 +78,7 @@ class BookingsPage extends ConsumerWidget {
 
 class _BookingsBody extends ConsumerStatefulWidget {
   const _BookingsBody({required this.arena, required this.arenas});
-  final ArenaListing arena;
+  final ArenaListing? arena;
   final List<ArenaListing> arenas;
 
   @override
@@ -91,8 +101,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    final allBookingsAsync =
-        ref.watch(_allBookingsProvider(widget.arena.id));
+    final allBookingsAsync = ref.watch(_bookingsProvider);
 
     return Scaffold(
       backgroundColor: _bg,
@@ -147,7 +156,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           Row(children: [
             Expanded(
               child: _UnitFilterBar(
-                units: widget.arena.units,
+                units: widget.arena?.units ?? widget.arenas.expand((a) => a.units).toList(),
                 selectedId: _selectedUnitId,
                 onSelect: (id) => setState(() => _selectedUnitId = id),
               ),
@@ -198,8 +207,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   final da = a.bookingDate ?? today;
                   final db = b.bookingDate ?? today;
                   final dateCmp = da.compareTo(db);
-                  if (dateCmp != 0) return dateCmp;
-                  return a.startTime.compareTo(b.startTime);
+                  if (dateCmp != 0) return db.compareTo(da); // Newest first
+                  return b.startTime.compareTo(a.startTime);
                 });
 
                 // Group by date for list
@@ -210,7 +219,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                       : DateFormat('yyyy-MM-dd').format(b.bookingDate!);
                   groups.putIfAbsent(key, () => []).add(b);
                 }
-                final dateKeys = groups.keys.toList()..sort();
+                final dateKeys = groups.keys.toList()..sort((a, b) => b.compareTo(a)); // Descending dates
                 final items = <dynamic>[];
                 for (final dk in dateKeys) {
                   items.add(dk);
@@ -231,7 +240,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   Expanded(
                     child: filtered.isEmpty
                         ? _EmptyBookings(
-                            onAdd: () =>
+                            onAdd: widget.arenas.isEmpty ? null : () =>
                                 _showAddBookingSheet(context, today),
                             isFiltered: rawBookings.isNotEmpty,
                           )
@@ -239,15 +248,9 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                             color: _accent,
                             backgroundColor: _surface,
                             onRefresh: () => ref.refresh(
-                                _allBookingsProvider(widget.arena.id)
-                                    .future),
+                                _bookingsProvider.future),
                             child: ListView.builder(
-                              padding: EdgeInsets.fromLTRB(
-                                  16,
-                                  8,
-                                  16,
-                                  100 +
-                                      MediaQuery.of(context).padding.bottom),
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                               itemCount: items.length,
                               itemBuilder: (context, i) {
                                 final item = items[i];
@@ -304,11 +307,12 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                                 final booking = item as ArenaReservation;
                                 return BookingCard(
                                   booking: booking,
+                                  arenas: widget.arenas,
                                   onTap: () => _showBookingDetail(
                                       context,
                                       booking,
-                                      widget.arena.name,
-                                      widget.arena.id),
+                                      widget.arenas.firstWhere((a) => a.id == booking.arenaId, orElse: () => widget.arenas.first).name,
+                                      booking.arenaId),
                                   onCheckin: booking.status == 'CONFIRMED'
                                       ? () => _handleCheckinCheckout(context, booking)
                                       : null,
@@ -323,26 +327,45 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddBookingSheet(context, today),
-        backgroundColor: _accent,
-        foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: const Icon(Icons.add_rounded, size: 32),
-      ),
+      bottomNavigationBar: widget.arenas.isEmpty
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: SizedBox(
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: () => _showAddBookingSheet(context, today),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _text,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text(
+                      'New Booking',
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ),
+            ),
     );
   }
 
   void _showAddBookingSheet(BuildContext context, DateTime date) {
+    final arena = widget.arena ?? widget.arenas.first;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: _surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => AddBookingSheet(arena: widget.arena, date: date),
+      builder: (_) => AddBookingSheet(arena: arena, date: date),
     ).then((_) {
-      ref.invalidate(_allBookingsProvider(widget.arena.id));
+      ref.invalidate(_bookingsProvider);
     });
   }
 
@@ -357,7 +380,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
       builder: (_) => BookingDetailSheet(
           booking: booking, arenaName: arenaName, arenaId: arenaId),
     ).then((_) {
-      ref.invalidate(_allBookingsProvider(arenaId));
+      ref.invalidate(_bookingsProvider);
     });
   }
 
@@ -379,7 +402,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
       if (booking.status == 'CONFIRMED') {
         await repo.checkinByOwner(booking.id);
       }
-      ref.invalidate(_allBookingsProvider(widget.arena.id));
+      ref.invalidate(_bookingsProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
@@ -407,7 +430,7 @@ class _ModernHeader extends ConsumerWidget {
     required this.collectedRevenue,
   });
 
-  final ArenaListing arena;
+  final ArenaListing? arena;
   final List<ArenaListing> arenas;
   final int totalCount;
   final int totalRevenue;
@@ -416,64 +439,86 @@ class _ModernHeader extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (arenas.length > 1)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    arena?.name ?? 'All Arenas',
+                    style: const TextStyle(
+                      color: _text,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    arena == null ? '${arenas.length} arenas aggregated' : 'Manage your arena bookings',
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              if (arenas.length > 1)
                 GestureDetector(
                   onTap: () => _showArenaPicker(context, ref),
                   child: Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: _surface,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: _border),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: Row(
                       children: [
                         const Icon(Icons.stadium_rounded,
                             color: _accent, size: 16),
                         const SizedBox(width: 8),
-                        Text(
-                          arena.name,
-                          style: const TextStyle(
-                              color: _text,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(width: 4),
                         const Icon(Icons.unfold_more_rounded,
                             color: _muted, size: 14),
                       ],
                     ),
                   ),
                 ),
-              ],
-            ),
-          const SizedBox(height: 12),
+            ],
+          ),
+          const SizedBox(height: 20),
           Row(
             children: [
               _HeaderStat(
-                label: 'Total Booking',
+                label: 'Bookings',
                 value: '$totalCount',
                 icon: Icons.confirmation_number_rounded,
-                color: Colors.blue,
+                color: const Color(0xFF3B82F6),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               _HeaderStat(
-                label: 'Total Revenue',
+                label: 'Revenue',
                 value: _moneyShort(totalRevenue),
                 icon: Icons.payments_rounded,
-                color: Colors.orange,
+                color: const Color(0xFFF59E0B),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               _HeaderStat(
-                label: 'Revenue Collected',
+                label: 'Collected',
                 value: _moneyShort(collectedRevenue),
                 icon: Icons.check_circle_rounded,
                 color: _accent,
@@ -497,12 +542,54 @@ class _ModernHeader extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Select Arena',
-                style: TextStyle(
-                    color: _text, fontSize: 18, fontWeight: FontWeight.w900)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Select Arena',
+                    style: TextStyle(
+                        color: _text, fontSize: 18, fontWeight: FontWeight.w900)),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close_rounded, color: _muted),
+                ),
+              ],
+            ),
             const SizedBox(height: 16),
-            ...arenas.map((a) => ListTile(
-                  leading: const Icon(Icons.stadium_outlined, color: _accent),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.grid_view_rounded, color: _accent, size: 20),
+              ),
+              title: const Text('All Arenas',
+                  style: TextStyle(
+                      color: _text, fontWeight: FontWeight.w800)),
+              subtitle: Text('Aggregated view of ${arenas.length} locations',
+                  style: const TextStyle(fontSize: 12)),
+              onTap: () {
+                ref.read(_selectedArenaProvider.notifier).state = null;
+                Navigator.pop(context);
+              },
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Divider(),
+            ),
+            Expanded(
+              child: ListView(
+                shrinkWrap: true,
+                children: arenas.map((a) => ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _border.withValues(alpha: 0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.stadium_outlined, color: _muted, size: 20),
+                  ),
                   title: Text(a.name,
                       style: const TextStyle(
                           color: _text, fontWeight: FontWeight.w700)),
@@ -510,7 +597,9 @@ class _ModernHeader extends ConsumerWidget {
                     ref.read(_selectedArenaProvider.notifier).state = a.id;
                     Navigator.pop(context);
                   },
-                )),
+                )).toList(),
+              ),
+            ),
           ],
         ),
       ),
@@ -533,14 +622,17 @@ class _HeaderStat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         decoration: BoxDecoration(
           color: _surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _border),
-          boxShadow: const [
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _border.withValues(alpha: 0.8)),
+          boxShadow: [
             BoxShadow(
-                color: Color(0x05000000), blurRadius: 8, offset: Offset(0, 4))
+              color: color.withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Column(
@@ -548,24 +640,28 @@ class _HeaderStat extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: color.withValues(alpha: .1), shape: BoxShape.circle),
-              child: Icon(icon, color: color, size: 16),
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Icon(icon, color: color, size: 18),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(
               value,
               style: const TextStyle(
                   color: _text,
-                  fontSize: 16,
+                  fontSize: 18,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Text(
               label,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                  color: _muted, fontSize: 9, fontWeight: FontWeight.w700),
+                  color: _muted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2),
             ),
           ],
         ),
@@ -904,11 +1000,13 @@ class BookingCard extends StatefulWidget {
     super.key,
     required this.booking,
     required this.onTap,
+    required this.arenas,
     this.isNextUp = false,
     this.onCheckin,
   });
   final ArenaReservation booking;
   final VoidCallback onTap;
+  final List<ArenaListing> arenas;
   final bool isNextUp;
   final VoidCallback? onCheckin;
 
@@ -948,7 +1046,8 @@ class _BookingCardState extends State<BookingCard> {
               ),
             ],
           ),
-          child: Column(
+            child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Main info row
               Padding(
@@ -981,7 +1080,7 @@ class _BookingCardState extends State<BookingCard> {
                       ],
                     ),
                     const SizedBox(width: 16),
-                    Container(height: 36, width: 1, color: _border),
+                    Container(height: 36, width: 1.5, color: _border.withValues(alpha: 0.5)),
                     const SizedBox(width: 16),
                     // Guest + unit + status
                     Expanded(
@@ -1001,24 +1100,51 @@ class _BookingCardState extends State<BookingCard> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              if (booking.unitName != null) ...[
-                                Text(
-                                  booking.unitName!,
-                                  style: const TextStyle(
-                                      color: _muted,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600),
-                                ),
-                                const SizedBox(width: 8),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                Consumer(builder: (context, ref, _) {
+                                  final isAllSelected = ref.watch(_selectedArenaProvider) == null;
+                                  if (!isAllSelected) {
+                                    return booking.unitName != null ? Padding(
+                                      padding: const EdgeInsets.only(right: 8.0),
+                                      child: Text(
+                                        booking.unitName!,
+                                        style: const TextStyle(
+                                            color: _muted,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                    ) : const SizedBox.shrink();
+                                  }
+                                  final arena = widget.arenas.where((a) => a.id == booking.arenaId).firstOrNull;
+                                  if (arena == null) return const SizedBox.shrink();
+
+                                  return Container(
+                                    margin: const EdgeInsets.only(right: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: _bg,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: _border),
+                                    ),
+                                    child: Text(
+                                      arena.name.split(' ').first,
+                                      style: const TextStyle(
+                                          color: _accent,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800),
+                                    ),
+                                  );
+                                }),
+                                _StatusBadge(
+                                    label: booking.isPaid ? 'PAID' : 'UNPAID',
+                                    color: booking.isPaid
+                                        ? _accent
+                                        : const Color(0xFFD97706)),
                               ],
-                              _StatusBadge(
-                                  label: booking.isPaid ? 'PAID' : 'UNPAID',
-                                  color: booking.isPaid
-                                      ? _accent
-                                      : const Color(0xFFD97706)),
-                            ],
+                            ),
                           ),
                         ],
                       ),
@@ -1031,7 +1157,7 @@ class _BookingCardState extends State<BookingCard> {
                           '₹${amount.toStringAsFixed(0)}',
                           style: TextStyle(
                               color: isCancelled ? _muted : _text,
-                              fontSize: 16,
+                              fontSize: 17,
                               fontWeight: FontWeight.w900),
                         ),
                         if (booking.displayPhone.isNotEmpty) ...[
@@ -1159,7 +1285,7 @@ class _FilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final filters = ['All', 'Confirmed', 'Checked In', 'Cancelled'];
     return SizedBox(
-      height: 38,
+      height: 40,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         scrollDirection: Axis.horizontal,
@@ -1169,17 +1295,48 @@ class _FilterBar extends StatelessWidget {
           final f = filters[i];
           final count = counts[f] ?? 0;
           final sel = f == selected;
-          return ChoiceChip(
-            selected: sel,
-            onSelected: (_) => onSelect(f),
-            label: Text('$f ($count)'),
-            backgroundColor: _surface,
-            selectedColor: _accent.withValues(alpha: .1),
-            side: BorderSide(color: sel ? _accent : _border),
-            labelStyle: TextStyle(
-              color: sel ? _accent : _muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          return GestureDetector(
+            onTap: () => onSelect(f),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: sel ? _text : _surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: sel ? _text : _border),
+                boxShadow: sel ? [
+                  BoxShadow(
+                    color: _text.withValues(alpha: 0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  )
+                ] : null,
+              ),
+              child: Row(
+                children: [
+                  Text(f,
+                      style: TextStyle(
+                        color: sel ? Colors.white : _muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      )),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: sel ? Colors.white.withValues(alpha: 0.2) : _bg,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('$count',
+                        style: TextStyle(
+                          color: sel ? Colors.white : _accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                        )),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -1198,7 +1355,7 @@ class _UnitFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 34,
+      height: 36,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         scrollDirection: Axis.horizontal,
@@ -1223,7 +1380,7 @@ class _UnitFilterBar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: sel ? _accent : Colors.transparent,
+                color: sel ? _accent : _surface,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: sel ? _accent : _border),
               ),
@@ -1826,9 +1983,19 @@ _See you at the arena!_ 🏏
                                 letterSpacing: 0.5)),
                       ),
                     ),
-                  ArenaPrimaryButton(
-                      label: 'Record Payment & Checkout',
-                      onPressed: _recordPayment),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _recordPayment,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _accent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Record Payment & Checkout'),
+                    ),
+                  ),
                 ],
               )
             else if (_booking.isPaid)
@@ -2225,7 +2392,7 @@ class _DetailInfoRow extends StatelessWidget {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 Color _statusColor(String s) => switch (s.toUpperCase()) {
-      'CONFIRMED' => arenaGreen,
+      'CONFIRMED' => _accent,
       'PENDING_PAYMENT' => Colors.orange,
       'CANCELLED' => Colors.red,
       'CHECKED_IN' => Colors.blue,
@@ -2261,7 +2428,7 @@ class _EmptyArenas extends StatelessWidget {
 
 class _EmptyBookings extends StatelessWidget {
   const _EmptyBookings({required this.onAdd, this.isFiltered = false});
-  final VoidCallback onAdd;
+  final VoidCallback? onAdd;
   final bool isFiltered;
 
   @override
@@ -2296,9 +2463,21 @@ class _EmptyBookings extends StatelessWidget {
               style: const TextStyle(
                   color: _muted, fontSize: 13, fontWeight: FontWeight.w600),
             ),
-            if (!isFiltered) ...[
+            if (!isFiltered && onAdd != null) ...[
               const SizedBox(height: 20),
-              ArenaPrimaryButton(label: 'Add New Booking', onPressed: onAdd),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: onAdd,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Add New Booking'),
+                ),
+              ),
             ],
           ],
         ),
@@ -3315,7 +3494,6 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
           // Handle
           const SizedBox(height: 12),
@@ -3348,7 +3526,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           const SizedBox(height: 20),
 
           // Step content — slides horizontally
-          Flexible(
+          Expanded(
             child: SingleChildScrollView(
               controller: _scrollCtrl,
               padding: EdgeInsets.only(

@@ -1,9 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 
 import '../auth/token_storage.dart';
@@ -42,8 +40,7 @@ class ApiClient {
           }
 
           try {
-            final newToken =
-                await _refreshAccessToken() ?? await _loginWithFirebaseUser();
+            final newToken = await _refreshAccessToken();
             if (newToken == null) {
               await _expireSession();
               return handler.next(error);
@@ -75,8 +72,6 @@ class ApiClient {
   Dio get dio => _dio;
 
   String _resolveBaseUrl() {
-    final env = dotenv.env['API_BASE_URL']?.trim();
-    if (env != null && env.isNotEmpty) return env;
     return _canonicalBaseUrl;
   }
 
@@ -127,27 +122,4 @@ class ApiClient {
     }
   }
 
-  Future<String?> _loginWithFirebaseUser() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return null;
-
-    final idToken = await user.getIdToken(true);
-    if (idToken == null || idToken.isEmpty) return null;
-
-    final response = await Dio(BaseOptions(baseUrl: _resolveBaseUrl())).post(
-      HostContracts.bizLogin,
-      data: {'idToken': idToken},
-    );
-    final payload = response.data as Map<String, dynamic>;
-    final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-    final accessToken = data['accessToken'] as String?;
-    final refreshToken = data['refreshToken'] as String?;
-    if (accessToken == null || refreshToken == null) return null;
-
-    await TokenStorage.saveTokens(
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-    );
-    return accessToken;
-  }
 }

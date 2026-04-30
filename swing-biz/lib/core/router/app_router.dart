@@ -8,20 +8,19 @@ import '../presentation/shared_screens.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/otp_verification_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
-import '../../features/auth/presentation/role_selection_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/auth/presentation/welcome_screen.dart';
 import '../auth/me_providers.dart';
-import '../../features/arena/screens/arena_screens.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/dashboard/presentation/coach_dashboard_screens.dart';
 import '../../features/onboarding/presentation/business_details_screen.dart';
-import '../../features/onboarding/presentation/choose_profile_screen.dart';
-import '../../features/onboarding/presentation/create_academy_screen.dart';
 import '../../features/onboarding/presentation/create_arena_screen.dart';
-import '../../features/onboarding/presentation/create_coach_screen.dart';
 import '../../features/arena/screens/arena_profile_page.dart';
 import '../../features/arena/screens/unit_detail_page.dart';
+import '../../features/auth/presentation/biometric_screen.dart';
+import '../../features/create_match/presentation/biz_create_match_screen.dart';
+import '../../features/create_tournament/presentation/biz_create_tournament_screen.dart';
+import '../../features/play/presentation/biz_play_tab.dart';
 import 'router_refresh.dart';
 
 class AppRoutes {
@@ -31,11 +30,9 @@ class AppRoutes {
   static const register = '/register';
   static const otp = '/otp';
   static const businessDetails = '/onboarding/business-details';
-  static const chooseProfile = '/onboarding/choose-profile';
   static const createAcademy = '/onboarding/academy';
   static const createCoach = '/onboarding/coach';
   static const createArena = '/onboarding/arena';
-  static const roleSelection = '/role-selection';
   static const dashboard = '/dashboard';
   static const coachHome = '/coach-home';
   static const coachSessions = '/coach-home/sessions';
@@ -48,44 +45,10 @@ class AppRoutes {
   static const coachProfileEdit = '/coach-home/profile/edit';
   static const coachTrainingForm = '/coach-home/training/form';
   static const coachSettings = '/coach-home/settings';
-  static const arenaHome = '/arena-home';
-  static const arenaBookings = '/arena-home/bookings';
-  static const arenaManageSlots = '/arena-home/manage-slots';
-  static const arenaPricingManual = '/arena-home/pricing-manual';
-  static const arenaPricingEdit = '/arena-home/pricing-manual/edit';
-  static const arenaCalendar = '/arena-home/calendar';
-  static const arenaBlockSlot = '/arena-home/block-slot';
-  static const arenaMaintenance = '/arena-home/maintenance';
-  static const arenaAssets = '/arena-home/assets';
-  static const arenaCourtDetail = '/arena-home/assets/detail';
-  static const arenaAddEditAsset = '/arena-home/assets/edit';
-  static const arenaCourtPhotoSource = '/arena-home/assets/photo-source';
-  static const arenaEarnings = '/arena-home/earnings';
-  static const arenaExportReport = '/arena-home/earnings/export';
-  static const arenaPaymentActions = '/arena-home/earnings/payment-actions';
-  static const arenaAnalytics = '/arena-home/earnings/analytics';
-  static const arenaTodaySchedule = '/arena-home/today-schedule';
-  static const arenaSlots = '/arena-home/slots';
-  static const arenaSlotDetail = '/arena-home/slots/detail';
-  static const arenaSlotForm = '/arena-home/slots/form';
-  static const arenaBulkSlotForm = '/arena-home/slots/bulk';
-  static const arenaSlotDelete = '/arena-home/slots/delete';
-  static const arenaPayments = '/arena-home/payments';
-  static const arenaBookingForm = '/arena-home/bookings/new';
-  static const arenaBookingEdit = '/arena-home/bookings/edit';
-  static const arenaBookingCancel = '/arena-home/bookings/cancel';
-  static const arenaBookingReminder = '/arena-home/bookings/reminder';
-  static const arenaReviews = '/arena-home/reviews';
-  static const arenaReviewDetail = '/arena-home/reviews/detail';
-  static const arenaProfile = '/arena-home/profile';
-  static const arenaUnitDetail = '/arena-home/units';
-  static const arenaProfileMenu = '/arena-home/profile-menu';
-  static const arenaAccount = '/arena-home/account';
-  static const arenaNotifications = '/arena-home/notifications';
-  static const arenaNotificationPrefs = '/arena-home/notifications/preferences';
-  static const arenaLogoutConfirm = '/arena-home/logout';
-  static const arenaMaintenanceTask = '/arena-home/maintenance/task';
-  static const arenaMaintenanceComplete = '/arena-home/maintenance/complete';
+  static const arenaProfile = '/arena/profile';
+  static const arenaUnitDetail = '/arena/units';
+  static const arenaAccount = '/arena/account';
+  static const arenaNotifications = '/arena/notifications';
   static const students = '/dashboard/students';
   static const editStudent = '/dashboard/students/edit';
   static const deleteStudent = '/dashboard/students/delete';
@@ -147,6 +110,20 @@ class AppRoutes {
   static const sharedSessionExpired = '/shared/session-expired';
   static const sharedPermissionRequest = '/shared/permission-request';
   static const sharedUpgrade = '/shared/upgrade';
+
+  // ── Play (matches / teams / tournaments) ────────────────────────────────
+  static const play = '/play';
+  static const createTeam = '/play/create-team';
+  static const team = '/play/teams';
+  static const createMatch = '/play/create-match';
+  static const match = '/play/matches';
+  static const scoreMatch = '/play/score';
+  static const createTournament = '/play/create-tournament';
+  static const tournament = '/play/tournaments';
+  static const hostTournament = '/play/host-tournament';
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  static const biometric = '/biometric';
 }
 
 final goRouterProvider = Provider<GoRouter>((ref) {
@@ -165,8 +142,13 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final onPhone = loc == AppRoutes.login;
       final onRegister = loc == AppRoutes.register;
       final onOtp = loc == AppRoutes.otp;
-      final onRoleSelection = loc == AppRoutes.roleSelection;
-      final onPublic = onSplash || onWelcome || onPhone || onOtp || onRegister;
+      final onBiometric = loc == AppRoutes.biometric;
+      final onPublic = onSplash ||
+          onWelcome ||
+          onPhone ||
+          onOtp ||
+          onRegister ||
+          onBiometric;
 
       debugPrint(
         '[biz router] loc=$loc status=${session.status.name} role=${selectedRole?.name} '
@@ -178,20 +160,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       if (!loggedIn) {
         if (onPublic) return null;
         return AppRoutes.login;
-      }
-
-      if (selectedRole == null) {
-        return onRoleSelection ? null : AppRoutes.roleSelection;
-      }
-
-      if (onRoleSelection) return null;
-
-      if (meAsync.isLoading || meAsync.valueOrNull == null) return null;
-
-      final me = meAsync.valueOrNull;
-      final requiredSetup = _setupRouteForRole(selectedRole, me);
-      if (requiredSetup != null) {
-        return loc == requiredSetup ? null : requiredSetup;
       }
 
       if (onPublic) return AppRoutes.dashboard;
@@ -214,24 +182,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           path: AppRoutes.otp,
           builder: (_, __) => const OtpVerificationScreen()),
       GoRoute(
-        path: AppRoutes.roleSelection,
-        builder: (_, __) => const RoleSelectionScreen(),
-      ),
-      GoRoute(
         path: AppRoutes.businessDetails,
         builder: (_, __) => const BusinessDetailsScreen(),
       ),
       GoRoute(
-        path: AppRoutes.chooseProfile,
-        builder: (_, __) => const ChooseProfileScreen(),
-      ),
-      GoRoute(
         path: AppRoutes.createAcademy,
-        builder: (_, __) => const CreateAcademyScreen(),
+        builder: (_, __) => const _DeferredScreen('Create Academy'),
       ),
       GoRoute(
         path: AppRoutes.createCoach,
-        builder: (_, __) => const CreateCoachScreen(),
+        builder: (_, __) => const _DeferredScreen('Create Coach'),
       ),
       GoRoute(
         path: AppRoutes.createArena,
@@ -304,161 +264,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const CoachSettingsScreen(),
       ),
       GoRoute(
-        path: AppRoutes.arenaHome,
-        builder: (_, __) => const ArenaHomeScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaBookings,
-        builder: (_, __) => const ArenaBookingsScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaManageSlots,
-        builder: (_, __) => const ArenaManageSlotsScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaPricingManual,
-        builder: (_, __) => const ArenaPricingManualScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaPricingEdit,
-        builder: (_, __) => const ArenaEditPricingScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaCalendar,
-        builder: (_, __) => const ArenaCalendarScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaBlockSlot,
-        builder: (_, __) => const ArenaBlockSlotScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaBlockSlot}/:slotId',
-        builder: (_, state) => ArenaBlockSlotScreen(
-          slotId: state.pathParameters['slotId'],
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaMaintenance,
-        builder: (_, __) => const ArenaMaintenanceScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaAssets,
-        builder: (_, __) => const ArenaAssetsScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaCourtDetail}/:courtId',
-        builder: (_, state) =>
-            ArenaCourtDetailScreen(courtId: state.pathParameters['courtId']!),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaAddEditAsset,
-        builder: (_, __) => const ArenaAddEditAssetScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaAddEditAsset}/:courtId',
-        builder: (_, state) => ArenaAddEditAssetScreen(
-          courtId: state.pathParameters['courtId'],
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaCourtPhotoSource,
-        builder: (_, __) => const ArenaCourtPhotoSourceScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaEarnings,
-        builder: (_, __) => const ArenaEarningsScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaExportReport,
-        builder: (_, __) => const ArenaExportReportScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaPaymentActions,
-        builder: (_, state) => ArenaPaymentActionScreen(
-          bookingId: state.uri.queryParameters['bookingId'],
-          initialTab: state.uri.queryParameters['tab'],
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaAnalytics,
-        builder: (_, __) => const ArenaAnalyticsDashboardScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaTodaySchedule,
-        builder: (_, __) => const ArenaTodayScheduleScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaBookings}/:bookingId',
-        builder: (_, state) => ArenaBookingDetailScreen(
-          bookingId: state.pathParameters['bookingId']!,
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaSlots,
-        builder: (_, __) => const ArenaSlotsScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaSlotDetail}/:slotId',
-        builder: (_, state) =>
-            ArenaSlotDetailScreen(slotId: state.pathParameters['slotId']!),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaSlotForm,
-        builder: (_, __) => const ArenaSlotFormScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaBulkSlotForm,
-        builder: (_, __) => const ArenaBulkSlotFormScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaSlotForm}/:slotId',
-        builder: (_, state) => ArenaSlotFormScreen(
-          slotId: state.pathParameters['slotId'],
-        ),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaSlotDelete}/:slotId',
-        builder: (_, state) => ArenaDeleteSlotScreen(
-          slotId: state.pathParameters['slotId']!,
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaPayments,
-        builder: (_, __) => const ArenaPaymentsScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaBookingForm,
-        builder: (_, __) => const ArenaBookingFormScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaBookingEdit}/:bookingId',
-        builder: (_, state) => ArenaEditBookingScreen(
-          bookingId: state.pathParameters['bookingId']!,
-        ),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaBookingCancel}/:bookingId',
-        builder: (_, state) => ArenaCancelBookingScreen(
-          bookingId: state.pathParameters['bookingId']!,
-        ),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaBookingReminder}/:bookingId',
-        builder: (_, state) => ArenaResendReminderScreen(
-          bookingId: state.pathParameters['bookingId']!,
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaReviews,
-        builder: (_, __) => const ArenaReviewsScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaReviewDetail}/:reviewId',
-        builder: (_, state) => ArenaReviewDetailScreen(
-          reviewId: state.pathParameters['reviewId']!,
-        ),
-      ),
-      GoRoute(
         path: AppRoutes.arenaProfile,
         builder: (_, __) => const ArenaProfilePage(),
       ),
@@ -466,6 +271,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '${AppRoutes.arenaProfile}/:arenaId',
         builder: (_, state) => ArenaProfilePage(
           arenaId: state.pathParameters['arenaId'],
+          startEditing:
+              (state.extra as Map<String, dynamic>?)?['startEditing'] == true,
         ),
       ),
       GoRoute(
@@ -476,34 +283,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
-        path: AppRoutes.arenaProfileMenu,
-        builder: (_, __) => const ArenaProfileMenuScreen(),
-      ),
-      GoRoute(
         path: AppRoutes.arenaAccount,
         builder: (_, __) => const ArenaProfilePage(),
       ),
       GoRoute(
         path: AppRoutes.arenaNotifications,
-        builder: (_, __) => const ArenaNotificationsScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaNotificationPrefs,
-        builder: (_, __) => const ArenaNotificationPreferencesScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaLogoutConfirm,
-        builder: (_, __) => const ArenaLogoutConfirmScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.arenaMaintenanceTask,
-        builder: (_, __) => const ArenaMaintenanceTaskScreen(),
-      ),
-      GoRoute(
-        path: '${AppRoutes.arenaMaintenanceComplete}/:taskId',
-        builder: (_, state) => ArenaMaintenanceCompleteScreen(
-          taskId: state.pathParameters['taskId']!,
-        ),
+        builder: (_, __) => const _ArenaNotificationsScreen(),
       ),
       GoRoute(
         path: AppRoutes.students,
@@ -812,23 +597,79 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.sharedUpgrade,
         builder: (_, __) => const PremiumUpgradeScreen(),
       ),
+      // ── Auth ─────────────────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.biometric,
+        builder: (_, __) => const BiometricScreen(),
+      ),
+      // ── Play ─────────────────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.play,
+        builder: (_, __) => const _PlayScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.createTeam,
+        builder: (_, __) => const HostCreateTeamScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.createMatch,
+        builder: (_, state) => BizCreateMatchScreen(
+          existingMatchId: state.uri.queryParameters['matchId'],
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.createTournament,
+        builder: (_, __) => const BizCreateTournamentScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.scoreMatch}/:matchId',
+        builder: (_, state) => ScoringScreen(
+          matchId: state.pathParameters['matchId']!,
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.match}/:matchId',
+        builder: (_, state) => HostMatchDetailScreen(
+          matchId: state.pathParameters['matchId']!,
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.team}/:teamId',
+        builder: (ctx, state) {
+          final userId = ProviderScope.containerOf(ctx)
+              .read(meProvider)
+              .valueOrNull
+              ?.user
+              .id;
+          return HostTeamDetailScreen(
+            teamId: state.pathParameters['teamId']!,
+            currentUserId: userId,
+          );
+        },
+      ),
+      GoRoute(
+        path: '${AppRoutes.tournament}/:slug',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return HostTournamentViewerScreen(
+            slug: state.pathParameters['slug']!,
+            isHost: extra?['isHost'] as bool? ?? false,
+          );
+        },
+      ),
+      GoRoute(
+        path: '${AppRoutes.hostTournament}/:tournamentId',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return HostTournamentDetailScreen(
+            tournamentId: state.pathParameters['tournamentId']!,
+            initialData: extra,
+          );
+        },
+      ),
     ],
   );
 });
-
-String? _setupRouteForRole(BizProfileType role, BizMeResponse? me) {
-  final status = me?.businessStatus;
-  return switch (role) {
-    BizProfileType.academy =>
-      status?.academyId == null ? AppRoutes.createAcademy : null,
-    BizProfileType.coach =>
-      status?.coachProfileId == null ? AppRoutes.createCoach : null,
-    BizProfileType.arena ||
-    BizProfileType.arenaManager =>
-      status?.arenaId == null ? AppRoutes.createArena : null,
-    BizProfileType.store => null,
-  };
-}
 
 class _DeferredScreen extends StatelessWidget {
   const _DeferredScreen(this.title);
@@ -848,6 +689,17 @@ class _DeferredScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PlayScreen extends StatelessWidget {
+  const _PlayScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: SafeArea(child: BizPlayTab()),
     );
   }
 }
@@ -1211,4 +1063,17 @@ class OwnerLogoutConfirmationScreen extends StatelessWidget {
   const OwnerLogoutConfirmationScreen({super.key});
   @override
   Widget build(BuildContext context) => const _DeferredScreen('Logout');
+}
+
+class _ArenaNotificationsScreen extends StatelessWidget {
+  const _ArenaNotificationsScreen();
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Notifications')),
+      body: const Center(
+        child: Text('Notifications coming soon'),
+      ),
+    );
+  }
 }

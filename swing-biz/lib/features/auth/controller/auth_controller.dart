@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/auth/session_controller.dart';
 import '../../../core/auth/two_factor_service.dart';
+import '../../../core/auth/biometric_service.dart';
+import '../../../core/auth/token_storage.dart';
 
 enum AuthStep { phone, otp, name }
 
@@ -16,6 +18,7 @@ class AuthFlowState {
     this.idToken, // Used to store temporary credentials or backend tokens
     this.pendingName,
     this.verificationId, // Stores the 2Factor Session ID
+    this.needsBiometricEnrollment = false,
   });
 
   final AuthStep step;
@@ -25,6 +28,7 @@ class AuthFlowState {
   final String? idToken;
   final String? pendingName;
   final String? verificationId;
+  final bool needsBiometricEnrollment;
 
   AuthFlowState copyWith({
     AuthStep? step,
@@ -37,6 +41,7 @@ class AuthFlowState {
     bool clearPendingName = false,
     String? verificationId,
     bool clearVerificationId = false,
+    bool? needsBiometricEnrollment,
   }) =>
       AuthFlowState(
         step: step ?? this.step,
@@ -47,6 +52,8 @@ class AuthFlowState {
         pendingName: clearPendingName ? null : (pendingName ?? this.pendingName),
         verificationId:
             clearVerificationId ? null : (verificationId ?? this.verificationId),
+        needsBiometricEnrollment:
+            needsBiometricEnrollment ?? this.needsBiometricEnrollment,
       );
 }
 
@@ -61,7 +68,12 @@ class AuthController extends StateNotifier<AuthFlowState> {
       state = state.copyWith(error: 'Enter a valid phone number');
       return;
     }
-    state = state.copyWith(loading: true, phone: phone, clearError: true);
+    state = state.copyWith(
+      step: AuthStep.phone,
+      loading: true,
+      phone: phone,
+      clearError: true,
+    );
 
     try {
       // Use 2Factor instead of Firebase
@@ -86,7 +98,11 @@ class AuthController extends StateNotifier<AuthFlowState> {
 
   Future<PhoneCheckResult> checkPhone(String rawPhone) async {
     final phone = _normalize(rawPhone);
-    state = state.copyWith(loading: true, clearError: true);
+    state = state.copyWith(
+      step: AuthStep.phone,
+      loading: true,
+      clearError: true,
+    );
     try {
       final repo = _ref.read(hostBizRepositoryProvider);
       final result = await repo.checkPhone(phone);
@@ -154,15 +170,27 @@ class AuthController extends StateNotifier<AuthFlowState> {
         otp: otp,
         name: name,
       );
+      
       await _ref.read(sessionControllerProvider.notifier).signIn(
             accessToken: result.accessToken,
             refreshToken: result.refreshToken,
           );
+
+      bool needsBio = false;
+      try {
+        final bioAvailable = await BiometricService.instance.isAvailable();
+        final bioEnabled = await TokenStorage.isBiometricEnabled();
+        if (bioAvailable && !bioEnabled) {
+          needsBio = true;
+        }
+      } catch (_) {}
+
       state = state.copyWith(
         loading: false,
         clearError: true,
         clearPendingName: true,
         clearVerificationId: true,
+        needsBiometricEnrollment: needsBio,
       );
     } catch (e) {
       debugPrint('Auth: Exchange Error: $e');
@@ -179,6 +207,23 @@ class AuthController extends StateNotifier<AuthFlowState> {
       }
       state = state.copyWith(loading: false, error: _humanize(msg));
     }
+  }
+
+  Future<void> enableBiometrics() async {
+    try {
+      final passed = await BiometricService.instance.authenticate();
+      if (passed) {
+        await TokenStorage.setBiometricEnabled(true, phone: state.phone);
+        state = state.copyWith(needsBiometricEnrollment: false);
+        debugPrint('Auth: Biometrics manually enabled for ${state.phone}');
+      }
+    } catch (e) {
+      debugPrint('Auth: Failed to enable biometrics: $e');
+    }
+  }
+
+  void skipBiometrics() {
+    state = state.copyWith(needsBiometricEnrollment: false);
   }
 
   void resetToPhone() {

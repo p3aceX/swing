@@ -212,17 +212,126 @@ class _StepShell extends StatelessWidget {
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(color: _text, fontSize: 24, fontWeight: FontWeight.w900)), const SizedBox(height: 6), Text(subtitle, style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600))])), Expanded(child: child)]);
 }
 
+class _SportEntry {
+  const _SportEntry(this.key, this.label, this.icon, {this.locked = false});
+  final String key;
+  final String label;
+  final IconData icon;
+  final bool locked;
+}
+
 class _ArenaTypeStep extends StatelessWidget {
-  const _ArenaTypeStep({required this.selectedType, required this.onChanged}); final String selectedType; final ValueChanged<String> onChanged;
-  static const sports = [('CRICKET', 'Cricket', Icons.sports_cricket_rounded), ('FOOTBALL', 'Football', Icons.sports_soccer_rounded), ('FUTSAL', 'Futsal', Icons.sports_soccer_rounded), ('PICKLEBALL', 'Pickleball', Icons.sports_tennis_rounded), ('BADMINTON', 'Badminton', Icons.sports_tennis_rounded)];
+  const _ArenaTypeStep({required this.selectedType, required this.onChanged});
+  final String selectedType;
+  final ValueChanged<String> onChanged;
+
+  static const sports = [
+    _SportEntry('CRICKET', 'Cricket', Icons.sports_cricket_rounded),
+    _SportEntry('FOOTBALL', 'Football', Icons.sports_soccer_rounded, locked: true),
+    _SportEntry('FUTSAL', 'Futsal', Icons.sports_soccer_rounded, locked: true),
+    _SportEntry('BADMINTON', 'Badminton', Icons.sports_tennis_rounded, locked: true),
+    _SportEntry('PICKLEBALL', 'Pickleball', Icons.sports_tennis_rounded, locked: true),
+    _SportEntry('BASKETBALL', 'Basketball', Icons.sports_basketball_rounded, locked: true),
+  ];
+
   @override
-  Widget build(BuildContext context) => _StepShell(title: 'Type of arena', subtitle: 'Choose the primary sport for this arena.', child: GridView.builder(padding: const EdgeInsets.all(20), itemCount: sports.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.18), itemBuilder: (ctx, i) => _ChoiceTile(title: sports[i].$2, icon: sports[i].$3, selected: selectedType == sports[i].$1, onTap: () => onChanged(sports[i].$1))));
+  Widget build(BuildContext context) => _StepShell(
+    title: 'Type of arena',
+    subtitle: 'Choose the primary sport for this arena.',
+    child: GridView.builder(
+      padding: const EdgeInsets.all(20),
+      itemCount: sports.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.18),
+      itemBuilder: (ctx, i) {
+        final s = sports[i];
+        return _ChoiceTile(
+          title: s.label,
+          icon: s.icon,
+          selected: selectedType == s.key,
+          locked: s.locked,
+          onTap: s.locked
+              ? () => ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text('${s.label} arenas coming soon'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  )
+              : () => onChanged(s.key),
+        );
+      },
+    ),
+  );
 }
 
 class _ChoiceTile extends StatelessWidget {
-  const _ChoiceTile({required this.title, required this.icon, required this.selected, required this.onTap}); final String title; final IconData icon; final bool selected; final VoidCallback onTap;
+  const _ChoiceTile({
+    required this.title,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.locked = false,
+  });
+  final String title;
+  final IconData icon;
+  final bool selected;
+  final bool locked;
+  final VoidCallback onTap;
+
   @override
-  Widget build(BuildContext context) => Material(color: selected ? _deep : _surface, borderRadius: BorderRadius.circular(8), child: InkWell(borderRadius: BorderRadius.circular(8), onTap: onTap, child: Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: selected ? _deep : _line)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Icon(icon, color: selected ? Colors.white : _deep, size: 28), Row(children: [Expanded(child: Text(title, style: TextStyle(color: selected ? Colors.white : _text, fontSize: 15, fontWeight: FontWeight.w900))), if (selected) const Icon(Icons.check_circle_rounded, color: _accent, size: 19)])]))));
+  Widget build(BuildContext context) {
+    final bg = locked ? const Color(0xFFF9FAFB) : (selected ? _deep : _surface);
+    final borderColor = locked ? _line : (selected ? _deep : _line);
+    final iconColor = locked ? const Color(0xFFCBD5E0) : (selected ? Colors.white : _deep);
+    final labelColor = locked ? const Color(0xFFB0B8C4) : (selected ? Colors.white : _text);
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: iconColor, size: 28),
+                  const Spacer(),
+                  if (locked)
+                    const Icon(Icons.lock_rounded, size: 15, color: Color(0xFFCBD5E0)),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: TextStyle(color: labelColor, fontSize: 15, fontWeight: FontWeight.w900)),
+                        if (locked)
+                          const Text('Coming soon', style: TextStyle(color: Color(0xFFB0B8C4), fontSize: 11, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                  if (selected && !locked)
+                    const Icon(Icons.check_circle_rounded, color: _accent, size: 19),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Field extends StatelessWidget {

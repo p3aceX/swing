@@ -456,7 +456,7 @@ class _HistoryRow extends StatelessWidget {
         isScrollControlled: true,
         backgroundColor: Colors.white,
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (_) => BookingDetailSheet(booking: booking, arenaId: arena.id),
+        builder: (_) => BookingDetailSheet(booking: booking, arenaId: arena.id, arenaName: arena.name),
       ).then((_) => onRefresh()),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),

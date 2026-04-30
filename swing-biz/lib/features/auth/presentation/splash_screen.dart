@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../core/auth/token_storage.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -16,15 +17,27 @@ class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1800),
-  )..repeat(reverse: true);
+    duration: const Duration(milliseconds: 1400),
+  )..forward();
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 2200), () {
-      if (mounted) context.go(AppRoutes.login);
+    _timer = Timer(const Duration(milliseconds: 2200), () async {
+      if (!mounted) return;
+      
+      final bioEnabled = await TokenStorage.isBiometricEnabled();
+      final refreshToken = await TokenStorage.getRefreshToken();
+      final accessToken = await TokenStorage.getAccessToken();
+
+      if (!mounted) return;
+      if (bioEnabled && refreshToken != null && accessToken == null) {
+        // We have a session that can be unlocked with biometrics
+        context.go(AppRoutes.biometric);
+      } else {
+        context.go(AppRoutes.login);
+      }
     });
   }
 
@@ -38,106 +51,84 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
-          final accent = Color.lerp(
-            const Color(0xFF0F766E),
-            const Color(0xFF14B8A6),
-            _controller.value,
-          )!;
-          return Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  const Color(0xFF0F172A),
-                  const Color(0xFF132A2A),
-                  accent.withValues(alpha: 0.9),
-                ],
-              ),
-            ),
+          final value = Curves.easeOutCubic.transform(_controller.value);
+          return SafeArea(
             child: Stack(
               children: [
-                Positioned(
-                  top: -80,
-                  right: -40,
-                  child: Container(
-                    width: 220,
-                    height: 220,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.06),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: -70,
-                  left: -20,
-                  child: Container(
-                    width: 180,
-                    height: 180,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 108,
-                          height: 108,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: .08),
-                            borderRadius: BorderRadius.circular(32),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: .14),
+                    child: Opacity(
+                      opacity: value,
+                      child: Transform.translate(
+                        offset: Offset(0, 22 * (1 - value)),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 190,
+                              height: 190,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFFF0F2F5),
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x14000000),
+                                    blurRadius: 28,
+                                    offset: Offset(0, 14),
+                                  ),
+                                ],
+                              ),
+                              child: Image.asset(
+                                'assets/logo/logo.png',
+                                fit: BoxFit.contain,
+                              ),
                             ),
-                          ),
-                          child: const Icon(
-                            Icons.stadium_rounded,
-                            color: Colors.white,
-                            size: 52,
-                          ),
+                            const SizedBox(height: 22),
+                            const Text(
+                              'Swing Arena',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Color(0xFF101828),
+                                fontSize: 32,
+                                height: 1,
+                                letterSpacing: -0.8,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Arena operations, ready for play.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Color(0xFF667085),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Swing Biz',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 34,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -1,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Built for academies, coaches and arenas.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Color(0xFFD7E1DE),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        const SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        ),
-                      ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 22,
+                  right: 22,
+                  bottom: 28,
+                  child: Opacity(
+                    opacity: value,
+                    child: Transform.translate(
+                      offset: Offset(0, 16 * (1 - value)),
+                      child: const _SplashStatus(),
                     ),
                   ),
                 ),
@@ -145,6 +136,52 @@ class _SplashScreenState extends State<SplashScreen>
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _SplashStatus extends StatelessWidget {
+  const _SplashStatus();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.2,
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF101828)),
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Syncing arena console',
+              style: TextStyle(
+                color: Color(0xFF101828),
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

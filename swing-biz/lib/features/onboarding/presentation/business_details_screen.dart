@@ -67,7 +67,7 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
       ));
       ref.invalidate(meProvider);
       if (!mounted) return;
-      context.go(AppRoutes.chooseProfile);
+      context.go(AppRoutes.createArena);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
