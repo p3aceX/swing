@@ -1060,17 +1060,31 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
           <div className="cal-strip">
             {dates.map((d) => {
               const { day, wd } = shortDate(d);
+              const a = dateAvail[d];
+              const isSelected = date === d;
+              const dotColor = !a || a.total === 0 ? null
+                : a.avail === 0 ? "#FF4444"
+                : a.avail < a.total / 2 ? "#FF9500"
+                : "#C8FF3E";
+              const bgColor = !dotColor || isSelected ? undefined
+                : a!.avail === 0 ? "rgba(255,68,68,0.12)"
+                : a!.avail < a!.total / 2 ? "rgba(255,149,0,0.10)"
+                : "rgba(200,255,62,0.08)";
+              const borderColor = !dotColor || isSelected ? undefined
+                : a!.avail === 0 ? "rgba(255,68,68,0.35)"
+                : a!.avail < a!.total / 2 ? "rgba(255,149,0,0.30)"
+                : "rgba(200,255,62,0.25)";
               return (
-                <div key={d} className={`cal-day${date === d ? " selected" : ""}`} onClick={() => handleDateSelect(d)}>
+                <div
+                  key={d}
+                  className={`cal-day${isSelected ? " selected" : ""}`}
+                  style={bgColor ? { background: bgColor, borderColor } : undefined}
+                  onClick={() => handleDateSelect(d)}
+                >
                   <div className="dow">{wd}</div>
                   <div className="dom">{day}</div>
                   <div className="avail" style={{ minHeight: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {(() => {
-                      const a = dateAvail[d];
-                      if (!a || a.total === 0) return null;
-                      const color = a.avail === 0 ? "#FF4444" : a.avail < a.total / 2 ? "#FF9500" : "#C8FF3E";
-                      return <div style={{ width: 5, height: 5, borderRadius: "50%", background: color }} />;
-                    })()}
+                    {dotColor && <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor }} />}
                   </div>
                 </div>
               );
