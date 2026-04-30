@@ -360,44 +360,172 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
 
   const savePass = async () => {
     const endTime = selectedStart ? toTime(toMins(selectedStart) + durMins) : "";
+    const W = 720, H = 1060;
     const canvas = document.createElement("canvas");
-    canvas.width = 900; canvas.height = 480;
+    canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#0A0B0A"; ctx.fillRect(0, 0, 900, 480);
-    const g = ctx.createRadialGradient(820, 40, 0, 820, 40, 260);
-    g.addColorStop(0, "rgba(200,255,62,0.28)"); g.addColorStop(1, "rgba(200,255,62,0)");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 900, 480);
-    ctx.fillStyle = "#C8FF3E"; ctx.fillRect(0, 0, 5, 480);
-    ctx.fillStyle = "#C8FF3E"; ctx.font = "bold 14px system-ui, sans-serif"; ctx.fillText("SWING", 32, 48);
-    ctx.fillStyle = "rgba(200,255,62,0.15)";
-    ctx.beginPath(); ctx.roundRect(720, 24, 130, 30, 15); ctx.fill();
-    ctx.fillStyle = "#C8FF3E"; ctx.font = "600 11px system-ui, sans-serif"; ctx.fillText("CONFIRMED ✓", 738, 44);
-    ctx.fillStyle = "white"; ctx.font = "bold 34px system-ui, sans-serif"; ctx.fillText(arenaName, 32, 110);
-    ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "500 16px system-ui, sans-serif"; ctx.fillText(unit?.name ?? "", 32, 142);
-    ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(32, 168); ctx.lineTo(868, 168); ctx.stroke();
-    const fields = [
-      { label: "DATE", value: date ? fmtDateShort(date) : "—" },
-      { label: "TIME", value: selectedStart && endTime ? `${fmt12(selectedStart)} – ${fmt12(endTime)}` : "—" },
-      { label: "DURATION", value: durMins ? durLabel(durMins) : "—" },
-    ];
-    fields.forEach((f, i) => {
-      const x = 32 + i * 270;
-      ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif"; ctx.fillText(f.label, x, 202);
-      ctx.fillStyle = "white"; ctx.font = "bold 20px system-ui, sans-serif"; ctx.fillText(f.value, x, 230);
-    });
-    ctx.fillStyle = "rgba(255,255,255,0.07)";
-    ctx.beginPath(); ctx.roundRect(32, 258, 310, 58, 8); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif"; ctx.fillText("BOOKING ID", 50, 280);
-    ctx.fillStyle = "white"; ctx.font = "bold 22px system-ui, sans-serif"; ctx.fillText(`SW-${bookingRef}`, 50, 306);
-    if (address) {
-      ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif"; ctx.fillText("LOCATION", 370, 280);
-      ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.font = "500 13px system-ui, sans-serif";
-      ctx.fillText(address.length > 50 ? address.slice(0, 50) + "…" : address, 370, 306);
+    const accent = "#C8FF3E";
+
+    // ── helpers
+    const line = (x1: number, y1: number, x2: number, y2: number, color: string, dash: number[] = []) => {
+      ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash(dash);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore();
+    };
+    const label = (text: string, x: number, y: number) => {
+      ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.font = "600 9px system-ui,sans-serif";
+      ctx.letterSpacing = "0.08em"; ctx.fillText(text, x, y); ctx.letterSpacing = "0px";
+    };
+    const wrapText = (text: string, x: number, y: number, maxW: number, lineH: number): number => {
+      const words = text.split(" "); let cur = ""; let cy = y;
+      for (const w of words) {
+        const test = cur ? `${cur} ${w}` : w;
+        if (ctx.measureText(test).width > maxW && cur) {
+          ctx.fillText(cur, x, cy); cur = w; cy += lineH;
+        } else cur = test;
+      }
+      if (cur) ctx.fillText(cur, x, cy);
+      return cy;
+    };
+
+    // ── Background
+    ctx.fillStyle = "#0A0B0A"; ctx.fillRect(0, 0, W, H);
+
+    // ── Glows
+    const g1 = ctx.createRadialGradient(W, 0, 0, W, 0, 420);
+    g1.addColorStop(0, "rgba(200,255,62,0.18)"); g1.addColorStop(1, "rgba(200,255,62,0)");
+    ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
+    const g2 = ctx.createRadialGradient(0, H, 0, 0, H, 320);
+    g2.addColorStop(0, "rgba(200,255,62,0.07)"); g2.addColorStop(1, "rgba(200,255,62,0)");
+    ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
+
+    // ── Left accent bar
+    ctx.fillStyle = accent; ctx.fillRect(0, 0, 6, H);
+
+    // ── CONFIRMED pill
+    ctx.fillStyle = "rgba(200,255,62,0.13)";
+    ctx.beginPath(); ctx.roundRect(W - 178, 22, 142, 26, 13); ctx.fill();
+    ctx.fillStyle = accent; ctx.font = "600 10px system-ui,sans-serif";
+    ctx.textAlign = "right"; ctx.fillText("✓  CONFIRMED", W - 36, 39); ctx.textAlign = "left";
+
+    // ── Brand header
+    ctx.fillStyle = accent; ctx.font = "800 15px system-ui,sans-serif"; ctx.fillText("SWING", 36, 44);
+    ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.font = "500 10px system-ui,sans-serif"; ctx.fillText("BOOKING PASS", 36, 60);
+
+    // ── Arena name (with wrap)
+    ctx.fillStyle = "white"; ctx.font = "800 34px system-ui,sans-serif";
+    const nameMaxW = W - 80;
+    let nameEndY = 108;
+    if (ctx.measureText(arenaName).width > nameMaxW) {
+      const words = arenaName.split(" "); let l1 = "", l2 = "";
+      for (const w of words) {
+        if (ctx.measureText((l1 ? l1 + " " : "") + w).width < nameMaxW) l1 = l1 ? l1 + " " + w : w;
+        else l2 = l2 ? l2 + " " + w : w;
+      }
+      ctx.fillText(l1, 36, 108); ctx.fillText(l2, 36, 148); nameEndY = 148;
+    } else {
+      ctx.fillText(arenaName, 36, 108);
     }
-    ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.font = "500 13px system-ui, sans-serif"; ctx.fillText(guestName, 32, 370);
-    ctx.fillStyle = "rgba(255,255,255,0.2)"; ctx.font = "500 10px system-ui, sans-serif";
-    ctx.fillText("ARRIVE 10 MIN EARLY  ·  SHOW THIS AT FRONT DESK  ·  swing.app", 32, 450);
+
+    // Unit chip
+    ctx.fillStyle = "rgba(200,255,62,0.12)";
+    ctx.beginPath(); ctx.roundRect(36, nameEndY + 14, (ctx.measureText(unit?.name ?? "").width + 24), 24, 12); ctx.fill();
+    ctx.fillStyle = accent; ctx.font = "600 11px system-ui,sans-serif";
+    ctx.fillText(unit?.name ?? "", 48, nameEndY + 31);
+
+    // ── Divider 1
+    const d1y = nameEndY + 52;
+    line(36, d1y, W - 36, d1y, "rgba(255,255,255,0.08)");
+
+    // ── 3-col info grid
+    const infoY = d1y + 28;
+    const colW = (W - 72) / 3;
+    [
+      { l: "DATE",     v: date ? fmtDateShort(date) : "—" },
+      { l: "TIME",     v: selectedStart && endTime ? `${fmt12(selectedStart)} – ${fmt12(endTime)}` : "—" },
+      { l: "DURATION", v: durMins ? durLabel(durMins) : "—" },
+    ].forEach(({ l, v }, i) => {
+      const x = 36 + i * colW;
+      label(l, x, infoY);
+      ctx.fillStyle = "white"; ctx.font = "700 19px system-ui,sans-serif"; ctx.fillText(v, x, infoY + 26);
+    });
+
+    // ── Booking ID panel
+    const bidY = infoY + 58;
+    ctx.fillStyle = "rgba(200,255,62,0.06)"; ctx.strokeStyle = "rgba(200,255,62,0.2)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(36, bidY, W - 72, 68, 12); ctx.fill(); ctx.stroke();
+    label("BOOKING ID", 56, bidY + 20);
+    ctx.fillStyle = accent; ctx.font = "700 28px system-ui,sans-serif"; ctx.fillText(`SW-${bookingRef}`, 56, bidY + 50);
+
+    // ── Guest + Amount
+    const gaY = bidY + 94;
+    label("GUEST", 36, gaY);
+    ctx.fillStyle = "white"; ctx.font = "600 15px system-ui,sans-serif"; ctx.fillText(guestName || "—", 36, gaY + 20);
+    if (totalPaise > 0) {
+      ctx.textAlign = "right";
+      label("AMOUNT DUE", W - 36, gaY); // label resets textAlign? No — set after
+      ctx.textAlign = "right";
+      ctx.fillStyle = "white"; ctx.font = "700 15px system-ui,sans-serif"; ctx.fillText(rupeesInt(totalPaise), W - 36, gaY + 20);
+      ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "500 10px system-ui,sans-serif"; ctx.fillText("Pay at venue", W - 36, gaY + 36);
+      ctx.textAlign = "left";
+    }
+
+    // ── Location
+    const locY = gaY + 58;
+    if (address) {
+      label("LOCATION", 36, locY);
+      ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "500 13px system-ui,sans-serif";
+      wrapText(address, 36, locY + 18, W - 72, 18);
+    }
+
+    // ── Tear line
+    const tearY = 560;
+    ctx.fillStyle = "#0A0B0A";
+    ctx.beginPath(); ctx.arc(-1, tearY, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(W + 1, tearY, 18, 0, Math.PI * 2); ctx.fill();
+    line(24, tearY, W - 24, tearY, "rgba(255,255,255,0.14)", [5, 5]);
+    ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.font = "600 8px system-ui,sans-serif";
+    ctx.textAlign = "center"; ctx.fillText("TERMS & CONDITIONS", W / 2, tearY - 10); ctx.textAlign = "left";
+
+    // ── Terms section
+    const cancHours = unit?.cancellationHours ?? 0;
+    const terms = [
+      cancHours > 0
+        ? `Free cancellation up to ${cancHours}h before slot. Cancellations within ${cancHours}h are non-refundable.`
+        : "Cancellation policy applies — contact the arena for details.",
+      "Full payment is collected at the venue on the day of your booking.",
+      "Arrive at least 10 minutes before your slot start time.",
+      "Show this pass at the front desk upon entry.",
+      "This pass is non-transferable and valid only for the date shown.",
+      "The arena reserves the right to reschedule due to unforeseen circumstances.",
+    ];
+    const tTitleY = tearY + 28;
+    ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.font = "700 9px system-ui,sans-serif";
+    ctx.letterSpacing = "0.1em"; ctx.fillText("TERMS & CANCELLATION POLICY", 36, tTitleY); ctx.letterSpacing = "0px";
+    ctx.fillStyle = "rgba(255,255,255,0.40)"; ctx.font = "400 11.5px system-ui,sans-serif";
+    terms.forEach((t, i) => ctx.fillText(`${i + 1}.  ${t}`, 36, tTitleY + 22 + i * 22));
+
+    // ── Divider 2
+    const d2y = tTitleY + 22 + terms.length * 22 + 18;
+    line(36, d2y, W - 36, d2y, "rgba(255,255,255,0.06)");
+
+    // ── Barcode visual
+    const bcY = d2y + 20; const bcH = 40;
+    [3,1,2,1,3,2,1,1,3,1,2,3,1,2,1,3,1,1,2,1,3,1,2,1,3,2,1,1,2,3,1,2].forEach((w, i) => {
+      if (i % 2 === 0) {
+        ctx.fillStyle = `rgba(255,255,255,${0.45 + (i % 4) * 0.08})`;
+        ctx.fillRect(36 + i * 6.5, bcY, w * 2, bcH);
+      }
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "600 10px system-ui,sans-serif";
+    ctx.textAlign = "right"; ctx.fillText("swing.app", W - 36, bcY + bcH / 2 + 4); ctx.textAlign = "left";
+
+    // ── Footer strip
+    ctx.fillStyle = accent; ctx.fillRect(0, H - 6, W, 6);
+    ctx.fillStyle = "rgba(255,255,255,0.16)"; ctx.font = "500 9px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("ARRIVE 10 MIN EARLY  ·  SHOW AT FRONT DESK  ·  VALID FOR DATE SHOWN ONLY", W / 2, H - 18);
+    ctx.textAlign = "left";
+
     canvas.toBlob(async (blob) => {
       if (!blob) return;
       const file = new File([blob], `swing-pass-${bookingRef}.png`, { type: "image/png" });
