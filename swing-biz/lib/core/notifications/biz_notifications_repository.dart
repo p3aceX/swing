@@ -147,6 +147,18 @@ class BizNotificationsRepository {
     );
   }
 
+  Future<void> clearAll({Set<String>? types}) async {
+    final allowedTypes =
+        types == null || types.isEmpty ? <String>[] : (types.toList()..sort());
+    await _dio.delete(
+      '/notifications/clear-all',
+      queryParameters: {
+        if (allowedTypes.isNotEmpty) 'types': allowedTypes.join(','),
+        'audience': 'BIZ_OWNER',
+      },
+    );
+  }
+
   Future<void> syncOneSignalNotification(OneSignalSyncPayload payload) async {
     final data = <String, dynamic>{
       'notificationId': payload.notificationId,

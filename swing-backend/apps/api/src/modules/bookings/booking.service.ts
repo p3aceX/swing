@@ -907,31 +907,18 @@ export class BookingService {
       orderBy: { paidAt: 'desc' },
     })
 
-    // Confirmed but not yet checked in = balance pending — keep filtering by bookingDate
+    // Unpaid = balance still due. Includes CONFIRMED (not yet shown up) and CHECKED_IN
+    // (customer arrived but payment not recorded yet). No month filter — outstanding
+    // dues are all-time, not month-scoped.
     const pendingBookings = await prisma.slotBooking.findMany({
       where: {
         arenaId,
-        checkedInAt: null,
-        status: 'CONFIRMED',
-        ...(dateFrom ? { date: { gte: dateFrom, lt: dateTo } } : {}),
+        paidAt: null,
+        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
       },
       select: bookingSelect,
-      orderBy: { date: 'asc' },
+      orderBy: { date: 'desc' },
     })
-
-    console.log(`[payments] returning ${checkedInBookings.length} checked-in, ${pendingBookings.length} pending`)
-    if (checkedInBookings.length > 0) {
-      const b = checkedInBookings[0]
-      console.log(`[payments] first checked-in: id=${b.id} status=${b.status} checkedInAt=${b.checkedInAt} date=${b.date}`)
-    }
-    if (pendingBookings.length > 0) {
-      const b = pendingBookings[0]
-      console.log(`[payments] first pending: id=${b.id} status=${b.status} date=${b.date}`)
-    }
-    // Diagnostic: count all confirmed+checkedIn bookings for this arena regardless of date
-    const allCheckedIn = await prisma.slotBooking.count({ where: { arenaId, checkedInAt: { not: null } } })
-    const allConfirmed = await prisma.slotBooking.count({ where: { arenaId, status: 'CONFIRMED', checkedInAt: null } })
-    console.log(`[payments] diagnostic — total checked-in (any date): ${allCheckedIn}, total confirmed no-checkin (any date): ${allConfirmed}`)
     return { checkedInBookings, pendingBookings }
   }
 

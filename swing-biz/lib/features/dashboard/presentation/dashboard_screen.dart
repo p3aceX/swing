@@ -8,7 +8,9 @@ import 'package:intl/intl.dart';
 import '../../../core/auth/me_providers.dart';
 import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
+import '../../arena/screens/arena_profile_page.dart';
 import '../../arena/services/arena_profile_providers.dart';
+import '../../../core/notifications/notifications_screen.dart';
 import '../../bookings/presentation/bookings_page.dart';
 import '../../payments/presentation/payments_page.dart';
 import '../../play/presentation/biz_play_tab.dart';
@@ -24,6 +26,28 @@ final _homeTodayBookingsProvider = FutureProvider.autoDispose
   return ref
       .watch(hostArenaBookingRepositoryProvider)
       .listArenaBookings(arenaId, date: today);
+});
+
+final _homeAllBookingsProvider = FutureProvider.autoDispose
+    .family<List<ArenaReservation>, String>((ref, arenaId) async {
+  return ref
+      .watch(hostArenaBookingRepositoryProvider)
+      .listArenaBookings(arenaId);
+});
+
+final _homeTodayAvailabilityProvider = FutureProvider.autoDispose
+    .family<Map<String, List<AvailabilitySlot>>, String>((ref, arenaId) async {
+  return ref
+      .watch(hostArenaBookingRepositoryProvider)
+      .fetchAvailability(arenaId: arenaId, date: DateTime.now());
+});
+
+final _homeDateBookingsProvider = FutureProvider.autoDispose
+    .family<List<ArenaReservation>, ({String arenaId, String date})>(
+        (ref, input) async {
+  return ref
+      .watch(hostArenaBookingRepositoryProvider)
+      .listArenaBookings(input.arenaId, date: input.date);
 });
 
 final _homeMonthPaymentsProvider = FutureProvider.autoDispose
@@ -745,9 +769,21 @@ class _HomeTab extends ConsumerWidget {
       data: (arenas) {
         final businessName =
             me?.businessAccount?.businessName ?? me?.user.name ?? 'Arena';
-        final todayBookings = _combineAsyncLists(
-          arenas
-              .map((a) => ref.watch(_homeTodayBookingsProvider(a.id)))
+        final selectedArenaId = ref.watch(_homeArenaProvider);
+        final selectedArenas = selectedArenaId == null
+            ? arenas
+            : arenas.where((a) => a.id == selectedArenaId).toList();
+        final allBookings = _combineAsyncLists(
+          selectedArenas
+              .map((a) => ref.watch(_homeAllBookingsProvider(a.id)))
+              .toList(),
+        );
+        final todayAvailability = _combineAsyncLists(
+          selectedArenas
+              .map((a) => ref
+                  .watch(_homeTodayAvailabilityProvider(a.id))
+                  .whenData((slotsByUnit) =>
+                      slotsByUnit.values.expand((slots) => slots).toList()))
               .toList(),
         );
         return Container(
@@ -755,19 +791,36 @@ class _HomeTab extends ConsumerWidget {
           child: Column(
             children: [
               _HeroHeader(businessName: businessName, ref: ref),
-              _HomeMetricStrip(bookingsAsync: todayBookings),
-              const Spacer(),
-              const Center(
-                child: Text(
-                  'Welcome to Swing Biz',
-                  style: TextStyle(
-                    color: Color(0xFF98A2B3),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    _HomeArenaFilter(
+                      arenas: arenas,
+                      selectedArenaId: selectedArenaId,
+                      onSelected: (id) =>
+                          ref.read(_homeArenaProvider.notifier).state = id,
+                    ),
+                    _HomeMetricStrip(
+                      bookingsAsync: allBookings,
+                      slotsAsync: todayAvailability,
+                    ),
+                    _HomeGraphTabs(arenas: selectedArenas),
+                    const SizedBox(height: 28),
+                    const Center(
+                      child: Text(
+                        'Welcome to Swing Biz',
+                        style: TextStyle(
+                          color: Color(0xFF98A2B3),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                  ],
                 ),
               ),
-              const Spacer(),
             ],
           ),
         );
@@ -776,75 +829,126 @@ class _HomeTab extends ConsumerWidget {
   }
 }
 
-class _HomeMetricStrip extends StatelessWidget {
-  const _HomeMetricStrip({required this.bookingsAsync});
+class _HomeGraphTabs extends ConsumerWidget {
+  const _HomeGraphTabs({required this.arenas});
 
-  final AsyncValue<List<ArenaReservation>> bookingsAsync;
+  final List<ArenaListing> arenas;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      child: bookingsAsync.when(
-        loading: () => const Row(
-          children: [
-            Expanded(child: _MetricSkeleton()),
-            SizedBox(width: 12),
-            Expanded(child: _MetricSkeleton()),
-          ],
-        ),
-        error: (_, __) => const Row(
-          children: [
-            Expanded(
-              child: _HomeMetricBox(
-                title: 'Total Bookings',
-                value: '--',
-                icon: Icons.calendar_month_rounded,
-                background: Color(0xFFEAFBF3),
-                accent: Color(0xFF059669),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final allBookings = _combineAsyncLists(
+      arenas.map((a) => ref.watch(_homeAllBookingsProvider(a.id))).toList(),
+    );
+
+    return DefaultTabController(
+      length: 2,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: _HomeMetricBox(
-                title: 'Checked In',
-                value: '--',
-                icon: Icons.done_all_rounded,
-                background: Color(0xFFEFF6FF),
-                accent: Color(0xFF2563EB),
-              ),
-            ),
-          ],
-        ),
-        data: (bookings) {
-          final active =
-              bookings.where((b) => b.status.toUpperCase() != 'CANCELLED');
-          final checkedIn = active.where((b) {
-            final status = b.status.toUpperCase();
-            return status == 'CHECKED_IN' || status == 'COMPLETED';
-          }).length;
-          return Row(
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: _HomeMetricBox(
-                  title: 'Total Bookings',
-                  value: active.length.toString(),
-                  icon: Icons.calendar_month_rounded,
-                  background: const Color(0xFFEAFBF3),
-                  accent: const Color(0xFF059669),
+              const Text(
+                'Booking vs Revenue',
+                style: TextStyle(
+                  color: Color(0xFF101828),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _HomeMetricBox(
-                  title: 'Checked In',
-                  value: checkedIn.toString(),
-                  icon: Icons.done_all_rounded,
-                  background: const Color(0xFFEFF6FF),
-                  accent: const Color(0xFF2563EB),
+              const SizedBox(height: 4),
+              const Text(
+                'All booking history grouped by date',
+                style: TextStyle(
+                  color: Color(0xFF667085),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 260,
+                child: allBookings.when(
+                  loading: () => const _ChartLoading(),
+                  error: (e, _) => const _ChartMessage('Could not load graph'),
+                  data: (bookings) =>
+                      _BookingRevenueLineChart(bookings: bookings),
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeArenaFilter extends StatelessWidget {
+  const _HomeArenaFilter({
+    required this.arenas,
+    required this.selectedArenaId,
+    required this.onSelected,
+  });
+
+  final List<ArenaListing> arenas;
+  final String? selectedArenaId;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <({String? id, String label})>[
+      (id: null, label: 'All'),
+      ...arenas.map((arena) => (id: arena.id, label: arena.name)),
+    ];
+    return SizedBox(
+      height: 46,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
+        scrollDirection: Axis.horizontal,
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final item = items[index];
+          final selected = item.id == selectedArenaId;
+          return ChoiceChip(
+            selected: selected,
+            label: Text(
+              item.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            showCheckmark: false,
+            onSelected: (_) => onSelected(item.id),
+            selectedColor: Theme.of(context).colorScheme.primary,
+            backgroundColor: const Color(0xFFF9FAFB),
+            side: BorderSide(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : const Color(0xFFE5E7EB),
+            ),
+            labelStyle: TextStyle(
+              color: selected ? Colors.white : const Color(0xFF667085),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0,
+            ),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           );
         },
       ),
@@ -852,10 +956,487 @@ class _HomeMetricStrip extends StatelessWidget {
   }
 }
 
+class _HomeMetricStrip extends StatelessWidget {
+  const _HomeMetricStrip({
+    required this.bookingsAsync,
+    required this.slotsAsync,
+  });
+
+  final AsyncValue<List<ArenaReservation>> bookingsAsync;
+  final AsyncValue<List<AvailabilitySlot>> slotsAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      child: bookingsAsync.isLoading || slotsAsync.isLoading
+          ? const Row(
+              children: [
+                Expanded(child: _MetricSkeleton()),
+                SizedBox(width: 12),
+                Expanded(child: _MetricSkeleton()),
+              ],
+            )
+          : bookingsAsync.hasError || slotsAsync.hasError
+              ? const Row(
+                  children: [
+                    Expanded(
+                      child: _HomeMetricBox(
+                        title: 'Checked In / Bookings',
+                        value: '--',
+                        subtitle: 'All time',
+                        icon: Icons.done_all_rounded,
+                        background: Color(0xFFEAFBF3),
+                        accent: Color(0xFF059669),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: _HomeMetricBox(
+                        title: 'Booked Slots / Total',
+                        value: '--',
+                        subtitle: 'Today',
+                        icon: Icons.event_available_rounded,
+                        background: Color(0xFFEFF6FF),
+                        accent: Color(0xFF2563EB),
+                      ),
+                    ),
+                  ],
+                )
+              : Builder(builder: (context) {
+                  final bookings =
+                      bookingsAsync.value ?? const <ArenaReservation>[];
+                  final slots = slotsAsync.value ?? const <AvailabilitySlot>[];
+                  final active = bookings.where(_isActiveBooking).toList();
+                  final checkedIn = active.where((b) {
+                    final status = b.status.toUpperCase();
+                    return status == 'CHECKED_IN' || status == 'COMPLETED';
+                  }).length;
+                  final totalSlots = slots.length;
+                  final bookedSlots =
+                      slots.where((slot) => !slot.available).length;
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: _HomeMetricBox(
+                          title: 'Checked In / Bookings',
+                          value: '$checkedIn/${active.length}',
+                          subtitle: 'All time',
+                          icon: Icons.done_all_rounded,
+                          background: const Color(0xFFEAFBF3),
+                          accent: const Color(0xFF059669),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _HomeMetricBox(
+                          title: 'Booked Slots / Total',
+                          value: '$bookedSlots/$totalSlots',
+                          subtitle: 'Today',
+                          icon: Icons.event_available_rounded,
+                          background: const Color(0xFFEFF6FF),
+                          accent: const Color(0xFF2563EB),
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+    );
+  }
+}
+
+class _BookingRevenueLineChart extends StatelessWidget {
+  const _BookingRevenueLineChart({required this.bookings});
+
+  final List<ArenaReservation> bookings;
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = <String, List<ArenaReservation>>{};
+    for (final booking in bookings) {
+      final date = booking.bookingDate;
+      if (date == null) continue;
+      final key = DateFormat('yyyy-MM-dd').format(date);
+      grouped.putIfAbsent(key, () => <ArenaReservation>[]).add(booking);
+    }
+    final keys = grouped.keys.toList()..sort();
+    if (keys.isEmpty) {
+      return const _ChartMessage('No bookings yet');
+    }
+    final days = keys.map((key) {
+      return (
+        day: DateTime.parse(key),
+        bookings: grouped[key] ?? const <ArenaReservation>[]
+      );
+    }).toList();
+    final bookingCounts = days
+        .map((row) => row.bookings.where(_isActiveBooking).length.toDouble())
+        .toList();
+    final revenue = days.map((row) {
+      return row.bookings
+              .where(_countsAsRevenue)
+              .fold<int>(0, (sum, booking) => sum + booking.totalAmountPaise) /
+          100;
+    }).toList();
+    final collected = days.map((row) {
+      return row.bookings.fold<int>(
+            0,
+            (sum, booking) =>
+                sum +
+                (booking.isPaid
+                    ? booking.totalAmountPaise
+                    : booking.advancePaise),
+          ) /
+          100;
+    }).toList();
+    final totalBookings =
+        bookingCounts.fold<int>(0, (sum, count) => sum + count.toInt());
+    final totalRevenue = days.fold<int>(0, (sum, row) {
+      return sum +
+          row.bookings.where(_countsAsRevenue).fold<int>(
+              0, (daySum, booking) => daySum + booking.totalAmountPaise);
+    });
+    final totalCollected = days.fold<int>(0, (sum, row) {
+      return sum +
+          row.bookings.fold<int>(
+            0,
+            (daySum, booking) =>
+                daySum +
+                (booking.isPaid
+                    ? booking.totalAmountPaise
+                    : booking.advancePaise),
+          );
+    });
+    final maxBookings = bookingCounts.fold<double>(
+        0, (max, value) => value > max ? value : max);
+    final maxRevenue =
+        revenue.fold<double>(0, (max, value) => value > max ? value : max);
+    final maxCollected =
+        collected.fold<double>(0, (max, value) => value > max ? value : max);
+    if (maxBookings == 0 && maxRevenue == 0 && maxCollected == 0) {
+      return const _ChartMessage('No active booking data yet');
+    }
+
+    List<FlSpot> normalizedSpots(List<double> values, double maxValue) {
+      return List.generate(values.length, (index) {
+        final normalized =
+            maxValue == 0 ? 0.0 : (values[index] / maxValue) * 100;
+        return FlSpot(index.toDouble(), normalized);
+      });
+    }
+
+    final bookingSpots = normalizedSpots(bookingCounts, maxBookings);
+    final revenueSpots = normalizedSpots(revenue, maxRevenue);
+    final collectedSpots = normalizedSpots(collected, maxCollected);
+    final primary = Theme.of(context).colorScheme.primary;
+    const blue = Color(0xFF2563EB);
+    const amber = Color(0xFFF59E0B);
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _TrendTotal(
+                label: 'Bookings',
+                value: totalBookings.toString(),
+                color: primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _TrendTotal(
+                label: 'Revenue',
+                value: '₹${_compactAmount(totalRevenue / 100)}',
+                color: blue,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _TrendTotal(
+                label: 'Collected',
+                value: '₹${_compactAmount(totalCollected / 100)}',
+                color: amber,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _TrendLegend(color: primary, label: 'Bookings'),
+            const SizedBox(width: 14),
+            const _TrendLegend(color: blue, label: 'Revenue'),
+            const SizedBox(width: 14),
+            const _TrendLegend(color: amber, label: 'Collected'),
+            const Spacer(),
+            const Text(
+              'Shape comparison',
+              style: TextStyle(
+                  color: Color(0xFF98A2B3),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: LineChart(
+            LineChartData(
+              minX: 0,
+              maxX: (days.length - 1).toDouble(),
+              minY: 0,
+              maxY: 110,
+              lineTouchData: LineTouchData(
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipColor: (_) => const Color(0xFF101828),
+                  getTooltipItems: (spots) => spots.map((spot) {
+                    final index = spot.x.round().clamp(0, days.length - 1);
+                    final text = switch (spot.barIndex) {
+                      0 => '${bookingCounts[index].toInt()} bookings',
+                      1 => '₹${_compactAmount(revenue[index])} revenue',
+                      _ => '₹${_compactAmount(collected[index])} collected',
+                    };
+                    return LineTooltipItem(
+                      text,
+                      const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800),
+                    );
+                  }).toList(),
+                ),
+              ),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                getDrawingHorizontalLine: (_) => const FlLine(
+                  color: Color(0xFFF2F4F7),
+                  strokeWidth: 1,
+                ),
+              ),
+              titlesData: FlTitlesData(
+                leftTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 26,
+                    interval:
+                        days.length > 7 ? (days.length / 6).ceilToDouble() : 1,
+                    getTitlesWidget: (value, meta) {
+                      final index = value.toInt();
+                      if (index < 0 || index >= days.length) {
+                        return const SizedBox.shrink();
+                      }
+                      final label = days.length <= 7
+                          ? DateFormat('E').format(days[index].day)
+                          : DateFormat('d MMM').format(days[index].day);
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          label,
+                          style: const TextStyle(
+                            color: Color(0xFF98A2B3),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: bookingSpots,
+                  isCurved: true,
+                  color: primary,
+                  barWidth: 3,
+                  isStrokeCapRound: true,
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        primary.withValues(alpha: 0.18),
+                        primary.withValues(alpha: 0),
+                      ],
+                    ),
+                  ),
+                ),
+                LineChartBarData(
+                  spots: revenueSpots,
+                  isCurved: true,
+                  color: blue,
+                  barWidth: 3,
+                  isStrokeCapRound: true,
+                  dotData: const FlDotData(show: false),
+                  dashArray: const [8, 4],
+                ),
+                LineChartBarData(
+                  spots: collectedSpots,
+                  isCurved: true,
+                  color: amber,
+                  barWidth: 3,
+                  isStrokeCapRound: true,
+                  dotData: const FlDotData(show: false),
+                  dashArray: const [3, 4],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TrendTotal extends StatelessWidget {
+  const _TrendTotal({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0)),
+          const SizedBox(height: 3),
+          Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Color(0xFF101828),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0)),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrendLegend extends StatelessWidget {
+  const _TrendLegend({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(label,
+            style: const TextStyle(
+                color: Color(0xFF667085),
+                fontSize: 11,
+                fontWeight: FontWeight.w800)),
+      ],
+    );
+  }
+}
+
+class _ChartLoading extends StatelessWidget {
+  const _ChartLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      alignment: Alignment.center,
+      child: const CircularProgressIndicator(strokeWidth: 2),
+    );
+  }
+}
+
+class _ChartMessage extends StatelessWidget {
+  const _ChartMessage(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        message,
+        style: const TextStyle(
+          color: Color(0xFF98A2B3),
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+String _compactAmount(double value) {
+  if (value >= 100000) return '${(value / 100000).toStringAsFixed(1)}L';
+  if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}k';
+  return value.toStringAsFixed(0);
+}
+
+bool _isActiveBooking(ArenaReservation booking) {
+  final status = booking.status.toUpperCase();
+  return status != 'CANCELLED' &&
+      status != 'CANCELLED_BY_OWNER' &&
+      status != 'HELD';
+}
+
+bool _countsAsRevenue(ArenaReservation booking) {
+  final status = booking.status.toUpperCase();
+  return status == 'CONFIRMED' ||
+      status == 'CHECKED_IN' ||
+      status == 'COMPLETED' ||
+      booking.paidAt != null;
+}
+
 class _HomeMetricBox extends StatelessWidget {
   const _HomeMetricBox({
     required this.title,
     required this.value,
+    required this.subtitle,
     required this.icon,
     required this.background,
     required this.accent,
@@ -863,6 +1444,7 @@ class _HomeMetricBox extends StatelessWidget {
 
   final String title;
   final String value;
+  final String subtitle;
   final IconData icon;
   final Color background;
   final Color accent;
@@ -927,7 +1509,7 @@ class _HomeMetricBox extends StatelessWidget {
             ),
           ),
           Text(
-            'Today',
+            subtitle,
             style: TextStyle(
               color: accent.withValues(alpha: 0.72),
               fontSize: 10,
@@ -987,10 +1569,10 @@ class _HeroHeader extends StatelessWidget {
             onTap: () => _showWhatsNew(context),
           ),
           const SizedBox(width: 4),
-          _HeaderIconBtn(
-            icon: Icons.notifications_none_rounded,
-            tooltip: 'Notifications',
-            onTap: () => context.push(AppRoutes.arenaNotifications),
+          _NotificationBell(
+            onTap: () => context
+                .push(AppRoutes.arenaNotifications)
+                .then((_) => ref.invalidate(bizUnreadCountProvider)),
           ),
           const SizedBox(width: 8),
           GestureDetector(
@@ -1032,6 +1614,56 @@ class _HeaderIconBtn extends StatelessWidget {
           ),
         ),
       );
+}
+
+class _NotificationBell extends ConsumerWidget {
+  const _NotificationBell({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unreadAsync = ref.watch(bizUnreadCountProvider);
+    final unread = unreadAsync.maybeWhen(data: (n) => n, orElse: () => 0);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(
+              unread > 0
+                  ? Icons.notifications_rounded
+                  : Icons.notifications_none_rounded,
+              size: 24,
+              color: const Color(0xFF344054),
+            ),
+            if (unread > 0)
+              Positioned(
+                top: -3,
+                right: -3,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDC2626),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    unread > 99 ? '99+' : '$unread',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _WhatsNewSheet extends StatelessWidget {
@@ -1172,6 +1804,25 @@ class _ArenasTab extends ConsumerWidget {
                 ),
               ),
               GestureDetector(
+                onTap: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  builder: (_) => const _ArenaHelpSheet(),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  child: const Icon(Icons.help_outline_rounded,
+                      color: Color(0xFF667085), size: 22),
+                ),
+              ),
+              const SizedBox(width: 4),
+              GestureDetector(
                 onTap: () => context.push(AppRoutes.createArena),
                 child: Container(
                   padding:
@@ -1198,54 +1849,62 @@ class _ArenasTab extends ConsumerWidget {
           ),
         ),
         Expanded(
-          child: arenasAsync.when(
-            loading: () =>
-                const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            error: (e, _) =>
-                _CenteredMessage(title: 'Could not load arenas', message: '$e'),
-            data: (arenas) {
-              if (arenas.isEmpty) {
-                return _CenteredMessage(
-                  title: 'No arenas yet',
-                  message: 'Add your first arena to start managing bookings.',
-                  action: GestureDetector(
-                    onTap: () => context.push(AppRoutes.createArena),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 22, vertical: 13),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF101828),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.add_rounded,
-                              size: 18, color: Colors.white),
-                          SizedBox(width: 8),
-                          Text('Add Your First Arena',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w800)),
-                        ],
+          child: RefreshIndicator(
+            onRefresh: () async => ref.refresh(ownedArenasProvider.future),
+            child: arenasAsync.when(
+              loading: () =>
+                  const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              error: (e, _) => SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: _CenteredMessage(
+                    title: 'Could not load arenas', message: '$e'),
+              ),
+              data: (arenas) {
+                if (arenas.isEmpty) {
+                  return SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: _CenteredMessage(
+                      title: 'No arenas yet',
+                      message:
+                          'Add your first arena to start managing bookings.',
+                      action: GestureDetector(
+                        onTap: () => context.push(AppRoutes.createArena),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 22, vertical: 13),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF101828),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.add_rounded,
+                                  size: 18, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text('Add Your First Arena',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800)),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                );
-              }
-              return RefreshIndicator(
-                onRefresh: () async => ref.refresh(ownedArenasProvider.future),
-                child: ListView.builder(
+                  );
+                }
+                return ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                   itemCount: arenas.length,
                   itemBuilder: (context, i) => Padding(
                     padding: const EdgeInsets.only(bottom: 14),
                     child: _ArenaCard(arena: arenas[i]),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -1253,12 +1912,12 @@ class _ArenasTab extends ConsumerWidget {
   }
 }
 
-class _ArenaCard extends StatelessWidget {
+class _ArenaCard extends ConsumerWidget {
   const _ArenaCard({required this.arena});
   final ArenaListing arena;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final loc = _joinNonEmpty([arena.city, arena.state]);
     final address = loc.isNotEmpty
         ? loc
@@ -1367,10 +2026,16 @@ class _ArenaCard extends StatelessWidget {
                   child: _CardAction(
                     icon: Icons.edit_outlined,
                     label: 'Edit Arena',
-                    onTap: () => context.push(
-                      '${AppRoutes.arenaProfile}/${arena.id}',
-                      extra: {'startEditing': true},
-                    ),
+                    onTap: () => showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      backgroundColor: const Color(0xFFF3F4F6),
+                      builder: (_) => ArenaDetailSheet(
+                        arena: arena,
+                        startEditing: true,
+                      ),
+                    ).then((_) => ref.invalidate(ownedArenasProvider)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1507,6 +2172,123 @@ class _CenteredMessage extends StatelessWidget {
                 style: const TextStyle(color: Color(0xFF667085))),
             if (action != null) ...[const SizedBox(height: 16), action!]
           ])));
+}
+
+// ─── Arena help sheet ─────────────────────────────────────────────────────────
+
+class _ArenaHelpSheet extends StatelessWidget {
+  const _ArenaHelpSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          24, 16, 24, 24 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: const Color(0xFFE1E5EA),
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'How it works',
+            style: TextStyle(
+                color: Color(0xFF101828),
+                fontSize: 18,
+                fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 20),
+          const _HelpItem(
+            icon: Icons.stadium_rounded,
+            iconColor: Color(0xFF064E3B),
+            iconBg: Color(0xFFD1FAE5),
+            title: 'Arena',
+            body:
+                'Your venue on Swing. Set up the name, location, sports, and operating hours. Players search and discover your arena to make bookings.',
+          ),
+          const SizedBox(height: 16),
+          const _HelpItem(
+            icon: Icons.grid_view_rounded,
+            iconColor: Color(0xFF0EA5E9),
+            iconBg: Color(0xFFE0F2FE),
+            title: 'Unit',
+            body:
+                'A bookable court or space inside your arena — e.g. "Court 1", "Turf A", "Net 2". Each unit has its own slot timings, pricing, and photos. Players pick a unit when they book.',
+          ),
+          const SizedBox(height: 16),
+          const _HelpItem(
+            icon: Icons.calendar_month_rounded,
+            iconColor: Color(0xFF7C3AED),
+            iconBg: Color(0xFFEDE9FE),
+            title: 'Booking',
+            body:
+                'A confirmed time slot reservation by a player for one of your units. You can view upcoming and past bookings, check payment status, and manage check-ins from the Bookings tab.',
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+class _HelpItem extends StatelessWidget {
+  const _HelpItem({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+              color: iconBg, borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, color: iconColor, size: 22),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(
+                      color: Color(0xFF101828),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text(body,
+                  style: const TextStyle(
+                      color: Color(0xFF667085),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      height: 1.45)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 String _joinNonEmpty(List<String?> v, {String s = ', '}) => v

@@ -49,9 +49,11 @@ class AuthFlowState {
         loading: loading ?? this.loading,
         error: clearError ? null : (error ?? this.error),
         idToken: idToken ?? this.idToken,
-        pendingName: clearPendingName ? null : (pendingName ?? this.pendingName),
-        verificationId:
-            clearVerificationId ? null : (verificationId ?? this.verificationId),
+        pendingName:
+            clearPendingName ? null : (pendingName ?? this.pendingName),
+        verificationId: clearVerificationId
+            ? null
+            : (verificationId ?? this.verificationId),
         needsBiometricEnrollment:
             needsBiometricEnrollment ?? this.needsBiometricEnrollment,
       );
@@ -78,7 +80,7 @@ class AuthController extends StateNotifier<AuthFlowState> {
     try {
       // Use 2Factor instead of Firebase
       final sessionId = await TwoFactorService.instance.sendOtp(phone);
-      
+
       if (sessionId != null) {
         state = state.copyWith(
           step: AuthStep.otp,
@@ -170,11 +172,6 @@ class AuthController extends StateNotifier<AuthFlowState> {
         otp: otp,
         name: name,
       );
-      
-      await _ref.read(sessionControllerProvider.notifier).signIn(
-            accessToken: result.accessToken,
-            refreshToken: result.refreshToken,
-          );
 
       bool needsBio = false;
       try {
@@ -184,6 +181,15 @@ class AuthController extends StateNotifier<AuthFlowState> {
           needsBio = true;
         }
       } catch (_) {}
+
+      if (needsBio) {
+        state = state.copyWith(needsBiometricEnrollment: true);
+      }
+
+      await _ref.read(sessionControllerProvider.notifier).signIn(
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+          );
 
       state = state.copyWith(
         loading: false,
@@ -209,16 +215,19 @@ class AuthController extends StateNotifier<AuthFlowState> {
     }
   }
 
-  Future<void> enableBiometrics() async {
+  Future<bool> enableBiometrics() async {
     try {
       final passed = await BiometricService.instance.authenticate();
       if (passed) {
         await TokenStorage.setBiometricEnabled(true, phone: state.phone);
         state = state.copyWith(needsBiometricEnrollment: false);
         debugPrint('Auth: Biometrics manually enabled for ${state.phone}');
+        return true;
       }
+      return false;
     } catch (e) {
       debugPrint('Auth: Failed to enable biometrics: $e');
+      return false;
     }
   }
 

@@ -154,6 +154,19 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     }
   }
 
+  void _showHelpSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: _surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const _ArenaHelpSheet(),
+    );
+  }
+
   bool _didAutoOpenSheet = false;
 
   void _openArenaDetailSheet(ArenaListing arena, {bool startEditing = false}) {
@@ -163,7 +176,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       useSafeArea: true,
       backgroundColor: _bg,
       builder: (_) =>
-          _ArenaDetailSheet(arena: arena, startEditing: startEditing),
+          ArenaDetailSheet(arena: arena, startEditing: startEditing),
     );
   }
 
@@ -348,17 +361,17 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
 
 // ─── Arena detail bottom sheet ───────────────────────────────────────────────
 
-class _ArenaDetailSheet extends ConsumerStatefulWidget {
-  const _ArenaDetailSheet({required this.arena, this.startEditing = false});
+class ArenaDetailSheet extends ConsumerStatefulWidget {
+  const ArenaDetailSheet({super.key, required this.arena, this.startEditing = false});
 
   final ArenaListing arena;
   final bool startEditing;
 
   @override
-  ConsumerState<_ArenaDetailSheet> createState() => _ArenaDetailSheetState();
+  ConsumerState<ArenaDetailSheet> createState() => _ArenaDetailSheetState();
 }
 
-class _ArenaDetailSheetState extends ConsumerState<_ArenaDetailSheet> {
+class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _descriptionCtrl;
@@ -885,7 +898,7 @@ class _UnitCard extends StatelessWidget {
                         },
                         itemBuilder: (context) => const [
                           PopupMenuItem(
-                              value: 'edit', child: Text('Edit')),
+                              value: 'edit', child: Text('Edit Unit')),
                           PopupMenuItem(
                               value: 'delete', child: Text('Remove')),
                         ],
@@ -966,6 +979,29 @@ class _UnitCard extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onTap,
+                          icon: const Icon(Icons.tune_rounded, size: 15),
+                          label: const Text(
+                            'Manage Unit',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _text,
+                            side: BorderSide(color: _line),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
                         child: OutlinedButton(
                           onPressed: onEdit,
                           style: OutlinedButton.styleFrom(
@@ -979,7 +1015,7 @@ class _UnitCard extends StatelessWidget {
                             ),
                           ),
                           child: const Text(
-                            'Edit',
+                            'Edit Unit',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 13,
@@ -3402,6 +3438,121 @@ class _StaticText extends StatelessWidget {
         fontWeight: FontWeight.w600,
         height: 1.45,
       ),
+    );
+  }
+}
+
+// ─── Help sheet ───────────────────────────────────────────────────────────────
+
+class _ArenaHelpSheet extends StatelessWidget {
+  const _ArenaHelpSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          24, 16, 24, 24 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // drag handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: _line, borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'How it works',
+            style: TextStyle(
+                color: _text, fontSize: 18, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 20),
+          _HelpItem(
+            icon: Icons.stadium_rounded,
+            iconColor: _deep,
+            iconBg: const Color(0xFFD1FAE5),
+            title: 'Arena',
+            body:
+                'Your venue on Swing. Set up the name, location, sports, and operating hours. Players search and discover your arena to make bookings.',
+          ),
+          const SizedBox(height: 16),
+          _HelpItem(
+            icon: Icons.grid_view_rounded,
+            iconColor: const Color(0xFF0EA5E9),
+            iconBg: const Color(0xFFE0F2FE),
+            title: 'Unit',
+            body:
+                'A bookable court or space inside your arena — e.g. "Court 1", "Turf A", "Net 2". Each unit has its own slot timings, pricing, and photos. Players pick a unit when they book.',
+          ),
+          const SizedBox(height: 16),
+          _HelpItem(
+            icon: Icons.calendar_month_rounded,
+            iconColor: const Color(0xFF7C3AED),
+            iconBg: const Color(0xFFEDE9FE),
+            title: 'Booking',
+            body:
+                'A confirmed time slot reservation by a player for one of your units. You can view upcoming and past bookings, check payment status, and manage check-ins from the Bookings tab.',
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+class _HelpItem extends StatelessWidget {
+  const _HelpItem({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration:
+              BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, color: iconColor, size: 22),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(
+                      color: _text,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text(body,
+                  style: const TextStyle(
+                      color: _muted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      height: 1.45)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

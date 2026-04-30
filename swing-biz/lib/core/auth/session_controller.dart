@@ -11,20 +11,24 @@ class SessionState {
   const SessionState({
     this.status = AuthStatus.unknown,
     this.activeProfile,
+    this.isLocked = false,
   });
 
   final AuthStatus status;
   final BizProfileType? activeProfile;
+  final bool isLocked;
 
   SessionState copyWith({
     AuthStatus? status,
     BizProfileType? activeProfile,
+    bool? isLocked,
     bool clearActiveProfile = false,
   }) =>
       SessionState(
         status: status ?? this.status,
         activeProfile:
             clearActiveProfile ? null : (activeProfile ?? this.activeProfile),
+        isLocked: isLocked ?? this.isLocked,
       );
 }
 
@@ -38,12 +42,15 @@ class SessionController extends StateNotifier<SessionState> {
     final profileRaw = await TokenStorage.getActiveProfile();
     final profile =
         profileRaw == null ? null : bizProfileTypeFromString(profileRaw);
+    final bioEnabled = await TokenStorage.isBiometricEnabled();
+    
     debugPrint(
-        '[biz session] bootstrap token=${token != null} profileRaw=$profileRaw');
+        '[biz session] bootstrap token=${token != null} profileRaw=$profileRaw bioEnabled=$bioEnabled');
     state = SessionState(
       status:
           token == null ? AuthStatus.unauthenticated : AuthStatus.authenticated,
       activeProfile: profile,
+      isLocked: token != null && bioEnabled,
     );
   }
 
@@ -62,6 +69,7 @@ class SessionController extends StateNotifier<SessionState> {
     state = state.copyWith(
       status: AuthStatus.authenticated,
       clearActiveProfile: true,
+      isLocked: false,
     );
     debugPrint('[biz session] signIn state authenticated');
   }
@@ -77,12 +85,24 @@ class SessionController extends StateNotifier<SessionState> {
     debugPrint('[biz session] signOut');
     await OneSignalService.instance.logout();
     await TokenStorage.clear();
-    state = const SessionState(status: AuthStatus.unauthenticated);
+    state = const SessionState(status: AuthStatus.unauthenticated, isLocked: false);
+  }
+
+  void lockSession() {
+    if (state.status == AuthStatus.authenticated) {
+      debugPrint('[biz session] lockSession');
+      state = state.copyWith(isLocked: true);
+    }
   }
 
   Future<void> unlockSession() async {
     debugPrint('[biz session] unlockSession');
-    await _bootstrap();
+    final token = await TokenStorage.getAccessToken();
+    if (token != null) {
+      state = state.copyWith(isLocked: false, status: AuthStatus.authenticated);
+    } else {
+      await _bootstrap();
+    }
   }
 
   String? _nameOf(BizProfileType? p) {

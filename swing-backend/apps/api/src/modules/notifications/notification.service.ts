@@ -331,6 +331,18 @@ export class NotificationService {
     })
   }
 
+  async clearAll(userId: string, types?: string[], audience?: NotificationAudience) {
+    const typeFilter = types && types.length > 0 ? { in: types } : undefined
+    await prisma.notification.deleteMany({
+      where: {
+        userId,
+        ...(typeFilter ? { type: typeFilter } : {}),
+        ...this.audienceWhere(audience),
+      },
+    })
+    return { message: 'All notifications cleared' }
+  }
+
   async broadcastToUsers(userIds: string[], notification: {
     type: string
     title: string
@@ -399,7 +411,7 @@ export class NotificationService {
     if (owner) {
       await this.createNotification(owner.userId, {
         type: 'NEW_BOOKING',
-        title: 'New Booking',
+        title: `New Booking · ${arena.name}`,
         body: `${booking.customerName ?? bookedBy.user?.name ?? 'Someone'} booked ${unit.name} · ${dateStr} · ${slotStr}`,
         entityType: 'booking',
         entityId: booking.id,

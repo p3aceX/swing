@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:go_router/go_router.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 
 import '../api/api_client.dart';
 import '../auth/token_storage.dart';
+import '../router/app_router.dart';
 
 class OneSignalService {
   OneSignalService._();
@@ -15,6 +17,9 @@ class OneSignalService {
 
   bool _initialized = false;
   String? _loggedInUserId;
+
+  // Set by the app after the router is ready
+  GoRouter? router;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -44,10 +49,6 @@ class OneSignalService {
     if (!_initialized || _loggedInUserId == userId) return;
     try {
       OneSignal.login(userId);
-      OneSignal.User.addTags(const {
-        'app': 'swing_biz',
-        'role': 'biz',
-      });
       _loggedInUserId = userId;
       if (kDebugMode) debugPrint('[OneSignal] identified user=$userId');
     } catch (e) {
@@ -72,6 +73,8 @@ class OneSignalService {
 
   Future<void> _handleClick(OSNotificationClickEvent event) async {
     await _syncNotification(event.notification);
+    // Navigate to notifications screen so the user sees the tapped notification
+    router?.push(AppRoutes.arenaNotifications);
   }
 
   Future<void> _syncNotification(OSNotification notification) async {

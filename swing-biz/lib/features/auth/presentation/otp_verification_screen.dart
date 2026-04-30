@@ -69,7 +69,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       }
       if (next.step == AuthStep.phone) context.go(AppRoutes.login);
 
-      if (next.needsBiometricEnrollment && !prev!.needsBiometricEnrollment) {
+      if (next.needsBiometricEnrollment &&
+          !next.loading &&
+          (prev == null || !prev.needsBiometricEnrollment || prev.loading)) {
         _showBiometricDialog(context, ref);
       }
     });
@@ -347,6 +349,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
             onPressed: () {
               ref.read(authControllerProvider.notifier).skipBiometrics();
               Navigator.pop(context);
+              context.go(AppRoutes.dashboard);
             },
             child: const Text('Maybe later',
                 style: TextStyle(color: Color(0xFF667085))),
@@ -354,7 +357,19 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              await ref.read(authControllerProvider.notifier).enableBiometrics();
+              final enabled = await ref
+                  .read(authControllerProvider.notifier)
+                  .enableBiometrics();
+              if (!context.mounted) return;
+              if (enabled) {
+                context.go(AppRoutes.dashboard);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Biometric setup failed. Try again.')),
+                );
+                _showBiometricDialog(context, ref);
+              }
             },
             child: const Text('Enable',
                 style: TextStyle(

@@ -80,6 +80,13 @@ export async function notificationRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.markAllRead(user.userId, types, parseAudience(q.audience)) })
   })
 
+  app.delete('/clear-all', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const q = request.query as { types?: string; audience?: string }
+    const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
+    return reply.send({ success: true, data: await svc.clearAll(user.userId, types, parseAudience(q.audience)) })
+  })
+
   app.post('/sync', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const body = z.object({

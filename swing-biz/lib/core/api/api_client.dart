@@ -71,6 +71,8 @@ class ApiClient {
 
   Dio get dio => _dio;
 
+  Future<String?> refreshSessionToken() => _refreshAccessToken();
+
   String _resolveBaseUrl() {
     return _canonicalBaseUrl;
   }
@@ -121,5 +123,4 @@ class ApiClient {
       _refreshing = false;
     }
   }
-
 }

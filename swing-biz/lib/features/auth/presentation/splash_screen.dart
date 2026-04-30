@@ -24,21 +24,8 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 2200), () async {
-      if (!mounted) return;
-      
-      final bioEnabled = await TokenStorage.isBiometricEnabled();
-      final refreshToken = await TokenStorage.getRefreshToken();
-      final accessToken = await TokenStorage.getAccessToken();
-
-      if (!mounted) return;
-      if (bioEnabled && refreshToken != null && accessToken == null) {
-        // We have a session that can be unlocked with biometrics
-        context.go(AppRoutes.biometric);
-      } else {
-        context.go(AppRoutes.login);
-      }
-    });
+    // No manual navigation here anymore. 
+    // SessionController bootstrap will trigger GoRouter redirect.
   }
 
   @override

@@ -24,13 +24,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       ref.read(authControllerProvider.notifier).resetToPhone();
-
-      // Auto-redirect if biometrics enabled and we have a session to unlock
-      final bioEnabled = await TokenStorage.isBiometricEnabled();
-      final refreshToken = await TokenStorage.getRefreshToken();
-      if (bioEnabled && refreshToken != null) {
-        if (mounted) context.go(AppRoutes.biometric);
-      }
     });
   }
 
@@ -48,17 +41,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final phone = '+91$normalized';
 
     try {
-      // Check if biometrics are enabled for this phone
-      final bioEnabled = await TokenStorage.isBiometricEnabled();
-      final bioPhone = await TokenStorage.getBiometricPhone();
-      final refreshToken = await TokenStorage.getRefreshToken();
-      
-      if (bioEnabled && bioPhone == phone && refreshToken != null) {
-        debugPrint('Login: Biometrics enabled for $phone, redirecting to BiometricScreen');
-        if (mounted) context.go(AppRoutes.biometric);
-        return;
-      }
-
       final result =
           await ref.read(authControllerProvider.notifier).checkPhone(phone);
       if (!mounted) return;

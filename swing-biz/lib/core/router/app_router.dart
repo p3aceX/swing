@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/session_controller.dart';
+import '../auth/token_storage.dart';
+import '../../features/auth/controller/auth_controller.dart';
 import '../presentation/shared_screens.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/otp_verification_screen.dart';
@@ -21,6 +23,7 @@ import '../../features/auth/presentation/biometric_screen.dart';
 import '../../features/create_match/presentation/biz_create_match_screen.dart';
 import '../../features/create_tournament/presentation/biz_create_tournament_screen.dart';
 import '../../features/play/presentation/biz_play_tab.dart';
+import '../notifications/notifications_screen.dart';
 import 'router_refresh.dart';
 
 class AppRoutes {
@@ -130,11 +133,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: AppRoutes.splash,
     refreshListenable: RouterRefreshStream(ref),
-    redirect: (context, state) {
+    redirect: (context, state) async {
       final session = ref.read(sessionControllerProvider);
       final loggedIn = session.status == AuthStatus.authenticated;
       final selectedRole = session.activeProfile;
       final meAsync = ref.read(meProvider);
+      final authFlow = ref.read(authControllerProvider);
 
       final loc = state.matchedLocation;
       final onSplash = loc == AppRoutes.splash;
@@ -152,15 +156,28 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
       debugPrint(
         '[biz router] loc=$loc status=${session.status.name} role=${selectedRole?.name} '
-        'meLoading=${meAsync.isLoading} meReady=${meAsync.valueOrNull != null}',
+        'locked=${session.isLocked} meLoading=${meAsync.isLoading} meReady=${meAsync.valueOrNull != null}',
       );
 
       if (session.status == AuthStatus.unknown) return null;
+
+      // Handle locking
+      if (loggedIn && session.isLocked && !onBiometric) {
+        final bioEnabled = await TokenStorage.isBiometricEnabled();
+        if (bioEnabled) return AppRoutes.biometric;
+      }
 
       if (!loggedIn) {
         if (onPublic) return null;
         return AppRoutes.login;
       }
+
+      if (onBiometric) {
+        if (session.isLocked) return null;
+        return AppRoutes.dashboard;
+      }
+
+      if (onOtp && authFlow.needsBiometricEnrollment) return null;
 
       if (onPublic) return AppRoutes.dashboard;
 
@@ -288,7 +305,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.arenaNotifications,
-        builder: (_, __) => const _ArenaNotificationsScreen(),
+        builder: (_, __) => const BizNotificationsScreen(),
       ),
       GoRoute(
         path: AppRoutes.students,

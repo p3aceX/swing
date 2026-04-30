@@ -14,6 +14,7 @@ import '../../../core/auth/me_providers.dart';
 import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/utils/image_compressor.dart';
+import '../../arena/services/arena_profile_providers.dart';
 
 const _bg = Color(0xFFF3F4F6);
 const _surface = Color(0xFFFFFFFF);
@@ -134,7 +135,14 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       ));
       await ref.read(sessionControllerProvider.notifier).setActiveProfile(BizProfileType.arena);
       ref.invalidate(meProvider);
-      if (mounted) context.go(AppRoutes.dashboard);
+      ref.invalidate(ownedArenasProvider);
+      if (mounted) {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go(AppRoutes.dashboard);
+        }
+      }
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create arena: $error')));
     } finally {

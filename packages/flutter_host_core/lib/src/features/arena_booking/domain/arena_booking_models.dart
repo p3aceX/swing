@@ -539,8 +539,7 @@ class ArenaReservation {
 
   String get displayPhone => guestPhone ?? customerPhone ?? '';
 
-  bool get isPaid =>
-      paidAt != null || status == 'CHECKED_IN' || status == 'COMPLETED';
+  bool get isPaid => paidAt != null;
 
   factory ArenaReservation.fromJson(Map<String, dynamic> json) {
     final bookedBy = (json['bookedBy'] as Map?)?.cast<String, dynamic>();

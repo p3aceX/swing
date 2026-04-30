@@ -997,7 +997,8 @@ class _BookingListSheet extends StatelessWidget {
                 style: const TextStyle(fontSize: 13, color: Color(0xFF667085))),
           ]),
           const SizedBox(height: 6),
-          Text('₹${(bookings.fold(0, (s, b) => s + b.totalAmountPaise) / 100).toStringAsFixed(0)} total',
+          Text(
+              '₹${(bookings.fold(0, (s, b) => s + (b.isPaid ? b.totalAmountPaise : (b.totalAmountPaise - b.advancePaise))) / 100).toStringAsFixed(0)} total',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
           const SizedBox(height: 16),
           if (bookings.isEmpty)

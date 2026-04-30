@@ -1,0 +1,6 @@
+*
+!swing-web
+!swing-web/**
+swing-web/node_modules/**
+swing-web/.next/**
+swing-web/.vercel/**
