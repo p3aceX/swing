@@ -472,7 +472,7 @@ export default async function ArenaPage({ params }: PageProps) {
         </aside>
       </section>
 
-      <style>{`
+      <style precedence="default">{`
         /* Light */
         :root, [data-theme="light"] {
           --arena-bg:              #F4F2EB;
