@@ -174,8 +174,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
       } catch {}
     });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, unitId, arenaSlug]);
+  }, [step, unitId, arenaSlug, durMins]);
 
   const unit = units.find((u) => u.id === unitId);
   const isGround = GROUND_TYPES.has(unit?.unitType ?? "");
