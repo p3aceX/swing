@@ -29,8 +29,7 @@ export default function PhotoCarousel({ photos, alt }: { photos: string[]; alt: 
   const goTo = useCallback((idx: number) => {
     const track = trackRef.current;
     if (!track) return;
-    const slide = track.children[idx] as HTMLElement;
-    slide?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
+    track.scrollTo({ left: idx * track.clientWidth, behavior: "smooth" });
   }, []);
 
   // Auto-advance every 4 seconds, pause on hover/touch
