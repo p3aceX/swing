@@ -626,7 +626,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         {unit && (
           <div style={{ padding: "32px 20px 0" }}>
             <div className="eyebrow" style={{ marginBottom: 14 }}>How to book</div>
-            <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0 4px 0" }} className="scrollbar-none">
+            <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0 14px 0" }} className="scrollbar-none">
               {/* Book Once — always shown */}
               {(() => {
                 const active = step === "date";
