@@ -17,7 +17,6 @@ import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/dashboard/presentation/coach_dashboard_screens.dart';
 import '../../features/onboarding/presentation/business_details_screen.dart';
 import '../../features/onboarding/presentation/create_arena_screen.dart';
-import '../../features/onboarding/presentation/create_first_unit_screen.dart';
 import '../../features/arena/screens/arena_profile_page.dart';
 import '../../features/arena/screens/unit_detail_page.dart';
 import '../../features/auth/presentation/biometric_screen.dart';
@@ -37,7 +36,6 @@ class AppRoutes {
   static const createAcademy = '/onboarding/academy';
   static const createCoach = '/onboarding/coach';
   static const createArena = '/onboarding/arena';
-  static const createFirstUnit = '/onboarding/first-unit';
   static const dashboard = '/dashboard';
   static const coachHome = '/coach-home';
   static const coachSessions = '/coach-home/sessions';
@@ -190,8 +188,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         if (me != null &&
             me.businessStatus.arenaIds.isEmpty &&
             me.businessStatus.managedArenaId == null) {
-          final onArenaSetup = loc == AppRoutes.createArena ||
-              loc == AppRoutes.createFirstUnit;
+          final onArenaSetup = loc == AppRoutes.createArena;
           if (!onArenaSetup) return AppRoutes.createArena;
         }
       }
@@ -228,12 +225,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.createArena,
         builder: (_, __) => const CreateArenaScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.createFirstUnit,
-        builder: (_, state) => CreateFirstUnitScreen(
-          arenaId: state.extra as String? ?? '',
-        ),
       ),
       GoRoute(
         path: AppRoutes.dashboard,

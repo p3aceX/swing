@@ -14,6 +14,7 @@ import '../../../core/auth/me_providers.dart';
 import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/utils/image_compressor.dart';
+import '../../arena/screens/arena_profile_page.dart';
 import '../../arena/services/arena_profile_providers.dart';
 
 const _bg = Color(0xFFF3F4F6);
@@ -138,13 +139,16 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       await ref.read(sessionControllerProvider.notifier).setActiveProfile(BizProfileType.arena);
       ref.invalidate(meProvider);
       ref.invalidate(ownedArenasProvider);
-      if (mounted) {
-        if (arenaId != null) {
-          context.go(AppRoutes.createFirstUnit, extra: arenaId);
-        } else {
-          context.go(AppRoutes.dashboard);
-        }
+      if (mounted && arenaId != null) {
+        await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          backgroundColor: _bg,
+          builder: (_) => UnitEditorSheet(arenaId: arenaId),
+        );
       }
+      if (mounted) context.go(AppRoutes.dashboard);
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create arena: $error')));
     } finally {
