@@ -11,10 +11,10 @@ export function createNotificationWorker() {
     'notifications',
     async (job: Job) => {
       const payload = job.data?.data ?? job.data
-      const { userId, title, body, data } = payload
+      const { userId, title, body, data, audience } = payload
 
       try {
-        await notificationSvc.sendPush(userId, title, body, data)
+        await notificationSvc.sendPush(userId, title, body, data, audience)
         return { sent: true, userId }
       } catch (err) {
         console.error(`[NotificationWorker] Failed to send push to ${userId}:`, err)

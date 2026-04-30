@@ -491,6 +491,7 @@ export class BookingService {
     if (booking.status === 'CANCELLED') {
       throw new AppError('INVALID_STATE', 'Cannot mark a cancelled booking as paid', 400)
     }
+    const shouldNotifyBookingConfirmed = booking.status !== 'CONFIRMED' && booking.status !== 'CHECKED_IN'
 
     const amount = data.amountPaise ?? booking.totalAmountPaise
 
@@ -530,7 +531,7 @@ export class BookingService {
       include: { unit: true, payment: true },
     })
 
-    if (confirmedManualBooking) {
+    if (confirmedManualBooking && shouldNotifyBookingConfirmed) {
       try {
         const notifSvc = new NotificationService()
         await notifSvc.notifyBookingConfirmed({

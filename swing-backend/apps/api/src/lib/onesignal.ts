@@ -5,10 +5,11 @@ export async function sendOneSignalPushNotification(
   title: string,
   body: string,
   data?: Record<string, string>,
+  audience: 'BIZ_OWNER' | 'ALL' = 'ALL',
 ): Promise<{ skipped: boolean; id?: string }> {
   const appId = process.env.ONESIGNAL_APP_ID
   const apiKey = process.env.ONESIGNAL_REST_API_KEY
-  if (!appId || !apiKey || !userId) return { skipped: true }
+  if (!appId || !apiKey || !userId || audience !== 'BIZ_OWNER') return { skipped: true }
 
   const response = await fetch(ONESIGNAL_API_URL, {
     method: 'POST',

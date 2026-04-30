@@ -14,6 +14,8 @@ type NotificationPreferenceKey =
   | 'arenaBookings'
   | 'bookingReminders'
 
+type NotificationAudience = 'PLAYER' | 'BIZ_OWNER' | 'ALL'
+
 export class NotificationService {
   private async getOrCreatePreferences(userId: string) {
     return prisma.notificationPreference.upsert({
@@ -33,11 +35,17 @@ export class NotificationService {
     return preferences[preferenceKey]
   }
 
-  async sendPush(userId: string, title: string, body: string, data?: Record<string, string>) {
+  async sendPush(
+    userId: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+    audience: NotificationAudience = 'PLAYER',
+  ) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { fcmTokens: true } })
     if (!user) return
 
-    if (user.fcmTokens.length > 0) {
+    if ((audience === 'PLAYER' || audience === 'ALL') && user.fcmTokens.length > 0) {
       try {
         const { invalidTokens } = await sendPushNotification(user.fcmTokens, title, body, data)
         if (invalidTokens.length > 0) {
@@ -51,10 +59,12 @@ export class NotificationService {
       }
     }
 
-    try {
-      await sendOneSignalPushNotification(userId, title, body, data)
-    } catch (err) {
-      console.error('[OneSignal] Send error:', err)
+    if (audience === 'BIZ_OWNER' || audience === 'ALL') {
+      try {
+        await sendOneSignalPushNotification(userId, title, body, data, audience)
+      } catch (err) {
+        console.error('[OneSignal] Send error:', err)
+      }
     }
   }
 
@@ -102,10 +112,15 @@ export class NotificationService {
     })
   }
 
-  async getSummary(userId: string) {
+  async getSummary(userId: string, types?: string[]) {
+    const typeFilter = types && types.length > 0 ? { in: types } : undefined
     const [notificationUnreadCount, profile, preferences] = await Promise.all([
       prisma.notification.count({
-        where: { userId, isRead: false },
+        where: {
+          userId,
+          isRead: false,
+          ...(typeFilter ? { type: typeFilter } : {}),
+        },
       }),
       prisma.playerProfile.findUnique({
         where: { userId },
@@ -223,7 +238,9 @@ export class NotificationService {
     data?: any
     sendPush?: boolean
     preferenceKey?: NotificationPreferenceKey
+    audience?: NotificationAudience
   }) {
+    const audience = data.audience ?? 'PLAYER'
     const notif = await prisma.notification.create({
       data: {
         userId,
@@ -236,6 +253,7 @@ export class NotificationService {
         data: {
           ...(data.data && typeof data.data === 'object' ? data.data : {}),
           source: 'backend',
+          audience,
         },
       },
     })
@@ -244,12 +262,18 @@ export class NotificationService {
       data.sendPush !== false
       && await this.shouldSendPush(userId, data.preferenceKey)
     ) {
-      const pushPayload = { userId, title: data.title, body: data.body, data: { type: data.type, entityId: data.entityId || '' } }
+      const pushPayload = {
+        userId,
+        title: data.title,
+        body: data.body,
+        data: { type: data.type, entityId: data.entityId || '', audience },
+        audience,
+      }
       if (notificationQueue) {
         await enqueueNotification('push', pushPayload)
       } else {
         // Queue not available — send directly (fire-and-forget)
-        this.sendPush(userId, data.title, data.body, { type: data.type, entityId: data.entityId || '' })
+        this.sendPush(userId, data.title, data.body, { type: data.type, entityId: data.entityId || '', audience }, audience)
           .catch(err => console.error('[notify] direct push failed:', err))
       }
     }
@@ -353,6 +377,7 @@ export class NotificationService {
       entityId: booking.id,
       sendPush: true,
       preferenceKey: 'arenaBookings',
+      audience: 'PLAYER',
     })
 
     // Notify arena owner
@@ -369,6 +394,7 @@ export class NotificationService {
         entityId: booking.id,
         sendPush: true,
         preferenceKey: 'arenaBookings',
+        audience: 'BIZ_OWNER',
       })
     }
   }
@@ -399,6 +425,7 @@ export class NotificationService {
       entityId: booking.id,
       sendPush: true,
       preferenceKey: 'arenaBookings',
+      audience: 'PLAYER',
     })
 
     const owner = await prisma.arenaOwnerProfile.findUnique({
@@ -414,6 +441,7 @@ export class NotificationService {
         entityId: booking.id,
         sendPush: true,
         preferenceKey: 'arenaBookings',
+        audience: 'BIZ_OWNER',
       })
     }
   }

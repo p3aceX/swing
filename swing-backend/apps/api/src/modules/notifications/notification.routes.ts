@@ -35,7 +35,9 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.get('/summary', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    return reply.send({ success: true, data: await svc.getSummary(user.userId) })
+    const q = request.query as { types?: string }
+    const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
+    return reply.send({ success: true, data: await svc.getSummary(user.userId, types) })
   })
 
   app.get('/preferences', auth, async (request, reply) => {

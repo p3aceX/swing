@@ -48,11 +48,22 @@ class AppNotification {
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
+const _playerNotificationTypes = {
+  'BOOKING_CONFIRMED',
+  'BOOKING_CANCELLED',
+  'CHAT_MESSAGE',
+  'NEW_FOLLOWER',
+  'TOURNAMENT_UPDATE',
+  'MATCH_LIVE',
+};
+
 final notificationSummaryProvider =
     FutureProvider.autoDispose<int>((ref) async {
   try {
-    final res =
-        await ApiClient.instance.dio.get(ApiEndpoints.notificationsSummary);
+    final res = await ApiClient.instance.dio.get(
+      ApiEndpoints.notificationsSummary,
+      queryParameters: {'types': _playerNotificationTypes.join(',')},
+    );
     final body = res.data;
     if (body is Map<String, dynamic>) {
       final data = body['data'] ?? body;
@@ -105,7 +116,11 @@ class _NotificationsNotifier extends StateNotifier<_NotificationsState> {
     try {
       final res = await ApiClient.instance.dio.get(
         ApiEndpoints.notifications,
-        queryParameters: {'page': 1, 'limit': 50},
+        queryParameters: {
+          'page': 1,
+          'limit': 50,
+          'types': _playerNotificationTypes.join(','),
+        },
       );
       final body = res.data;
       List<dynamic> raw = [];
@@ -155,7 +170,10 @@ class _NotificationsNotifier extends StateNotifier<_NotificationsState> {
   Future<void> markAllRead() async {
     state = state.copyWith(isMarkingAll: true);
     try {
-      await ApiClient.instance.dio.post(ApiEndpoints.notificationsReadAll);
+      await ApiClient.instance.dio.post(
+        ApiEndpoints.notificationsReadAll,
+        queryParameters: {'types': _playerNotificationTypes.join(',')},
+      );
       state = state.copyWith(
         isMarkingAll: false,
         items: state.items
