@@ -856,13 +856,13 @@ export default async function ArenaPage({ params }: PageProps) {
         .arena-booking-body {
           flex: 1 1 auto;
           min-height: 0;
-          overflow: hidden;
+          overflow-x: hidden;
+          overflow-y: auto;
           padding: 0;
         }
 
         .arena-booking-body > * {
-          height: 100%;
-          min-height: 0;
+          min-height: 100%;
         }
 
         .arena-booking-body :global(.cta-btn),

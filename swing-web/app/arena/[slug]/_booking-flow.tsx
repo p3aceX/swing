@@ -99,7 +99,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
   const [step, setStep] = useState<"date" | "slot" | "extras" | "form" | "done" | "pass" | "bulk">("date");
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   // monthly pass state
-  const [passDays, setPassDays] = useState<number[]>([]);
+  const [passDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
   const [passStartTime, setPassStartTime] = useState("06:00");
   const [passEndTime, setPassEndTime] = useState("07:00");
   const [passStartDate, setPassStartDate] = useState(getToday());
@@ -894,10 +894,10 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
             </div>
             <div className="form-field" style={{ flex: 1 }}>
               <label className="form-label">Months</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                <button onClick={() => setPassMonths(m => Math.max(1, m - 1))} style={{ width: 30, height: 30, borderRadius: "var(--r-sm)", border: "1.5px solid var(--hairline)", background: "var(--paper-2)", color: "var(--ink)", cursor: "pointer", fontWeight: 700, fontSize: 15 }}>−</button>
-                <span style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 15, color: "var(--ink)", minWidth: 20, textAlign: "center" }}>{passMonths}</span>
-                <button onClick={() => setPassMonths(m => Math.min(12, m + 1))} style={{ width: 30, height: 30, borderRadius: "var(--r-sm)", border: "1.5px solid var(--hairline)", background: "var(--paper-2)", color: "var(--ink)", cursor: "pointer", fontWeight: 700, fontSize: 15 }}>+</button>
+              <div className="form-input" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px", gap: 4 }}>
+                <button onClick={() => setPassMonths(m => Math.max(1, m - 1))} style={{ width: 32, height: 32, borderRadius: "var(--r-sm)", border: "none", background: "var(--paper-2)", color: "var(--ink)", cursor: "pointer", fontWeight: 700, fontSize: 18, flexShrink: 0 }}>−</button>
+                <span style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 16, color: "var(--ink)", flex: 1, textAlign: "center" }}>{passMonths}</span>
+                <button onClick={() => setPassMonths(m => Math.min(12, m + 1))} style={{ width: 32, height: 32, borderRadius: "var(--r-sm)", border: "none", background: "var(--paper-2)", color: "var(--ink)", cursor: "pointer", fontWeight: 700, fontSize: 18, flexShrink: 0 }}>+</button>
               </div>
             </div>
           </div>
@@ -1032,7 +1032,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
                         {a.description && <div style={{ font: "500 11px var(--font-ui)", color: on ? "rgba(255,255,255,0.5)" : "var(--ink-3)", marginTop: 2 }}>{a.description}</div>}
                       </div>
                       <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: on ? "#C8FF3E" : "var(--ink)", flexShrink: 0, marginLeft: 12 }}>
-                        {on ? "✓ " : ""}{rupeesInt(a.pricePaise)}<span style={{ fontWeight: 500, fontSize: 11, opacity: 0.7 }}>/{a.unit ?? "session"}</span>
+                        {on ? "✓ " : ""}{rupeesInt(a.pricePaise)}<span style={{ fontWeight: 500, fontSize: 11, opacity: 0.7 }}>/{(a.unit ?? "session").replace(/^per_/i, "")}</span>
                       </div>
                     </button>
                   );
