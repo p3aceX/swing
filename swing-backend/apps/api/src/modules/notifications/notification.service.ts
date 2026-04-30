@@ -112,7 +112,11 @@ export class NotificationService {
     })
   }
 
-  async getSummary(userId: string, types?: string[]) {
+  private audienceWhere(audience?: NotificationAudience) {
+    return audience ? { data: { path: ['audience'], equals: audience } } : {}
+  }
+
+  async getSummary(userId: string, types?: string[], audience?: NotificationAudience) {
     const typeFilter = types && types.length > 0 ? { in: types } : undefined
     const [notificationUnreadCount, profile, preferences] = await Promise.all([
       prisma.notification.count({
@@ -120,6 +124,7 @@ export class NotificationService {
           userId,
           isRead: false,
           ...(typeFilter ? { type: typeFilter } : {}),
+          ...this.audienceWhere(audience),
         },
       }),
       prisma.playerProfile.findUnique({
@@ -190,11 +195,13 @@ export class NotificationService {
     page: number,
     limit: number,
     types?: string[],
+    audience?: NotificationAudience,
   ) {
     const typeFilter = types && types.length > 0 ? { in: types } : undefined
     const where = {
       userId,
       ...(typeFilter ? { type: typeFilter } : {}),
+      ...this.audienceWhere(audience),
     }
     const [notifications, total, unreadCount] = await prisma.$transaction([
       prisma.notification.findMany({
@@ -216,13 +223,14 @@ export class NotificationService {
     return prisma.notification.update({ where: { id: notificationId }, data: { isRead: true, readAt: new Date(), status: 'READ' } })
   }
 
-  async markAllRead(userId: string, types?: string[]) {
+  async markAllRead(userId: string, types?: string[], audience?: NotificationAudience) {
     const typeFilter = types && types.length > 0 ? { in: types } : undefined
     await prisma.notification.updateMany({
       where: {
         userId,
         isRead: false,
         ...(typeFilter ? { type: typeFilter } : {}),
+        ...this.audienceWhere(audience),
       },
       data: { isRead: true, readAt: new Date(), status: 'READ' },
     })

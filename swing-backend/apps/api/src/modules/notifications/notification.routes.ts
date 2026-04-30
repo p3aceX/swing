@@ -5,6 +5,12 @@ import { NotificationService } from './notification.service'
 export async function notificationRoutes(app: FastifyInstance) {
   const svc = new NotificationService()
   const auth = { onRequest: [(app as any).authenticate] }
+  const parseAudience = (value?: string) => {
+    const audience = value?.trim()
+    return audience === 'PLAYER' || audience === 'BIZ_OWNER' || audience === 'ALL'
+      ? audience
+      : undefined
+  }
 
   app.post('/fcm-token', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
@@ -20,7 +26,7 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.get('/', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const q = request.query as { page?: string; limit?: string; types?: string }
+    const q = request.query as { page?: string; limit?: string; types?: string; audience?: string }
     const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
     return reply.send({
       success: true,
@@ -29,15 +35,16 @@ export async function notificationRoutes(app: FastifyInstance) {
         Number(q.page) || 1,
         Number(q.limit) || 20,
         types,
+        parseAudience(q.audience),
       ),
     })
   })
 
   app.get('/summary', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const q = request.query as { types?: string }
+    const q = request.query as { types?: string; audience?: string }
     const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
-    return reply.send({ success: true, data: await svc.getSummary(user.userId, types) })
+    return reply.send({ success: true, data: await svc.getSummary(user.userId, types, parseAudience(q.audience)) })
   })
 
   app.get('/preferences', auth, async (request, reply) => {
@@ -68,9 +75,9 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.post('/read-all', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const q = request.query as { types?: string }
+    const q = request.query as { types?: string; audience?: string }
     const types = q.types?.split(',').map((type) => type.trim()).filter(Boolean)
-    return reply.send({ success: true, data: await svc.markAllRead(user.userId, types) })
+    return reply.send({ success: true, data: await svc.markAllRead(user.userId, types, parseAudience(q.audience)) })
   })
 
   app.post('/sync', auth, async (request, reply) => {

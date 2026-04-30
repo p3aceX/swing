@@ -62,7 +62,10 @@ final notificationSummaryProvider =
   try {
     final res = await ApiClient.instance.dio.get(
       ApiEndpoints.notificationsSummary,
-      queryParameters: {'types': _playerNotificationTypes.join(',')},
+      queryParameters: {
+        'types': _playerNotificationTypes.join(','),
+        'audience': 'PLAYER',
+      },
     );
     final body = res.data;
     if (body is Map<String, dynamic>) {
@@ -120,6 +123,7 @@ class _NotificationsNotifier extends StateNotifier<_NotificationsState> {
           'page': 1,
           'limit': 50,
           'types': _playerNotificationTypes.join(','),
+          'audience': 'PLAYER',
         },
       );
       final body = res.data;
@@ -172,7 +176,10 @@ class _NotificationsNotifier extends StateNotifier<_NotificationsState> {
     try {
       await ApiClient.instance.dio.post(
         ApiEndpoints.notificationsReadAll,
-        queryParameters: {'types': _playerNotificationTypes.join(',')},
+        queryParameters: {
+          'types': _playerNotificationTypes.join(','),
+          'audience': 'PLAYER',
+        },
       );
       state = state.copyWith(
         isMarkingAll: false,
