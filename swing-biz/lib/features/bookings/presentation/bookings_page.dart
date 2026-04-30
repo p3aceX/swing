@@ -310,19 +310,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                                       widget.arena.name,
                                       widget.arena.id),
                                   onCheckin: booking.status == 'CONFIRMED'
-                                      ? () async {
-                                          final repo = ref.read(hostArenaBookingRepositoryProvider);
-                                          try {
-                                            await repo.checkinByOwner(booking.id);
-                                            ref.invalidate(_allBookingsProvider(widget.arena.id));
-                                          } catch (e) {
-                                            if (context.mounted) {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(content: Text('Check-in failed: $e')),
-                                              );
-                                            }
-                                          }
-                                        }
+                                      ? () => _handleCheckinCheckout(context, booking)
                                       : null,
                                 );
                               },
@@ -371,6 +359,40 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     ).then((_) {
       ref.invalidate(_allBookingsProvider(arenaId));
     });
+  }
+
+  Future<void> _handleCheckinCheckout(
+      BuildContext context, ArenaReservation booking) async {
+    final result = await showModalBottomSheet<_PaymentResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (_) => _CheckoutSheet(booking: booking),
+    );
+    if (result == null) return;
+    final repo = ref.read(hostArenaBookingRepositoryProvider);
+    try {
+      await repo.markBookingPaid(booking.id,
+          paymentMode: result.mode, amountPaise: result.amountPaise);
+      if (booking.status == 'CONFIRMED') {
+        await repo.checkinByOwner(booking.id);
+      }
+      ref.invalidate(_allBookingsProvider(widget.arena.id));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Guest checked in · ${result.mode} ₹${(result.amountPaise / 100).toStringAsFixed(0)} recorded'),
+          backgroundColor: _accent,
+        ));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e')));
+      }
+    }
   }
 }
 
@@ -888,15 +910,13 @@ class BookingCard extends StatefulWidget {
   final ArenaReservation booking;
   final VoidCallback onTap;
   final bool isNextUp;
-  final Future<void> Function()? onCheckin;
+  final VoidCallback? onCheckin;
 
   @override
   State<BookingCard> createState() => _BookingCardState();
 }
 
 class _BookingCardState extends State<BookingCard> {
-  bool _checkingIn = false;
-
   @override
   Widget build(BuildContext context) {
     final booking = widget.booking;
@@ -1044,13 +1064,7 @@ class _BookingCardState extends State<BookingCard> {
                   child: InkWell(
                     borderRadius: const BorderRadius.vertical(
                         bottom: Radius.circular(20)),
-                    onTap: _checkingIn
-                        ? null
-                        : () async {
-                            setState(() => _checkingIn = true);
-                            await widget.onCheckin!();
-                            if (mounted) setState(() => _checkingIn = false);
-                          },
+                    onTap: widget.onCheckin,
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1059,29 +1073,22 @@ class _BookingCardState extends State<BookingCard> {
                         borderRadius: BorderRadius.vertical(
                             bottom: Radius.circular(19)),
                       ),
-                      child: _checkingIn
-                          ? const Center(
-                              child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: _accent)))
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: const [
-                                Icon(Icons.how_to_reg_rounded,
-                                    size: 16, color: _accent),
-                                SizedBox(width: 6),
-                                Text(
-                                  'Check In Guest',
-                                  style: TextStyle(
-                                      color: _accent,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.2),
-                                ),
-                              ],
-                            ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.how_to_reg_rounded,
+                              size: 16, color: _accent),
+                          SizedBox(width: 6),
+                          Text(
+                            'Check In Guest',
+                            style: TextStyle(
+                                color: _accent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.2),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1896,7 +1903,8 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     final advance = widget.booking.advancePaise / 100;
     final discount = (double.tryParse(_discountCtrl.text) ?? 0);
 
-    return Container(
+    return SingleChildScrollView(
+      child: Container(
       padding: EdgeInsets.fromLTRB(
           24,
           12,
@@ -2022,6 +2030,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
           ),
         ],
       ),
+    ),
     );
   }
 
