@@ -983,8 +983,8 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
 
       {/* ── DURATION (step 2 only) ───────────────────────────────────────────── */}
       {step === "slot" && unit && (
-        <div style={{ padding: "14px 14px 0" }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Duration</div>
+        <div style={{ padding: "16px 20px 0" }}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Duration</div>
           {useGroundBundles ? (
             <div style={{ display: "flex", gap: 8 }}>
               {bundles.map((b) => (
@@ -1053,8 +1053,8 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
       {/* ── DATE + SLOT ─────────────────────────────────────────────────────── */}
       {step === "slot" && (
         <>
-          <div style={{ padding: "14px 14px 0" }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Pick a date</div>
+          <div style={{ padding: "20px 20px 0" }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Pick a date</div>
           </div>
           <div className="cal-strip">
             {dates.map((d) => {
@@ -1099,7 +1099,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
               <>
                 {durMins > 0 && allSlots.length > 0 ? (
                   <>
-                    <div style={{ height: 12 }} />
+                    <div style={{ height: 16 }} />
                     <div className="slot-grid">
                       {allSlots.map((s) => (
                         <div key={s.start}
