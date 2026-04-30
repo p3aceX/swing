@@ -489,14 +489,14 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
   const stepNum = step === "date" ? 1 : step === "slot" ? 2 : step === "extras" ? 3 : step === "form" ? (hasExtrasStep ? 4 : 3) : (hasExtrasStep ? 4 : 3);
   const stepLabels: Record<number, string> = { 1: "Choose unit", 2: "Pick time", 3: hasExtrasStep ? "Add-ons" : "Your details", 4: "Your details" };
   const StepBar = () => (
-    <div style={{ display: "flex", alignItems: "center", gap: 0, padding: "16px 16px 0" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 0, padding: "22px 20px 0" }}>
       {Array.from({ length: totalSteps }, (_, i) => i + 1).map((n) => {
         const done = stepNum > n;
         const active = stepNum === n;
         return (
           <div key={n} style={{ display: "flex", alignItems: "center", flex: n < totalSteps ? "1 1 auto" : "0 0 auto" }}>
             <div style={{
-              width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
+              width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
               background: active ? "#0A0B0A" : done ? "#0A0B0A" : "var(--paper-2)",
               border: `1.5px solid ${active ? "#C8FF3E" : done ? "#0A0B0A" : "var(--hairline)"}`,
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -506,11 +506,11 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
             }}>
               {done ? "✓" : n}
             </div>
-            {n < totalSteps && <div style={{ flex: 1, height: 1.5, background: done ? "#0A0B0A" : "var(--hairline)", margin: "0 6px", transition: "background .2s" }} />}
+            {n < totalSteps && <div style={{ flex: 1, height: 1.5, background: done ? "#0A0B0A" : "var(--hairline)", margin: "0 8px", transition: "background .2s" }} />}
           </div>
         );
       })}
-      <div style={{ marginLeft: 10, fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "var(--ink-3)", whiteSpace: "nowrap" }}>
+      <div style={{ marginLeft: 12, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "var(--ink-3)", whiteSpace: "nowrap" }}>
         {stepLabels[stepNum] ?? ""}
       </div>
     </div>
@@ -523,9 +523,9 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         <StepBar />
 
         {/* Unit blocks */}
-        <div style={{ padding: "28px 14px 0" }}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Available Units</div>
-          <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "15px 0 15px 0" }} className="scrollbar-none">
+        <div style={{ padding: "32px 20px 0" }}>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>Available Units</div>
+          <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0 16px 0" }} className="scrollbar-none">
             {units.map((u) => {
               const sel = unitId === u.id;
               const isGr = GROUND_TYPES.has(u.unitType ?? "");
@@ -543,14 +543,14 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
               return (
                 <button key={u.id} onClick={() => handleUnitChange(u.id)} style={{
                   flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "flex-start",
-                  gap: 4, padding: "12px 14px", minWidth: 130, borderRadius: "var(--r-md)",
+                  gap: 6, padding: "14px 16px", minWidth: 140, borderRadius: "var(--r-md)",
                   border: `1.5px solid ${sel ? "#C8FF3E" : "var(--hairline)"}`,
                   background: sel ? "#0A0B0A" : "var(--paper-2)",
                   cursor: "pointer", textAlign: "left", transition: "all .15s",
                 }}>
-                  <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: sel ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 }}>{u.name}</div>
-                  {u.unitType && <div style={{ font: "500 10px var(--font-ui)", color: sel ? "rgba(255,255,255,0.5)" : "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 8 }}>{u.unitType.replace(/_/g, " ")}</div>}
-                  {pLabel && <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 12, color: sel ? "rgba(255,255,255,0.85)" : "var(--ink)", marginTop: 4 }}>{pLabel}</div>}
+                  <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 14, color: sel ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 }}>{u.name}</div>
+                  {u.unitType && <div style={{ font: "500 10px var(--font-ui)", color: sel ? "rgba(255,255,255,0.5)" : "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4 }}>{u.unitType.replace(/_/g, " ")}</div>}
+                  {pLabel && <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: sel ? "rgba(255,255,255,0.85)" : "var(--ink)", marginTop: 2 }}>{pLabel}</div>}
                 </button>
               );
             })}
@@ -559,15 +559,16 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
 
         {/* Booking mode + net type */}
         {unit && (
-          <div style={{ padding: "28px 14px 0" }}>
-            <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "4px 0 4px 0" }} className="scrollbar-none">
+          <div style={{ padding: "32px 20px 0" }}>
+            <div className="eyebrow" style={{ marginBottom: 14 }}>How to book</div>
+            <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0 4px 0" }} className="scrollbar-none">
               {/* Book Once — always shown */}
               {(() => {
                 const active = step === "date";
                 return (
                   <button onClick={() => setStep("date")} style={{
                     flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                    padding: "10px 16px", borderRadius: 999,
+                    padding: "11px 20px", borderRadius: 999,
                     border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
                     background: active ? "#0A0B0A" : "var(--paper-2)",
                     cursor: "pointer", transition: "all .15s",
@@ -593,7 +594,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
                 return (
                   <button onClick={() => { setStep("pass"); setGuestName(""); setGuestPhone(""); setError(""); }} style={{
                     flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                    padding: "10px 16px", borderRadius: 999,
+                    padding: "11px 20px", borderRadius: 999,
                     border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
                     background: active ? "#0A0B0A" : "var(--paper-2)",
                     cursor: "pointer", transition: "all .15s",
@@ -610,7 +611,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
                 return (
                   <button onClick={() => { setStep("bulk"); setBulkDays(unit.minBulkDays ?? 1); setGuestName(""); setGuestPhone(""); setError(""); }} style={{
                     flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                    padding: "10px 16px", borderRadius: 999,
+                    padding: "11px 20px", borderRadius: 999,
                     border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
                     background: active ? "#0A0B0A" : "var(--paper-2)",
                     cursor: "pointer", transition: "all .15s",
@@ -624,13 +625,13 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
 
             {/* Net variants — no label */}
             {netVariants.length > 0 && step === "date" && (
-              <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "16px 2px 16px" }} className="scrollbar-none">
+              <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "20px 2px 8px" }} className="scrollbar-none">
                 {netVariants.map((v) => {
                   const active = activeVariant?.type === v.type;
                   return (
                     <button key={v.type} onClick={() => setSelectedVariant(v.type)} style={{
-                      flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                      padding: "8px 14px", borderRadius: "var(--r-md)",
+                      flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 4,
+                      padding: "10px 16px", borderRadius: "var(--r-md)",
                       border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
                       background: active ? "#0A0B0A" : "var(--paper-2)",
                       cursor: "pointer", transition: "all .15s",
@@ -674,7 +675,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
           </button>
           <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>Monthly Pass · {unit?.name}</div>
         </div>
-        <div style={{ padding: "12px 14px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ padding: "20px 20px 0", display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", gap: 8 }}>
             <div className="form-field" style={{ flex: 1 }}>
               <label className="form-label">Start time</label>
