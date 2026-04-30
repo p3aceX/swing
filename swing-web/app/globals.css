@@ -441,7 +441,7 @@ a { color: inherit; text-decoration: none; }
 /* ── Pay-at-venue note ───────────────────────────────────────────────────── */
 .pay-note {
   font: 500 11px var(--font-ui, ui-sans-serif);
-  color: var(--ink-3); padding: 0 20px; margin-top: 8px;
+  color: var(--ink-3); padding: 0 20px; margin-top: 8px; margin-bottom: 10px;
   line-height: 1.5;
 }
 
