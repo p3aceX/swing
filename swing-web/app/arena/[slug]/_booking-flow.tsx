@@ -113,6 +113,8 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
   const [submitting, startSubmit] = useTransition();
   const [error, setError] = useState("");
   const [bookingRef, setBookingRef] = useState("");
+  const [dateAvail, setDateAvail] = useState<Record<string, { total: number; avail: number }>>({});
+  const [showSaveModal, setShowSaveModal] = useState(false);
   const slotRef = useRef<HTMLDivElement>(null);
 
   // Prevent page scroll when user swipes horizontally on carousels (iOS fix)
@@ -143,6 +145,37 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
     });
     return () => cleanups.forEach((fn) => fn());
   }, [step]);
+
+  // Batch-fetch slot availability for all 14 visible dates
+  useEffect(() => {
+    if (step !== "slot") return;
+    setDateAvail({});
+    let cancelled = false;
+    const dm = durMins || 60;
+    const dates14 = Array.from({ length: 14 }, (_, i) => addDays(getToday(), i));
+    dates14.forEach(async (d) => {
+      try {
+        const res = await fetch(`/api/arena/${arenaSlug}/slots?date=${d}`);
+        if (!res.ok || cancelled) return;
+        const body = await res.json() as { data?: { units?: SlotUnit[] } };
+        const su = (body.data?.units ?? []).find(u => u.id === unitId);
+        if (!su || cancelled) return;
+        const openM = toMins(su.openTime ?? (openTime ?? "06:00"));
+        const closeM = toMins(su.closeTime ?? (closeTime ?? "23:00"));
+        const inc = su.slotIncrementMins ?? su.minSlotMins ?? 60;
+        const booked = su.bookedSlots ?? [];
+        let total = 0, avail = 0;
+        for (let s = openM; s + dm <= closeM; s += inc) {
+          const st = toTime(s); const et = toTime(s + dm);
+          total++;
+          if (!booked.some(b => b.startTime < et && b.endTime > st)) avail++;
+        }
+        if (!cancelled) setDateAvail(prev => ({ ...prev, [d]: { total, avail } }));
+      } catch {}
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, unitId, arenaSlug]);
 
   const unit = units.find((u) => u.id === unitId);
   const isGround = GROUND_TYPES.has(unit?.unitType ?? "");
@@ -257,6 +290,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         const data = (await res.json()) as { success?: boolean; error?: string; data?: { id?: string } };
         if (!res.ok || !data.success) { setError(data.error ?? "Booking failed. Slot may have been taken."); return; }
         setBookingRef(data.data?.id?.slice(-8).toUpperCase() ?? "OK");
+        setShowSaveModal(true);
         setStep("done");
       } catch { setError("Network error. Try again."); }
     });
@@ -274,6 +308,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         const data = (await res.json()) as { success?: boolean; error?: string; data?: { id?: string } };
         if (!res.ok || !data.success) { setError(data.error ?? "Failed. Try again."); return; }
         setBookingRef(data.data?.id?.slice(-8).toUpperCase() ?? "OK");
+        setShowSaveModal(true);
         setStep("done");
       } catch { setError("Network error. Try again."); }
     });
@@ -291,6 +326,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         const data = (await res.json()) as { success?: boolean; error?: string; data?: { numDays?: number; totalAmountPaise?: number } };
         if (!res.ok || !data.success) { setError(data.error ?? "Failed. Try again."); return; }
         setBookingRef(`${data.data?.numDays ?? bulkDays}D`);
+        setShowSaveModal(true);
         setStep("done");
       } catch { setError("Network error. Try again."); }
     });
@@ -298,108 +334,112 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
 
   const dates = Array.from({ length: 14 }, (_, i) => addDays(today, i));
 
+  const savePass = async () => {
+    const endTime = selectedStart ? toTime(toMins(selectedStart) + durMins) : "";
+    const canvas = document.createElement("canvas");
+    canvas.width = 900; canvas.height = 480;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#0A0B0A"; ctx.fillRect(0, 0, 900, 480);
+    const g = ctx.createRadialGradient(820, 40, 0, 820, 40, 260);
+    g.addColorStop(0, "rgba(200,255,62,0.28)"); g.addColorStop(1, "rgba(200,255,62,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 900, 480);
+    ctx.fillStyle = "#C8FF3E"; ctx.fillRect(0, 0, 5, 480);
+    ctx.fillStyle = "#C8FF3E"; ctx.font = "bold 14px system-ui, sans-serif"; ctx.fillText("SWING", 32, 48);
+    ctx.fillStyle = "rgba(200,255,62,0.15)";
+    ctx.beginPath(); ctx.roundRect(720, 24, 130, 30, 15); ctx.fill();
+    ctx.fillStyle = "#C8FF3E"; ctx.font = "600 11px system-ui, sans-serif"; ctx.fillText("CONFIRMED ✓", 738, 44);
+    ctx.fillStyle = "white"; ctx.font = "bold 34px system-ui, sans-serif"; ctx.fillText(arenaName, 32, 110);
+    ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "500 16px system-ui, sans-serif"; ctx.fillText(unit?.name ?? "", 32, 142);
+    ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(32, 168); ctx.lineTo(868, 168); ctx.stroke();
+    const fields = [
+      { label: "DATE", value: date ? fmtDateShort(date) : "—" },
+      { label: "TIME", value: selectedStart && endTime ? `${fmt12(selectedStart)} – ${fmt12(endTime)}` : "—" },
+      { label: "DURATION", value: durMins ? durLabel(durMins) : "—" },
+    ];
+    fields.forEach((f, i) => {
+      const x = 32 + i * 270;
+      ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif"; ctx.fillText(f.label, x, 202);
+      ctx.fillStyle = "white"; ctx.font = "bold 20px system-ui, sans-serif"; ctx.fillText(f.value, x, 230);
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.beginPath(); ctx.roundRect(32, 258, 310, 58, 8); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif"; ctx.fillText("BOOKING ID", 50, 280);
+    ctx.fillStyle = "white"; ctx.font = "bold 22px system-ui, sans-serif"; ctx.fillText(`SW-${bookingRef}`, 50, 306);
+    if (address) {
+      ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif"; ctx.fillText("LOCATION", 370, 280);
+      ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.font = "500 13px system-ui, sans-serif";
+      ctx.fillText(address.length > 50 ? address.slice(0, 50) + "…" : address, 370, 306);
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.font = "500 13px system-ui, sans-serif"; ctx.fillText(guestName, 32, 370);
+    ctx.fillStyle = "rgba(255,255,255,0.2)"; ctx.font = "500 10px system-ui, sans-serif";
+    ctx.fillText("ARRIVE 10 MIN EARLY  ·  SHOW THIS AT FRONT DESK  ·  swing.app", 32, 450);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `swing-pass-${bookingRef}.png`, { type: "image/png" });
+      if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Booking Pass" });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = file.name; a.click();
+        URL.revokeObjectURL(url);
+      }
+    }, "image/png");
+  };
+
   // ── Confirmation screen ─────────────────────────────────────────────────
   if (step === "done") {
-    const endTime = toTime(toMins(selectedStart) + durMins);
+    const endTime = selectedStart ? toTime(toMins(selectedStart) + durMins) : "";
     const mapsUrl = latitude && longitude
       ? `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`
       : address
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
         : null;
 
-    const savePass = async () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 900; canvas.height = 480;
-      const ctx = canvas.getContext("2d")!;
-
-      // Background
-      ctx.fillStyle = "#0A0B0A";
-      ctx.fillRect(0, 0, 900, 480);
-
-      // Glow
-      const g = ctx.createRadialGradient(820, 40, 0, 820, 40, 260);
-      g.addColorStop(0, "rgba(200,255,62,0.28)"); g.addColorStop(1, "rgba(200,255,62,0)");
-      ctx.fillStyle = g; ctx.fillRect(0, 0, 900, 480);
-
-      // Left accent bar
-      ctx.fillStyle = "#C8FF3E"; ctx.fillRect(0, 0, 5, 480);
-
-      // Branding
-      ctx.fillStyle = "#C8FF3E"; ctx.font = "bold 14px system-ui, sans-serif";
-      ctx.fillText("SWING", 32, 48);
-
-      // CONFIRMED badge
-      ctx.fillStyle = "rgba(200,255,62,0.15)";
-      ctx.beginPath(); ctx.roundRect(720, 24, 130, 30, 15); ctx.fill();
-      ctx.fillStyle = "#C8FF3E"; ctx.font = "600 11px system-ui, sans-serif";
-      ctx.fillText("CONFIRMED ✓", 738, 44);
-
-      // Arena name
-      ctx.fillStyle = "white"; ctx.font = "bold 34px system-ui, sans-serif";
-      ctx.fillText(arenaName, 32, 110);
-
-      // Unit name
-      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "500 16px system-ui, sans-serif";
-      ctx.fillText(unit?.name ?? "", 32, 142);
-
-      // Divider
-      ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(32, 168); ctx.lineTo(868, 168); ctx.stroke();
-
-      // Fields row
-      const fields = [
-        { label: "DATE", value: fmtDateShort(date) },
-        { label: "TIME", value: `${fmt12(selectedStart)} – ${fmt12(endTime)}` },
-        { label: "DURATION", value: durLabel(durMins) },
-      ];
-      fields.forEach((f, i) => {
-        const x = 32 + i * 270;
-        ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif";
-        ctx.fillText(f.label, x, 202);
-        ctx.fillStyle = "white"; ctx.font = "bold 20px system-ui, sans-serif";
-        ctx.fillText(f.value, x, 230);
-      });
-
-      // Booking ref box
-      ctx.fillStyle = "rgba(255,255,255,0.07)";
-      ctx.beginPath(); ctx.roundRect(32, 258, 310, 58, 8); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif";
-      ctx.fillText("BOOKING ID", 50, 280);
-      ctx.fillStyle = "white"; ctx.font = "bold 22px system-ui, sans-serif";
-      ctx.fillText(`SW-${bookingRef}`, 50, 306);
-
-      // Address
-      if (address) {
-        ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.font = "500 10px system-ui, sans-serif";
-        ctx.fillText("LOCATION", 370, 280);
-        ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.font = "500 13px system-ui, sans-serif";
-        ctx.fillText(address.length > 50 ? address.slice(0, 50) + "…" : address, 370, 306);
-      }
-
-      // Guest name
-      ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.font = "500 13px system-ui, sans-serif";
-      ctx.fillText(guestName, 32, 370);
-
-      // Footer
-      ctx.fillStyle = "rgba(255,255,255,0.2)"; ctx.font = "500 10px system-ui, sans-serif";
-      ctx.fillText("ARRIVE 10 MIN EARLY  ·  SHOW THIS AT FRONT DESK  ·  swing.app", 32, 450);
-
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
-        const file = new File([blob], `swing-pass-${bookingRef}.png`, { type: "image/png" });
-        if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [file] })) {
-          await navigator.share({ files: [file], title: "Booking Pass" });
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = file.name; a.click();
-          URL.revokeObjectURL(url);
-        }
-      }, "image/png");
-    };
-
     return (
-      <div style={{ background: "#0A0B0A", color: "white", padding: "0 20px 48px", position: "relative", overflowX: "hidden" }}>
+      <>
+        {/* Save Pass modal — bottom sheet, shown immediately on confirmation */}
+        {showSaveModal && (
+          <div
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 999, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}
+            onClick={() => setShowSaveModal(false)}
+          >
+            <div
+              style={{ background: "#0D0E0D", borderRadius: "20px 20px 0 0", padding: "20px 24px 44px", position: "relative" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ width: 36, height: 4, borderRadius: 999, background: "rgba(255,255,255,0.18)", margin: "0 auto 28px" }} />
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+                <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#C8FF3E", display: "grid", placeItems: "center" }}>
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#0A0B0A" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+              </div>
+              <div style={{ textAlign: "center", marginBottom: 28 }}>
+                <div style={{ fontFamily: "var(--font-ui)", fontWeight: 800, fontSize: 24, color: "white", lineHeight: 1.15, marginBottom: 8 }}>Booking Confirmed!</div>
+                <div style={{ font: "500 13px var(--font-ui)", color: "rgba(255,255,255,0.5)" }}>
+                  {unit?.name} · <span style={{ color: "#C8FF3E" }}>SW-{bookingRef}</span>
+                </div>
+                {date && selectedStart && (
+                  <div style={{ font: "500 12px var(--font-ui)", color: "rgba(255,255,255,0.38)", marginTop: 5 }}>
+                    {fmtDateShort(date)} · {fmt12(selectedStart)} → {fmt12(endTime)}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <button onClick={savePass} style={{ width: "100%", padding: "15px", borderRadius: 999, font: "700 14px var(--font-ui)", background: "#C8FF3E", color: "#0A0B0A", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Save Pass to Gallery
+                </button>
+                <button onClick={() => setShowSaveModal(false)} style={{ width: "100%", padding: "14px", borderRadius: 999, font: "600 13px var(--font-ui)", background: "transparent", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.15)", cursor: "pointer" }}>
+                  View Booking Details
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Confirmation page — visible after modal is dismissed */}
+        <div style={{ background: "#0A0B0A", color: "white", padding: "0 20px 48px", position: "relative", overflowX: "hidden" }}>
         {/* glow */}
         <div style={{ position: "absolute", top: -80, right: -80, width: 300, height: 300, borderRadius: "50%", background: "#C8FF3E", filter: "blur(100px)", opacity: 0.25, pointerEvents: "none", zIndex: 0 }} />
 
@@ -479,7 +519,8 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      </>
     );
   }
 
@@ -1023,7 +1064,14 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
                 <div key={d} className={`cal-day${date === d ? " selected" : ""}`} onClick={() => handleDateSelect(d)}>
                   <div className="dow">{wd}</div>
                   <div className="dom">{day}</div>
-                  <div className="avail" style={{ minHeight: 14 }}></div>
+                  <div className="avail" style={{ minHeight: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {(() => {
+                      const a = dateAvail[d];
+                      if (!a || a.total === 0) return null;
+                      const color = a.avail === 0 ? "#FF4444" : a.avail < a.total / 2 ? "#FF9500" : "#C8FF3E";
+                      return <div style={{ width: 5, height: 5, borderRadius: "50%", background: color }} />;
+                    })()}
+                  </div>
                 </div>
               );
             })}
