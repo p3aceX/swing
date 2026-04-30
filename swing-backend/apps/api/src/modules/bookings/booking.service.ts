@@ -894,19 +894,20 @@ export class BookingService {
       bookedBy: { include: { user: { select: { name: true, phone: true } } } },
     }
 
-    // Checked-in = collection realized
+    // Checked-in = collection realized — filter by paidAt so a future booking
+    // checked-in today shows up in today's/this month's collected total.
     const checkedInBookings = await prisma.slotBooking.findMany({
       where: {
         arenaId,
         checkedInAt: { not: null },
         status: { notIn: ['CANCELLED'] },
-        ...(dateFrom ? { date: { gte: dateFrom, lt: dateTo } } : {}),
+        ...(dateFrom ? { paidAt: { gte: dateFrom, lt: dateTo } } : {}),
       },
       select: bookingSelect,
-      orderBy: { date: 'desc' },
+      orderBy: { paidAt: 'desc' },
     })
 
-    // Confirmed but not yet checked in = balance pending
+    // Confirmed but not yet checked in = balance pending — keep filtering by bookingDate
     const pendingBookings = await prisma.slotBooking.findMany({
       where: {
         arenaId,
