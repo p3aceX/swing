@@ -120,7 +120,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   Future<void> _submit() async {
     setState(() => _saving = true);
     try {
-      await ref.read(hostBizRepositoryProvider).createArena(ArenaProfileInput(
+      final arenaData = await ref.read(hostBizRepositoryProvider).createArena(ArenaProfileInput(
         name: _name.text.trim(),
         address: _address.text.trim(),
         city: _city.text.trim(),
@@ -133,12 +133,14 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         longitude: _parseDouble(_longitude.text),
         photoUrls: _photoUrls,
       ));
+      final arenaId = arenaData['id'] as String? ??
+          (arenaData['data'] as Map<String, dynamic>?)?['id'] as String?;
       await ref.read(sessionControllerProvider.notifier).setActiveProfile(BizProfileType.arena);
       ref.invalidate(meProvider);
       ref.invalidate(ownedArenasProvider);
       if (mounted) {
-        if (context.canPop()) {
-          context.pop();
+        if (arenaId != null) {
+          context.go(AppRoutes.createFirstUnit, extra: arenaId);
         } else {
           context.go(AppRoutes.dashboard);
         }

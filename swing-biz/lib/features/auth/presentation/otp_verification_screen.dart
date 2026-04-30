@@ -334,11 +334,11 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     return '$min:$sec';
   }
 
-  void _showBiometricDialog(BuildContext context, WidgetRef ref) {
+  void _showBiometricDialog(BuildContext screenContext, WidgetRef ref) {
     showDialog(
-      context: context,
+      context: screenContext,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Enable Biometric?',
             style: TextStyle(fontWeight: FontWeight.w900)),
@@ -347,28 +347,28 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
         actions: [
           TextButton(
             onPressed: () {
+              Navigator.pop(dialogContext);
+              // skipBiometrics sets needsBiometricEnrollment=false →
+              // RouterRefreshStream fires → router redirects to dashboard.
               ref.read(authControllerProvider.notifier).skipBiometrics();
-              Navigator.pop(context);
-              context.go(AppRoutes.dashboard);
             },
             child: const Text('Maybe later',
                 style: TextStyle(color: Color(0xFF667085))),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               final enabled = await ref
                   .read(authControllerProvider.notifier)
                   .enableBiometrics();
-              if (!context.mounted) return;
-              if (enabled) {
-                context.go(AppRoutes.dashboard);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
+              // enableBiometrics sets needsBiometricEnrollment=false on success →
+              // RouterRefreshStream fires → router redirects to dashboard.
+              if (!enabled && screenContext.mounted) {
+                ScaffoldMessenger.of(screenContext).showSnackBar(
                   const SnackBar(
                       content: Text('Biometric setup failed. Try again.')),
                 );
-                _showBiometricDialog(context, ref);
+                _showBiometricDialog(screenContext, ref);
               }
             },
             child: const Text('Enable',

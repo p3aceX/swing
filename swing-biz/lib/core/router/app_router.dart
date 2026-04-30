@@ -17,6 +17,7 @@ import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/dashboard/presentation/coach_dashboard_screens.dart';
 import '../../features/onboarding/presentation/business_details_screen.dart';
 import '../../features/onboarding/presentation/create_arena_screen.dart';
+import '../../features/onboarding/presentation/create_first_unit_screen.dart';
 import '../../features/arena/screens/arena_profile_page.dart';
 import '../../features/arena/screens/unit_detail_page.dart';
 import '../../features/auth/presentation/biometric_screen.dart';
@@ -36,6 +37,7 @@ class AppRoutes {
   static const createAcademy = '/onboarding/academy';
   static const createCoach = '/onboarding/coach';
   static const createArena = '/onboarding/arena';
+  static const createFirstUnit = '/onboarding/first-unit';
   static const dashboard = '/dashboard';
   static const coachHome = '/coach-home';
   static const coachSessions = '/coach-home/sessions';
@@ -168,6 +170,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (!loggedIn) {
+        if (onSplash) return AppRoutes.login;
         if (onPublic) return null;
         return AppRoutes.login;
       }
@@ -180,6 +183,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       if (onOtp && authFlow.needsBiometricEnrollment) return null;
 
       if (onPublic) return AppRoutes.dashboard;
+
+      // New user with no arena yet — guide through onboarding
+      if (!meAsync.isLoading && meAsync.hasValue) {
+        final me = meAsync.valueOrNull;
+        if (me != null &&
+            me.businessStatus.arenaIds.isEmpty &&
+            me.businessStatus.managedArenaId == null) {
+          final onArenaSetup = loc == AppRoutes.createArena ||
+              loc == AppRoutes.createFirstUnit;
+          if (!onArenaSetup) return AppRoutes.createArena;
+        }
+      }
 
       return null;
     },
@@ -213,6 +228,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.createArena,
         builder: (_, __) => const CreateArenaScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.createFirstUnit,
+        builder: (_, state) => CreateFirstUnitScreen(
+          arenaId: state.extra as String? ?? '',
+        ),
       ),
       GoRoute(
         path: AppRoutes.dashboard,

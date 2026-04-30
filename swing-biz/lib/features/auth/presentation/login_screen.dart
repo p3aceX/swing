@@ -49,6 +49,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         await ref
             .read(authControllerProvider.notifier)
             .sendOtp(result.normalizedPhone);
+        if (!mounted) return;
+        final updated = ref.read(authControllerProvider);
+        if (updated.step == AuthStep.otp || updated.step == AuthStep.name) {
+          context.go(AppRoutes.otp);
+        }
       } else {
         context.go(
             '${AppRoutes.register}?phone=${Uri.encodeComponent(result.normalizedPhone)}');
@@ -71,9 +76,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           SnackBar(content: Text(next.error!)),
         );
       }
-      final movedToAuthStep = prev?.step != next.step &&
-          (next.step == AuthStep.otp || next.step == AuthStep.name);
-      if (movedToAuthStep) context.go(AppRoutes.otp);
     });
 
     return AnnotatedRegion<SystemUiOverlayStyle>(

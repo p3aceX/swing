@@ -34,11 +34,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           SnackBar(content: Text(next.error!)),
         );
       }
-      final movedToAuthStep = prev?.step != next.step &&
-          (next.step == AuthStep.otp || next.step == AuthStep.name);
-      if (movedToAuthStep) {
-        context.go(AppRoutes.otp);
-      }
     });
 
     return Scaffold(
@@ -151,6 +146,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     ref.read(authControllerProvider.notifier);
                                 controller.setPendingName(_nameCtrl.text);
                                 await controller.sendOtp(widget.phone);
+                                if (!mounted) return;
+                                final updated = ref.read(authControllerProvider);
+                                if (updated.step == AuthStep.otp ||
+                                    updated.step == AuthStep.name) {
+                                  context.go(AppRoutes.otp);
+                                }
                               },
                         child: auth.loading
                             ? const SizedBox(
