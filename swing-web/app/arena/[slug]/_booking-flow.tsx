@@ -146,6 +146,24 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
     return () => cleanups.forEach((fn) => fn());
   }, [step]);
 
+  // Helper: compute availability for one fetched unit, respecting past-slot cutoff for today
+  const computeAvail = useCallback((su: SlotUnit, dm: number, d: string) => {
+    const todayStr = getToday();
+    const nowMins = d === todayStr ? (() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); })() : -1;
+    const openM = toMins(su.openTime ?? (openTime ?? "06:00"));
+    const closeM = toMins(su.closeTime ?? (closeTime ?? "23:00"));
+    const inc = su.slotIncrementMins ?? su.minSlotMins ?? 60;
+    const booked = su.bookedSlots ?? [];
+    let total = 0, avail = 0;
+    for (let s = openM; s + dm <= closeM; s += inc) {
+      if (nowMins >= 0 && s < nowMins) continue; // skip past slots for today
+      const st = toTime(s); const et = toTime(s + dm);
+      total++;
+      if (!booked.some(b => b.startTime < et && b.endTime > st)) avail++;
+    }
+    return { total, avail };
+  }, [openTime, closeTime]);
+
   // Batch-fetch slot availability for all 14 visible dates
   useEffect(() => {
     if (step !== "slot") return;
@@ -160,21 +178,25 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         const body = await res.json() as { data?: { units?: SlotUnit[] } };
         const su = (body.data?.units ?? []).find(u => u.id === unitId);
         if (!su || cancelled) return;
-        const openM = toMins(su.openTime ?? (openTime ?? "06:00"));
-        const closeM = toMins(su.closeTime ?? (closeTime ?? "23:00"));
-        const inc = su.slotIncrementMins ?? su.minSlotMins ?? 60;
-        const booked = su.bookedSlots ?? [];
-        let total = 0, avail = 0;
-        for (let s = openM; s + dm <= closeM; s += inc) {
-          const st = toTime(s); const et = toTime(s + dm);
-          total++;
-          if (!booked.some(b => b.startTime < et && b.endTime > st)) avail++;
-        }
-        if (!cancelled) setDateAvail(prev => ({ ...prev, [d]: { total, avail } }));
+        const result = computeAvail(su, dm, d);
+        if (!cancelled) setDateAvail(prev => ({ ...prev, [d]: result }));
       } catch {}
     });
     return () => { cancelled = true; };
-  }, [step, unitId, arenaSlug, durMins]);
+  }, [step, unitId, arenaSlug, durMins, computeAvail]);
+
+  // Re-fetch a single date's availability (called after a booking is confirmed)
+  const refreshDateAvail = useCallback(async (d: string) => {
+    try {
+      const res = await fetch(`/api/arena/${arenaSlug}/slots?date=${d}`);
+      if (!res.ok) return;
+      const body = await res.json() as { data?: { units?: SlotUnit[] } };
+      const su = (body.data?.units ?? []).find(u => u.id === unitId);
+      if (!su) return;
+      const result = computeAvail(su, durMins || 60, d);
+      setDateAvail(prev => ({ ...prev, [d]: result }));
+    } catch {}
+  }, [arenaSlug, unitId, durMins, computeAvail]);
 
   const unit = units.find((u) => u.id === unitId);
   const isGround = GROUND_TYPES.has(unit?.unitType ?? "");
@@ -257,8 +279,10 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
     const closeM = toMins(slotUnit?.closeTime ?? close);
     const inc = slotUnit?.slotIncrementMins ?? slotUnit?.minSlotMins ?? 60;
     const booked = slotUnit?.bookedSlots ?? [];
+    const nowMins = date === today ? (() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); })() : -1;
     const slots: { start: string; end: string; available: boolean; peak: boolean }[] = [];
     for (let s = openM; s + durMins <= closeM; s += inc) {
+      if (nowMins >= 0 && s < nowMins) continue; // hide already-started slots for today
       const st = toTime(s); const et = toTime(s + durMins);
       const peak = s >= PEAK_START && s < PEAK_END;
       const busy = booked.some((b) => b.startTime < et && b.endTime > st);
@@ -289,6 +313,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
         const data = (await res.json()) as { success?: boolean; error?: string; data?: { id?: string } };
         if (!res.ok || !data.success) { setError(data.error ?? "Booking failed. Slot may have been taken."); return; }
         setBookingRef(data.data?.id?.slice(-8).toUpperCase() ?? "OK");
+        refreshDateAvail(date); // update calendar color for this date
         setShowSaveModal(true);
         setStep("done");
       } catch { setError("Network error. Try again."); }
