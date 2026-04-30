@@ -120,48 +120,16 @@ function rupeesPerHr(paise?: number) {
   return `₹${Math.round(paise / 100)}/hr`;
 }
 
-function unitPriceCandidates(unit: ArenaUnit) {
-  const variants = (unit.netVariants ?? [])
-    .map((variant) => variant.pricePaise)
-    .filter((price): price is number => Boolean(price && price > 0));
-  if (variants.length) return variants;
-
-  const packagePrices = [
-    unit.price4HrPaise,
-    unit.price8HrPaise,
-    unit.priceFullDayPaise,
-  ].filter((price): price is number => Boolean(price && price > 0));
-
-  return [
-    unit.pricePerHourPaise,
-    ...packagePrices,
-  ].filter((price): price is number => Boolean(price && price > 0));
-}
-
-function startingPricePaise(units: ArenaUnit[]) {
-  const prices = units.flatMap(unitPriceCandidates);
-  return prices.length ? Math.min(...prices) : undefined;
-}
-
-function priceRangeLabel(units: ArenaUnit[]) {
-  const prices = units.flatMap(unitPriceCandidates);
-  if (!prices.length) return null;
-  const min = Math.round(Math.min(...prices) / 100);
-  const max = Math.round(Math.max(...prices) / 100);
-  return min === max ? `₹${min}` : `₹${min}–₹${max}`;
-}
-
 function marketingDescription(arena: Arena) {
   const location = [arena.city, arena.state].filter(Boolean).join(", ");
   const sports = (arena.sports ?? []).map(sportLabel).join(", ");
   const units = arena.units ?? [];
-  const fromPrice = startingPricePaise(units);
-  const price = fromPrice ? `Book from ₹${Math.round(fromPrice / 100)}` : "Book slots online";
   const unitLabel = units.length
     ? `${units.length} ${units.length === 1 ? "play area" : "play areas"}`
     : "sports venue";
   const details = [
-    price,
+    "Best prices",
+    "Book arena instantly",
     unitLabel,
     sports,
     location,
@@ -191,9 +159,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const units = arena.units ?? [];
   const photo = arena.photoUrls?.find(Boolean);
   const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
-  const price = startingPricePaise(units);
-  const priceText = price ? ` from ₹${Math.round(price / 100)}` : "";
-  const title = `Book ${arena.name}${location ? ` in ${location}` : ""}${priceText}`;
+  const title = `Book ${arena.name}${location ? ` in ${location}` : ""} instantly`;
   const description = marketingDescription(arena);
   const image = photo
     ? [{ url: photo, width: 1200, height: 630, alt: `${arena.name} on Swing` }]
@@ -254,8 +220,6 @@ export default async function ArenaPage({ params }: PageProps) {
   const fullAddress = [arena.address, arena.city, arena.state]
     .filter(Boolean)
     .join(", ");
-  const startingPaise = startingPricePaise(units);
-  const priceRange = priceRangeLabel(units);
   const nets = units.filter(
     (u) => u.unitType === "CRICKET_NET" || u.unitType === "INDOOR_NET"
   ).length;
@@ -316,15 +280,6 @@ export default async function ArenaPage({ params }: PageProps) {
       name,
       value: true,
     })),
-    offers: startingPaise
-      ? {
-          "@type": "Offer",
-          priceCurrency: "INR",
-          price: Math.round(startingPaise / 100),
-          availability: "https://schema.org/InStock",
-          url: publicUrl,
-        }
-      : undefined,
   };
 
   const visibleUnits = units.slice(0, 4);
@@ -440,7 +395,7 @@ export default async function ArenaPage({ params }: PageProps) {
             <span>{openText}</span>
           </div>
           <div className="arena-share-copy">
-            {priceRange ? `${priceRange} starting options` : "Live slot booking"} · Powered by Swing
+            Best prices · Book arena instantly · Powered by Swing
           </div>
 
           <div className="arena-booking-body">
