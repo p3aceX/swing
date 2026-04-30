@@ -309,6 +309,21 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                                       booking,
                                       widget.arena.name,
                                       widget.arena.id),
+                                  onCheckin: booking.status == 'CONFIRMED'
+                                      ? () async {
+                                          final repo = ref.read(hostArenaBookingRepositoryProvider);
+                                          try {
+                                            await repo.checkinByOwner(booking.id);
+                                            ref.invalidate(_allBookingsProvider(widget.arena.id));
+                                          } catch (e) {
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text('Check-in failed: $e')),
+                                              );
+                                            }
+                                          }
+                                        }
+                                      : null,
                                 );
                               },
                             ),
@@ -862,131 +877,215 @@ class _NavBtn extends StatelessWidget {
 
 // ─── Booking Tile ────────────────────────────────────────────────────────────
 
-class BookingCard extends StatelessWidget {
+class BookingCard extends StatefulWidget {
   const BookingCard({
     super.key,
     required this.booking,
     required this.onTap,
     this.isNextUp = false,
+    this.onCheckin,
   });
   final ArenaReservation booking;
   final VoidCallback onTap;
   final bool isNextUp;
+  final Future<void> Function()? onCheckin;
+
+  @override
+  State<BookingCard> createState() => _BookingCardState();
+}
+
+class _BookingCardState extends State<BookingCard> {
+  bool _checkingIn = false;
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = _statusColor(booking.status);
+    final booking = widget.booking;
     final amount = booking.totalAmountPaise / 100;
+    final needsCheckin = booking.status == 'CONFIRMED' && widget.onCheckin != null;
+    final isCancelled = booking.status == 'CANCELLED';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GestureDetector(
-        onTap: onTap,
+        onTap: widget.onTap,
         child: Container(
-          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: _surface,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: isNextUp ? _accent : _border),
+            border: Border.all(
+              color: needsCheckin
+                  ? _accent.withValues(alpha: 0.4)
+                  : widget.isNextUp
+                      ? _accent
+                      : _border,
+            ),
             boxShadow: [
               BoxShadow(
-                color: (isNextUp ? _accent : Colors.black)
-                    .withValues(alpha: isNextUp ? 0.08 : 0.04),
+                color: (needsCheckin || widget.isNextUp ? _accent : Colors.black)
+                    .withValues(alpha: needsCheckin ? 0.06 : widget.isNextUp ? 0.08 : 0.03),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
-          child: Row(
+          child: Column(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    booking.startTime,
-                    style: const TextStyle(
-                        color: _text,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _durationLabel(
-                        _durationMins(booking.startTime, booking.endTime)),
-                    style: const TextStyle(
-                        color: _muted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 16),
-              Container(height: 36, width: 1, color: _border),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              // ── Main info row
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
                   children: [
-                    Text(
-                      booking.displayName,
-                      style: const TextStyle(
-                          color: _text,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
+                    // Time + duration
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (booking.unitName != null) ...[
+                        Text(
+                          booking.startTime,
+                          style: TextStyle(
+                              color: isCancelled ? _muted : _text,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              decoration: isCancelled
+                                  ? TextDecoration.lineThrough
+                                  : null),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _durationLabel(
+                              _durationMins(booking.startTime, booking.endTime)),
+                          style: const TextStyle(
+                              color: _muted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    Container(height: 36, width: 1, color: _border),
+                    const SizedBox(width: 16),
+                    // Guest + unit + status
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            booking.unitName!,
-                            style: const TextStyle(
-                                color: _muted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600),
+                            booking.displayName,
+                            style: TextStyle(
+                                color: isCancelled ? _muted : _text,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                decoration: isCancelled
+                                    ? TextDecoration.lineThrough
+                                    : null),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              if (booking.unitName != null) ...[
+                                Text(
+                                  booking.unitName!,
+                                  style: const TextStyle(
+                                      color: _muted,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              _StatusBadge(
+                                  label: booking.isPaid ? 'PAID' : 'UNPAID',
+                                  color: booking.isPaid
+                                      ? _accent
+                                      : const Color(0xFFD97706)),
+                            ],
+                          ),
                         ],
-                        _StatusBadge(
-                            label: booking.isPaid ? 'PAID' : 'UNPAID',
-                            color: booking.isPaid
-                                ? _accent
-                                : const Color(0xFFD97706)),
+                      ),
+                    ),
+                    // Amount + quick actions
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '₹${amount.toStringAsFixed(0)}',
+                          style: TextStyle(
+                              color: isCancelled ? _muted : _text,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900),
+                        ),
+                        if (booking.displayPhone.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              _QuickAction(
+                                  Icons.phone_rounded,
+                                  () => launchUrl(Uri.parse(
+                                      'tel:${booking.displayPhone}'))),
+                              const SizedBox(width: 8),
+                              _QuickAction(
+                                  Icons.chat_bubble_rounded,
+                                  () => launchUrl(Uri.parse(
+                                      'https://wa.me/${booking.displayPhone.replaceAll(RegExp(r'[^0-9]'), '')}'))),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ],
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '₹${amount.toStringAsFixed(0)}',
-                    style: const TextStyle(
-                        color: _text,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900),
-                  ),
-                  if (booking.displayPhone.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _QuickAction(
-                            Icons.phone_rounded,
-                            () => launchUrl(
-                                Uri.parse('tel:${booking.displayPhone}'))),
-                        const SizedBox(width: 8),
-                        _QuickAction(
-                            Icons.chat_bubble_rounded,
-                            () => launchUrl(Uri.parse(
-                                'https://wa.me/${booking.displayPhone.replaceAll(RegExp(r'[^0-9]'), '')}'))),
-                      ],
+
+              // ── Check In CTA — only for CONFIRMED bookings
+              if (needsCheckin) ...[
+                Container(height: 1, color: _accent.withValues(alpha: 0.15)),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(20)),
+                    onTap: _checkingIn
+                        ? null
+                        : () async {
+                            setState(() => _checkingIn = true);
+                            await widget.onCheckin!();
+                            if (mounted) setState(() => _checkingIn = false);
+                          },
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF0FDF6),
+                        borderRadius: BorderRadius.vertical(
+                            bottom: Radius.circular(19)),
+                      ),
+                      child: _checkingIn
+                          ? const Center(
+                              child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: _accent)))
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(Icons.how_to_reg_rounded,
+                                    size: 16, color: _accent),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Check In Guest',
+                                  style: TextStyle(
+                                      color: _accent,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.2),
+                                ),
+                              ],
+                            ),
                     ),
-                  ],
-                ],
-              ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -2350,6 +2449,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   bool _totalEdited = false;
   List<String> _allDaySlots = [];
   List<ArenaReservation> _existingBookings = [];
+  List<ArenaTimeBlock> _activeTimeBlocks = [];
   bool _loadingAvail = true;
   List<ArenaAddon> _addons = [];
   final Set<ArenaAddon> _selectedAddons = {};
@@ -2486,6 +2586,16 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   bool _isTabSlotBusy(String time, String variantType, int instanceIndex) {
     final tMins = _toMins(time);
     final durMins = _currentDurationMins;
+
+    // Time block check applies to all variants
+    final blockedBy = _activeTimeBlocks.where((b) {
+      return _toMins(b.startTime) < tMins + durMins && _toMins(b.endTime) > tMins;
+    }).toList();
+    if (blockedBy.isNotEmpty) {
+      debugPrint('[booking] TAB BUSY $time+${durMins}m ($variantType): blocked by ${blockedBy.map((b) => '${b.startTime}-${b.endTime} recurring=${b.isRecurring}').toList()}');
+      return true;
+    }
+
     int count = 0;
     for (final b in _existingBookings) {
       if (b.status == 'CANCELLED') continue;
@@ -2833,17 +2943,40 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
       debugPrint(
           '[booking] _loadAvailability unitId=$_unitId date=$date relatedIds=$relatedIds isFullDay=$_isFullDay');
-      final results = await Future.wait(
+
+      final weekday = _selectedDate.weekday; // 1=Mon … 7=Sun (matches DB convention)
+
+      final bookingResults = await Future.wait(
         relatedIds.map((id) =>
             repo.listArenaBookings(widget.arena.id, date: date, unitId: id)),
       );
-      final merged = results.expand((b) => b).toList();
+      final merged = bookingResults.expand((b) => b).toList();
       debugPrint(
-          '[booking] _loadAvailability fetched ${merged.length} bookings: ${merged.map((b) => '${b.unitId} ${b.startTime}-${b.endTime} ${b.status}').toList()}');
-      if (mounted) setState(() => _existingBookings = merged);
+          '[booking] bookings fetched=${merged.length} : ${merged.map((b) => '${b.unitId} ${b.startTime}-${b.endTime} ${b.status}').toList()}');
+
+      // Fetch time blocks for this unit and filter to ones active on this date
+      List<ArenaTimeBlock> blocks = [];
+      try {
+        final all = await repo.listUnitTimeBlocks(widget.arena.id, unitId: _unitId!);
+        blocks = all.where((b) {
+          if (b.isRecurring && b.weekdays.contains(weekday)) return true;
+          if (b.isHoliday && b.date != null && b.date!.startsWith(date)) return true;
+          if (!b.isRecurring && !b.isHoliday && b.date != null && b.date!.startsWith(date)) return true;
+          return false;
+        }).toList();
+      } catch (e) {
+        debugPrint('[booking] _loadAvailability timeBlocks ERROR: $e');
+      }
+      debugPrint(
+          '[booking] timeBlocks fetched=${blocks.length} : ${blocks.map((b) => 'recurring=${b.isRecurring} holiday=${b.isHoliday} weekdays=${b.weekdays} date=${b.date} ${b.startTime}-${b.endTime}').toList()}');
+
+      if (mounted) setState(() {
+        _existingBookings = merged;
+        _activeTimeBlocks = blocks;
+      });
     } catch (e) {
       debugPrint('[booking] _loadAvailability ERROR: $e');
-      if (mounted) setState(() => _existingBookings = []);
+      if (mounted) setState(() { _existingBookings = []; _activeTimeBlocks = []; });
     } finally {
       if (mounted) setState(() => _loadingAvail = false);
     }
@@ -2892,15 +3025,28 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     }
   }
 
-  // A start time is busy if any part of [time, time + selectedDuration) overlaps an existing booking.
+  // A start time is busy if any part of [time, time + selectedDuration) overlaps an existing booking or a time block.
   bool _isBusy(String time) {
     final tMins = _toMins(time);
     final durMins = _currentDurationMins;
-    return _existingBookings.any((b) {
+
+    final bookedBy = _existingBookings.where((b) {
       if (b.status == 'CANCELLED') return false;
-      return _toMins(b.startTime) < tMins + durMins &&
-          _toMins(b.endTime) > tMins;
-    });
+      return _toMins(b.startTime) < tMins + durMins && _toMins(b.endTime) > tMins;
+    }).toList();
+
+    final blockedBy = _activeTimeBlocks.where((b) {
+      return _toMins(b.startTime) < tMins + durMins && _toMins(b.endTime) > tMins;
+    }).toList();
+
+    if (bookedBy.isNotEmpty) {
+      debugPrint('[booking] BUSY $time+${durMins}m: booked by ${bookedBy.map((b) => '${b.startTime}-${b.endTime} ${b.status}').toList()}');
+    }
+    if (blockedBy.isNotEmpty) {
+      debugPrint('[booking] BUSY $time+${durMins}m: blocked by ${blockedBy.map((b) => '${b.startTime}-${b.endTime} recurring=${b.isRecurring} holiday=${b.isHoliday}').toList()}');
+    }
+
+    return bookedBy.isNotEmpty || blockedBy.isNotEmpty;
   }
 
   void _onSlotTapped(String time) {
