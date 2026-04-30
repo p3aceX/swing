@@ -812,7 +812,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
           </button>
           <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>Bulk Booking · {unit?.name}</div>
         </div>
-        <div style={{ padding: "20px 14px 0", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ padding: "20px 14px 10px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Number of days <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>· min {minDays}</span></div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -884,7 +884,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
           </div>
         </div>
 
-        <div style={{ padding: "20px 14px 0", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ padding: "20px 14px 10px", display: "flex", flexDirection: "column", gap: 16 }}>
 
           {/* Addons */}
           {unitAddons.length > 0 && (
@@ -1071,7 +1071,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
             <input className="form-input" type="tel" placeholder="+91 98765 43210" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} />
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
-          <div className="pay-note" style={{ padding: 0 }}>Payment at the venue · booking is free to reserve</div>
+          <div className="pay-note" style={{ padding: "0 0 10px" }}>Payment at the venue · booking is free to reserve</div>
         </div>
       )}
 
