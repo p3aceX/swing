@@ -1,7 +1,7 @@
 import { prisma } from '@swing/db'
 import { AppError } from '../../lib/errors'
 import { Errors } from '../../lib/errors'
-import { enqueueNotification } from '../../lib/queue'
+import { enqueueNotification, notificationQueue } from '../../lib/queue'
 import { sendPushNotification } from '../../lib/firebase'
 import { sendOneSignalPushNotification } from '../../lib/onesignal'
 
@@ -244,7 +244,14 @@ export class NotificationService {
       data.sendPush !== false
       && await this.shouldSendPush(userId, data.preferenceKey)
     ) {
-      await enqueueNotification('push', { userId, title: data.title, body: data.body, data: { type: data.type, entityId: data.entityId || '' } })
+      const pushPayload = { userId, title: data.title, body: data.body, data: { type: data.type, entityId: data.entityId || '' } }
+      if (notificationQueue) {
+        await enqueueNotification('push', pushPayload)
+      } else {
+        // Queue not available — send directly (fire-and-forget)
+        this.sendPush(userId, data.title, data.body, { type: data.type, entityId: data.entityId || '' })
+          .catch(err => console.error('[notify] direct push failed:', err))
+      }
     }
 
     return notif

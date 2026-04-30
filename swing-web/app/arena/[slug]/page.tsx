@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import BookingFlow, { MobileBookBar } from "./_booking-flow";
+import BookingFlow from "./_booking-flow";
+import PhotoCarousel from "./_carousel";
+import DirectionsModal from "./_directions-modal";
+import SiteNav from "@/app/components/SiteNav";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
+type NetVariant = { type: string; label: string; pricePaise?: number | null };
+type ArenaAddon = { id: string; name: string; pricePaise: number; description?: string | null; unit?: string | null };
 type ArenaUnit = {
   id: string;
   name: string;
@@ -15,6 +20,16 @@ type ArenaUnit = {
   priceFullDayPaise?: number | null;
   photoUrls?: string[];
   description?: string | null;
+  openTime?: string | null;
+  closeTime?: string | null;
+  netVariants?: NetVariant[] | null;
+  monthlyPassEnabled?: boolean;
+  monthlyPassRatePaise?: number | null;
+  minBulkDays?: number | null;
+  bulkDayRatePaise?: number | null;
+  addons?: ArenaAddon[] | null;
+  minAdvancePaise?: number | null;
+  cancellationHours?: number | null;
 };
 
 type Arena = {
@@ -34,8 +49,12 @@ type Arena = {
   hasLights?: boolean;
   hasWashrooms?: boolean;
   hasCanteen?: boolean;
+  hasCCTV?: boolean;
+  hasScorer?: boolean;
   customSlug?: string | null;
   arenaSlug?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 const API = (
@@ -47,7 +66,7 @@ const API = (
 async function fetchArena(slug: string): Promise<Arena | null> {
   try {
     const res = await fetch(`${API}/public/arena/p/${encodeURIComponent(slug)}`, {
-      next: { revalidate: 60 },
+      cache: "no-store",
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { data?: Arena };
@@ -74,348 +93,1014 @@ function unitTypeLabel(type?: string) {
   return map[type ?? ""] ?? "Unit";
 }
 
+function unitSurface(type?: string) {
+  const map: Record<string, string> = {
+    FULL_GROUND:
+      "repeating-linear-gradient(135deg, oklch(0.42 0.12 145) 0 10px, oklch(0.36 0.12 145) 10px 20px)",
+    HALF_GROUND:
+      "repeating-linear-gradient(135deg, oklch(0.42 0.12 145) 0 10px, oklch(0.36 0.12 145) 10px 20px)",
+    CRICKET_NET:
+      "repeating-linear-gradient(90deg, oklch(0.55 0.10 130) 0 6px, oklch(0.47 0.10 130) 6px 12px)",
+    INDOOR_NET:
+      "repeating-linear-gradient(90deg, oklch(0.48 0.08 230) 0 6px, oklch(0.40 0.08 230) 6px 12px)",
+    TURF:
+      "repeating-linear-gradient(90deg, oklch(0.62 0.14 30) 0 6px, oklch(0.53 0.14 30) 6px 12px)",
+    MULTI_SPORT:
+      "repeating-linear-gradient(90deg, oklch(0.55 0.10 260) 0 6px, oklch(0.47 0.10 260) 6px 12px)",
+  };
+
+  return (
+    map[type ?? ""] ??
+    "repeating-linear-gradient(90deg, oklch(0.55 0.10 130) 0 6px, oklch(0.48 0.10 130) 6px 12px)"
+  );
+}
+
 function rupeesPerHr(paise?: number) {
   if (!paise) return null;
   return `₹${Math.round(paise / 100)}/hr`;
 }
 
-// ── OG / WhatsApp metadata ───────────────────────────────────────────────────
+function unitPriceCandidates(unit: ArenaUnit) {
+  const variants = (unit.netVariants ?? [])
+    .map((variant) => variant.pricePaise)
+    .filter((price): price is number => Boolean(price && price > 0));
+  if (variants.length) return variants;
+
+  const packagePrices = [
+    unit.price4HrPaise,
+    unit.price8HrPaise,
+    unit.priceFullDayPaise,
+  ].filter((price): price is number => Boolean(price && price > 0));
+
+  return [
+    unit.pricePerHourPaise,
+    ...packagePrices,
+  ].filter((price): price is number => Boolean(price && price > 0));
+}
+
+function startingPricePaise(units: ArenaUnit[]) {
+  const prices = units.flatMap(unitPriceCandidates);
+  return prices.length ? Math.min(...prices) : undefined;
+}
+
+function priceRangeLabel(units: ArenaUnit[]) {
+  const prices = units.flatMap(unitPriceCandidates);
+  if (!prices.length) return null;
+  const min = Math.round(Math.min(...prices) / 100);
+  const max = Math.round(Math.max(...prices) / 100);
+  return min === max ? `₹${min}` : `₹${min}–₹${max}`;
+}
+
+function marketingDescription(arena: Arena) {
+  const location = [arena.city, arena.state].filter(Boolean).join(", ");
+  const sports = (arena.sports ?? []).map(sportLabel).join(", ");
+  const units = arena.units ?? [];
+  const fromPrice = startingPricePaise(units);
+  const price = fromPrice ? `Book from ₹${Math.round(fromPrice / 100)}` : "Book slots online";
+  const unitLabel = units.length
+    ? `${units.length} ${units.length === 1 ? "play area" : "play areas"}`
+    : "sports venue";
+  const details = [
+    price,
+    unitLabel,
+    sports,
+    location,
+  ].filter(Boolean);
+
+  return `${details.join(" · ")}. Reserve your slot instantly with live availability. Powered by Swing.`;
+}
+
+function formatTime(time?: string | null) {
+  if (!time) return null;
+  const [hourRaw, minuteRaw = "00"] = time.split(":");
+  const hour = Number(hourRaw);
+  if (Number.isNaN(hour)) return time;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${minuteRaw.padStart(2, "0")} ${suffix}`;
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const arena = await fetchArena(slug);
+
   if (!arena) return { title: "Arena not found" };
 
   const location = [arena.city, arena.state].filter(Boolean).join(", ");
   const sports = (arena.sports ?? []).map(sportLabel).join(", ");
   const units = arena.units ?? [];
-  const prices = units.map((u) => u.pricePerHourPaise ?? 0).filter(Boolean);
-  const fromPrice = prices.length ? `From ₹${Math.round(Math.min(...prices) / 100)}/hr · ` : "";
   const photo = arena.photoUrls?.find(Boolean);
-
-  const description = `${fromPrice}${units.length} court${units.length === 1 ? "" : "s"}${sports ? ` · ${sports}` : ""}${location ? ` · ${location}` : ""}. Book your slot instantly.`;
+  const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
+  const price = startingPricePaise(units);
+  const priceText = price ? ` from ₹${Math.round(price / 100)}` : "";
+  const title = `Book ${arena.name}${location ? ` in ${location}` : ""}${priceText}`;
+  const description = marketingDescription(arena);
+  const image = photo
+    ? [{ url: photo, width: 1200, height: 630, alt: `${arena.name} on Swing` }]
+    : [{ url: "/assets/logo-light.png", width: 1200, height: 630, alt: "Swing" }];
 
   return {
-    title: arena.name,
+    title,
     description,
+    keywords: [
+      arena.name,
+      location && `${arena.name} ${location}`,
+      location && `book cricket net in ${location}`,
+      location && `book sports arena in ${location}`,
+      sports && `${sports} booking`,
+      "Swing arena booking",
+      "sports venue booking",
+    ].filter(Boolean) as string[],
+    alternates: {
+      canonical: `/arena/${canonicalSlug}`,
+    },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        "max-image-preview": "large",
+        "max-snippet": -1,
+      },
+    },
     openGraph: {
-      title: arena.name,
+      title,
       description,
-      images: photo ? [{ url: photo, width: 1200, height: 630, alt: arena.name }] : [],
+      url: `/arena/${canonicalSlug}`,
+      siteName: "Swing",
+      images: image,
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: arena.name,
+      title,
       description,
-      images: photo ? [photo] : [],
+      images: image.map((item) => item.url),
     },
   };
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
 export default async function ArenaPage({ params }: PageProps) {
   const { slug } = await params;
   const arena = await fetchArena(slug);
+
   if (!arena) notFound();
 
   const units = arena.units ?? [];
   const photos = arena.photoUrls?.filter(Boolean) ?? [];
-  const heroPhoto = photos[0];
-  const galleryPhotos = photos.slice(1, 5);
   const sports = (arena.sports ?? []).filter(Boolean);
-  const location = [arena.address, arena.city, arena.state].filter(Boolean).join(", ");
-  const prices = units.map((u) => u.pricePerHourPaise ?? 0).filter(Boolean);
-  const startingPaise = prices.length ? Math.min(...prices) : undefined;
+  const city = [arena.city, arena.state].filter(Boolean).join(", ");
+  const fullAddress = [arena.address, arena.city, arena.state]
+    .filter(Boolean)
+    .join(", ");
+  const startingPaise = startingPricePaise(units);
+  const priceRange = priceRangeLabel(units);
+  const nets = units.filter(
+    (u) => u.unitType === "CRICKET_NET" || u.unitType === "INDOOR_NET"
+  ).length;
+  const grounds = units.filter(
+    (u) => u.unitType !== "CRICKET_NET" && u.unitType !== "INDOOR_NET"
+  ).length;
+
   const amenities = [
-    arena.hasParking && "Parking",
-    arena.hasLights && "Floodlights",
+    arena.hasLights    && "Floodlights",
+    arena.hasParking   && "Parking",
     arena.hasWashrooms && "Washrooms",
-    arena.hasCanteen && "Canteen",
+    arena.hasCanteen   && "Canteen",
+    arena.hasCCTV      && "CCTV",
+    arena.hasScorer    && "Scorer",
   ].filter(Boolean) as string[];
 
+  const chips = [...sports.map(sportLabel), ...amenities];
+
+  // Derive opening/closing from all units (earliest open, latest close)
+  const toMins = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + (m || 0); };
+  const unitOpenTimes = units.map((u) => u.openTime).filter(Boolean) as string[];
+  const unitCloseTimes = units.map((u) => u.closeTime).filter(Boolean) as string[];
+  const arenaOpenTime = unitOpenTimes.length
+    ? unitOpenTimes.reduce((a, b) => toMins(a) <= toMins(b) ? a : b)
+    : arena.openTime ?? null;
+  const arenaCloseTime = unitCloseTimes.length
+    ? unitCloseTimes.reduce((a, b) => toMins(a) >= toMins(b) ? a : b)
+    : arena.closeTime ?? null;
+  const openText = arenaCloseTime ? `Open till ${formatTime(arenaCloseTime)}` : "Open today";
+  const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
+  const publicUrl = `https://www.swingcricketapp.com/arena/${canonicalSlug}`;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SportsActivityLocation",
+    name: arena.name,
+    description: marketingDescription(arena),
+    url: publicUrl,
+    image: photos,
+    telephone: arena.phone,
+    address: fullAddress
+      ? {
+          "@type": "PostalAddress",
+          streetAddress: arena.address || undefined,
+          addressLocality: arena.city || undefined,
+          addressRegion: arena.state || undefined,
+        }
+      : undefined,
+    geo:
+      arena.latitude && arena.longitude
+        ? {
+            "@type": "GeoCoordinates",
+            latitude: arena.latitude,
+            longitude: arena.longitude,
+          }
+        : undefined,
+    amenityFeature: amenities.map((name) => ({
+      "@type": "LocationFeatureSpecification",
+      name,
+      value: true,
+    })),
+    offers: startingPaise
+      ? {
+          "@type": "Offer",
+          priceCurrency: "INR",
+          price: Math.round(startingPaise / 100),
+          availability: "https://schema.org/InStock",
+          url: publicUrl,
+        }
+      : undefined,
+  };
+
+  const visibleUnits = units.slice(0, 4);
+  const extraUnits = Math.max(units.length - visibleUnits.length, 0);
+
   return (
-    <div className="min-h-screen bg-white text-[#0d1210]">
-      {/* ── Hero ──────────────────────────────────────────────────────────────── */}
-      <section className="relative flex min-h-[100svh] flex-col overflow-hidden bg-[#0d1210]">
-        {heroPhoto ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={heroPhoto}
-            alt={arena.name}
-            className="absolute inset-0 h-full w-full object-cover opacity-60"
-          />
-        ) : (
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,#166534_0%,#0d1210_55%)]" />
-        )}
-        {/* gradient — strong at bottom so text always readable */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/90" />
-        <div className="absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-black/95 to-transparent" />
+    <main className="arena-page">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <SiteNav />
 
-        {/* Nav bar */}
-        <nav className="relative z-10 flex items-center justify-between px-5 py-5 sm:px-8">
-          <div className="flex items-center gap-2.5">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-white text-xs font-black text-[#0d1210]">S</div>
-            <span className="text-sm font-black text-white/80">Swing</span>
+      <section className="arena-stage">
+        <aside className="arena-hero-card">
+          <div className="arena-photo-wrap">
+            <PhotoCarousel photos={photos} alt={arena.name} />
           </div>
-          {arena.phone && (
-            <a
-              href={`tel:${arena.phone}`}
-              className="flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-sm font-bold text-white backdrop-blur-sm"
-            >
-              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-              </svg>
-              Call
-            </a>
-          )}
-        </nav>
+          <div className="arena-photo-vignette" />
+          <div className="arena-photo-glow" />
 
-        {/* Arena identity — bottom of hero */}
-        <div className="relative z-10 mt-auto px-5 pb-10 sm:px-8 sm:pb-14">
-          {sports.length > 0 && (
-            <div className="mb-4 flex flex-wrap gap-2">
-              {sports.map((s) => (
-                <span key={s} className="rounded-lg bg-white/15 px-3 py-1 text-xs font-bold text-white backdrop-blur-sm">
-                  {sportLabel(s)}
-                </span>
-              ))}
-            </div>
-          )}
-
-          <h1 className="max-w-2xl text-4xl font-black leading-[1.04] text-white sm:text-5xl md:text-6xl">
-            {arena.name}
-          </h1>
-
-          {location && (
-            <p className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-white/70">
-              <svg className="h-3.5 w-3.5 flex-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              {location}
-            </p>
-          )}
-
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {arena.openTime && arena.closeTime && (
-              <span className="rounded-lg bg-white/12 px-3 py-1.5 text-xs font-bold text-white/80 backdrop-blur-sm">
-                {arena.openTime} – {arena.closeTime}
-              </span>
+          <div className="arena-top-row">
+            {(arenaOpenTime || arenaCloseTime) && (
+              <div className="arena-live-pill">
+                <span />
+                {arenaOpenTime && arenaCloseTime
+                  ? `${formatTime(arenaOpenTime)} – ${formatTime(arenaCloseTime)}`
+                  : arenaOpenTime
+                  ? `Opens ${formatTime(arenaOpenTime)}`
+                  : `Closes ${formatTime(arenaCloseTime)}`}
+              </div>
             )}
-            {units.length > 0 && (
-              <span className="rounded-lg bg-white/12 px-3 py-1.5 text-xs font-bold text-white/80 backdrop-blur-sm">
-                {units.length} {units.length === 1 ? "court" : "courts"}
-              </span>
-            )}
-            {startingPaise && (
-              <span className="rounded-lg bg-[#16a34a]/80 px-3 py-1.5 text-xs font-bold text-white backdrop-blur-sm">
-                from ₹{Math.round(startingPaise / 100)}/hr
-              </span>
-            )}
-          </div>
-
-          {/* Book CTA — shown in hero on mobile */}
-          <div className="mt-7 flex gap-3">
-            <a
-              href="#book"
-              className="rounded-xl bg-[#16a34a] px-7 py-3.5 text-sm font-black text-white active:scale-[.97]"
-            >
-              Book a slot →
-            </a>
-            {arena.phone && (
-              <a
-                href={`tel:${arena.phone}`}
-                className="rounded-xl bg-white/15 px-5 py-3.5 text-sm font-black text-white backdrop-blur-sm"
-              >
-                Call
-              </a>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Sticky bottom booking bar — appears once #book scrolls out of view */}
-      <MobileBookBar startingPaise={startingPaise} />
-
-      {/* ── Content ───────────────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-5xl px-5 py-8 sm:px-8">
-
-        {/* Gallery strip */}
-        {galleryPhotos.length > 0 && (
-          <div className="mb-10 flex gap-2.5 overflow-x-auto pb-1 scrollbar-none">
-            {galleryPhotos.map((url, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={url}
-                src={url}
-                alt={`${arena.name} ${i + 2}`}
-                className="h-36 w-56 flex-none rounded-2xl object-cover sm:h-44 sm:w-72"
+            {arena.latitude && arena.longitude && (
+              <DirectionsModal
+                name={arena.name}
+                address={fullAddress || city}
+                latitude={arena.latitude}
+                longitude={arena.longitude}
               />
-            ))}
-          </div>
-        )}
-
-        <div className="grid gap-10 lg:grid-cols-[1fr_360px]">
-          {/* ── Left col ──────────────────────────────────────────────────────── */}
-          <div className="space-y-10">
-            {/* About */}
-            {arena.description && (
-              <div>
-                <h2 className="mb-2 text-lg font-black">About</h2>
-                <p className="text-sm font-medium leading-7 text-[#475569]">{arena.description}</p>
-              </div>
             )}
+          </div>
 
-            {/* Courts */}
-            <div>
-              <h2 className="mb-3 text-lg font-black">Courts & Facilities</h2>
-              <div className="space-y-2.5">
-                {units.map((u) => (
-                  <div key={u.id} className="flex items-center gap-4 rounded-2xl bg-[#f8fafc] px-4 py-4">
-                    <div className="h-14 w-14 flex-none overflow-hidden rounded-xl bg-[#e2e8f0]">
-                      {u.photoUrls?.[0] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={u.photoUrls[0]} alt={u.name} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="grid h-full place-items-center text-[10px] font-black text-[#94a3b8]">
-                          {u.unitType?.slice(0, 2) ?? "UN"}
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-black text-[#0d1210]">{u.name}</div>
-                      <div className="mt-0.5 text-xs font-semibold text-[#94a3b8]">{unitTypeLabel(u.unitType)}</div>
-                      {u.description && (
-                        <div className="mt-1 line-clamp-1 text-xs font-medium text-[#64748b]">{u.description}</div>
-                      )}
-                    </div>
-                    {rupeesPerHr(u.pricePerHourPaise) && (
-                      <div className="text-sm font-black text-[#16a34a]">{rupeesPerHr(u.pricePerHourPaise)}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
+          <div className="arena-hero-content">
+            <div className="arena-title-block">
+              <h1>{arena.name}</h1>
+              {arena.description && (
+                <p className="arena-description">{arena.description}</p>
+              )}
             </div>
 
-            {/* Amenities */}
-            {amenities.length > 0 && (
-              <div>
-                <h2 className="mb-3 text-lg font-black">Amenities</h2>
-                <div className="flex flex-wrap gap-2">
-                  {amenities.map((a) => (
-                    <span key={a} className="rounded-xl bg-[#f0fdf4] px-4 py-2 text-xs font-bold text-[#166534]">
-                      {a}
-                    </span>
-                  ))}
+            <div className="arena-info-rows">
+              {sports.length > 0 && (
+                <div className="arena-info-row">
+                  <span className="arena-info-label">Sports Available</span>
+                  <div className="arena-chip-row">
+                    {sports.map(sportLabel).map((s) => <span key={s}>{s}</span>)}
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {/* Visit info — mobile only (below content) */}
-            <div className="rounded-2xl bg-[#f8fafc] p-5 lg:hidden">
-              <h3 className="mb-4 font-black">Visit info</h3>
-              <div className="space-y-3 text-sm">
-                {location && (
-                  <div className="flex gap-3">
-                    <svg className="mt-0.5 h-4 w-4 flex-none text-[#94a3b8]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                    </svg>
-                    <span className="font-medium text-[#475569]">{location}</span>
+              )}
+              {amenities.length > 0 && (
+                <div className="arena-info-row">
+                  <span className="arena-info-label">Facilities</span>
+                  <div className="arena-chip-row">
+                    {amenities.map((a) => <span key={a}>{a}</span>)}
                   </div>
-                )}
-                {arena.openTime && arena.closeTime && (
-                  <div className="flex gap-3">
-                    <svg className="mt-0.5 h-4 w-4 flex-none text-[#94a3b8]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <circle cx={12} cy={12} r={10} /><path strokeLinecap="round" d="M12 6v6l4 2" />
-                    </svg>
-                    <span className="font-medium text-[#475569]">{arena.openTime} – {arena.closeTime}</span>
-                  </div>
-                )}
-                {arena.phone && (
-                  <div className="flex gap-3">
-                    <svg className="mt-0.5 h-4 w-4 flex-none text-[#94a3b8]" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                    </svg>
-                    <a href={`tel:${arena.phone}`} className="font-black text-[#0d1210]">{arena.phone}</a>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ── Right col: booking widget ──────────────────────────────────────── */}
-          <div id="book" className="scroll-mt-4 lg:sticky lg:top-6 lg:self-start">
-            <div className="rounded-3xl bg-white p-6 shadow-[0_4px_32px_rgba(0,0,0,0.08)] ring-1 ring-black/5">
-              <div className="mb-1 text-[11px] font-black uppercase tracking-widest text-[#94a3b8]">
-                Powered by Swing
-              </div>
-              <h2 className="mb-5 text-xl font-black text-[#0d1210]">Book a slot</h2>
-
-              {units.length > 0 ? (
-                <BookingFlow
-                  units={units}
-                  arenaSlug={slug}
-                  apiBaseUrl={API}
-                  phone={arena.phone}
-                  arenaOpenTime={arena.openTime}
-                  arenaCloseTime={arena.closeTime}
-                  startingPaise={startingPaise}
-                />
-              ) : (
-                <div>
-                  <p className="mb-4 text-sm font-medium text-[#64748b]">
-                    Online booking isn&apos;t set up yet. Call to reserve your slot.
-                  </p>
-                  {arena.phone && (
-                    <a
-                      href={`tel:${arena.phone}`}
-                      className="block rounded-xl bg-[#16a34a] py-3.5 text-center text-sm font-black text-white"
-                    >
-                      Call {arena.phone}
-                    </a>
-                  )}
                 </div>
               )}
             </div>
 
-            {/* Visit info — desktop sidebar */}
-            {(location || arena.openTime || arena.phone) && (
-              <div className="mt-4 hidden rounded-3xl bg-[#f8fafc] p-5 lg:block">
-                <h3 className="mb-4 text-sm font-black text-[#0d1210]">Visit info</h3>
-                <div className="space-y-3 text-sm">
-                  {location && (
-                    <div className="flex gap-3">
-                      <svg className="mt-0.5 h-4 w-4 flex-none text-[#94a3b8]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      </svg>
-                      <span className="font-medium text-[#475569]">{location}</span>
+            <div className="arena-bottom-grid">
+              {visibleUnits.length > 0 && (
+                <div className="arena-unit-strip">
+                  {visibleUnits.map((unit) => (
+                    <div key={unit.id} className="arena-unit-card">
+                      <i style={{ background: unitSurface(unit.unitType) }} />
+                      <span>
+                        <b>{unit.name}</b>
+                        <small>
+                          {unitTypeLabel(unit.unitType)}
+                          {(() => {
+                            const vs = (unit.netVariants ?? []).map(v => v.pricePaise).filter((p): p is number => !!p);
+                            if (vs.length) {
+                              const lo = Math.round(Math.min(...vs) / 100);
+                              const hi = Math.round(Math.max(...vs) / 100);
+                              return ` · ₹${lo === hi ? lo : `${lo}–${hi}`}/hr`;
+                            }
+                            const isGr = ["FULL_GROUND","HALF_GROUND"].includes(unit.unitType ?? "");
+                            if (isGr) {
+                              const bulk = [unit.price4HrPaise, unit.price8HrPaise, unit.priceFullDayPaise].filter(Boolean) as number[];
+                              return bulk.length ? ` · from ₹${Math.round(Math.min(...bulk) / 100)}` : "";
+                            }
+                            return rupeesPerHr(unit.pricePerHourPaise) ? ` · ${rupeesPerHr(unit.pricePerHourPaise)}` : "";
+                          })()}
+                        </small>
+                      </span>
                     </div>
-                  )}
-                  {arena.openTime && arena.closeTime && (
-                    <div className="flex gap-3">
-                      <svg className="mt-0.5 h-4 w-4 flex-none text-[#94a3b8]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                        <circle cx={12} cy={12} r={10} /><path strokeLinecap="round" d="M12 6v6l4 2" />
-                      </svg>
-                      <span className="font-medium text-[#475569]">{arena.openTime} – {arena.closeTime}</span>
-                    </div>
-                  )}
-                  {arena.phone && (
-                    <div className="flex gap-3">
-                      <svg className="mt-0.5 h-4 w-4 flex-none text-[#94a3b8]" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                      </svg>
-                      <a href={`tel:${arena.phone}`} className="font-black text-[#0d1210]">{arena.phone}</a>
-                    </div>
+                  ))}
+                  {extraUnits > 0 && (
+                    <div className="arena-more-units">+{extraUnits} more</div>
                   )}
                 </div>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        <aside className="arena-booking-card" id="book">
+          <div className="arena-booking-head">
+            <div>
+              <p>Powered by Swing</p>
+              <h2>{units.length > 0 ? "Pick your slot" : "Reserve your slot"}</h2>
+            </div>
+            <span>{openText}</span>
+          </div>
+          <div className="arena-share-copy">
+            {priceRange ? `${priceRange} starting options` : "Live slot booking"} · Powered by Swing
+          </div>
+
+          <div className="arena-booking-body">
+            {units.length > 0 ? (
+              <BookingFlow
+                units={units}
+                arenaSlug={slug}
+                apiBaseUrl={API}
+                arenaName={arena.name}
+                address={fullAddress || city || undefined}
+                latitude={arena.latitude}
+                longitude={arena.longitude}
+                phone={arena.phone}
+                openTime={arenaOpenTime}
+                closeTime={arenaCloseTime}
+              />
+            ) : (
+              <div className="arena-empty-booking">
+                <h3>Online booking is not live yet</h3>
+                <p>Call the arena directly to reserve your preferred slot.</p>
+                {arena.phone && (
+                  <a href={`tel:${arena.phone}`} className="arena-empty-call">
+                    Call {arena.phone}
+                  </a>
+                )}
               </div>
             )}
           </div>
-        </div>
-      </div>
+        </aside>
+      </section>
 
-      {/* Bottom padding for mobile booking bar */}
-      <div className="h-20 lg:hidden" />
-    </div>
+      <style>{`
+        /* Light */
+        :root, [data-theme="light"] {
+          --arena-bg:              #F4F2EB;
+          --arena-ink:             #0A0B0A;
+          --arena-muted:           rgba(10,11,10,0.55);
+          --arena-line:            rgba(10,11,10,0.10);
+          --arena-accent:          #C8FF3E;
+          --arena-card:            rgba(255,255,255,0.70);
+          --arena-shadow:          0 24px 90px rgba(10,11,10,0.16);
+          --arena-booking-bg:      #FFFFFF;
+          --arena-booking-border:  rgba(10,11,10,0.12);
+          --arena-price-bg:        rgba(10,11,10,0.045);
+          --arena-price-border:    rgba(10,11,10,0.06);
+          --arena-empty-bg:        rgba(255,255,255,0.55);
+          --arena-empty-border:    rgba(10,11,10,0.15);
+          --arena-mobile-nav-bg:   rgba(244,242,235,0.85);
+        }
+        /* Dark */
+        [data-theme="dark"] {
+          --arena-bg:              #0A0B0A;
+          --arena-ink:             #F4F4F1;
+          --arena-muted:           rgba(244,244,241,0.55);
+          --arena-line:            rgba(244,244,241,0.10);
+          --arena-accent:          #C8FF3E;
+          --arena-card:            rgba(255,255,255,0.06);
+          --arena-shadow:          0 24px 90px rgba(0,0,0,0.55);
+          --arena-booking-bg:      #111211;
+          --arena-booking-border:  rgba(255,255,255,0.10);
+          --arena-price-bg:        rgba(255,255,255,0.05);
+          --arena-price-border:    rgba(255,255,255,0.07);
+          --arena-empty-bg:        rgba(255,255,255,0.04);
+          --arena-empty-border:    rgba(255,255,255,0.12);
+          --arena-mobile-nav-bg:   rgba(10,11,10,0.88);
+        }
+
+        :root {
+          --arena-radius-lg: 34px;
+          --arena-radius-md: 22px;
+        }
+
+        html, body {
+          overflow: hidden;
+          background: var(--arena-bg);
+          transition: background 0.35s ease, color 0.35s ease;
+        }
+
+        .arena-page {
+          height: 100svh;
+          overflow: hidden;
+          color: var(--arena-ink);
+          background:
+            radial-gradient(circle at 12% 0%, rgba(200,255,62,0.12), transparent 26rem),
+            radial-gradient(circle at 90% 10%, rgba(200,255,62,0.06), transparent 24rem),
+            var(--arena-bg);
+          font-family: var(--font-ui, Inter, ui-sans-serif, system-ui, -apple-system, sans-serif);
+          transition: background 0.35s ease, color 0.35s ease;
+        }
+
+
+        .arena-stage {
+          height: calc(100svh - 52px);
+          min-height: 0;
+          display: grid;
+          grid-template-columns: minmax(0, 1.18fr) minmax(390px, 0.82fr);
+          gap: 14px;
+          padding: 10px clamp(12px, 1.6vw, 24px) clamp(12px, 1.6vw, 24px);
+        }
+
+        .arena-hero-card,
+        .arena-booking-card {
+          position: relative;
+          min-height: 0;
+          overflow: hidden;
+          border-radius: var(--arena-radius-lg);
+          box-shadow: var(--arena-shadow);
+        }
+
+        .arena-hero-card {
+          isolation: isolate;
+          background: #09110a;
+        }
+
+        .arena-photo-wrap,
+        .arena-photo-vignette,
+        .arena-photo-glow {
+          position: absolute;
+          inset: 0;
+        }
+
+        .arena-photo-wrap > * {
+          height: 100%;
+        }
+
+        .arena-photo-vignette {
+          pointer-events: none;
+          background:
+            linear-gradient(180deg, rgba(0, 0, 0, 0.16) 0%, transparent 26%, rgba(0, 0, 0, 0.58) 64%, rgba(0, 0, 0, 0.92) 100%),
+            linear-gradient(90deg, rgba(0, 0, 0, 0.38) 0%, transparent 62%);
+          z-index: 1;
+        }
+
+        .arena-photo-glow {
+          pointer-events: none;
+          z-index: 2;
+          background: radial-gradient(circle at 20% 80%, rgba(182, 255, 69, 0.24), transparent 22rem);
+          mix-blend-mode: screen;
+        }
+
+        .arena-top-row {
+          position: absolute;
+          top: 22px;
+          left: 22px;
+          right: 22px;
+          z-index: 3;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .arena-live-pill,
+        .arena-city-pill {
+          display: inline-flex;
+          align-items: center;
+          min-height: 34px;
+          border-radius: 999px;
+          backdrop-filter: blur(18px);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+
+        .arena-live-pill {
+          gap: 8px;
+          padding: 0 13px;
+          color: #10210f;
+          background: var(--arena-accent);
+        }
+
+        .arena-live-pill span {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #10210f;
+          box-shadow: 0 0 0 0 rgba(16, 33, 15, 0.42);
+          animation: arenaPulse 1.35s ease-in-out infinite;
+        }
+
+        .arena-hero-content {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 3;
+          padding: 22px;
+          display: grid;
+          gap: 16px;
+        }
+
+        .arena-metrics {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 1px;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.13);
+          border-radius: 22px;
+          background: rgba(255, 255, 255, 0.09);
+          backdrop-filter: blur(20px);
+        }
+
+        .arena-metrics div {
+          min-width: 0;
+          padding: 13px 14px;
+          background: rgba(255, 255, 255, 0.045);
+        }
+
+        .arena-metrics strong,
+        .arena-metrics span {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .arena-metrics strong {
+          color: white;
+          font-family: var(--font-display, ui-sans-serif);
+          font-size: clamp(18px, 2vw, 26px);
+          line-height: 0.95;
+          letter-spacing: -0.04em;
+        }
+
+        .arena-metrics span {
+          margin-top: 5px;
+          color: rgba(255, 255, 255, 0.55);
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+
+        .arena-title-block p {
+          margin: 0 0 7px;
+          color: var(--arena-accent);
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+        }
+
+        .arena-title-block {
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        .arena-title-block h1 {
+          max-width: 900px;
+          margin: 0;
+          color: white;
+          font-family: var(--font-display, ui-sans-serif);
+          font-size: clamp(44px, 6vw, 86px);
+          line-height: 0.86;
+          letter-spacing: -0.065em;
+        }
+
+        .arena-location {
+          width: min(100%, 880px);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 13px;
+          color: rgba(255, 255, 255, 0.68);
+          font-size: 13px;
+          font-weight: 650;
+          line-height: 1.35;
+        }
+
+        .arena-location span {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .arena-info-rows {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .arena-info-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .arena-info-label {
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: rgba(255, 255, 255, 0.45);
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+
+        .arena-chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .arena-chip-row span {
+          padding: 5px 11px;
+          border-radius: 999px;
+          color: rgba(255, 255, 255, 0.84);
+          background: rgba(255, 255, 255, 0.11);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          backdrop-filter: blur(14px);
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .arena-bottom-grid {
+          display: grid;
+          grid-template-columns: 0.76fr 1fr;
+          align-items: end;
+          gap: 16px;
+        }
+
+        .arena-description {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          margin: 0;
+          color: rgba(255, 255, 255, 0.66);
+          font-size: 13px;
+          line-height: 1.55;
+          font-weight: 500;
+        }
+
+        .arena-unit-strip {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .arena-unit-card,
+        .arena-more-units {
+          min-width: 0;
+          min-height: 54px;
+          display: flex;
+          align-items: center;
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.13);
+          background: rgba(255, 255, 255, 0.09);
+          backdrop-filter: blur(18px);
+        }
+
+        .arena-unit-card {
+          gap: 10px;
+          padding: 9px;
+        }
+
+        .arena-unit-card i {
+          width: 38px;
+          height: 30px;
+          flex: 0 0 auto;
+          border-radius: 10px;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+        }
+
+        .arena-unit-card span {
+          min-width: 0;
+          display: block;
+        }
+
+        .arena-unit-card b,
+        .arena-unit-card small {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .arena-unit-card b {
+          color: white;
+          font-size: 12px;
+          line-height: 1.15;
+        }
+
+        .arena-unit-card small {
+          margin-top: 3px;
+          color: rgba(255, 255, 255, 0.58);
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .arena-more-units {
+          justify-content: center;
+          padding: 0 12px;
+          color: var(--arena-accent);
+          font-size: 12px;
+          font-weight: 900;
+        }
+
+        .arena-booking-card {
+          display: flex;
+          flex-direction: column;
+          border: 1px solid var(--arena-booking-border);
+          background: var(--arena-booking-bg);
+        }
+
+        .arena-booking-head {
+          flex: 0 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 14px 16px 12px;
+          border-bottom: 1px solid var(--arena-line);
+        }
+
+        .arena-booking-head p {
+          display: none;
+        }
+
+        .arena-booking-head h2 {
+          margin: 0;
+          color: var(--arena-ink);
+          font-family: var(--font-ui, ui-sans-serif);
+          font-size: 16px;
+          font-weight: 700;
+          line-height: 1;
+          letter-spacing: -0.02em;
+        }
+
+        .arena-booking-head > span {
+          flex: 0 0 auto;
+          padding: 5px 10px;
+          border-radius: 999px;
+          color: #14310e;
+          background: rgba(182, 255, 69, 0.64);
+          font-size: 10px;
+          font-weight: 700;
+          font-family: var(--font-ui, ui-sans-serif);
+          white-space: nowrap;
+        }
+
+        .arena-share-copy {
+          margin: 12px 16px 0;
+          padding: 10px 12px;
+          border-radius: 14px;
+          color: var(--arena-muted);
+          background: var(--arena-price-bg);
+          border: 1px solid var(--arena-price-border);
+          font: 800 10px/1.35 var(--font-ui, ui-sans-serif);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .arena-booking-body {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+          padding: 0;
+        }
+
+        .arena-booking-body > * {
+          height: 100%;
+          min-height: 0;
+        }
+
+        .arena-booking-body :global(.cta-btn),
+        .arena-booking-body :global(button) {
+          border-radius: 12px;
+        }
+
+        .arena-empty-booking {
+          height: 100%;
+          display: grid;
+          place-content: center;
+          text-align: center;
+          padding: 28px;
+          border-radius: 24px;
+          border: 1px dashed var(--arena-empty-border);
+          background: var(--arena-empty-bg);
+        }
+
+        .arena-empty-booking h3 {
+          margin: 0;
+          color: var(--arena-ink);
+          font-size: 22px;
+          letter-spacing: -0.04em;
+        }
+
+        .arena-empty-booking p {
+          max-width: 280px;
+          margin: 9px auto 18px;
+          color: var(--arena-muted);
+          font-size: 14px;
+          line-height: 1.45;
+        }
+
+        .arena-empty-call {
+          display: inline-flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 46px;
+          padding: 0 18px;
+          border-radius: 999px;
+          color: #10210f;
+          background: var(--arena-accent);
+          text-decoration: none;
+          font-weight: 900;
+        }
+
+        @keyframes arenaPulse {
+          0% { box-shadow: 0 0 0 0 rgba(16, 33, 15, 0.42); }
+          70% { box-shadow: 0 0 0 9px rgba(16, 33, 15, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(16, 33, 15, 0); }
+        }
+
+        @media (max-width: 1120px) {
+          .arena-stage {
+            grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr);
+          }
+
+          .arena-bottom-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .arena-description {
+            -webkit-line-clamp: 2;
+          }
+        }
+
+        @media (max-width: 900px) {
+          html,
+          body,
+          .arena-page {
+            overflow: auto;
+          }
+
+          .arena-page {
+            height: auto;
+            min-height: 100svh;
+          }
+
+          .arena-nav {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            height: 64px;
+            background: var(--arena-mobile-nav-bg);
+            backdrop-filter: blur(18px);
+          }
+
+          .arena-nav-links {
+            display: none;
+          }
+
+          .arena-stage {
+            height: auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            padding: 0 12px 12px;
+          }
+
+          .arena-hero-card {
+            min-height: 590px;
+          }
+
+          .arena-booking-card {
+            min-height: 650px;
+          }
+
+          .arena-booking-body {
+            overflow: auto;
+          }
+        }
+
+        @media (max-width: 560px) {
+          .arena-brand span,
+          .arena-call-btn {
+            display: none;
+          }
+
+          .arena-nav {
+            padding-inline: 12px;
+          }
+
+          .arena-book-btn {
+            height: 38px;
+            padding: 0 15px;
+          }
+
+          .arena-hero-card {
+            min-height: 600px;
+            border-radius: 26px;
+          }
+
+          .arena-top-row {
+            top: 16px;
+            left: 16px;
+            right: 16px;
+          }
+
+          .arena-hero-content {
+            padding: 16px;
+            gap: 13px;
+          }
+
+          .arena-metrics {
+            grid-template-columns: repeat(2, 1fr);
+            border-radius: 18px;
+          }
+
+          .arena-title-block h1 {
+            font-size: 42px;
+          }
+
+          .arena-location span {
+            white-space: normal;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+          }
+
+          .arena-chip-row span:nth-child(n + 6) {
+            display: none;
+          }
+
+          .arena-unit-strip {
+            grid-template-columns: 1fr;
+          }
+
+          .arena-booking-card {
+            border-radius: 26px;
+          }
+
+          .arena-booking-head,
+          .arena-booking-price-row {
+            padding-inline: 16px;
+          }
+
+          .arena-share-copy {
+            margin-inline: 16px;
+          }
+
+          .arena-booking-head {
+            display: block;
+          }
+
+          .arena-booking-head > span {
+            display: inline-flex;
+            margin-top: 12px;
+          }
+
+          .arena-booking-body {
+            padding: 12px;
+          }
+        }
+      `}</style>
+    </main>
   );
 }

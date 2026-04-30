@@ -6,6 +6,9 @@ import { z } from "zod";
 import { getStudioScene } from "../../lib/redis";
 import { buildInningsPlayerStats } from "../matches/match-stats";
 import { OverlayPackService } from "../overlays/overlay-pack.service";
+import { NotificationService } from "../notifications/notification.service";
+
+const notificationSvc = new NotificationService();
 
 type IndianCityRecord = {
   id?: string;
@@ -2799,7 +2802,13 @@ startRealtime();
           { arenaSlug: slug, isPublicPage: true, isActive: true },
         ],
       },
-      include: { units: { where: { isActive: true }, orderBy: { createdAt: 'asc' } } },
+      include: {
+        units: {
+          where: { isActive: true },
+          orderBy: { createdAt: 'asc' },
+          include: { addons: { where: { isAvailable: true } } },
+        },
+      },
     })
     if (!arena) return reply.code(404).send({ success: false, error: 'Arena not found' })
     return reply.send({ success: true, data: arena })
@@ -2824,20 +2833,59 @@ startRealtime();
     if (!arena) return reply.code(404).send({ success: false, error: 'Arena not found' })
 
     const bookingDate = date ? new Date(date) : new Date()
-    const existingBookings = await prisma.slotBooking.findMany({
-      where: {
-        arenaId: arena.id,
-        date: bookingDate,
-        status: { in: ['HELD', 'PENDING_PAYMENT', 'CONFIRMED', 'CHECKED_IN'] },
-      },
-      select: { unitId: true, startTime: true, endTime: true },
-    })
+    // Match service convention: Mon=1 … Sat=6, Sun=7
+    const rawDay = bookingDate.getUTCDay()
+    const weekday = rawDay === 0 ? 7 : rawDay
+
+    const [existingBookings, timeBlocks, monthlyPasses] = await Promise.all([
+      prisma.slotBooking.findMany({
+        where: {
+          arenaId: arena.id,
+          date: bookingDate,
+          status: { in: ['HELD', 'PENDING_PAYMENT', 'CONFIRMED', 'CHECKED_IN'] },
+        },
+        select: { unitId: true, startTime: true, endTime: true },
+      }),
+      prisma.arenaTimeBlock.findMany({
+        where: {
+          arenaId: arena.id,
+          OR: [
+            { date: bookingDate },
+            { isRecurring: true, weekdays: { has: weekday } },
+          ],
+        },
+        select: { unitId: true, startTime: true, endTime: true, isHoliday: true },
+      }),
+      prisma.monthlyPass.findMany({
+        where: {
+          arenaId: arena.id,
+          status: 'ACTIVE',
+          startDate: { lte: bookingDate },
+          endDate: { gte: bookingDate },
+          daysOfWeek: { has: weekday },
+        },
+        select: { unitId: true, startTime: true, endTime: true },
+      }),
+    ])
 
     const bookedByUnit: Record<string, { startTime: string; endTime: string }[]> = {}
-    for (const b of existingBookings) {
-      if (!bookedByUnit[b.unitId]) bookedByUnit[b.unitId] = []
-      bookedByUnit[b.unitId].push({ startTime: b.startTime, endTime: b.endTime })
+    const push = (unitId: string, startTime: string, endTime: string) => {
+      if (!bookedByUnit[unitId]) bookedByUnit[unitId] = []
+      bookedByUnit[unitId].push({ startTime, endTime })
     }
+
+    for (const b of existingBookings) push(b.unitId, b.startTime, b.endTime)
+
+    for (const b of timeBlocks) {
+      if (b.isHoliday) {
+        const u = arena.units.find(u => u.id === b.unitId)
+        push(b.unitId, u?.openTime ?? arena.openTime ?? '00:00', u?.closeTime ?? arena.closeTime ?? '23:59')
+      } else {
+        push(b.unitId, b.startTime, b.endTime)
+      }
+    }
+
+    for (const p of monthlyPasses) push(p.unitId, p.startTime, p.endTime)
 
     return reply.send({
       success: true,
@@ -2969,8 +3017,10 @@ startRealtime();
     }
 
     const dateObj = new Date(bookingDate)
+    const rawDay = dateObj.getUTCDay()
+    const weekday = rawDay === 0 ? 7 : rawDay
 
-    // conflict check
+    // conflict: existing booking
     const conflict = await prisma.slotBooking.findFirst({
       where: {
         unitId: arenaUnitId,
@@ -2981,6 +3031,34 @@ startRealtime();
       },
     })
     if (conflict) return reply.code(409).send({ success: false, error: 'Slot already booked' })
+
+    // conflict: time block (one-time or recurring or holiday)
+    const blocked = await prisma.arenaTimeBlock.findFirst({
+      where: {
+        unitId: arenaUnitId,
+        startTime: { lt: endTime },
+        endTime: { gt: startTime },
+        OR: [
+          { date: dateObj },
+          { isRecurring: true, weekdays: { has: weekday } },
+        ],
+      },
+    })
+    if (blocked) return reply.code(409).send({ success: false, error: 'This slot is blocked' })
+
+    // conflict: active monthly pass
+    const passConflict = await prisma.monthlyPass.findFirst({
+      where: {
+        unitId: arenaUnitId,
+        status: 'ACTIVE',
+        startDate: { lte: dateObj },
+        endDate: { gte: dateObj },
+        daysOfWeek: { has: weekday },
+        startTime: { lt: endTime },
+        endTime: { gt: startTime },
+      },
+    })
+    if (passConflict) return reply.code(409).send({ success: false, error: 'This slot is reserved by a monthly pass' })
 
     // resolve or create walk-in player for this arena
     const arenaId = unit.arenaId
@@ -3026,6 +3104,17 @@ startRealtime();
       } as any,
     })
 
+    // Notify arena owner (fire-and-forget)
+    notificationSvc.notifyBookingConfirmed({
+      id: booking.id,
+      arenaId,
+      unitId: arenaUnitId,
+      date: dateObj,
+      startTime,
+      endTime,
+      bookedById: walkinPlayer.id,
+    }).catch((err) => console.error('[notify] booking confirmed failed:', err))
+
     return reply.code(201).send({
       success: true,
       data: {
@@ -3036,6 +3125,142 @@ startRealtime();
         guestName: booking.guestName,
         status: booking.status,
       },
+    })
+  })
+
+  // POST /public/monthly-passes
+  app.post('/monthly-passes', async (request, reply) => {
+    const bodySchema = z.object({
+      arenaUnitId: z.string(),
+      startTime: z.string().regex(/^\d{2}:\d{2}$/),
+      endTime: z.string().regex(/^\d{2}:\d{2}$/),
+      daysOfWeek: z.array(z.number().int().min(1).max(7)).min(1),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      months: z.number().int().min(1).max(12).default(1),
+      guestName: z.string().min(1).max(100),
+      guestPhone: z.string().min(5).max(20),
+    })
+    const parsed = bodySchema.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ success: false, error: 'Invalid request' })
+
+    const { arenaUnitId, startTime, endTime, daysOfWeek, startDate, months, guestName, guestPhone } = parsed.data
+
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: arenaUnitId }, include: { arena: true } })
+    if (!unit || !unit.isActive) return reply.code(404).send({ success: false, error: 'Unit not found' })
+    if (!(unit.arena as any).isPublicPage || !(unit.arena as any).isActive) return reply.code(404).send({ success: false, error: 'Arena not found' })
+    if (!(unit as any).monthlyPassEnabled) return reply.code(400).send({ success: false, error: 'Monthly pass not available for this unit' })
+
+    const start = new Date(startDate)
+    const end = new Date(start)
+    end.setUTCMonth(end.getUTCMonth() + months)
+    end.setUTCDate(end.getUTCDate() - 1)
+
+    const ratePaise = (unit as any).monthlyPassRatePaise ?? 0
+    const totalPaise = ratePaise * months
+
+    const pass = await prisma.monthlyPass.create({
+      data: {
+        arenaId: unit.arenaId,
+        unitId: arenaUnitId,
+        guestName,
+        guestPhone,
+        startTime,
+        endTime,
+        daysOfWeek,
+        startDate: start,
+        endDate: end,
+        totalAmountPaise: totalPaise,
+        status: 'ACTIVE',
+        bookingSource: 'PUBLIC_WEB',
+      } as any,
+    })
+
+    return reply.code(201).send({ success: true, data: { id: pass.id, startDate, endDate: end.toISOString().slice(0, 10), totalAmountPaise: totalPaise } })
+  })
+
+  // POST /public/bulk-bookings
+  app.post('/bulk-bookings', async (request, reply) => {
+    const bodySchema = z.object({
+      arenaUnitId: z.string(),
+      startTime: z.string().regex(/^\d{2}:\d{2}$/),
+      endTime: z.string().regex(/^\d{2}:\d{2}$/),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      numDays: z.number().int().min(1),
+      guestName: z.string().min(1).max(100),
+      guestPhone: z.string().min(5).max(20),
+    })
+    const parsed = bodySchema.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ success: false, error: 'Invalid request' })
+
+    const { arenaUnitId, startTime, endTime, startDate, numDays, guestName, guestPhone } = parsed.data
+
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: arenaUnitId }, include: { arena: true } })
+    if (!unit || !unit.isActive) return reply.code(404).send({ success: false, error: 'Unit not found' })
+    if (!(unit.arena as any).isPublicPage || !(unit.arena as any).isActive) return reply.code(404).send({ success: false, error: 'Arena not found' })
+
+    const minDays = (unit as any).minBulkDays ?? 1
+    if (numDays < minDays) return reply.code(400).send({ success: false, error: `Minimum ${minDays} days required for bulk booking` })
+
+    const dayRatePaise = (unit as any).bulkDayRatePaise ?? 0
+    const startMins = parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1])
+    const endMins = parseInt(endTime.split(':')[0]) * 60 + parseInt(endTime.split(':')[1])
+    const durationMins = endMins - startMins
+
+    const arenaId = unit.arenaId
+    const walkinEmail = `walkin+${arenaId}@swing.internal`
+    let walkinUser = await prisma.user.findUnique({ where: { email: walkinEmail } })
+    if (!walkinUser) {
+      walkinUser = await prisma.user.create({ data: { phone: `000000000000_${arenaId.slice(0, 8)}`, email: walkinEmail, name: 'Walk-in Guest', roles: ['PLAYER'] } })
+    }
+    let walkinPlayer = await prisma.playerProfile.findUnique({ where: { userId: walkinUser.id } })
+    if (!walkinPlayer) walkinPlayer = await prisma.playerProfile.create({ data: { userId: walkinUser.id } })
+
+    const bookings = []
+    for (let i = 0; i < numDays; i++) {
+      const d = new Date(startDate)
+      d.setUTCDate(d.getUTCDate() + i)
+      bookings.push(prisma.slotBooking.create({
+        data: {
+          arenaId,
+          unitId: arenaUnitId,
+          bookedById: walkinPlayer.id,
+          date: d,
+          startTime,
+          endTime,
+          durationMins,
+          baseAmountPaise: dayRatePaise,
+          totalAmountPaise: dayRatePaise,
+          totalPricePaise: dayRatePaise,
+          status: 'CONFIRMED',
+          isOfflineBooking: true,
+          isBulkBooking: true,
+          bulkDayRatePaise: dayRatePaise,
+          guestName,
+          guestPhone,
+          guestSource: 'PUBLIC_WEB',
+          paymentMode: 'CASH',
+        } as any,
+      }))
+    }
+
+    const created = await prisma.$transaction(bookings)
+
+    // Notify arena owner (fire-and-forget)
+    if (created[0]) {
+      notificationSvc.notifyBookingConfirmed({
+        id: created[0].id,
+        arenaId: (unit.arena as any).id,
+        unitId: arenaUnitId,
+        date: created[0].date,
+        startTime,
+        endTime,
+        bookedById: walkinPlayer.id,
+      }).catch((err) => console.error('[notify] bulk booking confirmed failed:', err))
+    }
+
+    return reply.code(201).send({
+      success: true,
+      data: { numDays, startDate, startTime, endTime, totalAmountPaise: dayRatePaise * numDays },
     })
   })
 }
