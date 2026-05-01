@@ -518,7 +518,7 @@ class _ProfileSheetState extends ConsumerState<_ProfileSheet> {
                   ),
                   const SizedBox(height: 24),
                   SizedBox(
-                    height: 456,
+                    height: 520,
                     child: TabBarView(
                       children: [
                         _ProfileTabFields(children: [
@@ -660,7 +660,6 @@ class _ProfileTabFields extends StatelessWidget {
       ),
       child: ListView(
         padding: EdgeInsets.zero,
-        physics: const NeverScrollableScrollPhysics(),
         children: [
           ...children.expand((child) => [child, const SizedBox(height: 12)]),
         ],
