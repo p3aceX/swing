@@ -18,6 +18,8 @@ import '../../../core/utils/image_compressor.dart';
 import '../../arena/screens/arena_profile_page.dart';
 import '../../arena/services/arena_profile_providers.dart';
 
+const _googlePlacesKey = 'AIzaSyDpJ1S4JYO-jVA6BgzxM1LYjdSvrSrTkTo';
+
 const _bg = Color(0xFFF3F4F6);
 const _surface = Color(0xFFFFFFFF);
 const _line = Color(0xFFE1E5EA);
@@ -139,25 +141,20 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   Future<void> _fetchSuggestions(String query) async {
     try {
-      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': '$query India',
-        'format': 'json',
-        'countrycodes': 'in',
-        'limit': '6',
-        'addressdetails': '1',
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', {
+        'input': query,
+        'key': _googlePlacesKey,
+        'components': 'country:in',
+        'language': 'en',
+        'types': 'geocode|establishment',
       });
-      debugPrint('[Search] GET $uri');
-      final res = await http.get(uri, headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'SwingBizApp/1.0',
-      }).timeout(const Duration(seconds: 10));
-      debugPrint('[Search] status=${res.statusCode} body=${res.body.length}b');
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
-        final list = jsonDecode(res.body) as List<dynamic>;
-        debugPrint('[Search] results=${list.length}');
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final predictions = (body['predictions'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
         if (mounted) {
           setState(() {
-            _suggestions = list.whereType<Map<String, dynamic>>().toList();
+            _suggestions = predictions;
             _searchLoading = false;
           });
         }
@@ -165,37 +162,67 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
       }
     } catch (e) {
-      debugPrint('[Search] error: $e');
+      debugPrint('[Places] autocomplete error: $e');
       if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
     }
   }
 
-  void _selectSuggestion(Map<String, dynamic> result) {
-    final addr = result['address'] as Map<String, dynamic>? ?? {};
-    final lat = double.tryParse(result['lat'] as String? ?? '');
-    final lon = double.tryParse(result['lon'] as String? ?? '');
+  Future<void> _selectSuggestion(Map<String, dynamic> prediction) async {
+    final placeId = prediction['place_id'] as String? ?? '';
+    final description = prediction['description'] as String? ?? '';
+    setState(() { _searchCtrl.text = description; _suggestions = []; _searchLoading = true; });
 
-    final road = addr['road'] as String? ?? addr['pedestrian'] as String? ?? '';
-    final houseNumber = addr['house_number'] as String? ?? '';
-    final suburb = addr['suburb'] as String? ?? addr['neighbourhood'] as String? ?? '';
-    final city = addr['city'] as String? ?? addr['town'] as String? ?? addr['village'] as String? ?? addr['county'] as String? ?? '';
-    final state = addr['state'] as String? ?? '';
-    final postcode = addr['postcode'] as String? ?? '';
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
+        'place_id': placeId,
+        'key': _googlePlacesKey,
+        'fields': 'geometry,formatted_address,address_components',
+        'language': 'en',
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final result = body['result'] as Map<String, dynamic>? ?? {};
+        final location = (result['geometry'] as Map<String, dynamic>?)?['location'] as Map<String, dynamic>?;
+        final lat = location?['lat'] as double?;
+        final lng = location?['lng'] as double?;
+        final components = (result['address_components'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
 
-    final addressParts = [if (houseNumber.isNotEmpty) houseNumber, if (road.isNotEmpty) road, if (suburb.isNotEmpty) suburb];
-    final addressLine = addressParts.isNotEmpty ? addressParts.join(', ') : (result['display_name'] as String? ?? '').split(',').first;
+        String getComponent(List<String> types) {
+          for (final c in components) {
+            final t = (c['types'] as List?)?.cast<String>() ?? [];
+            if (types.any((type) => t.contains(type))) return c['long_name'] as String? ?? '';
+          }
+          return '';
+        }
 
-    setState(() {
-      _searchCtrl.text = result['display_name'] as String? ?? '';
-      _address.text = addressLine;
-      _city.text = city;
-      _state.text = state;
-      _pincode.text = postcode;
-      if (lat != null) _latitude.text = lat.toStringAsFixed(6);
-      if (lon != null) _longitude.text = lon.toStringAsFixed(6);
-      _suggestions = [];
-      _locationPicked = true;
-    });
+        final streetNum = getComponent(['street_number']);
+        final route = getComponent(['route']);
+        final sublocality = getComponent(['sublocality_level_1', 'sublocality']);
+        final city = getComponent(['locality']);
+        final state = getComponent(['administrative_area_level_1']);
+        final postcode = getComponent(['postal_code']);
+
+        final addressParts = [if (streetNum.isNotEmpty) streetNum, if (route.isNotEmpty) route, if (sublocality.isNotEmpty) sublocality];
+        final addressLine = addressParts.isNotEmpty ? addressParts.join(', ') : description.split(',').first;
+
+        if (mounted) {
+          setState(() {
+            _address.text = addressLine;
+            _city.text = city;
+            _state.text = state;
+            _pincode.text = postcode;
+            if (lat != null) _latitude.text = lat.toStringAsFixed(6);
+            if (lng != null) _longitude.text = lng.toStringAsFixed(6);
+            _locationPicked = true;
+            _searchLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('[Places] details error: $e');
+      if (mounted) setState(() { _searchLoading = false; });
+    }
   }
 
   Future<void> _submit() async {
@@ -277,15 +304,11 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                     ),
                     child: Column(
                       children: _suggestions.map((f) {
-                        final addr = f['address'] as Map<String, dynamic>? ?? {};
-                        final displayName = f['display_name'] as String? ?? '';
-                        final parts = displayName.split(',');
-                        final title = parts.isNotEmpty ? parts.first.trim() : displayName;
-                        final city = addr['city'] as String? ?? addr['town'] as String? ?? addr['village'] as String? ?? '';
-                        final state = addr['state'] as String? ?? '';
-                        final subtitle = [city, state].where((s) => s.isNotEmpty).join(', ');
+                        final sf = f['structured_formatting'] as Map<String, dynamic>? ?? {};
+                        final title = sf['main_text'] as String? ?? f['description'] as String? ?? '';
+                        final subtitle = sf['secondary_text'] as String? ?? '';
                         return InkWell(
-                          onTap: () => _selectSuggestion(f),
+                          onTap: () => _selectSuggestion(f),  // async, fire-and-forget
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                             child: Row(children: [
