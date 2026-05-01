@@ -16,9 +16,9 @@ const createArenaSchema = z.object({
   city: z.string(),
   state: z.string(),
   pincode: z.string().optional(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-  phone: z.string().optional(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  phone: z.string().min(10).max(15).optional(),
   sports: z.array(z.enum(['CRICKET', 'FUTSAL', 'PICKLEBALL', 'BADMINTON', 'FOOTBALL', 'TENNIS', 'BASKETBALL', 'OTHER'])).default(['CRICKET']),
   photoUrls: z.array(z.string()).default([]),
   hasParking: z.boolean().default(false),
@@ -71,6 +71,7 @@ const addUnitSchema = z.object({
     label: z.string().trim().min(1),
     count: z.number().int().min(1).default(1),
     pricePaise: z.number().int().min(0).optional(),
+    monthlyPassRatePaise: z.number().int().min(0).optional().nullable(),
   })).optional().nullable(),
 })
 
@@ -124,6 +125,12 @@ const arenaTimeBlockSchema = z.object({
 const updateArenaSchema = createArenaSchema.partial().extend({
   customSlug: z.string().min(3).max(60).optional().nullable(),
   isPublicPage: z.boolean().optional(),
+  openTime: z.string().regex(timePattern).optional().nullable(),
+  closeTime: z.string().regex(timePattern).optional().nullable(),
+  operatingDays: z.array(z.number().int().min(1).max(7)).optional(),
+  advanceBookingDays: z.number().int().optional().nullable(),
+  bufferMins: z.number().int().optional().nullable(),
+  cancellationHours: z.number().int().optional().nullable(),
 })
 
 const arenaTimeBlockQuerySchema = z.object({
