@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
@@ -137,19 +139,22 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   Future<void> _fetchSuggestions(String query) async {
     try {
-      final res = await Dio().get<Map<String, dynamic>>(
-        'https://photon.komoot.io/api/',
-        queryParameters: {'q': '$query India', 'limit': '5', 'lang': 'en'},
-        options: Options(receiveTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8)),
-      );
-      final features = (res.data?['features'] as List?) ?? [];
-      if (mounted) {
-        setState(() {
-          _suggestions = features.cast<Map<String, dynamic>>();
-          _searchLoading = false;
-        });
+      final uri = Uri.https('photon.komoot.io', '/api/', {'q': '$query India', 'limit': '5', 'lang': 'en'});
+      final res = await http.get(uri, headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final features = (body['features'] as List?) ?? [];
+        if (mounted) {
+          setState(() {
+            _suggestions = features.whereType<Map<String, dynamic>>().toList();
+            _searchLoading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Photon error: $e');
       if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
     }
   }
