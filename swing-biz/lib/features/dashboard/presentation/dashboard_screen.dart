@@ -651,15 +651,14 @@ class _ProfileTabFields extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 16, 14, 4),
+    return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: ListView(
-        padding: EdgeInsets.zero,
+        padding: const EdgeInsets.fromLTRB(14, 16, 14, 4),
         children: [
           ...children.expand((child) => [child, const SizedBox(height: 12)]),
         ],

@@ -273,7 +273,16 @@ export class ArenaService {
 
   async deleteArena(arenaId: string, userId: string) {
     await this.verifyOwner(arenaId, userId)
-    return prisma.arena.delete({ where: { id: arenaId } })
+    await prisma.$transaction([
+      prisma.monthlyPass.deleteMany({ where: { arenaId } }),
+      prisma.arenaManager.deleteMany({ where: { arenaId } }),
+      (prisma as any).review.deleteMany({ where: { arenaId } }),
+      prisma.arenaTimeBlock.deleteMany({ where: { arenaId } }),
+      prisma.slotBooking.deleteMany({ where: { arenaId } }),
+      prisma.arenaAddon.deleteMany({ where: { arenaId } }),
+      (prisma.arenaUnit as any).deleteMany({ where: { arenaId } }),
+      prisma.arena.delete({ where: { id: arenaId } }),
+    ])
   }
 
   async addUnit(arenaId: string, userId: string, data: any) {

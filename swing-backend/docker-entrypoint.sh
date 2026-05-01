@@ -20,6 +20,7 @@ run_migrations() {
     # was wired into startup. Mark those historical baselines as applied if
     # they are missing, then deploy all pending migrations normally.
     # Note: We mark everything as applied because SQL was run manually.
+    npx prisma migrate resolve --rolled-back 20260318_match_round --schema "$SCHEMA" || true
     npx prisma migrate resolve --applied 20260318_match_round --schema "$SCHEMA" || true
     npx prisma migrate resolve --applied 20260318_missing_endpoints_additions --schema "$SCHEMA" || true
     npx prisma migrate resolve --applied 20260318_team_roles --schema "$SCHEMA" || true
