@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -35,7 +34,6 @@ class CreateArenaScreen extends ConsumerStatefulWidget {
 class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   final _page = PageController();
   final _basicKey = GlobalKey<FormState>();
-  final _locationKey = GlobalKey<FormState>();
 
   final _name = TextEditingController();
   final _description = TextEditingController();
@@ -50,11 +48,15 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   int _step = 0;
   bool _saving = false;
   bool _uploading = false;
-  bool _pincodeLoading = false;
+  bool _locationPicked = false;
   String _arenaType = 'CRICKET';
-  String? _pincodeMessage;
-  Timer? _pincodeDebounce;
   final List<String> _photoUrls = [];
+
+  // Address search
+  final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
+  bool _searchLoading = false;
+  List<Map<String, dynamic>> _suggestions = [];
 
   static const _steps = [
     _SetupStep('Type', Icons.category_rounded),
@@ -65,10 +67,10 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   @override
   void dispose() {
-    for (final controller in [_name, _description, _phone, _address, _city, _state, _pincode, _latitude, _longitude]) {
-      controller.dispose();
+    for (final c in [_name, _description, _phone, _address, _city, _state, _pincode, _latitude, _longitude, _searchCtrl]) {
+      c.dispose();
     }
-    _pincodeDebounce?.cancel();
+    _searchDebounce?.cancel();
     _page.dispose();
     super.dispose();
   }
@@ -101,60 +103,87 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   }
 
   Future<void> _next() async {
+    if (_step == 2 && !_locationPicked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please search and select your arena location')),
+      );
+      return;
+    }
     final form = switch (_step) {
       1 => _basicKey,
-      2 => _locationKey,
       _ => null,
     };
     if (form != null && !form.currentState!.validate()) return;
-    // On leaving the location step, geocode the full address if lat/long are empty
-    if (_step == 2) await _geocodeAddress();
     if (_step == _steps.length - 1) return _submit();
     setState(() => _step++);
     await _page.nextPage(duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
-  }
-
-  Future<void> _geocodeAddress() async {
-    if (_latitude.text.trim().isNotEmpty && _longitude.text.trim().isNotEmpty) return;
-    final q = [_address.text.trim(), _city.text.trim(), _state.text.trim(), _pincode.text.trim(), 'India']
-        .where((s) => s.isNotEmpty)
-        .join(', ');
-    if (q.isEmpty) return;
-    setState(() { _pincodeLoading = true; _pincodeMessage = 'Fetching coordinates...'; });
-    try {
-      final geo = await Dio().get<List<dynamic>>(
-        'https://nominatim.openstreetmap.org/search',
-        queryParameters: {'q': q, 'format': 'json', 'limit': '1'},
-        options: Options(
-          headers: {'User-Agent': 'SwingBizApp/1.0'},
-          receiveTimeout: const Duration(seconds: 10),
-          sendTimeout: const Duration(seconds: 10),
-        ),
-      );
-      final places = geo.data;
-      if (places != null && places.isNotEmpty) {
-        final place = places.first as Map<String, dynamic>;
-        final lat = place['lat'] as String?;
-        final lon = place['lon'] as String?;
-        if (mounted && lat != null && lon != null) {
-          setState(() {
-            _latitude.text = double.parse(lat).toStringAsFixed(6);
-            _longitude.text = double.parse(lon).toStringAsFixed(6);
-            _pincodeMessage = 'Coordinates fetched from address ✓';
-          });
-        }
-      }
-    } catch (_) {
-      // silently skip — lat/long fields remain editable
-    } finally {
-      if (mounted) setState(() => _pincodeLoading = false);
-    }
   }
 
   Future<void> _back() async {
     if (_step == 0) { context.pop(); return; }
     setState(() => _step--);
     await _page.previousPage(duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    if (value.trim().length < 3) {
+      setState(() { _suggestions = []; _searchLoading = false; });
+      return;
+    }
+    setState(() => _searchLoading = true);
+    _searchDebounce = Timer(const Duration(milliseconds: 500), () => _fetchSuggestions(value.trim()));
+  }
+
+  Future<void> _fetchSuggestions(String query) async {
+    try {
+      final res = await Dio().get<Map<String, dynamic>>(
+        'https://photon.komoot.io/api/',
+        queryParameters: {'q': '$query India', 'limit': '5', 'lang': 'en'},
+        options: Options(receiveTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8)),
+      );
+      final features = (res.data?['features'] as List?) ?? [];
+      if (mounted) {
+        setState(() {
+          _suggestions = features.cast<Map<String, dynamic>>();
+          _searchLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
+    }
+  }
+
+  void _selectSuggestion(Map<String, dynamic> feature) {
+    final props = feature['properties'] as Map<String, dynamic>? ?? {};
+    final coords = (feature['geometry']?['coordinates'] as List?) ?? [];
+    final lon = coords.isNotEmpty ? coords[0] as double? : null;
+    final lat = coords.length > 1 ? coords[1] as double? : null;
+
+    final name = props['name'] as String? ?? '';
+    final street = props['street'] as String? ?? '';
+    final housenumber = props['housenumber'] as String? ?? '';
+    final district = props['district'] as String? ?? '';
+    final city = props['city'] as String? ?? props['county'] as String? ?? district;
+    final state = props['state'] as String? ?? '';
+    final postcode = props['postcode'] as String? ?? '';
+
+    final addressParts = [if (housenumber.isNotEmpty) housenumber, if (street.isNotEmpty) street, if (name.isNotEmpty && street.isEmpty) name];
+    final addressLine = addressParts.join(', ');
+
+    final displayLabel = [name, street, city, state].where((s) => s.isNotEmpty).join(', ');
+
+    setState(() {
+      _searchCtrl.text = displayLabel;
+      _address.text = addressLine.isNotEmpty ? addressLine : name;
+      _city.text = city;
+      _state.text = state;
+      _pincode.text = postcode;
+      if (lat != null) _latitude.text = lat.toStringAsFixed(6);
+      if (lon != null) _longitude.text = lon.toStringAsFixed(6);
+      _suggestions = [];
+      _locationPicked = true;
+    });
   }
 
   Future<void> _submit() async {
@@ -195,36 +224,6 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
     }
   }
 
-  void _onPincodeChanged(String value) {
-    _pincodeDebounce?.cancel();
-    final pincode = value.trim();
-    if (pincode.length != 6) { setState(() { _pincodeLoading = false; _pincodeMessage = null; }); return; }
-    _pincodeDebounce = Timer(const Duration(milliseconds: 450), () => _lookupPincode(pincode));
-  }
-
-  Future<void> _lookupPincode(String pincode) async {
-    setState(() { _pincodeLoading = true; _pincodeMessage = null; });
-    try {
-      final response = await Dio().get<List<dynamic>>('https://api.postalpincode.in/pincode/$pincode', options: Options(receiveTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8)));
-      final payload = response.data;
-      final first = payload?.isNotEmpty == true ? payload!.first : null;
-      if (first is! Map || first['Status'] != 'Success') { if (mounted) setState(() => _pincodeMessage = 'No location found for this pincode'); return; }
-      final postOffices = first['PostOffice'];
-      final office = postOffices is List && postOffices.isNotEmpty ? postOffices.first : null;
-      if (office is! Map) { if (mounted) setState(() => _pincodeMessage = 'No location found for this pincode'); return; }
-      final district = '${office['District'] ?? ''}'.trim();
-      final state = '${office['State'] ?? ''}'.trim();
-      if (mounted) setState(() {
-        if (district.isNotEmpty) _city.text = _titleCase(district);
-        if (state.isNotEmpty) _state.text = _titleCase(state);
-        _pincodeMessage = 'City and state filled ✓  —  coordinates will be fetched from address on Next';
-      });
-    } catch (_) {
-      if (mounted) setState(() => _pincodeMessage = 'Could not fetch location details');
-    } finally {
-      if (mounted) setState(() => _pincodeLoading = false);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -237,7 +236,85 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
           Expanded(child: PageView(controller: _page, physics: const NeverScrollableScrollPhysics(), children: [
             _ArenaTypeStep(selectedType: _arenaType, onChanged: (value) => setState(() => _arenaType = value)),
             _StepShell(title: 'Basic arena details', subtitle: 'Name, description and booking phone.', child: Form(key: _basicKey, child: ListView(padding: const EdgeInsets.all(20), children: [_Field(_name, 'Arena name', required: true), _Field(_description, 'Description', maxLines: 3), _Field(_phone, 'Booking confirmation phone number', required: true, keyboardType: TextInputType.phone, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)])]))),
-            _StepShell(title: 'Location', subtitle: 'Keep latitude and longitude for map accuracy.', child: Form(key: _locationKey, child: ListView(padding: const EdgeInsets.all(20), children: [_Field(_pincode, 'Pincode', required: true, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)], onChanged: _onPincodeChanged, trailing: _pincodeLoading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null, helperText: _pincodeMessage), _Field(_city, 'City', required: true), _Field(_state, 'State', required: true), _Field(_address, 'Address', required: true), Row(children: [Expanded(child: _Field(_latitude, 'Latitude', keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true))), const SizedBox(width: 10), Expanded(child: _Field(_longitude, 'Longitude', keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true)))])]))),
+            _StepShell(
+              title: 'Location',
+              subtitle: 'Search your arena address to auto-fill all location details.',
+              child: ListView(padding: const EdgeInsets.all(20), children: [
+                // Search box
+                TextField(
+                  controller: _searchCtrl,
+                  onChanged: _onSearchChanged,
+                  decoration: _inputDecoration(
+                    'Search arena address...',
+                    suffixIcon: _searchLoading
+                        ? const Padding(padding: EdgeInsets.all(13), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+                        : _locationPicked
+                            ? const Padding(padding: EdgeInsets.all(13), child: Icon(Icons.check_circle_rounded, color: _accent, size: 20))
+                            : const Padding(padding: EdgeInsets.all(13), child: Icon(Icons.search_rounded, color: _muted, size: 20)),
+                  ),
+                ),
+                // Suggestions dropdown
+                if (_suggestions.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      color: _surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _line),
+                      boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 12, offset: Offset(0, 4))],
+                    ),
+                    child: Column(
+                      children: _suggestions.map((f) {
+                        final props = f['properties'] as Map<String, dynamic>? ?? {};
+                        final name = props['name'] as String? ?? '';
+                        final street = props['street'] as String? ?? '';
+                        final city = props['city'] as String? ?? props['county'] as String? ?? props['district'] as String? ?? '';
+                        final state = props['state'] as String? ?? '';
+                        final title = [name, street].where((s) => s.isNotEmpty).join(', ');
+                        final subtitle = [city, state].where((s) => s.isNotEmpty).join(', ');
+                        return InkWell(
+                          onTap: () => _selectSuggestion(f),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(children: [
+                              const Icon(Icons.location_on_outlined, size: 18, color: _accent),
+                              const SizedBox(width: 10),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(title.isNotEmpty ? title : subtitle, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _text)),
+                                if (subtitle.isNotEmpty && title.isNotEmpty)
+                                  Text(subtitle, style: const TextStyle(fontSize: 12, color: _muted)),
+                              ])),
+                            ]),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                // Filled details (shown after selection)
+                if (_locationPicked) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(color: const Color(0xFFF0FDF8), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFBBF7D0))),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('Location details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _accent)),
+                      const SizedBox(height: 10),
+                      _DetailRow('Address', _address.text),
+                      _DetailRow('City', _city.text),
+                      _DetailRow('State', _state.text),
+                      if (_pincode.text.isNotEmpty) _DetailRow('Pincode', _pincode.text),
+                      _DetailRow('Lat / Long', '${_latitude.text},  ${_longitude.text}'),
+                    ]),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () => setState(() { _locationPicked = false; _searchCtrl.clear(); _suggestions = []; }),
+                    icon: const Icon(Icons.edit_location_alt_outlined, size: 16),
+                    label: const Text('Change location'),
+                  ),
+                ],
+              ]),
+            ),
             _StepShell(title: 'Arena Photos', subtitle: 'Add up to 3 photos of your arena.', child: ListView(padding: const EdgeInsets.all(20), children: [
               if (_photoUrls.isNotEmpty) GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: _photoUrls.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (_, i) => Stack(children: [ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_photoUrls[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity)), Positioned(right: 4, top: 4, child: GestureDetector(onTap: () => setState(() => _photoUrls.removeAt(i)), child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 14, color: Colors.white))))])),
               const SizedBox(height: 20),
@@ -388,9 +465,9 @@ class _ChoiceTile extends StatelessWidget {
 }
 
 class _Field extends StatelessWidget {
-  const _Field(this.controller, this.label, {this.required = false, this.maxLines = 1, this.keyboardType, this.inputFormatters, this.onChanged, this.trailing, this.helperText}); final TextEditingController controller; final String label; final bool required; final int maxLines; final TextInputType? keyboardType; final List<TextInputFormatter>? inputFormatters; final ValueChanged<String>? onChanged; final Widget? trailing; final String? helperText;
+  const _Field(this.controller, this.label, {this.required = false, this.maxLines = 1, this.keyboardType, this.inputFormatters}); final TextEditingController controller; final String label; final bool required; final int maxLines; final TextInputType? keyboardType; final List<TextInputFormatter>? inputFormatters;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(controller: controller, maxLines: maxLines, keyboardType: keyboardType, inputFormatters: inputFormatters, onChanged: onChanged, validator: required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null, decoration: _inputDecoration(label, suffixIcon: trailing, helperText: helperText)));
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(controller: controller, maxLines: maxLines, keyboardType: keyboardType, inputFormatters: inputFormatters, validator: required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null, decoration: _inputDecoration(label)));
 }
 
 class _BottomBar extends StatelessWidget {
@@ -399,7 +476,20 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) { final isLast = step == total - 1; return Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: _bg, border: Border(top: BorderSide(color: _line))), child: Row(children: [Expanded(child: OutlinedButton(onPressed: saving ? null : onBack, child: Text(step == 0 ? 'Cancel' : 'Back'))), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: saving ? null : onNext, style: FilledButton.styleFrom(backgroundColor: _deep, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(isLast ? 'Create Arena' : 'Next')))])); }
 }
 
-InputDecoration _inputDecoration(String label, {Widget? suffixIcon, String? helperText}) => InputDecoration(labelText: label, suffixIcon: suffixIcon == null ? null : Padding(padding: const EdgeInsets.all(13), child: suffixIcon), helperText: helperText, helperMaxLines: 2, filled: true, fillColor: _surface, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)));
+class _DetailRow extends StatelessWidget {
+  const _DetailRow(this.label, this.value);
+  final String label;
+  final String value;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(width: 70, child: Text(label, style: const TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w700))),
+      Expanded(child: Text(value.isEmpty ? '—' : value, style: const TextStyle(fontSize: 12, color: _text, fontWeight: FontWeight.w700))),
+    ]),
+  );
+}
+
+InputDecoration _inputDecoration(String label, {Widget? suffixIcon, String? helperText}) => InputDecoration(labelText: label, suffixIcon: suffixIcon, helperText: helperText, helperMaxLines: 2, filled: true, fillColor: _surface, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)));
 String? _emptyToNull(String v) => v.trim().isEmpty ? null : v.trim();
 double? _parseDouble(String v) => v.trim().isEmpty ? null : double.tryParse(v.trim());
-String _titleCase(String v) => v.toLowerCase().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).map((p) => p[0].toUpperCase() + p.substring(1)).join(' ');
