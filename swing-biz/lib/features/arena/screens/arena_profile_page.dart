@@ -573,16 +573,12 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
-      final input = {
+      final input = <String, dynamic>{
         'name': _nameCtrl.text.trim(),
-        'description': _emptyToNull(_descriptionCtrl.text),
-        'phone': _emptyToNull(_phoneCtrl.text),
         'address': _addressCtrl.text.trim(),
         'city': _cityCtrl.text.trim(),
         'state': _stateCtrl.text.trim(),
         'pincode': _pincodeCtrl.text.trim(),
-        'latitude': _parseDouble(_latitudeCtrl.text),
-        'longitude': _parseDouble(_longitudeCtrl.text),
         'advanceBookingDays': _intValue(_advanceBookingDaysCtrl.text),
         'bufferMins': _intValue(_bufferMinsCtrl.text),
         'cancellationHours': _intValue(_cancellationHoursCtrl.text),
@@ -596,6 +592,15 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
         'hasCCTV': _hasCctv,
         'hasScorer': _hasScorer,
       };
+      // Only include optional fields when they have a value — Zod rejects explicit null
+      final desc = _emptyToNull(_descriptionCtrl.text);
+      if (desc != null) input['description'] = desc;
+      final phone = _emptyToNull(_phoneCtrl.text);
+      if (phone != null) input['phone'] = phone;
+      final lat = _parseDouble(_latitudeCtrl.text);
+      if (lat != null) input['latitude'] = lat;
+      final lng = _parseDouble(_longitudeCtrl.text);
+      if (lng != null) input['longitude'] = lng;
       _arenaUploadLog(
           'save arena request arenaId=${widget.arena.id} photoUrls=${_photoUrls.length} input=$input');
       final updated = await ref
