@@ -1307,11 +1307,15 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               _bulkEnabled && _bulkRateCtrl.text.trim().isNotEmpty
                   ? (int.tryParse(_bulkRateCtrl.text.trim()) ?? 0) * 100
                   : null,
-          'monthlyPassEnabled': _monthlyPassEnabled,
-          'monthlyPassRatePaise':
-              _monthlyPassEnabled && _monthlyPassRateCtrl.text.trim().isNotEmpty
+          // For nets: monthly pass is enabled if any variant has a rate set
+          'monthlyPassEnabled': _isNetsWithVariants
+              ? _netVariants.any((v) => v.monthlyPassRateCtrl.text.trim().isNotEmpty)
+              : _monthlyPassEnabled,
+          'monthlyPassRatePaise': _isNetsWithVariants
+              ? null  // per-variant rates live inside netVariants JSON
+              : (_monthlyPassEnabled && _monthlyPassRateCtrl.text.trim().isNotEmpty
                   ? (int.tryParse(_monthlyPassRateCtrl.text.trim()) ?? 0) * 100
-                  : null,
+                  : null),
           'weekendMultiplier': _weekendMultiplier,
           'minSlotMins': _slotMins,
           'maxSlotMins': _slotMins,
@@ -1880,36 +1884,26 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         const _SectionLabel('Monthly Pass'),
         const SizedBox(height: 4),
         const Text(
-          'Let customers lock a recurring time slot for the whole month.',
+          'Set a monthly pass rate per net type. Leave blank to disable for that type.',
           style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            const Expanded(
-              child: Text('Offer monthly pass', style: TextStyle(color: _text, fontSize: 14, fontWeight: FontWeight.w700)),
-            ),
-            Switch(
-              value: _monthlyPassEnabled,
-              onChanged: (v) => setState(() => _monthlyPassEnabled = v),
-              activeThumbColor: _accent,
-            ),
-          ],
-        ),
-        if (_monthlyPassEnabled) ...[
-          const SizedBox(height: 10),
-          TextField(
-            controller: _monthlyPassRateCtrl,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: 'Pass rate (₹ / month)',
-              prefixText: '₹ ',
-              filled: true,
-              fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)),
+        for (final v in _netVariants) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: TextField(
+              controller: v.monthlyPassRateCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: '${v.label} pass rate (₹ / month)',
+                prefixText: '₹ ',
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)),
+              ),
             ),
           ),
         ],
@@ -3367,13 +3361,16 @@ class _NetVariantDraft {
     this.count = 1,
     this.hasFloodlights = false,
     String price = '',
-  }) : priceCtrl = TextEditingController(text: price);
+    String monthlyPassRate = '',
+  }) : priceCtrl = TextEditingController(text: price),
+       monthlyPassRateCtrl = TextEditingController(text: monthlyPassRate);
 
   String type;
   String label;
   int count;
   bool hasFloodlights;
   final TextEditingController priceCtrl;
+  final TextEditingController monthlyPassRateCtrl;
 
   static const _surfaceOptions = [
     ('TURF', 'Turf'),
@@ -3388,6 +3385,8 @@ class _NetVariantDraft {
     'hasFloodlights': hasFloodlights,
     if (priceCtrl.text.trim().isNotEmpty)
       'pricePaise': (int.tryParse(priceCtrl.text.trim()) ?? 0) * 100,
+    if (monthlyPassRateCtrl.text.trim().isNotEmpty)
+      'monthlyPassRatePaise': (int.tryParse(monthlyPassRateCtrl.text.trim()) ?? 0) * 100,
   };
 
   factory _NetVariantDraft.fromVariant(NetVariant v) => _NetVariantDraft(
@@ -3396,9 +3395,13 @@ class _NetVariantDraft {
     count: v.count,
     hasFloodlights: v.hasFloodlights,
     price: v.pricePaise != null ? (v.pricePaise! ~/ 100).toString() : '',
+    monthlyPassRate: v.monthlyPassRatePaise != null ? (v.monthlyPassRatePaise! ~/ 100).toString() : '',
   );
 
-  void dispose() => priceCtrl.dispose();
+  void dispose() {
+    priceCtrl.dispose();
+    monthlyPassRateCtrl.dispose();
+  }
 }
 
 class _Panel extends StatelessWidget {

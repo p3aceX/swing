@@ -133,6 +133,7 @@ class NetVariant {
     required this.label,
     this.count = 1,
     this.pricePaise,
+    this.monthlyPassRatePaise,
     this.hasFloodlights = false,
   });
 
@@ -140,6 +141,7 @@ class NetVariant {
   final String label;
   final int count;
   final int? pricePaise;
+  final int? monthlyPassRatePaise;
   final bool hasFloodlights;
 
   factory NetVariant.fromJson(Map<String, dynamic> json) {
@@ -148,6 +150,7 @@ class NetVariant {
       label: '${json['label'] ?? json['type'] ?? ''}',
       count: _intValue(json['count'] ?? 1),
       pricePaise: _intOrNull(json['pricePaise']),
+      monthlyPassRatePaise: _intOrNull(json['monthlyPassRatePaise']),
       hasFloodlights: json['hasFloodlights'] == true,
     );
   }
@@ -157,6 +160,7 @@ class NetVariant {
         'label': label,
         'count': count,
         if (pricePaise != null) 'pricePaise': pricePaise,
+        if (monthlyPassRatePaise != null) 'monthlyPassRatePaise': monthlyPassRatePaise,
         'hasFloodlights': hasFloodlights,
       };
 }
