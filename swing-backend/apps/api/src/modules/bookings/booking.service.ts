@@ -1276,8 +1276,8 @@ export class BookingService {
       throw new AppError('ARENA_CLOSED', 'Arena is closed on the selected day', 400)
     }
 
-    const openMinutes  = this.timeToMinutes(unit.arena.openTime  || '06:00')
-    const closeMinutes = this.timeToMinutes(unit.arena.closeTime || '22:00')
+    const openMinutes  = this.timeToMinutes((unit as any).openTime  || unit.arena.openTime  || '06:00')
+    const closeMinutes = this.timeToMinutes((unit as any).closeTime || unit.arena.closeTime || '22:00')
     const startMinutes = this.timeToMinutes(startTime)
     const endMinutes   = this.timeToMinutes(endTime)
 
