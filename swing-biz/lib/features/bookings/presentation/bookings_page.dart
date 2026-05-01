@@ -2800,6 +2800,14 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   bool _loadingBusyMap = false;
   String? _unitId;
   String? _netVariantType;
+
+  // Monthly pass state
+  bool _isMonthlyPass = false;
+  List<int> _mpDays = [1, 2, 3, 4, 5, 6, 7];
+  DateTime? _mpStartDate;
+  DateTime? _mpEndDate;
+  String _mpStartTime = '06:00';
+  String _mpEndTime = '07:00';
   int _variantInstanceIdx =
       0; // which instance (0-based) within the selected variant
   final List<String> _selectedSlots = [];
@@ -2827,9 +2835,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     return u?.unitType == 'CRICKET_NET' || u?.unitType == 'INDOOR_NET';
   }
 
-  List<String> get _stepLabels => _isNetsFlow
-      ? const ['Add-ons', 'Date & Time', 'Confirm']
-      : const ['Court', 'Slot', 'Confirm'];
+  NetVariant? get _selectedVariant => _netVariantType == null
+      ? null
+      : _unit?.netVariants.where((v) => v.type == _netVariantType).firstOrNull;
+
+  int? get _mpVariantRate => _selectedVariant?.monthlyPassRatePaise;
+  bool get _variantHasPass => (_mpVariantRate ?? 0) > 0;
+
+  List<String> get _stepLabels {
+    if (_isNetsFlow && _isMonthlyPass) return const ['Setup', 'Schedule', 'Confirm'];
+    if (_isNetsFlow) return const ['Add-ons', 'Date & Time', 'Confirm'];
+    return const ['Court', 'Slot', 'Confirm'];
+  }
 
   int get _netsDurMin {
     final u = _unit;
@@ -3136,6 +3153,16 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   }
 
   bool get _canAdvance {
+    if (_isNetsFlow && _isMonthlyPass) {
+      switch (_step) {
+        case 0:
+          return _netVariantType != null;
+        case 1:
+          return _mpDays.isNotEmpty && _mpStartDate != null && _mpEndDate != null;
+        default:
+          return true;
+      }
+    }
     if (_isNetsFlow) {
       switch (_step) {
         case 0:
@@ -3445,15 +3472,48 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   }
 
   Future<void> _save() async {
-    debugPrint(
-        '[booking] _save isFullDay=$_isFullDay loadingAvail=$_loadingAvail fullDayBusy=$_fullDayBusy existingBookings=${_existingBookings.length} startTime=$_startTime endTime=$_endTime totalPaise=$_totalPaise loading=$_loading advanceOk=$_advanceOk minAdv=$_minAdvancePaise adv=$_advancePaise name="${_nameCtrl.text.trim()}" phone="${_phoneCtrl.text.trim()}"');
     final guestName =
         _customerLookup?.name ?? _foundGuest?.name ?? _nameCtrl.text.trim();
     if (guestName.isEmpty || _phoneCtrl.text.trim().isEmpty) {
-      debugPrint('[booking] BLOCKED: name/phone');
       _snack('Required fields missing', err: true);
       return;
     }
+
+    // ── Monthly pass flow ──
+    if (_isMonthlyPass) {
+      if (_mpStartDate == null || _mpEndDate == null || _mpDays.isEmpty) {
+        _snack('Complete the schedule before saving', err: true);
+        return;
+      }
+      setState(() => _loading = true);
+      try {
+        final repo = ref.read(hostArenaBookingRepositoryProvider);
+        await repo.createMonthlyPass(widget.arena.id, {
+          'unitId': _unitId,
+          'guestName': guestName,
+          'guestPhone': _phoneCtrl.text.trim(),
+          'startTime': _mpStartTime,
+          'endTime': _mpEndTime,
+          'daysOfWeek': _mpDays,
+          'startDate': DateFormat('yyyy-MM-dd').format(_mpStartDate!),
+          'endDate': DateFormat('yyyy-MM-dd').format(_mpEndDate!),
+          'totalAmountPaise': _totalPaise,
+          'advancePaise': _advancePaise,
+          'paymentMode': _paymentMode,
+          if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
+        });
+        if (mounted) {
+          Navigator.pop(context);
+          _snack('Monthly pass created');
+        }
+      } catch (e) {
+        if (mounted) _snack('Failed: $e', err: true);
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+      return;
+    }
+
     if (!_isMultiDay && !_isFullDay && _selectedSlots.isEmpty) {
       debugPrint('[booking] BLOCKED: no slot');
       _snack('Please select a start time', err: true);
@@ -3643,6 +3703,10 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   void _syncPrice() {
     if (_totalEdited) return;
+    if (_isMonthlyPass && _mpVariantRate != null) {
+      _totalCtrl.text = (_mpVariantRate! ~/ 100).toString();
+      return;
+    }
     final unit = _unit;
     if (unit == null) return;
     if (_isMultiDay) {
@@ -3731,27 +3795,27 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   }
 
   Widget _buildStepContent() {
+    if (_isNetsFlow && _isMonthlyPass) {
+      switch (_step) {
+        case 0: return _buildNetsSetupStep();
+        case 1: return _buildMonthlyPassScheduleStep();
+        case 2: return _buildConfirmStep();
+        default: return const SizedBox.shrink();
+      }
+    }
     if (_isNetsFlow) {
       switch (_step) {
-        case 0:
-          return _buildNetsSetupStep();
-        case 1:
-          return _buildNetsDateTimeStep();
-        case 2:
-          return _buildConfirmStep();
-        default:
-          return const SizedBox.shrink();
+        case 0: return _buildNetsSetupStep();
+        case 1: return _buildNetsDateTimeStep();
+        case 2: return _buildConfirmStep();
+        default: return const SizedBox.shrink();
       }
     }
     switch (_step) {
-      case 0:
-        return _buildCourtStep();
-      case 1:
-        return _buildSlotStep();
-      case 2:
-        return _buildConfirmStep();
-      default:
-        return const SizedBox.shrink();
+      case 0: return _buildCourtStep();
+      case 1: return _buildSlotStep();
+      case 2: return _buildConfirmStep();
+      default: return const SizedBox.shrink();
     }
   }
 
@@ -3907,6 +3971,38 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         const SizedBox(height: 8),
       ],
 
+      // Monthly pass toggle — shown when selected variant has a pass rate configured
+      if (_variantHasPass) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: _isMonthlyPass ? const Color(0xFFF0FDF4) : _bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _isMonthlyPass ? _accent : _border),
+          ),
+          child: Row(children: [
+            Icon(Icons.card_membership_rounded, size: 18, color: _isMonthlyPass ? _accent : _muted),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Monthly Pass', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _isMonthlyPass ? _accent : _text)),
+              Text('₹${(_mpVariantRate! / 100).toStringAsFixed(0)}/month · recurring slot', style: const TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w500)),
+            ])),
+            Switch.adaptive(
+              value: _isMonthlyPass,
+              activeColor: _accent,
+              onChanged: (v) => setState(() {
+                _isMonthlyPass = v;
+                _selectedSlots.clear();
+                _totalEdited = false;
+                _totalCtrl.text = v && _mpVariantRate != null ? (_mpVariantRate! ~/ 100).toString() : '';
+              }),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 8),
+      ],
+
       if (addons.isNotEmpty) ...[
         const SizedBox(height: 12),
         const Text('ADD-ONS',
@@ -3975,6 +4071,146 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   }
 
   // ── Nets Step 1: Surface chips + count tabs + date + duration + slots ──────
+  Future<void> _pickMpTime(BuildContext context, {required bool isStart}) async {
+    final current = isStart ? _mpStartTime : _mpEndTime;
+    final parts = current.split(':');
+    final h = int.tryParse(parts[0]) ?? (isStart ? 6 : 7);
+    final m = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: h, minute: m),
+      builder: (ctx, child) => MediaQuery(data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true), child: child!),
+    );
+    if (picked == null) return;
+    final formatted = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+    setState(() {
+      if (isStart) _mpStartTime = formatted;
+      else _mpEndTime = formatted;
+    });
+  }
+
+  Widget _buildMonthlyPassScheduleStep() {
+    const days = [(1, 'Mon'), (2, 'Tue'), (3, 'Wed'), (4, 'Thu'), (5, 'Fri'), (6, 'Sat'), (7, 'Sun')];
+    final variant = _selectedVariant;
+
+    String fmt(DateTime d) => DateFormat('d MMM yyyy').format(d);
+
+    Widget timeChip(String label, String time, {required bool isStart}) {
+      return GestureDetector(
+        onTap: () => _pickMpTime(context, isStart: isStart),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _border)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.schedule_rounded, size: 16, color: _accent),
+            const SizedBox(width: 8),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: const TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
+              Text(time, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text)),
+            ]),
+          ]),
+        ),
+      );
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Variant summary
+      if (variant != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          margin: const EdgeInsets.only(bottom: 20),
+          decoration: BoxDecoration(color: const Color(0xFFF0FDF4), borderRadius: BorderRadius.circular(10), border: Border.all(color: _accent.withValues(alpha: .3))),
+          child: Row(children: [
+            const Icon(Icons.card_membership_rounded, size: 16, color: _accent),
+            const SizedBox(width: 8),
+            Text('${variant.label} Monthly Pass', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _accent)),
+            const Spacer(),
+            Text('₹${(_mpVariantRate! ~/ 100)}/mo', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _accent)),
+          ]),
+        ),
+
+      // Time slot
+      const Text('RECURRING TIME SLOT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+      const SizedBox(height: 10),
+      Row(children: [
+        timeChip('Start', _mpStartTime, isStart: true),
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('–', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _muted))),
+        timeChip('End', _mpEndTime, isStart: false),
+      ]),
+      const SizedBox(height: 20),
+
+      // Days of week
+      const Text('RECURRING DAYS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: days.map((d) {
+        final sel = _mpDays.contains(d.$1);
+        return GestureDetector(
+          onTap: () => setState(() {
+            if (sel) { if (_mpDays.length > 1) _mpDays = _mpDays.where((x) => x != d.$1).toList(); }
+            else _mpDays = [..._mpDays, d.$1]..sort();
+          }),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: sel ? _accent : _bg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: sel ? _accent : _border),
+            ),
+            child: Text(d.$2, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: sel ? Colors.white : _text)),
+          ),
+        );
+      }).toList()),
+      const SizedBox(height: 20),
+
+      // Date range
+      const Text('PASS DURATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: GestureDetector(
+          onTap: () async {
+            final d = await showDatePicker(
+              context: context,
+              initialDate: _mpStartDate ?? DateTime.now(),
+              firstDate: DateTime.now().subtract(const Duration(days: 1)),
+              lastDate: DateTime.now().add(const Duration(days: 365)),
+            );
+            if (d != null) setState(() { _mpStartDate = d; if (_mpEndDate != null && _mpEndDate!.isBefore(d)) _mpEndDate = null; });
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _mpStartDate != null ? _accent : _border)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Start date', style: TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+              Text(_mpStartDate != null ? fmt(_mpStartDate!) : 'Pick date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _mpStartDate != null ? _text : _muted)),
+            ]),
+          ),
+        )),
+        const SizedBox(width: 10),
+        Expanded(child: GestureDetector(
+          onTap: () async {
+            final d = await showDatePicker(
+              context: context,
+              initialDate: _mpEndDate ?? (_mpStartDate ?? DateTime.now()).add(const Duration(days: 29)),
+              firstDate: _mpStartDate ?? DateTime.now(),
+              lastDate: DateTime.now().add(const Duration(days: 730)),
+            );
+            if (d != null) setState(() => _mpEndDate = d);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _mpEndDate != null ? _accent : _border)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('End date', style: TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+              Text(_mpEndDate != null ? fmt(_mpEndDate!) : 'Pick date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _mpEndDate != null ? _text : _muted)),
+            ]),
+          ),
+        )),
+      ]),
+    ]);
+  }
+
   Widget _buildNetsDateTimeStep() {
     final unit = _unit;
     if (unit == null) return const SizedBox.shrink();
