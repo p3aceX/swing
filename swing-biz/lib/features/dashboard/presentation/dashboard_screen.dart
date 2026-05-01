@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../../../core/auth/me_providers.dart';
@@ -312,6 +315,7 @@ class _ProfileSheetState extends ConsumerState<_ProfileSheet> {
 
   bool _editMode = false;
   bool _saving = false;
+  bool _fetchingPincode = false;
   String? _loadedAccountId;
 
   @override
@@ -331,6 +335,32 @@ class _ProfileSheetState extends ConsumerState<_ProfileSheet> {
     _ifsc.dispose();
     _upi.dispose();
     super.dispose();
+  }
+
+  Future<void> _lookupPincode(String pincode) async {
+    if (pincode.length != 6) return;
+    setState(() => _fetchingPincode = true);
+    try {
+      final res = await http.get(
+        Uri.parse('https://api.postalpincode.in/pincode/$pincode'),
+      ).timeout(const Duration(seconds: 6));
+      if (!mounted) return;
+      final data = jsonDecode(res.body) as List;
+      if (data.isNotEmpty && data[0]['Status'] == 'Success') {
+        final offices = data[0]['PostOffice'] as List;
+        if (offices.isNotEmpty) {
+          final office = offices[0] as Map<String, dynamic>;
+          setState(() {
+            _city.text = office['District'] as String? ?? _city.text;
+            _state.text = office['State'] as String? ?? _state.text;
+          });
+        }
+      }
+    } catch (_) {
+      // silently ignore — user can fill manually
+    } finally {
+      if (mounted) setState(() => _fetchingPincode = false);
+    }
   }
 
   void _sync(BizMeResponse me) {
@@ -580,7 +610,19 @@ class _ProfileSheetState extends ConsumerState<_ProfileSheet> {
                                     controller: _pincode,
                                     label: 'Pincode',
                                     icon: Icons.pin_drop_outlined,
-                                    enabled: _editMode)),
+                                    keyboardType: TextInputType.number,
+                                    enabled: _editMode,
+                                    onChanged: _editMode ? _lookupPincode : null,
+                                    suffixIcon: _fetchingPincode
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(12),
+                                            child: SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                            ),
+                                          )
+                                        : null)),
                           ]),
                           _ProfileTextField(
                               controller: _gst,
@@ -681,6 +723,8 @@ class _ProfileTextField extends StatelessWidget {
     this.keyboardType,
     this.validator,
     this.maxLines = 1,
+    this.onChanged,
+    this.suffixIcon,
   });
 
   final TextEditingController controller;
@@ -690,6 +734,8 @@ class _ProfileTextField extends StatelessWidget {
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
   final int maxLines;
+  final ValueChanged<String>? onChanged;
+  final Widget? suffixIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -700,6 +746,7 @@ class _ProfileTextField extends StatelessWidget {
       keyboardType: keyboardType,
       validator: validator,
       maxLines: maxLines,
+      onChanged: onChanged,
       style: const TextStyle(
           color: Color(0xFF101828), fontSize: 14, fontWeight: FontWeight.w700),
       decoration: InputDecoration(
@@ -709,6 +756,7 @@ class _ProfileTextField extends StatelessWidget {
         prefixIcon: Icon(icon,
             size: 19,
             color: enabled ? scheme.primary : const Color(0xFF98A2B3)),
+        suffixIcon: suffixIcon,
         filled: true,
         fillColor: enabled ? Colors.white : const Color(0xFFF9FAFB),
         contentPadding:
