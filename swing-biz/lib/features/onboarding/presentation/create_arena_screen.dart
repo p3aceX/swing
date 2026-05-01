@@ -135,12 +135,23 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
-    if (value.trim().length < 3) {
+    if (value.trim().length < 2) {
       setState(() { _suggestions = []; _searchLoading = false; });
       return;
     }
     setState(() => _searchLoading = true);
-    _searchDebounce = Timer(const Duration(milliseconds: 500), () => _fetchSuggestions(value.trim()));
+    _searchDebounce = Timer(const Duration(milliseconds: 450), () => _fetchSuggestions(value.trim()));
+  }
+
+  /// Returns lat/lng bias from the user's first existing arena, or null if none.
+  ({double lat, double lng})? _locationBias() {
+    final arenas = ref.read(ownedArenasProvider).valueOrNull ?? [];
+    for (final a in arenas) {
+      final lat = a.latitude;
+      final lng = a.longitude;
+      if (lat != null && lng != null) return (lat: lat, lng: lng);
+    }
+    return null;
   }
 
   Future<void> _fetchSuggestions(String query) async {
@@ -150,19 +161,23 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       return;
     }
     try {
+      final bias = _locationBias();
       final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', {
         'input': query,
         'key': _googlePlacesKey,
         'components': 'country:in',
         'language': 'en',
         'types': 'geocode|establishment',
-        'sessiontoken': _placesSession,  // groups calls into one billed session
+        'sessiontoken': _placesSession,
+        // bias results towards user's existing arenas city — silently improves relevance
+        if (bias != null) 'location': '${bias.lat},${bias.lng}',
+        if (bias != null) 'radius': '50000',  // 50km radius
       });
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
         final predictions = (body['predictions'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
-        _suggestionsCache[query] = predictions;  // cache for reuse
+        _suggestionsCache[query] = predictions;
         if (mounted) setState(() { _suggestions = predictions; _searchLoading = false; });
       } else {
         if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
