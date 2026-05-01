@@ -338,14 +338,19 @@ class _ProfileSheetState extends ConsumerState<_ProfileSheet> {
     final key = b?.id ?? 'new:${me.user.id}';
     if (_loadedAccountId == key) return;
     _loadedAccountId = key;
-    _businessName.text = b?.businessName ?? '';
+
+    // Fall back to first owned arena's location when business profile fields are empty
+    final arenas = ref.read(ownedArenasProvider).valueOrNull ?? [];
+    final a = arenas.isNotEmpty ? arenas.first : null;
+
+    _businessName.text = b?.businessName ?? a?.name ?? '';
     _contactName.text = b?.contactName ?? me.user.name ?? '';
-    _phone.text = b?.phone ?? me.user.phone;
+    _phone.text = b?.phone ?? a?.phone ?? me.user.phone;
     _email.text = b?.email ?? me.user.email ?? '';
-    _address.text = b?.address ?? '';
-    _city.text = b?.city ?? '';
-    _state.text = b?.state ?? '';
-    _pincode.text = b?.pincode ?? '';
+    _address.text = b?.address?.isNotEmpty == true ? b!.address! : (a?.address ?? '');
+    _city.text = b?.city?.isNotEmpty == true ? b!.city! : (a?.city ?? '');
+    _state.text = b?.state?.isNotEmpty == true ? b!.state! : (a?.state ?? '');
+    _pincode.text = b?.pincode?.isNotEmpty == true ? b!.pincode! : (a?.pincode ?? '');
     _gst.text = b?.gstNumber ?? '';
     _pan.text = b?.panNumber ?? '';
     _beneficiaryName.text = b?.beneficiaryName ?? '';
