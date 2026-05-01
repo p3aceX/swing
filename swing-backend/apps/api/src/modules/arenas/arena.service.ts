@@ -273,7 +273,7 @@ export class ArenaService {
 
   async deleteArena(arenaId: string, userId: string) {
     await this.verifyOwner(arenaId, userId)
-    return prisma.arena.update({ where: { id: arenaId }, data: { isActive: false } })
+    return prisma.arena.delete({ where: { id: arenaId } })
   }
 
   async addUnit(arenaId: string, userId: string, data: any) {

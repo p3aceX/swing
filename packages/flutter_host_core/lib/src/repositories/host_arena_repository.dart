@@ -99,6 +99,10 @@ class HostArenaBookingRepository {
     await _dio.delete(_paths.arenaUnit(unitId));
   }
 
+  Future<void> deleteArena(String arenaId) async {
+    await _dio.delete(_paths.arena(arenaId));
+  }
+
   Future<Map<String, List<AvailabilitySlot>>> fetchAvailability({
     required String arenaId,
     required DateTime date,

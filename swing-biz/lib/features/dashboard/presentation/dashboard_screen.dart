@@ -1912,12 +1912,60 @@ class _ArenasTab extends ConsumerWidget {
   }
 }
 
-class _ArenaCard extends ConsumerWidget {
+class _ArenaCard extends ConsumerStatefulWidget {
   const _ArenaCard({required this.arena});
   final ArenaListing arena;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ArenaCard> createState() => _ArenaCardState();
+}
+
+class _ArenaCardState extends ConsumerState<_ArenaCard> {
+  bool _deleting = false;
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Arena?',
+            style: TextStyle(fontWeight: FontWeight.w900)),
+        content: Text(
+            'This will permanently delete "${widget.arena.name}" and all its units, bookings and data. This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete',
+                style: TextStyle(
+                    color: Colors.red, fontWeight: FontWeight.w900)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deleting = true);
+    try {
+      final repo = ref.read(hostArenaBookingRepositoryProvider);
+      await repo.deleteArena(widget.arena.id);
+      if (!mounted) return;
+      ref.invalidate(ownedArenasProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete arena: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final arena = widget.arena;
     final loc = _joinNonEmpty([arena.city, arena.state]);
     final address = loc.isNotEmpty
         ? loc
@@ -1992,8 +2040,34 @@ class _ArenaCard extends ConsumerWidget {
                         ],
                       ),
                     ),
-                    const Icon(Icons.chevron_right_rounded,
-                        color: Color(0xFFD0D5DD), size: 20),
+                    if (_deleting)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert_rounded,
+                            color: Color(0xFFD0D5DD), size: 20),
+                        onSelected: (value) {
+                          if (value == 'delete') _confirmDelete();
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete_outline_rounded,
+                                    color: Colors.red, size: 18),
+                                SizedBox(width: 8),
+                                Text('Delete Arena',
+                                    style: TextStyle(color: Colors.red)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
