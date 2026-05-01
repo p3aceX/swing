@@ -1105,6 +1105,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
   bool _monthlyPassEnabled = false;
   final _monthlyPassRateCtrl = TextEditingController();
   List<int> _scheduleOpDays = const [];
+  bool _allDay = false;
   int _step = 0;
   bool _saving = false;
   late List<_AddonDraft> _addons;
@@ -1165,6 +1166,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         : '';
     _openTimeCtrl.text = unit?.openTime ?? '';
     _closeTimeCtrl.text = unit?.closeTime ?? '';
+    _allDay = unit?.openTime == '00:00' && (unit?.closeTime == '24:00' || unit?.closeTime == '23:59');
     _hasFloodlights = unit?.hasFloodlights ?? false;
     _advanceBookingDaysCtrl.text = unit?.advanceBookingDays?.toString() ?? '';
     _unitCancellationHoursCtrl.text = unit?.cancellationHours?.toString() ?? '';
@@ -1696,6 +1698,27 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _LargeStepTitle('Schedule'),
+        Row(
+          children: [
+            const Text('All day (24 hrs)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _text)),
+            const Spacer(),
+            Switch.adaptive(
+              value: _allDay,
+              activeColor: _accent,
+              onChanged: (v) => setState(() {
+                _allDay = v;
+                if (v) {
+                  _openTimeCtrl.text = '00:00';
+                  _closeTimeCtrl.text = '24:00';
+                } else {
+                  _openTimeCtrl.text = '';
+                  _closeTimeCtrl.text = '';
+                }
+              }),
+            ),
+          ],
+        ),
+        if (!_allDay)
         Row(
           children: [
             Expanded(
