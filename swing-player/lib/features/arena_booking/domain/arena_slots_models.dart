@@ -204,25 +204,23 @@ class SlotHold {
 
 class ArenaPaymentOrder {
   const ArenaPaymentOrder({
-    required this.razorpayOrderId,
+    required this.orderId,
+    required this.token,
     required this.amountPaise,
-    required this.currency,
-    this.key,
   });
 
-  final String razorpayOrderId;
+  final String orderId;
+  final String token;
   final int amountPaise;
-  final String currency;
-  final String? key;
 
   factory ArenaPaymentOrder.fromJson(Map<String, dynamic> j) {
-    final order = _map(j['razorpayOrder']);
+    final pp = _map(j['phonePeOrder'] ?? j['phonepeOrder']);
     return ArenaPaymentOrder(
-      razorpayOrderId:
-          '${order['id'] ?? j['razorpayOrderId'] ?? j['orderId'] ?? ''}',
-      amountPaise: _intValue(order['amount'] ?? j['amountPaise']),
-      currency: '${order['currency'] ?? j['currency'] ?? 'INR'}',
-      key: _stringOrNull(order['key']) ?? _stringOrNull(j['key']),
+      orderId:
+          '${pp['orderId'] ?? pp['merchantOrderId'] ?? j['orderId'] ?? j['merchantOrderId'] ?? ''}',
+      token:
+          '${pp['token'] ?? pp['orderToken'] ?? j['token'] ?? j['orderToken'] ?? ''}',
+      amountPaise: _intValue(pp['amountPaise'] ?? j['amountPaise']),
     );
   }
 }

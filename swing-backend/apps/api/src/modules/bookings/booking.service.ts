@@ -2,6 +2,7 @@ import { prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { holdSlot, releaseSlot, isSlotHeld } from '../../lib/redis'
 import { NotificationService } from '../notifications/notification.service'
+import { PhonePeService } from '../payments/phonepe.service'
 import Razorpay from 'razorpay'
 import crypto from 'crypto'
 
@@ -84,7 +85,7 @@ export class BookingService {
     return { unit, totalPricePaise, durationMins, expiresIn: 600 }
   }
 
-  // ─── Player: confirm booking (after payment initiated) ───────────────────
+  // ─── Player: confirm booking (after payment) ─────────────────────────────
 
   async createBooking(userId: string, data: {
     arenaUnitId: string
@@ -92,7 +93,11 @@ export class BookingService {
     startTime: string
     endTime: string
     totalPricePaise: number
+    advancePaise?: number
     notes?: string
+    holdId?: string
+    phonePeOrderId?: string
+    paymentGateway?: string
     endDate?: string
     isBulkBooking?: boolean
     bulkDayRatePaise?: number
@@ -128,7 +133,83 @@ export class BookingService {
     if (conflict) throw Errors.slotAlreadyBooked()
 
     const durationMins = this.calcDurationMins(data.startTime, data.endTime)
+    const isPhonePe = data.paymentGateway === 'PHONEPE' && !!data.phonePeOrderId
 
+    // ── PhonePe: verify payment before creating booking ───────────────────
+    if (isPhonePe) {
+      const ppSvc = new PhonePeService()
+      const status = await ppSvc.checkOrderStatus(data.phonePeOrderId!)
+      if (status.state !== 'COMPLETED') {
+        throw new AppError(
+          'PAYMENT_NOT_COMPLETED',
+          `PhonePe payment is not completed (state: ${status.state})`,
+          400,
+        )
+      }
+
+      const paidPaise = data.advancePaise ?? data.totalPricePaise
+      const booking = await prisma.slotBooking.create({
+        data: {
+          arenaId: unit.arenaId,
+          unitId: data.arenaUnitId,
+          bookedById: player.id,
+          date: bookingDate,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          durationMins,
+          baseAmountPaise: data.totalPricePaise,
+          totalAmountPaise: data.totalPricePaise,
+          totalPricePaise: data.totalPricePaise,
+          advancePaise: paidPaise,
+          status: 'CONFIRMED',
+          paymentMode: 'ONLINE',
+          paidAt: new Date(),
+          notes: data.notes,
+          bookingSource: data.bookingSource ?? 'ONLINE',
+          ...(data.endDate ? { endDate: this.startOfDay(data.endDate) } : {}),
+          ...(data.isBulkBooking !== undefined ? { isBulkBooking: data.isBulkBooking } : {}),
+          ...(data.bulkDayRatePaise !== undefined ? { bulkDayRatePaise: data.bulkDayRatePaise } : {}),
+        } as any,
+        include: { unit: { include: { arena: true } } },
+      })
+
+      await prisma.payment.create({
+        data: {
+          userId,
+          entityType: 'SLOT_BOOKING',
+          entityId: booking.id,
+          amountPaise: paidPaise,
+          currency: 'INR',
+          status: 'COMPLETED',
+          gateway: 'PHONEPE',
+          gatewayOrderId: data.phonePeOrderId,
+          slotBookingId: booking.id,
+          completedAt: new Date(),
+          description: `Arena slot ${data.startTime}–${data.endTime}`,
+        },
+      })
+
+      await releaseSlot(data.arenaUnitId, data.bookingDate, data.startTime)
+
+      try {
+        const notifSvc = new NotificationService()
+        await notifSvc.notifyBookingConfirmed({
+          id: booking.id,
+          arenaId: booking.arenaId,
+          unitId: booking.unitId,
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          bookedById: booking.bookedById,
+        })
+      } catch (e) {
+        console.error('[Notification] bookingConfirmed error:', e)
+      }
+
+      return booking
+    }
+
+    // ── Legacy: create as PENDING_PAYMENT (Razorpay flow) ─────────────────
     const booking = await prisma.slotBooking.create({
       data: {
         arenaId: unit.arenaId,

@@ -44,6 +44,7 @@ import '../../features/health/presentation/health_module_screen.dart';
 import '../../features/health/presentation/wellness_checkin_screen.dart';
 import '../../features/health/presentation/workload_log_screen.dart';
 import '../../features/arena_booking/presentation/arena_booking_screen.dart';
+import '../../features/arena_booking/presentation/booking_wizard_screen.dart';
 import '../../features/booking/presentation/arena_detail_screen.dart';
 import '../../features/booking/presentation/booking_detail_screen.dart';
 import '../../features/booking/presentation/booking_success_screen.dart';
@@ -337,9 +338,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/arena-booking/:id',
-        builder: (_, state) => ArenaBookingScreen(
+        builder: (_, state) => BookingWizardScreen(
           arenaId: state.pathParameters['id'] ?? '',
-          initialDate: state.extra is DateTime ? state.extra as DateTime : null,
         ),
       ),
       GoRoute(

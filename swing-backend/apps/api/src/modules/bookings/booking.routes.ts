@@ -21,18 +21,50 @@ export async function bookingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.holdSlot(user.userId, body) })
   })
 
-  // ─── Player: create booking (after hold) ────────────────────────────────
+  // ─── Player: create booking (after hold + payment) ──────────────────────
   app.post('/', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const body = z.object({
-      arenaUnitId: z.string(),
-      bookingDate: z.string(),
+      // Unit ID — accept both field names the client may send
+      arenaUnitId: z.string().optional(),
+      unitId: z.string().optional(),
+      // Date — accept both field names
+      bookingDate: z.string().optional(),
+      date: z.string().optional(),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       endTime: z.string().regex(/^\d{2}:\d{2}$/),
-      totalPricePaise: z.number().int().min(0),
+      totalPricePaise: z.number().int().min(0).optional(),
+      totalAmountPaise: z.number().int().min(0).optional(),
+      advancePaise: z.number().int().min(0).optional(),
       notes: z.string().optional(),
+      // PhonePe payment fields
+      holdId: z.string().optional(),
+      phonePeOrderId: z.string().optional(),
+      merchantOrderId: z.string().optional(),
+      paymentGateway: z.string().optional(),
     }).parse(request.body)
-    return reply.code(201).send({ success: true, data: await svc.createBooking(user.userId, body) })
+
+    const resolved = {
+      arenaUnitId: (body.arenaUnitId ?? body.unitId ?? '') as string,
+      bookingDate: (body.bookingDate ?? body.date ?? '') as string,
+      startTime: body.startTime,
+      endTime: body.endTime,
+      totalPricePaise: body.totalPricePaise ?? body.totalAmountPaise ?? 0,
+      advancePaise: body.advancePaise,
+      notes: body.notes,
+      holdId: body.holdId,
+      phonePeOrderId: body.phonePeOrderId ?? body.merchantOrderId,
+      paymentGateway: body.paymentGateway,
+    }
+
+    if (!resolved.arenaUnitId) {
+      return reply.code(400).send({ success: false, error: { code: 'MISSING_UNIT', message: 'arenaUnitId is required' } })
+    }
+    if (!resolved.bookingDate) {
+      return reply.code(400).send({ success: false, error: { code: 'MISSING_DATE', message: 'bookingDate is required' } })
+    }
+
+    return reply.code(201).send({ success: true, data: await svc.createBooking(user.userId, resolved) })
   })
 
   // ─── Player: create Razorpay order for a booking ────────────────────────
