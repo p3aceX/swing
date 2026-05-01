@@ -107,9 +107,48 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       _ => null,
     };
     if (form != null && !form.currentState!.validate()) return;
+    // On leaving the location step, geocode the full address if lat/long are empty
+    if (_step == 2) await _geocodeAddress();
     if (_step == _steps.length - 1) return _submit();
     setState(() => _step++);
     await _page.nextPage(duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+  }
+
+  Future<void> _geocodeAddress() async {
+    if (_latitude.text.trim().isNotEmpty && _longitude.text.trim().isNotEmpty) return;
+    final q = [_address.text.trim(), _city.text.trim(), _state.text.trim(), _pincode.text.trim(), 'India']
+        .where((s) => s.isNotEmpty)
+        .join(', ');
+    if (q.isEmpty) return;
+    setState(() { _pincodeLoading = true; _pincodeMessage = 'Fetching coordinates...'; });
+    try {
+      final geo = await Dio().get<List<dynamic>>(
+        'https://nominatim.openstreetmap.org/search',
+        queryParameters: {'q': q, 'format': 'json', 'limit': '1'},
+        options: Options(
+          headers: {'User-Agent': 'SwingBizApp/1.0'},
+          receiveTimeout: const Duration(seconds: 10),
+          sendTimeout: const Duration(seconds: 10),
+        ),
+      );
+      final places = geo.data;
+      if (places != null && places.isNotEmpty) {
+        final place = places.first as Map<String, dynamic>;
+        final lat = place['lat'] as String?;
+        final lon = place['lon'] as String?;
+        if (mounted && lat != null && lon != null) {
+          setState(() {
+            _latitude.text = double.parse(lat).toStringAsFixed(6);
+            _longitude.text = double.parse(lon).toStringAsFixed(6);
+            _pincodeMessage = 'Coordinates fetched from address ✓';
+          });
+        }
+      }
+    } catch (_) {
+      // silently skip — lat/long fields remain editable
+    } finally {
+      if (mounted) setState(() => _pincodeLoading = false);
+    }
   }
 
   Future<void> _back() async {
@@ -166,7 +205,6 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   Future<void> _lookupPincode(String pincode) async {
     setState(() { _pincodeLoading = true; _pincodeMessage = null; });
     try {
-      // Step 1: pincode → city + state
       final response = await Dio().get<List<dynamic>>('https://api.postalpincode.in/pincode/$pincode', options: Options(receiveTimeout: const Duration(seconds: 8), sendTimeout: const Duration(seconds: 8)));
       final payload = response.data;
       final first = payload?.isNotEmpty == true ? payload!.first : null;
@@ -179,34 +217,8 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       if (mounted) setState(() {
         if (district.isNotEmpty) _city.text = _titleCase(district);
         if (state.isNotEmpty) _state.text = _titleCase(state);
-        _pincodeMessage = 'City and state filled — fetching coordinates...';
+        _pincodeMessage = 'City and state filled ✓  —  coordinates will be fetched from address on Next';
       });
-
-      // Step 2: pincode → lat/long via Nominatim (OpenStreetMap)
-      final geo = await Dio().get<List<dynamic>>(
-        'https://nominatim.openstreetmap.org/search',
-        queryParameters: {'postalcode': pincode, 'country': 'India', 'format': 'json', 'limit': '1'},
-        options: Options(
-          headers: {'User-Agent': 'SwingBizApp/1.0'},
-          receiveTimeout: const Duration(seconds: 8),
-          sendTimeout: const Duration(seconds: 8),
-        ),
-      );
-      final places = geo.data;
-      if (places != null && places.isNotEmpty) {
-        final place = places.first as Map<String, dynamic>;
-        final lat = place['lat'] as String?;
-        final lon = place['lon'] as String?;
-        if (mounted && lat != null && lon != null) {
-          setState(() {
-            _latitude.text = double.parse(lat).toStringAsFixed(6);
-            _longitude.text = double.parse(lon).toStringAsFixed(6);
-            _pincodeMessage = 'Location auto-filled from pincode ✓';
-          });
-        }
-      } else {
-        if (mounted) setState(() => _pincodeMessage = 'City/state filled. Enter coordinates manually.');
-      }
     } catch (_) {
       if (mounted) setState(() => _pincodeMessage = 'Could not fetch location details');
     } finally {
