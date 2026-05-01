@@ -310,8 +310,17 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                     'Search arena address...',
                     suffixIcon: _searchLoading
                         ? const Padding(padding: EdgeInsets.all(13), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
-                        : _locationPicked
-                            ? const Padding(padding: EdgeInsets.all(13), child: Icon(Icons.check_circle_rounded, color: _accent, size: 20))
+                        : _searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.close_rounded, size: 18, color: _muted),
+                                onPressed: () => setState(() {
+                                  _searchCtrl.clear();
+                                  _suggestions = [];
+                                  _searchLoading = false;
+                                  _locationPicked = false;
+                                  _searchDebounce?.cancel();
+                                }),
+                              )
                             : const Padding(padding: EdgeInsets.all(13), child: Icon(Icons.search_rounded, color: _muted, size: 20)),
                   ),
                 ),
@@ -363,12 +372,6 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                       if (_pincode.text.isNotEmpty) _DetailRow('Pincode', _pincode.text),
                       _DetailRow('Lat / Long', '${_latitude.text},  ${_longitude.text}'),
                     ]),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton.icon(
-                    onPressed: () => setState(() { _locationPicked = false; _searchCtrl.clear(); _suggestions = []; }),
-                    icon: const Icon(Icons.edit_location_alt_outlined, size: 16),
-                    label: const Text('Change location'),
                   ),
                 ],
               ]),
