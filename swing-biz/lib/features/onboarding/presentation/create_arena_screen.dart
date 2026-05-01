@@ -139,14 +139,25 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   Future<void> _fetchSuggestions(String query) async {
     try {
-      final uri = Uri.https('photon.komoot.io', '/api/', {'q': '$query India', 'limit': '5', 'lang': 'en'});
-      final res = await http.get(uri, headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 8));
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': '$query India',
+        'format': 'json',
+        'countrycodes': 'in',
+        'limit': '6',
+        'addressdetails': '1',
+      });
+      debugPrint('[Search] GET $uri');
+      final res = await http.get(uri, headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'SwingBizApp/1.0',
+      }).timeout(const Duration(seconds: 10));
+      debugPrint('[Search] status=${res.statusCode} body=${res.body.length}b');
       if (res.statusCode == 200) {
-        final body = jsonDecode(res.body) as Map<String, dynamic>;
-        final features = (body['features'] as List?) ?? [];
+        final list = jsonDecode(res.body) as List<dynamic>;
+        debugPrint('[Search] results=${list.length}');
         if (mounted) {
           setState(() {
-            _suggestions = features.whereType<Map<String, dynamic>>().toList();
+            _suggestions = list.whereType<Map<String, dynamic>>().toList();
             _searchLoading = false;
           });
         }
@@ -154,33 +165,29 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
       }
     } catch (e) {
-      debugPrint('Photon error: $e');
+      debugPrint('[Search] error: $e');
       if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
     }
   }
 
-  void _selectSuggestion(Map<String, dynamic> feature) {
-    final props = feature['properties'] as Map<String, dynamic>? ?? {};
-    final coords = (feature['geometry']?['coordinates'] as List?) ?? [];
-    final lon = coords.isNotEmpty ? coords[0] as double? : null;
-    final lat = coords.length > 1 ? coords[1] as double? : null;
+  void _selectSuggestion(Map<String, dynamic> result) {
+    final addr = result['address'] as Map<String, dynamic>? ?? {};
+    final lat = double.tryParse(result['lat'] as String? ?? '');
+    final lon = double.tryParse(result['lon'] as String? ?? '');
 
-    final name = props['name'] as String? ?? '';
-    final street = props['street'] as String? ?? '';
-    final housenumber = props['housenumber'] as String? ?? '';
-    final district = props['district'] as String? ?? '';
-    final city = props['city'] as String? ?? props['county'] as String? ?? district;
-    final state = props['state'] as String? ?? '';
-    final postcode = props['postcode'] as String? ?? '';
+    final road = addr['road'] as String? ?? addr['pedestrian'] as String? ?? '';
+    final houseNumber = addr['house_number'] as String? ?? '';
+    final suburb = addr['suburb'] as String? ?? addr['neighbourhood'] as String? ?? '';
+    final city = addr['city'] as String? ?? addr['town'] as String? ?? addr['village'] as String? ?? addr['county'] as String? ?? '';
+    final state = addr['state'] as String? ?? '';
+    final postcode = addr['postcode'] as String? ?? '';
 
-    final addressParts = [if (housenumber.isNotEmpty) housenumber, if (street.isNotEmpty) street, if (name.isNotEmpty && street.isEmpty) name];
-    final addressLine = addressParts.join(', ');
-
-    final displayLabel = [name, street, city, state].where((s) => s.isNotEmpty).join(', ');
+    final addressParts = [if (houseNumber.isNotEmpty) houseNumber, if (road.isNotEmpty) road, if (suburb.isNotEmpty) suburb];
+    final addressLine = addressParts.isNotEmpty ? addressParts.join(', ') : (result['display_name'] as String? ?? '').split(',').first;
 
     setState(() {
-      _searchCtrl.text = displayLabel;
-      _address.text = addressLine.isNotEmpty ? addressLine : name;
+      _searchCtrl.text = result['display_name'] as String? ?? '';
+      _address.text = addressLine;
       _city.text = city;
       _state.text = state;
       _pincode.text = postcode;
@@ -270,12 +277,12 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                     ),
                     child: Column(
                       children: _suggestions.map((f) {
-                        final props = f['properties'] as Map<String, dynamic>? ?? {};
-                        final name = props['name'] as String? ?? '';
-                        final street = props['street'] as String? ?? '';
-                        final city = props['city'] as String? ?? props['county'] as String? ?? props['district'] as String? ?? '';
-                        final state = props['state'] as String? ?? '';
-                        final title = [name, street].where((s) => s.isNotEmpty).join(', ');
+                        final addr = f['address'] as Map<String, dynamic>? ?? {};
+                        final displayName = f['display_name'] as String? ?? '';
+                        final parts = displayName.split(',');
+                        final title = parts.isNotEmpty ? parts.first.trim() : displayName;
+                        final city = addr['city'] as String? ?? addr['town'] as String? ?? addr['village'] as String? ?? '';
+                        final state = addr['state'] as String? ?? '';
                         final subtitle = [city, state].where((s) => s.isNotEmpty).join(', ');
                         return InkWell(
                           onTap: () => _selectSuggestion(f),
