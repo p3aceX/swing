@@ -56,6 +56,16 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   String _arenaType = 'CRICKET';
   final List<String> _photoUrls = [];
 
+  // Facilities step
+  bool _hasParking = false;
+  bool _hasLights = false;
+  bool _hasWashrooms = false;
+  bool _hasCanteen = false;
+  bool _hasCCTV = false;
+  bool _hasScorer = false;
+  String _openTime = '06:00';
+  String _closeTime = '22:00';
+
   // Address search
   final _searchCtrl = TextEditingController();
   Timer? _searchDebounce;
@@ -70,6 +80,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
     _SetupStep('Type', Icons.category_rounded),
     _SetupStep('Basics', Icons.edit_note_rounded),
     _SetupStep('Location', Icons.location_on_rounded),
+    _SetupStep('Facilities', Icons.local_parking_rounded),
     _SetupStep('Photos', Icons.add_a_photo_rounded),
   ];
 
@@ -263,6 +274,14 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         latitude: _parseDouble(_latitude.text),
         longitude: _parseDouble(_longitude.text),
         photoUrls: _photoUrls,
+        hasParking: _hasParking,
+        hasLights: _hasLights,
+        hasWashrooms: _hasWashrooms,
+        hasCanteen: _hasCanteen,
+        hasCCTV: _hasCCTV,
+        hasScorer: _hasScorer,
+        openTime: _openTime,
+        closeTime: _closeTime,
       ));
       final arenaId = arenaData['id'] as String? ??
           (arenaData['data'] as Map<String, dynamic>?)?['id'] as String?;
@@ -375,6 +394,28 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                   ),
                 ],
               ]),
+            ),
+            _FacilitiesStep(
+              openTime: _openTime,
+              closeTime: _closeTime,
+              hasParking: _hasParking,
+              hasLights: _hasLights,
+              hasWashrooms: _hasWashrooms,
+              hasCanteen: _hasCanteen,
+              hasCCTV: _hasCCTV,
+              hasScorer: _hasScorer,
+              onOpenTimePicked: (t) => setState(() => _openTime = t),
+              onCloseTimePicked: (t) => setState(() => _closeTime = t),
+              onToggle: (field, v) => setState(() {
+                switch (field) {
+                  case 'parking':   _hasParking = v;
+                  case 'lights':    _hasLights = v;
+                  case 'washrooms': _hasWashrooms = v;
+                  case 'canteen':   _hasCanteen = v;
+                  case 'cctv':      _hasCCTV = v;
+                  case 'scorer':    _hasScorer = v;
+                }
+              }),
             ),
             _StepShell(title: 'Arena Photos', subtitle: 'Add up to 3 photos of your arena.', child: ListView(padding: const EdgeInsets.all(20), children: [
               if (_photoUrls.isNotEmpty) GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: _photoUrls.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (_, i) => Stack(children: [ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_photoUrls[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity)), Positioned(right: 4, top: 4, child: GestureDetector(onTap: () => setState(() => _photoUrls.removeAt(i)), child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 14, color: Colors.white))))])),
@@ -549,6 +590,120 @@ class _DetailRow extends StatelessWidget {
       Expanded(child: Text(value.isEmpty ? '—' : value, style: const TextStyle(fontSize: 12, color: _text, fontWeight: FontWeight.w700))),
     ]),
   );
+}
+
+class _FacilitiesStep extends StatelessWidget {
+  const _FacilitiesStep({
+    required this.openTime,
+    required this.closeTime,
+    required this.hasParking,
+    required this.hasLights,
+    required this.hasWashrooms,
+    required this.hasCanteen,
+    required this.hasCCTV,
+    required this.hasScorer,
+    required this.onOpenTimePicked,
+    required this.onCloseTimePicked,
+    required this.onToggle,
+  });
+
+  final String openTime, closeTime;
+  final bool hasParking, hasLights, hasWashrooms, hasCanteen, hasCCTV, hasScorer;
+  final ValueChanged<String> onOpenTimePicked, onCloseTimePicked;
+  final void Function(String field, bool value) onToggle;
+
+  Future<void> _pickTime(BuildContext context, String current, ValueChanged<String> onPicked) async {
+    final parts = current.split(':');
+    final h = int.tryParse(parts[0]) ?? 6;
+    final m = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: h, minute: m),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    onPicked('${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget timeChip(String label, String time, ValueChanged<String> onPicked) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => _pickTime(context, time, onPicked),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _deep),
+            ),
+            child: Row(children: [
+              const Icon(Icons.schedule_rounded, size: 15, color: _accent),
+              const SizedBox(width: 8),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label, style: const TextStyle(fontSize: 10, color: _muted, fontWeight: FontWeight.w600)),
+                Text(time, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text)),
+              ]),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    Widget toggle(String field, String label, IconData icon, bool value) {
+      return GestureDetector(
+        onTap: () => onToggle(field, !value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            color: value ? _deep : _surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: value ? _deep : _line),
+          ),
+          child: Row(children: [
+            Icon(icon, size: 18, color: value ? Colors.white : _muted),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: value ? Colors.white : _text))),
+            Icon(value ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                size: 18, color: value ? _accent : _line),
+          ]),
+        ),
+      );
+    }
+
+    return _StepShell(
+      title: 'Facilities',
+      subtitle: 'Operating hours and amenities players will see on your arena page.',
+      child: ListView(padding: const EdgeInsets.all(20), children: [
+        const Text('OPERATING HOURS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        Row(children: [
+          timeChip('Opens at', openTime, onOpenTimePicked),
+          const SizedBox(width: 10),
+          timeChip('Closes at', closeTime, onCloseTimePicked),
+        ]),
+        const SizedBox(height: 24),
+        const Text('AMENITIES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        toggle('parking',   'Parking',        Icons.local_parking_rounded,     hasParking),
+        const SizedBox(height: 8),
+        toggle('lights',    'Floodlights',     Icons.wb_incandescent_rounded,   hasLights),
+        const SizedBox(height: 8),
+        toggle('washrooms', 'Washrooms',       Icons.wc_rounded,                hasWashrooms),
+        const SizedBox(height: 8),
+        toggle('canteen',   'Canteen / Food',  Icons.restaurant_rounded,        hasCanteen),
+        const SizedBox(height: 8),
+        toggle('cctv',      'CCTV',            Icons.videocam_rounded,          hasCCTV),
+        const SizedBox(height: 8),
+        toggle('scorer',    'Scorer',          Icons.scoreboard_rounded,        hasScorer),
+      ]),
+    );
+  }
 }
 
 InputDecoration _inputDecoration(String label, {Widget? suffixIcon, String? helperText}) => InputDecoration(labelText: label, suffixIcon: suffixIcon, helperText: helperText, helperMaxLines: 2, filled: true, fillColor: _surface, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)));
