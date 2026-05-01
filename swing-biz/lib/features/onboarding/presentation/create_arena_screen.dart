@@ -61,6 +61,10 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   Timer? _searchDebounce;
   bool _searchLoading = false;
   List<Map<String, dynamic>> _suggestions = [];
+  // Session token groups all autocomplete keystrokes + 1 details call = 1 billed session
+  String _placesSession = _newSessionToken();
+  // Cache: query → predictions (avoids re-fetching identical searches)
+  final Map<String, List<Map<String, dynamic>>> _suggestionsCache = {};
 
   static const _steps = [
     _SetupStep('Type', Icons.category_rounded),
@@ -140,6 +144,11 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   }
 
   Future<void> _fetchSuggestions(String query) async {
+    // Return cached result — zero API cost
+    if (_suggestionsCache.containsKey(query)) {
+      if (mounted) setState(() { _suggestions = _suggestionsCache[query]!; _searchLoading = false; });
+      return;
+    }
     try {
       final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', {
         'input': query,
@@ -147,17 +156,14 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         'components': 'country:in',
         'language': 'en',
         'types': 'geocode|establishment',
+        'sessiontoken': _placesSession,  // groups calls into one billed session
       });
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
         final predictions = (body['predictions'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
-        if (mounted) {
-          setState(() {
-            _suggestions = predictions;
-            _searchLoading = false;
-          });
-        }
+        _suggestionsCache[query] = predictions;  // cache for reuse
+        if (mounted) setState(() { _suggestions = predictions; _searchLoading = false; });
       } else {
         if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
       }
@@ -178,6 +184,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         'key': _googlePlacesKey,
         'fields': 'geometry,formatted_address,address_components',
         'language': 'en',
+        'sessiontoken': _placesSession,  // closes this session — all prior autocomplete calls + this = 1 billed unit
       });
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
@@ -216,6 +223,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
             if (lng != null) _longitude.text = lng.toStringAsFixed(6);
             _locationPicked = true;
             _searchLoading = false;
+            _placesSession = _newSessionToken();  // start fresh session for next search
           });
         }
       }
@@ -526,5 +534,6 @@ class _DetailRow extends StatelessWidget {
 }
 
 InputDecoration _inputDecoration(String label, {Widget? suffixIcon, String? helperText}) => InputDecoration(labelText: label, suffixIcon: suffixIcon, helperText: helperText, helperMaxLines: 2, filled: true, fillColor: _surface, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)));
+String _newSessionToken() => DateTime.now().millisecondsSinceEpoch.toRadixString(36);
 String? _emptyToNull(String v) => v.trim().isEmpty ? null : v.trim();
 double? _parseDouble(String v) => v.trim().isEmpty ? null : double.tryParse(v.trim());
