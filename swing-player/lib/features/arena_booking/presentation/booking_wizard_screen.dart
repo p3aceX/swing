@@ -382,37 +382,40 @@ class _BookingWizardScreenState extends ConsumerState<BookingWizardScreen> {
         child: Row(
           children: [
             // Back / close
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: Material(
-                color: context.panel.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
+            GestureDetector(
+              onTap: _back,
+              child: Container(
+                width: 48,
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: context.panel.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(14),
-                  onTap: _back,
-                  child: Icon(Icons.arrow_back_rounded, color: context.fg, size: 22),
                 ),
+                child: Icon(Icons.arrow_back_rounded, color: context.fg, size: 22),
               ),
             ),
-            const Spacer(),
-            // Step dots
-            Row(
-              children: List.generate(
-                3,
-                (i) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: _step == i ? 22 : 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: _step == i ? context.accent : context.panel,
-                    borderRadius: BorderRadius.circular(4),
+            // Step dots — centered in remaining space
+            Expanded(
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(
+                    3,
+                    (i) => AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: _step == i ? 22 : 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: _step == i ? context.accent : context.panel,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-            const Spacer(),
             // Next (steps 0-1) — Pay button is inside step 2
             if (_step < 2)
               SizedBox(
@@ -424,6 +427,8 @@ class _BookingWizardScreenState extends ConsumerState<BookingWizardScreen> {
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: context.panel,
                     disabledForegroundColor: context.fgSub,
+                    minimumSize: const Size(0, 48),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(horizontal: 28),
                     shape: RoundedRectangleBorder(
@@ -436,7 +441,7 @@ class _BookingWizardScreenState extends ConsumerState<BookingWizardScreen> {
                 ),
               )
             else
-              const SizedBox(width: 48), // balance layout — Pay is inside step
+              const SizedBox(width: 48),
           ],
         ),
       ),
