@@ -1,8 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:phonepe_payment_sdk/phonepe_payment_sdk.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../data/arena_slots_repository.dart';
@@ -27,7 +29,8 @@ class ArenaBookingScreen extends ConsumerStatefulWidget {
 }
 
 class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
-  late final Razorpay _razorpay;
+  static const _kMerchantId = 'SU2507111540338505172019';
+  static const _kAppSchema = 'swingplayer';
   late DateTime _selectedDate;
   int _durationMins = 60;
   UnitGroupSlots? _selectedGroup;
@@ -40,24 +43,22 @@ class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
 
   final _photoPageNotifier = ValueNotifier<int>(0);
 
-  SlotHold? _pendingHold;
-  String? _pendingUnitId;
-  int? _pendingPayNowPaise;
-
   @override
   void initState() {
     super.initState();
     _selectedDate = widget.initialDate ?? DateTime.now();
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+    _initPhonePe();
     _load();
+  }
+
+  Future<void> _initPhonePe() async {
+    try {
+      await PhonePePaymentSdk.init('PRODUCTION', _kMerchantId, '', false);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _razorpay.clear();
     _photoPageNotifier.dispose();
     super.dispose();
   }
@@ -74,23 +75,6 @@ class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
           .read(arenaSlotsRepositoryProvider)
           .getArenaSlots(widget.arenaId, _selectedDate, _durationMins);
       if (!mounted || requestId != _requestId) return;
-
-      debugPrint('[Booking] duration=$_durationMins  groups=${slots.unitGroups.length}');
-      for (final g in slots.unitGroups) {
-        debugPrint(
-          '[Booking]   group=${g.groupKey} displayName=${g.displayName} '
-          'minSlot=${g.minSlotMins} maxSlot=${g.maxSlotMins} '
-          'isNet=${g.isNetGroup} netTypes=${g.netTypes} '
-          'slots=${g.availableSlots.length}',
-        );
-        if (g.availableSlots.isNotEmpty) {
-          final s = g.availableSlots.first;
-          debugPrint(
-            '[Booking]     first slot ${s.startTime}-${s.endTime} '
-            'amount=${s.totalAmountPaise} netOpts=${s.netTypeOptions.map((o) => '${o.netType}:${o.totalAmountPaise}').toList()}',
-          );
-        }
-      }
 
       // Restore previously selected group from fresh data using groupKey
       final restoredGroup = previousGroupKey == null
@@ -241,7 +225,7 @@ class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
                       const SizedBox(height: 10),
                       DurationPicker(
                         selectedMins: _durationMins,
-                        groups: [group],
+                        constraints: [DurationConstraints.fromGroup(group)],
                         onChanged: (mins) {
                           setState(() {
                             _durationMins = mins;
@@ -333,7 +317,6 @@ class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
     // For nets, prefer the unit assigned to the chosen net type
     String? unitId;
     if (group.isNetGroup) {
-      debugPrint('[Book] net group selectedNetType=$_selectedNetType slot netOpts=${slot.netTypeOptions.map((o) => '${o.netType}→${o.assignedUnitId}').toList()}');
       if (_selectedNetType != null) {
         unitId = slot.netTypeOptions
             .where((o) => o.netType == _selectedNetType)
@@ -344,7 +327,6 @@ class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
     } else {
       unitId = group.unitId;
     }
-    debugPrint('[Book] resolved unitId=$unitId  slot=${slot.startTime}-${slot.endTime}  group=${group.groupKey}');
     if (unitId == null || unitId.isEmpty) {
       _showSnack('Could not assign a unit for this slot.');
       return;
@@ -365,72 +347,44 @@ class _ArenaBookingScreenState extends ConsumerState<ArenaBookingScreen> {
           ? group.minAdvancePaise
           : slot.totalAmountPaise;
       final order = await repo.createPaymentOrder(payNowPaise);
-      _pendingHold = hold;
-      _pendingUnitId = unitId;
-      _pendingPayNowPaise = payNowPaise;
-      _razorpay.open({
-        'key': order.key,
-        'order_id': order.razorpayOrderId,
-        'amount': payNowPaise,
-        'currency': order.currency,
-        'name': slots.arena.name,
-        'description': '${group.displayName} · ${slot.startTime}',
+      final payload = jsonEncode({
+        'orderId': order.orderId,
+        'merchantId': _kMerchantId,
+        'token': order.token,
+        'paymentMode': {'type': 'PAY_PAGE'},
       });
+      final response =
+          await PhonePePaymentSdk.startTransaction(payload, _kAppSchema);
+      if (!mounted) return;
+
+      final status = response?['status']?.toString() ?? 'FAILURE';
+      if (status == 'SUCCESS') {
+        final booking = await repo.createBooking(
+          holdId: hold.holdId,
+          unitId: unitId,
+          date: _selectedDate,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          phonePeOrderId: order.orderId,
+          advancePaise: payNowPaise,
+          totalAmountPaise: slot.totalAmountPaise,
+        );
+        if (!mounted) return;
+        setState(() => _booking = false);
+        context.go('/booking/success', extra: booking);
+      } else if (status == 'INTERRUPTED') {
+        setState(() => _booking = false);
+        _showSnack('Payment was cancelled.');
+      } else {
+        setState(() => _booking = false);
+        final err = response?['error']?.toString() ?? '';
+        _showSnack(err.isNotEmpty ? err : 'Payment failed. Please try again.');
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _booking = false);
       _showSnack(repo.messageFor(error, fallback: 'Could not start booking.'));
     }
-  }
-
-  Future<void> _onPaymentSuccess(PaymentSuccessResponse payment) async {
-    final hold = _pendingHold;
-    final unitId = _pendingUnitId;
-    final payNowPaise = _pendingPayNowPaise;
-    final group = _selectedGroup;
-    final slot = _selectedSlot;
-    if (hold == null ||
-        unitId == null ||
-        payNowPaise == null ||
-        group == null ||
-        slot == null) {
-      setState(() => _booking = false);
-      return;
-    }
-    try {
-      final booking =
-          await ref.read(arenaSlotsRepositoryProvider).createBooking(
-                holdId: hold.holdId,
-                unitId: unitId,
-                date: _selectedDate,
-                startTime: slot.startTime,
-                endTime: slot.endTime,
-                razorpayPaymentId: payment.paymentId ?? '',
-                razorpayOrderId: payment.orderId ?? '',
-                razorpaySignature: payment.signature ?? '',
-                advancePaise: payNowPaise,
-                totalAmountPaise: slot.totalAmountPaise,
-              );
-      if (!mounted) return;
-      setState(() => _booking = false);
-      context.go('/booking/success', extra: booking);
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _booking = false);
-      _showSnack(ref.read(arenaSlotsRepositoryProvider).messageFor(
-            error,
-            fallback: 'Payment captured, but booking confirmation failed.',
-          ));
-    }
-  }
-
-  void _onPaymentError(PaymentFailureResponse response) {
-    if (mounted) setState(() => _booking = false);
-    _showSnack(response.message ?? 'Payment was not completed.');
-  }
-
-  void _onExternalWallet(ExternalWalletResponse response) {
-    _showSnack('${response.walletName ?? 'Wallet'} selected');
   }
 
   void _showSnack(String message) {

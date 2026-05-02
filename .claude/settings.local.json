@@ -47,7 +47,28 @@
       "Bash(gcloud run *)",
       "Bash(echo \"Build submitted in background, PID: $!\")",
       "Bash(sort find *)",
-      "Bash(grep -E \"\\\\.\\(dart\\)$\")"
+      "Bash(grep -E \"\\\\.\\(dart\\)$\")",
+      "Bash(git stash *)",
+      "Bash(git subtree *)",
+      "Bash(git *)",
+      "Bash(grep \"\\\\.dart$\")",
+      "Bash(gcloud secrets versions access *)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(grep -v \"^$\")",
+      "Bash(psql \"postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require\" -c \"SELECT version\\(\\);\")",
+      "Bash(psql \"postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:6543/postgres?sslmode=require\" -c \"SELECT version\\(\\);\")",
+      "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require\" npx prisma migrate deploy)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require\" npx prisma db push)",
+      "Bash(/opt/homebrew/opt/postgresql@17/bin/pg_restore --no-owner --no-privileges --data-only -d 'postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require' '~/swing_backup.sql')",
+      "Bash(/opt/homebrew/opt/postgresql@17/bin/psql 'postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require' --single-transaction -c 'SET session_replication_role = replica;' -f '~/swing_backup.sql')",
+      "Bash(/opt/homebrew/opt/postgresql@17/bin/psql 'postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require' -c 'SET session_replication_role = replica;' -f '~/swing_backup.sql')",
+      "Bash(gcloud secrets *)",
+      "Bash(echo \"Build submitted PID: $!\")",
+      "Bash(gcloud logging read *)",
+      "Bash(curl -s \"https://photon.komoot.io/api/?q=Mumbai+India&limit=5&lang=en\")",
+      "Bash(curl -s \"https://nominatim.openstreetmap.org/search?format=json&q=Mumbai+India&countrycodes=in&limit=5&addressdetails=1\" -H \"User-Agent: SwingApp/1.0\")",
+      "WebFetch(domain:developer.phonepe.com)"
     ]
   }
 }

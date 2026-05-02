@@ -133,10 +133,19 @@ class ApiEndpoints {
   static String gigById(String id) => '/gigs/$id';
   static String gigBook(String id) => '/gigs/$id/book';
 
-  // Matchmaking
+  // Matchmaking (legacy queue)
   static const String matchmakingQueue = '/matchmaking/queue';
   static String matchmakingQueueById(String id) => '/matchmaking/queue/$id';
   static String matchmakingConfirm(String id) => '/matchmaking/confirm/$id';
+
+  // Matchmaking (lobby-based)
+  static const String matchmakingGrounds = '/matchmaking/grounds';
+  static const String matchmakingLobbies = '/matchmaking/lobbies';
+  static String matchmakingLobby(String id) => '/matchmaking/lobbies/$id';
+  static String matchmakingMatchConfirm(String id) =>
+      '/matchmaking/matches/$id/confirm';
+  static String matchmakingMatchDecline(String id) =>
+      '/matchmaking/matches/$id/decline';
 
   // Sessions
   static const String sessionsScan = '/sessions/scan';

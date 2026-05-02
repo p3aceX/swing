@@ -2,6 +2,15 @@
 
 import { useState, useCallback, useTransition, useRef, useEffect } from "react";
 
+declare global {
+  interface Window {
+    PhonePeCheckout?: {
+      transact: (opts: { tokenUrl: string; callback?: (response: string) => void; type?: "IFRAME" | "REDIRECT" }) => void;
+      closePage?: () => void;
+    };
+  }
+}
+
 type BookedSlot = { startTime: string; endTime: string };
 type SlotUnit = {
   id: string; name: string; unitType?: string;
@@ -300,20 +309,114 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
     const endTime = toTime(toMins(selectedStart) + durMins);
     startSubmit(async () => {
       try {
-        const res = await fetch(`/api/bookings`, {
+        const bookingPayload = {
+          arenaUnitId: unitId,
+          bookingDate: date,
+          startTime: selectedStart,
+          endTime,
+          totalPricePaise: totalPaise,
+          guestName: guestName.trim(),
+          guestPhone: guestPhone.trim(),
+        };
+
+        const isPhonePeFlow = totalPaise > 0;
+        if (isPhonePeFlow) {
+          const initRes = await fetch("/api/bookings/phonepe/initiate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(bookingPayload),
+          });
+          const initData = (await initRes.json()) as {
+            success?: boolean;
+            error?: string;
+            data?: { merchantOrderId?: string; redirectUrl?: string };
+          };
+          if (!initRes.ok || !initData.success || !initData.data?.merchantOrderId || !initData.data?.redirectUrl) {
+            setError(initData.error ?? "Could not start PhonePe checkout.");
+            return;
+          }
+
+          const ensureCheckoutScript = async () => {
+            if (window.PhonePeCheckout?.transact) return true;
+            await new Promise<void>((resolve, reject) => {
+              const existing = document.querySelector('script[data-phonepe-checkout="1"]') as HTMLScriptElement | null;
+              if (existing) {
+                existing.addEventListener("load", () => resolve(), { once: true });
+                existing.addEventListener("error", () => reject(new Error("script")), { once: true });
+                return;
+              }
+              const s = document.createElement("script");
+              s.src = "https://mercury.phonepe.com/web/bundle/checkout.js";
+              s.async = true;
+              s.dataset.phonepeCheckout = "1";
+              s.onload = () => resolve();
+              s.onerror = () => reject(new Error("script"));
+              document.head.appendChild(s);
+            });
+            return !!window.PhonePeCheckout?.transact;
+          };
+
+          const scriptReady = await ensureCheckoutScript().catch(() => false);
+          if (!scriptReady) {
+            setError("PhonePe checkout failed to load. Please try again.");
+            return;
+          }
+
+          const finalizeBooking = async () => {
+            try {
+              const confirmRes = await fetch("/api/bookings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  ...bookingPayload,
+                  paymentGateway: "PHONEPE",
+                  phonePeOrderId: initData.data?.merchantOrderId,
+                }),
+              });
+              const confirmData = (await confirmRes.json()) as { success?: boolean; error?: string; data?: { id?: string } };
+              if (!confirmRes.ok || !confirmData.success) {
+                setError(confirmData.error ?? "Payment captured but booking failed. Please contact support.");
+                return;
+              }
+              setBookingRef(confirmData.data?.id?.slice(-8).toUpperCase() ?? "OK");
+              refreshDateAvail(date);
+              setShowSaveModal(true);
+              setStep("done");
+            } catch {
+              setError("Payment completed, but booking confirmation failed.");
+            }
+          };
+
+          try {
+            window.PhonePeCheckout!.transact({
+              tokenUrl: initData.data.redirectUrl,
+              callback: async (response: string) => {
+                if (response === "USER_CANCEL") {
+                  setError("Payment was cancelled.");
+                  return;
+                }
+                if (response !== "CONCLUDED") {
+                  setError("Payment did not complete. Please retry.");
+                  return;
+                }
+                await finalizeBooking();
+              },
+            });
+          } catch {
+            window.location.href = initData.data.redirectUrl;
+          }
+          return;
+        }
+
+        const res = await fetch("/api/bookings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            arenaUnitId: unitId, bookingDate: date,
-            startTime: selectedStart, endTime,
-            totalPricePaise: totalPaise,
-            guestName: guestName.trim(), guestPhone: guestPhone.trim(),
-          }),
+          body: JSON.stringify(bookingPayload),
         });
         const data = (await res.json()) as { success?: boolean; error?: string; data?: { id?: string } };
         if (!res.ok || !data.success) { setError(data.error ?? "Booking failed. Slot may have been taken."); return; }
         setBookingRef(data.data?.id?.slice(-8).toUpperCase() ?? "OK");
-        refreshDateAvail(date); // update calendar color for this date
+        refreshDateAvail(date);
         setShowSaveModal(true);
         setStep("done");
       } catch { setError("Network error. Try again."); }
@@ -1199,7 +1302,9 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
             <input className="form-input" type="tel" placeholder="+91 98765 43210" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} />
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
-          <div className="pay-note" style={{ padding: "0 0 10px" }}>Payment at the venue · booking is free to reserve</div>
+          <div className="pay-note" style={{ padding: "0 0 10px" }}>
+            {totalPaise > 0 ? "Secure checkout with PhonePe" : "Payment at the venue · booking is free to reserve"}
+          </div>
         </div>
       )}
 
@@ -1290,7 +1395,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
           ) : step === "form" ? (
             <>
               <div className="cta-amt">{totalPaise > 0 ? rupeesInt(totalPaise) : "Book"}</div>
-              <div className="cta-sub">Pay at venue</div>
+              <div className="cta-sub">{totalPaise > 0 ? "Secure checkout with PhonePe" : "Pay at venue"}</div>
             </>
           ) : (
             <>
@@ -1318,7 +1423,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
             <button className="cta-btn"
               disabled={submitting || !guestName.trim() || !guestPhone.trim()}
               onClick={handleSubmit}>
-              {submitting ? "Confirming…" : "Confirm"}
+              {submitting ? "Processing…" : totalPaise > 0 ? "Pay with PhonePe" : "Confirm"}
               {!submitting && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>}
             </button>
           </>

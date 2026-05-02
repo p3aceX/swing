@@ -7,6 +7,7 @@ import { getStudioScene } from "../../lib/redis";
 import { buildInningsPlayerStats } from "../matches/match-stats";
 import { OverlayPackService } from "../overlays/overlay-pack.service";
 import { NotificationService } from "../notifications/notification.service";
+import { PhonePeService } from "../payments/phonepe.service";
 
 const notificationSvc = new NotificationService();
 
@@ -63,6 +64,7 @@ const indianCities: PublicCitySuggestion[] = (() => {
 })();
 
 const overlayPackService = new OverlayPackService();
+const phonePeService = new PhonePeService();
 
 const overlayLogoAsset = (() => {
   const candidates = [
@@ -2989,6 +2991,49 @@ startRealtime();
   })
 
   // POST /public/bookings — guest booking (no auth)
+  app.post('/bookings/phonepe/initiate', async (request, reply) => {
+    const bodySchema = z.object({
+      amountPaise: z.number().int().min(100),
+      guestPhone: z.string().min(5).max(20).optional(),
+      guestName: z.string().min(1).max(100).optional(),
+      arenaUnitId: z.string().optional(),
+      bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+      endTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+    })
+
+    const parsed = bodySchema.safeParse(request.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ success: false, error: 'Invalid request', details: parsed.error.flatten() })
+    }
+
+    const body = parsed.data
+    const order = await phonePeService.createOrder(body.amountPaise, {
+      message: 'Swing arena booking advance',
+      prefillPhone: body.guestPhone,
+      redirectUrl: process.env.PHONEPE_WEB_REDIRECT_URL ?? 'https://www.swingcricketapp.com',
+      metaInfo: {
+        udf1: body.arenaUnitId ?? '',
+        udf2: body.bookingDate ?? '',
+        udf3: body.startTime ?? '',
+        udf4: body.endTime ?? '',
+        udf5: body.guestName ?? '',
+      },
+    })
+
+    return reply.code(201).send({
+      success: true,
+      data: {
+        merchantOrderId: order.orderId,
+        phonePeOrderId: order.phonePeOrderId,
+        redirectUrl: order.redirectUrl,
+        token: order.token,
+        state: order.state,
+      },
+    })
+  })
+
+  // POST /public/bookings — guest booking (no auth)
   app.post('/bookings', async (request, reply) => {
     const bodySchema = z.object({
       arenaUnitId: z.string(),
@@ -2998,6 +3043,8 @@ startRealtime();
       totalPricePaise: z.number().int().min(0),
       guestName: z.string().min(1).max(100),
       guestPhone: z.string().min(5).max(20),
+      paymentGateway: z.string().optional(),
+      phonePeOrderId: z.string().optional(),
     })
 
     const parsed = bodySchema.safeParse(request.body)
@@ -3005,7 +3052,7 @@ startRealtime();
       return reply.code(400).send({ success: false, error: 'Invalid request', details: parsed.error.flatten() })
     }
 
-    const { arenaUnitId, bookingDate, startTime, endTime, totalPricePaise, guestName, guestPhone } = parsed.data
+    const { arenaUnitId, bookingDate, startTime, endTime, totalPricePaise, guestName, guestPhone, paymentGateway, phonePeOrderId } = parsed.data
 
     const unit = await prisma.arenaUnit.findUnique({
       where: { id: arenaUnitId },
@@ -3060,6 +3107,17 @@ startRealtime();
     })
     if (passConflict) return reply.code(409).send({ success: false, error: 'This slot is reserved by a monthly pass' })
 
+    const isPhonePe = paymentGateway === 'PHONEPE'
+    if (isPhonePe) {
+      if (!phonePeOrderId) {
+        return reply.code(400).send({ success: false, error: 'phonePeOrderId is required for PhonePe payment' })
+      }
+      const status = await phonePeService.checkOrderStatus(phonePeOrderId)
+      if (status.state !== 'COMPLETED') {
+        return reply.code(400).send({ success: false, error: `PhonePe payment not completed (state: ${status.state})` })
+      }
+    }
+
     // resolve or create walk-in player for this arena
     const arenaId = unit.arenaId
     const walkinEmail = `walkin+${arenaId}@swing.internal`
@@ -3096,13 +3154,32 @@ startRealtime();
         totalAmountPaise: totalPricePaise,
         totalPricePaise,
         status: 'CONFIRMED',
-        isOfflineBooking: true,
+        isOfflineBooking: !isPhonePe,
         guestName,
         guestPhone,
         guestSource: 'PUBLIC_WEB',
-        paymentMode: 'CASH',
+        paymentMode: isPhonePe ? 'ONLINE' : 'CASH',
+        ...(isPhonePe ? { paidAt: new Date(), advancePaise: totalPricePaise } : {}),
       } as any,
     })
+
+    if (isPhonePe && phonePeOrderId) {
+      await prisma.payment.create({
+        data: {
+          userId: walkinUser.id,
+          entityType: 'SLOT_BOOKING',
+          entityId: booking.id,
+          amountPaise: totalPricePaise,
+          currency: 'INR',
+          status: 'COMPLETED',
+          gateway: 'PHONEPE',
+          gatewayOrderId: phonePeOrderId,
+          slotBookingId: booking.id,
+          completedAt: new Date(),
+          description: `Arena slot ${startTime}–${endTime}`,
+        },
+      })
+    }
 
     // Notify arena owner (fire-and-forget)
     notificationSvc.notifyBookingConfirmed({

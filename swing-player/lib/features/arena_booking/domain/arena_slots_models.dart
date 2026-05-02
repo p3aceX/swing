@@ -207,11 +207,13 @@ class ArenaPaymentOrder {
     required this.orderId,
     required this.token,
     required this.amountPaise,
+    this.redirectUrl,
   });
 
   final String orderId;
   final String token;
   final int amountPaise;
+  final String? redirectUrl;
 
   factory ArenaPaymentOrder.fromJson(Map<String, dynamic> j) {
     final pp = _map(j['phonePeOrder'] ?? j['phonepeOrder']);
@@ -221,6 +223,7 @@ class ArenaPaymentOrder {
       token:
           '${pp['token'] ?? pp['orderToken'] ?? j['token'] ?? j['orderToken'] ?? ''}',
       amountPaise: _intValue(pp['amountPaise'] ?? j['amountPaise']),
+      redirectUrl: _stringOrNull(pp['redirectUrl'] ?? j['redirectUrl']),
     );
   }
 }

@@ -84,6 +84,8 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
     _SetupStep('Photos', Icons.add_a_photo_rounded),
   ];
 
+  void _log(String msg) => debugPrint('[CreateArena] $msg');
+
   @override
   void dispose() {
     for (final c in [_name, _description, _phone, _address, _city, _state, _pincode, _latitude, _longitude, _searchCtrl]) {
@@ -96,6 +98,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   Future<void> _pickPhotos() async {
     final files = await ImagePicker().pickMultiImage();
+    _log('pickPhotos: selected ${files.length} file(s)');
     if (files.isEmpty) return;
     setState(() => _uploading = true);
     try {
@@ -107,14 +110,18 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
           'folder': 'temp/arena_onboarding',
           'file': await MultipartFile.fromFile(compressedFile.path, filename: 'photo_${DateTime.now().millisecondsSinceEpoch}.jpg'),
         });
+        _log('pickPhotos: uploading ${file.path}');
         final response = await ApiClient.instance.dio.post('/media/upload', data: form, options: Options(contentType: 'multipart/form-data'));
         final payload = response.data as Map<String, dynamic>;
         final data = (payload['data'] ?? payload) as Map<String, dynamic>;
         final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
+        _log('pickPhotos: upload result url=$url');
         if (url != null && url.isNotEmpty) uploads.add(url);
       }
+      _log('pickPhotos: total uploaded=${uploads.length} photoUrls=${_photoUrls.length + uploads.length}');
       setState(() => _photoUrls.addAll(uploads));
     } catch (e) {
+      _log('pickPhotos: error $e');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo upload failed: $e')));
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -122,7 +129,9 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   }
 
   Future<void> _next() async {
+    _log('next: step=$_step');
     if (_step == 2 && !_locationPicked) {
+      _log('next: blocked — location not picked');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please search and select your arena location')),
       );
@@ -132,9 +141,13 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       1 => _basicKey,
       _ => null,
     };
-    if (form != null && !form.currentState!.validate()) return;
+    if (form != null && !form.currentState!.validate()) {
+      _log('next: form validation failed at step=$_step');
+      return;
+    }
     if (_step == _steps.length - 1) return _submit();
     setState(() => _step++);
+    _log('next: moved to step=$_step');
     await _page.nextPage(duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
   }
 
@@ -168,9 +181,11 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   Future<void> _fetchSuggestions(String query) async {
     // Return cached result — zero API cost
     if (_suggestionsCache.containsKey(query)) {
+      _log('fetchSuggestions: cache hit for "$query" (${_suggestionsCache[query]!.length} results)');
       if (mounted) setState(() { _suggestions = _suggestionsCache[query]!; _searchLoading = false; });
       return;
     }
+    _log('fetchSuggestions: querying Places API for "$query"');
     try {
       final bias = _locationBias();
       final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', {
@@ -180,21 +195,24 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         'language': 'en',
         'types': 'geocode|establishment',
         'sessiontoken': _placesSession,
-        // bias results towards user's existing arenas city — silently improves relevance
         if (bias != null) 'location': '${bias.lat},${bias.lng}',
-        if (bias != null) 'radius': '50000',  // 50km radius
+        if (bias != null) 'radius': '50000',
       });
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      _log('fetchSuggestions: HTTP ${res.statusCode} body=${res.body.substring(0, res.body.length.clamp(0, 200))}');
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final status = body['status'] as String? ?? '';
         final predictions = (body['predictions'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
+        _log('fetchSuggestions: status=$status predictions=${predictions.length}');
         _suggestionsCache[query] = predictions;
         if (mounted) setState(() { _suggestions = predictions; _searchLoading = false; });
       } else {
+        _log('fetchSuggestions: non-200 response');
         if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
       }
     } catch (e) {
-      debugPrint('[Places] autocomplete error: $e');
+      _log('fetchSuggestions: error $e');
       if (mounted) setState(() { _suggestions = []; _searchLoading = false; });
     }
   }
@@ -202,6 +220,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   Future<void> _selectSuggestion(Map<String, dynamic> prediction) async {
     final placeId = prediction['place_id'] as String? ?? '';
     final description = prediction['description'] as String? ?? '';
+    _log('selectSuggestion: placeId=$placeId description="$description"');
     setState(() { _searchCtrl.text = description; _suggestions = []; _searchLoading = true; });
 
     try {
@@ -210,11 +229,14 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
         'key': _googlePlacesKey,
         'fields': 'geometry,formatted_address,address_components',
         'language': 'en',
-        'sessiontoken': _placesSession,  // closes this session — all prior autocomplete calls + this = 1 billed unit
+        'sessiontoken': _placesSession,
       });
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      _log('selectSuggestion: HTTP ${res.statusCode}');
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final status = body['status'] as String? ?? '';
+        _log('selectSuggestion: status=$status');
         final result = body['result'] as Map<String, dynamic>? ?? {};
         final location = (result['geometry'] as Map<String, dynamic>?)?['location'] as Map<String, dynamic>?;
         final lat = location?['lat'] as double?;
@@ -238,6 +260,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
         final addressParts = [if (streetNum.isNotEmpty) streetNum, if (route.isNotEmpty) route, if (sublocality.isNotEmpty) sublocality];
         final addressLine = addressParts.isNotEmpty ? addressParts.join(', ') : description.split(',').first;
+        _log('selectSuggestion: lat=$lat lng=$lng city=$city state=$state postcode=$postcode address="$addressLine"');
 
         if (mounted) {
           setState(() {
@@ -249,17 +272,18 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
             if (lng != null) _longitude.text = lng.toStringAsFixed(6);
             _locationPicked = true;
             _searchLoading = false;
-            _placesSession = _newSessionToken();  // start fresh session for next search
+            _placesSession = _newSessionToken();
           });
         }
       }
     } catch (e) {
-      debugPrint('[Places] details error: $e');
+      _log('selectSuggestion: error $e');
       if (mounted) setState(() { _searchLoading = false; });
     }
   }
 
   Future<void> _submit() async {
+    _log('submit: starting — name="${_name.text.trim()}" city="${_city.text.trim()}" state="${_state.text.trim()}" lat="${_latitude.text}" lng="${_longitude.text}" phone="${_phone.text.trim()}" sport=$_arenaType photos=${_photoUrls.length} openTime=$_openTime closeTime=$_closeTime parking=$_hasParking lights=$_hasLights washrooms=$_hasWashrooms canteen=$_hasCanteen cctv=$_hasCCTV scorer=$_hasScorer');
     setState(() => _saving = true);
     try {
       final arenaData = await ref.read(hostBizRepositoryProvider).createArena(ArenaProfileInput(
@@ -285,6 +309,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       ));
       final arenaId = arenaData['id'] as String? ??
           (arenaData['data'] as Map<String, dynamic>?)?['id'] as String?;
+      _log('submit: arena created id=$arenaId');
       await ref.read(sessionControllerProvider.notifier).setActiveProfile(BizProfileType.arena);
       ref.invalidate(meProvider);
       ref.invalidate(ownedArenasProvider);
@@ -297,8 +322,10 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
           builder: (_) => UnitEditorSheet(arenaId: arenaId),
         );
       }
+      _log('submit: navigating to dashboard');
       if (mounted) context.go(AppRoutes.dashboard);
     } catch (error) {
+      _log('submit: error $error');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create arena: $error')));
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -316,7 +343,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
           _ProgressHeader(step: _step, steps: _steps),
           Expanded(child: PageView(controller: _page, physics: const NeverScrollableScrollPhysics(), children: [
             _ArenaTypeStep(selectedType: _arenaType, onChanged: (value) => setState(() => _arenaType = value)),
-            _StepShell(title: 'Basic arena details', subtitle: 'Name, description and booking phone.', child: Form(key: _basicKey, child: ListView(padding: const EdgeInsets.all(20), children: [_Field(_name, 'Arena name', required: true), _Field(_description, 'Description', maxLines: 3), _Field(_phone, 'Booking confirmation phone number', required: true, keyboardType: TextInputType.phone, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)])]))),
+            _StepShell(title: 'Basic arena details', subtitle: 'Name, description and booking phone.', child: Form(key: _basicKey, child: ListView(padding: const EdgeInsets.all(20), children: [_Field(_name, 'Arena name', required: true), _Field(_description, 'Description', maxLines: 3), _Field(_phone, 'Booking confirmation phone number', required: true, keyboardType: TextInputType.phone, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)], validator: (v) { final s = v?.trim() ?? ''; if (s.isEmpty) return 'Required'; if (s.length != 10) return 'Enter a valid 10-digit mobile number'; return null; })]))),
             _StepShell(
               title: 'Location',
               subtitle: 'Search your arena address to auto-fill all location details.',
@@ -567,9 +594,9 @@ class _ChoiceTile extends StatelessWidget {
 }
 
 class _Field extends StatelessWidget {
-  const _Field(this.controller, this.label, {this.required = false, this.maxLines = 1, this.keyboardType, this.inputFormatters}); final TextEditingController controller; final String label; final bool required; final int maxLines; final TextInputType? keyboardType; final List<TextInputFormatter>? inputFormatters;
+  const _Field(this.controller, this.label, {this.required = false, this.maxLines = 1, this.keyboardType, this.inputFormatters, this.validator}); final TextEditingController controller; final String label; final bool required; final int maxLines; final TextInputType? keyboardType; final List<TextInputFormatter>? inputFormatters; final String? Function(String?)? validator;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(controller: controller, maxLines: maxLines, keyboardType: keyboardType, inputFormatters: inputFormatters, validator: required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null, decoration: _inputDecoration(label)));
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(controller: controller, maxLines: maxLines, keyboardType: keyboardType, inputFormatters: inputFormatters, validator: validator ?? (required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null), decoration: _inputDecoration(label)));
 }
 
 class _BottomBar extends StatelessWidget {

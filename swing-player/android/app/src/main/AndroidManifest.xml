@@ -37,6 +37,14 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
+            <!-- PhonePe payment callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="swingplayer"/>
+            </intent-filter>
+
             <!-- Health Connect intent filters -->
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
@@ -64,6 +72,7 @@
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="com.phonepe.app" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

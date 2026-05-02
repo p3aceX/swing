@@ -1,7 +1,6 @@
-import 'dart:convert';
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/api/api_client.dart';
@@ -29,7 +28,6 @@ class ArenaSlotsRepository {
         'durationMins': durationMins.toString(),
       },
     );
-    debugPrint('[API /slots raw]\n${const JsonEncoder.withIndent('  ').convert(resp.data)}');
     return ArenaSlots.fromJson(_unwrapMap(resp.data));
   }
 
@@ -98,12 +96,35 @@ class ArenaSlotsRepository {
     return PlayerBooking.fromJson(_unwrapMap(resp.data));
   }
 
+  /// Player-accessible: returns busy slots for an arena on a date.
+  /// Uses /busy endpoint which requires no arena ownership.
+  Future<List<ArenaReservation>> listArenaBusySlots(
+    String arenaId, {
+    required String date,
+  }) async {
+    final resp = await _dio.get(
+      '/bookings/arena/$arenaId/busy',
+      queryParameters: {'date': date},
+    );
+    final root = resp.data is Map
+        ? Map<String, dynamic>.from(resp.data as Map)
+        : <String, dynamic>{};
+    final list = (root['data'] ?? const []) as List;
+    return list
+        .whereType<Map>()
+        .map((e) => ArenaReservation.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
   String messageFor(Object error,
       {String fallback = 'Could not complete request.'}) {
     if (error is DioException) {
       final data = error.response?.data;
       if (data is Map) {
-        final message = data['message'] ?? data['error'];
+        final nestedError = data['error'];
+        final message = data['message'] ??
+            (nestedError is Map ? nestedError['message'] : null) ??
+            nestedError;
         if (message != null && '$message'.trim().isNotEmpty) {
           return '$message'.trim();
         }

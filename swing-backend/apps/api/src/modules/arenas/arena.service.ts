@@ -810,27 +810,77 @@ export class ArenaService {
       }
       const possibleStarts = [...startTimeSet].sort()
 
-      // Distinct net types present
-      const netTypeKeys = [...new Set(activeNetUnits.map((u: any) => u.netType || 'Standard'))]
+      // Extract per-type variants from a unit (supports netVariants JSON array or legacy netType string)
+      const getUnitVariants = (u: any): Array<{ type: string; count: number; pricePaise: number }> => {
+        const nv = u.netVariants
+        if (Array.isArray(nv) && nv.length > 0) {
+          return nv.map((v: any) => ({
+            type: String(v.type || 'Standard'),
+            count: Number(v.count) || 1,
+            pricePaise: Number(v.pricePaise) || u.pricePerHourPaise,
+          }))
+        }
+        return [{ type: String(u.netType || 'Standard'), count: 1, pricePaise: u.pricePerHourPaise }]
+      }
+
+      // Distinct net types across all active net units
+      const netTypeKeys = [...new Set(activeNetUnits.flatMap((u: any) => getUnitVariants(u).map((v: any) => v.type)))]
 
       const rep = activeNetUnits[0]
       const availableSlots: any[] = []
 
       for (const startTime of possibleStarts) {
         const endTime = this.minutesToTime(this.timeToMinutes(startTime) + durationMins)
-        const available = activeNetUnits.filter((u: any) => isUnitAvailable(u, startTime, endTime))
+
+        // For multi-count variant units, availability is per-variant capacity, not unit-level
+        const available = activeNetUnits.filter((u: any) => {
+          const variants = getUnitVariants(u)
+          const hasMultiCount = variants.some((v: any) => v.count > 1)
+          if (!hasMultiCount) return isUnitAvailable(u, startTime, endTime)
+          // Time blocks still fully block the unit
+          if (timeBlocks.some((b: any) => b.unitId === u.id && this.timesOverlap(b.startTime, b.endTime, startTime, endTime))) return false
+          // Available if any variant type still has remaining capacity
+          return variants.some((variant: any) => {
+            const booked = bookings.filter((b: any) =>
+              b.unitId === u.id &&
+              b.netVariantType === variant.type &&
+              this.timesOverlap(b.startTime, b.endTime, startTime, endTime)
+            ).length
+            return booked < variant.count
+          })
+        })
         if (available.length === 0) continue
 
         // Per-type breakdown so the frontend can offer a sub-picker
-        const netTypeOptions = netTypeKeys.map(nt => {
-          const ofType = available.filter((u: any) => (u.netType || 'Standard') === nt)
-          if (ofType.length === 0) return null
-          const assignedUnit = ofType[0]
+        const netTypeOptions = netTypeKeys.map((nt: string) => {
+          let totalAvailable = 0
+          let assignedUnitId: string | null = null
+          let variantPricePaise = 0
+
+          for (const u of available) {
+            const variant = getUnitVariants(u).find((v: any) => v.type === nt)
+            if (!variant) continue
+            const existingForType = bookings.filter((b: any) =>
+              b.unitId === u.id &&
+              b.netVariantType === nt &&
+              this.timesOverlap(b.startTime, b.endTime, startTime, endTime)
+            ).length
+            const slotAvail = Math.max(0, variant.count - existingForType)
+            if (slotAvail > 0) {
+              totalAvailable += slotAvail
+              if (!assignedUnitId) {
+                assignedUnitId = u.id
+                variantPricePaise = variant.pricePaise
+              }
+            }
+          }
+
+          if (!assignedUnitId) return null
           return {
             netType: nt,
-            availableCount: ofType.length,
-            assignedUnitId: assignedUnit.id,
-            totalAmountPaise: computePricePaise(assignedUnit),
+            availableCount: totalAvailable,
+            assignedUnitId,
+            totalAmountPaise: Math.round((variantPricePaise * durationMins) / 60),
           }
         }).filter(Boolean)
 
@@ -859,7 +909,7 @@ export class ArenaService {
         minAdvancePaise: Math.min(...activeNetUnits.map((u: any) => u.minAdvancePaise || 0)),
         minSlotMins: rep.minSlotMins,
         maxSlotMins: rep.maxSlotMins,
-        pricePerHourPaise: Math.min(...activeNetUnits.map((u: any) => u.pricePerHourPaise)),
+        pricePerHourPaise: Math.min(...activeNetUnits.flatMap((u: any) => getUnitVariants(u).map((v: any) => v.pricePaise))),
         price4HrPaise: rep.price4HrPaise ?? null,
         price8HrPaise: rep.price8HrPaise ?? null,
         weekendMultiplier: rep.weekendMultiplier,

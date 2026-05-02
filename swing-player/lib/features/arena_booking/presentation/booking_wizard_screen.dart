@@ -506,7 +506,7 @@ class _FacilityStep extends StatelessWidget {
               const SizedBox(height: 8),
               DurationPicker(
                 selectedMins: durationMins,
-                groups: [group],
+                constraints: [DurationConstraints.fromGroup(group)],
                 onChanged: onDurationChanged,
               ),
             ],
@@ -577,7 +577,7 @@ class _ScheduleStep extends StatelessWidget {
           const SizedBox(height: 8),
           DurationPicker(
             selectedMins: durationMins,
-            groups: [selectedGroup],
+            constraints: [DurationConstraints.fromGroup(selectedGroup)],
             onChanged: onDurationChanged,
           ),
         ],

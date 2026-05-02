@@ -1,57 +1,115 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { MatchmakingService } from './matchmaking.service'
-
-const createRequestSchema = z.object({
-  format: z.enum(['T10', 'T20', 'ONE_DAY', 'TWO_INNINGS', 'BOX_CRICKET', 'CUSTOM']),
-  matchType: z.enum(['RANKED', 'FRIENDLY']),
-  preferredDate: z.string().optional(),
-  preferredVenueName: z.string().optional(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-  radiusKm: z.number().default(25),
-  notes: z.string().optional(),
-})
+import { MatchmakingService, MatchmakingFormat } from './matchmaking.service'
 
 export async function matchmakingRoutes(app: FastifyInstance) {
   const svc = new MatchmakingService()
   const auth = { onRequest: [(app as any).authenticate] }
 
-  app.post('/requests', auth, async (request, reply) => {
+  const formatSchema = z.enum(['T10', 'T20', '30-over'])
+
+  app.get('/grounds', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const body = createRequestSchema.parse(request.body)
-    return reply.code(201).send({ success: true, data: await svc.createRequest(user.userId, body) })
+    const q = z.object({
+      q: z.string().optional(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      format: formatSchema,
+      teamId: z.string().optional(),
+    }).parse(request.query)
+    const data = await svc.searchGrounds(user.userId, {
+      q: q.q,
+      date: q.date,
+      format: q.format as MatchmakingFormat,
+      teamId: q.teamId,
+    })
+    return reply.send({ success: true, data })
   })
 
-  app.get('/requests', auth, async (request, reply) => {
+  app.post('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const q = request.query as { format?: string; status?: string; page?: string; limit?: string }
-    return reply.send({
-      success: true,
-      data: await svc.listRequests(user.userId, {
-        format: q.format,
-        status: q.status,
-        page: Number(q.page) || 1,
-        limit: Number(q.limit) || 20,
-      }),
+    const body = z.object({
+      teamId: z.string(),
+      format: formatSchema,
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      picks: z.array(z.object({
+        groundId: z.string(),
+        slotTime: z.string().regex(/^\d{2}:\d{2}$/),
+      })).min(1).max(3),
+    }).parse(request.body)
+    const data = await svc.createLobby(user.userId, {
+      teamId: body.teamId,
+      format: body.format as MatchmakingFormat,
+      date: body.date,
+      picks: body.picks,
+    })
+    return reply.code(201).send({ success: true, data })
+  })
+
+  app.get('/lobbies/:lobbyId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    const data = await svc.getLobbyStatus(user.userId, lobbyId)
+    return reply.send({ success: true, data })
+  })
+
+  app.get('/lobbies/:lobbyId/stream', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    await svc.assertLobbyOwnership(user.userId, lobbyId)
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
+
+    const write = async () => {
+      const payload = await svc.getLobbyStatus(user.userId, lobbyId)
+      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
+    }
+
+    await write()
+    const timer = setInterval(() => void write(), 5000)
+    request.raw.on('close', () => {
+      clearInterval(timer)
+      reply.raw.end()
     })
   })
 
-  app.get('/requests/mine', auth, async (request, reply) => {
+  app.get('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    return reply.send({ success: true, data: await svc.getMyRequests(user.userId) })
+    const q = z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      format: formatSchema.optional(),
+      ageGroup: z.string().optional(),
+    }).parse(request.query)
+    const data = await svc.listOpenLobbies(user.userId, {
+      date: q.date,
+      format: q.format as MatchmakingFormat | undefined,
+      ageGroup: q.ageGroup,
+    })
+    return reply.send({ success: true, data })
   })
 
-  app.post('/requests/:id/respond', auth, async (request, reply) => {
+  app.post('/matches/:matchId/confirm', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const { id } = request.params as { id: string }
-    const body = z.object({ accept: z.boolean() }).parse(request.body)
-    return reply.send({ success: true, data: await svc.respondToRequest(id, user.userId, body.accept) })
+    const { matchId } = request.params as { matchId: string }
+    const body = z.object({ lobbyId: z.string() }).parse(request.body)
+    const data = await svc.confirmMatchLobby(user.userId, matchId, body.lobbyId)
+    return reply.send({ success: true, data })
   })
 
-  app.post('/requests/:id/cancel', auth, async (request, reply) => {
+  app.post('/matches/:matchId/decline', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const { id } = request.params as { id: string }
-    return reply.send({ success: true, data: await svc.cancelRequest(id, user.userId) })
+    const { matchId } = request.params as { matchId: string }
+    const body = z.object({ lobbyId: z.string() }).parse(request.body)
+    const data = await svc.declineMatchLobby(user.userId, matchId, body.lobbyId)
+    return reply.send({ success: true, data })
+  })
+
+  app.delete('/lobbies/:lobbyId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    await svc.leaveLobby(user.userId, lobbyId)
+    return reply.code(204).send()
   })
 }

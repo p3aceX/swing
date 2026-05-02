@@ -1426,7 +1426,7 @@ class _BookingHistoryRow extends StatelessWidget {
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: _text)),
               const SizedBox(height: 4),
               _Badge(
-                isCheckedIn ? 'Checked in' : 'Pending',
+                isCheckedIn ? 'Paid' : 'Pending',
                 color,
               ),
             ]),

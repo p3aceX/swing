@@ -16,43 +16,52 @@ class AppTheme {
   static ThemeData _build(Brightness brightness, RankVisualTheme rankTheme) {
     final isDark = brightness == Brightness.dark;
 
-    // Titanium & Chrome Palette
-    // High-end masculine aesthetic with deep blacks and metallic silvers.
-    const Color bg$dark = Color(0xFF050505); // Pitch Black
-    const Color surf$dark = Color(0xFF121212); // Charcoal
-    const Color card$dark = Color(0xFF181818);
-    const Color stroke$dark = Color(0xFF2A2A2A);
-    const Color panel$dark = Color(0xFF1F1F1F);
+    // ── Rank tint seeds ───────────────────────────────────────────────────────
+    // Each rank colors the whole environment — bg, panels, borders all breathe
+    // the rank's hue. Light = subtle wash; dark = deep atmospheric tint.
+    final rankSeed = isDark ? rankTheme.primary : rankTheme.secondary;
 
-    const Color bg$light = Color(0xFFEEF1F5);    // Slate-tinted bg so cards lift off
-    const Color surf$light = Color(0xFFFFFFFF);  // Sheets, drawers — pure white
-    const Color card$light = Color(0xFFFFFFFF);  // Cards pop against the bg
-    const Color stroke$light = Color(0xFFB8C2CC); // Visible borders and dividers
-    const Color panel$light = Color(0xFFDDE2E9); // Tab bar bg, grouped sections
+    // ── Dark palette — pure blacks for top/bottom navigation ──────────────────
+    final bg$dark   = const Color(0xFF000000);
+    final surf$dark = const Color(0xFF000000);
+    final card$dark = Color.lerp(const Color(0xFF0A0A0A), rankSeed, 0.04)!;
+    final stroke$dark = Color.lerp(const Color(0xFF1A1A1A), rankSeed, 0.15)!;
+    final panel$dark = Color.lerp(const Color(0xFF0F0F0F), rankSeed, 0.05)!;
 
-    final bg = isDark ? bg$dark : bg$light;
-    final surf = isDark ? surf$dark : surf$light;
-    final card = isDark ? card$dark : card$light;
+    // ── Light palette — rank-tinted clean whites ──────────────────────────────
+    final bg$light   = Color.lerp(const Color(0xFFFFFFFF), rankSeed, 0.04)!;
+    final surf$light = Color.lerp(const Color(0xFFFFFFFF), rankSeed, 0.02)!;
+    final card$light = const Color(0xFFFFFFFF); // cards stay pure white for contrast
+    final stroke$light = Color.lerp(const Color(0xFFE0E0E0), rankSeed, 0.18)!;
+    final panel$light  = Color.lerp(const Color(0xFFF2F2F2), rankSeed, 0.07)!;
+
+    final bg     = isDark ? bg$dark     : bg$light;
+    final surf   = isDark ? surf$dark   : surf$light;
+    final card   = isDark ? card$dark   : card$light;
     final stroke = isDark ? stroke$dark : stroke$light;
-    final panel = isDark ? panel$dark : panel$light;
+    final panel  = isDark ? panel$dark  : panel$light;
 
-    final fg = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF0E1114);
-    final fgSub = isDark ? const Color(0xFF888888) : const Color(0xFF52606D);
+    final fg = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF0A0A0A);
+    final fgSub = isDark
+        ? Color.lerp(const Color(0xFF888888), rankTheme.primary, 0.12)!
+        : Color.lerp(const Color(0xFF6B6B80), rankTheme.secondary, 0.15)!;
 
-    // Primary Identity: Liquid Silver / Platinum
-    final accent = isDark ? const Color(0xFFE5E4E2) : rankTheme.secondary;
-    final accentBg =
-        isDark ? const Color(0x1AFFFFFF) : accent.withValues(alpha: 0.14);
-    final success = isDark ? const Color(0xFF00FF95) : const Color(0xFF2F7A52);
-    final warn = isDark ? const Color(0xFFFFB347) : const Color(0xFFAF7A2A);
-    final danger = isDark ? const Color(0xFFFF5252) : const Color(0xFFB45252);
-    final gold = isDark ? const Color(0xFFD4AF37) : const Color(0xFFC8922F);
-    final sky = isDark ? const Color(0xFF4A90E2) : const Color(0xFF43698F);
-    final match = isDark ? const Color(0xFFC0C0C0) : const Color(0xFF357ABD);
+    // Accent is rank-based in both modes — primary (lighter) for dark, secondary (vivid) for light.
+    final accent = isDark ? rankTheme.primary : rankTheme.secondary;
+    final accentBg = accent.withValues(alpha: isDark ? 0.15 : 0.12);
 
-    // Dark-on-light CTAs in light mode; platinum on dark.
-    final ctaBg = isDark ? accent : const Color(0xFF0A0A0A);
-    final ctaFg = isDark ? const Color(0xFF050505) : Colors.white;
+    final success = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final warn = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    final danger = isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final gold = isDark ? const Color(0xFFD4AF37) : const Color(0xFFCA8A04);
+    final sky = isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
+    final match = isDark ? const Color(0xFFA5B4FC) : const Color(0xFF4F46E5);
+
+    // CTA bg is rank accent in both modes. Auto-pick fg by luminance so text always pops.
+    final ctaBg = accent;
+    final ctaFg = accent.computeLuminance() > 0.45
+        ? const Color(0xFF0A0A0A)
+        : Colors.white;
 
     final palette = SwingPalette(
       bg: bg,
@@ -111,57 +120,59 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: card,
-        elevation: isDark ? 0 : 2.5,
-        shadowColor:
-            isDark ? Colors.transparent : Colors.black.withValues(alpha: 0.10),
+        elevation: 0,
+        shadowColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: stroke),
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: stroke, width: 1),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? surf : card,
+        fillColor: isDark ? surf : panel,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: stroke),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: stroke),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: accent, width: 1.5),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: accent, width: 2),
         ),
-        hintStyle: TextStyle(color: fgSub, fontSize: 14),
-        labelStyle: TextStyle(color: fgSub, fontSize: 14),
+        hintStyle: TextStyle(color: fgSub, fontSize: 15),
+        labelStyle: TextStyle(color: fgSub, fontSize: 15),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: ctaBg,
           foregroundColor: ctaFg,
-          disabledBackgroundColor: ctaBg.withValues(alpha: 0.55),
-          disabledForegroundColor: ctaFg.withValues(alpha: 0.75),
-          minimumSize: const Size.fromHeight(48),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: isDark ? 0 : 2,
-          shadowColor: isDark ? Colors.transparent : ctaBg.withValues(alpha: 0.3),
+          disabledBackgroundColor: ctaBg.withValues(alpha: 0.45),
+          disabledForegroundColor: ctaFg.withValues(alpha: 0.6),
+          minimumSize: const Size.fromHeight(52),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(isDark ? 12 : 16)),
+          elevation: 0,
+          shadowColor: Colors.transparent,
           textStyle: const TextStyle(
-              fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+              fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 0.2),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: fg,
-          minimumSize: const Size.fromHeight(44),
-          side: BorderSide(color: isDark ? stroke : const Color(0xFF8E9BAA), width: 1.2),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          foregroundColor: isDark ? fg : accent,
+          minimumSize: const Size.fromHeight(48),
+          side: BorderSide(
+              color: isDark ? stroke : accent.withValues(alpha: 0.5),
+              width: 1.5),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(isDark ? 8 : 14)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
       ),
@@ -183,12 +194,12 @@ class AppTheme {
             const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: surf, // Use semi-transparent surf for glass effect
+        backgroundColor: isDark ? surf : panel,
         selectedColor: accentBg,
-        side: BorderSide(color: stroke),
+        side: BorderSide(color: stroke, width: 1),
         labelStyle:
-            TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w600),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w700),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
       switchTheme: SwitchThemeData(

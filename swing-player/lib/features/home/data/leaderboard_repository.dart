@@ -9,7 +9,7 @@ class LeaderboardRepository extends BaseRepository {
   final _client = ApiClient.instance.dio;
 
   /// GET /player/leaderboard
-  Stream<List<LeaderboardEntry>> loadLeaderboardStream({
+  Stream<LeaderboardData> loadLeaderboardStream({
     int page = 1,
     int limit = 20,
   }) async* {
@@ -20,23 +20,23 @@ class LeaderboardRepository extends BaseRepository {
 
     final cached = getCached(cacheKey);
     if (cached != null) {
-      yield _parseEntries(cached);
+      yield _parseLeaderboardData(cached);
     }
 
     try {
       final response = await _client.get(
         ApiEndpoints.playerLeaderboard,
         queryParameters: {'page': page, 'limit': limit},
+        options: Options(extra: {'refresh': true}),
       );
-      // Cache is handled by CacheInterceptor, but we yield the fresh data.
-      yield _parseEntries(response.data);
+      yield _parseLeaderboardData(response.data);
     } catch (e) {
       if (cached == null) rethrow;
     }
   }
 
   /// GET /player/leaderboard (for legacy Future compatibility)
-  Future<List<LeaderboardEntry>> loadLeaderboard({
+  Future<LeaderboardData> loadLeaderboard({
     int page = 1,
     int limit = 20,
   }) async {
@@ -44,7 +44,7 @@ class LeaderboardRepository extends BaseRepository {
       ApiEndpoints.playerLeaderboard,
       queryParameters: {'page': page, 'limit': limit},
     );
-    return _parseEntries(response.data);
+    return _parseLeaderboardData(response.data);
   }
 
   /// GET /player/recommendations
@@ -91,6 +91,20 @@ class LeaderboardRepository extends BaseRepository {
 
   // ── Parsing helpers ────────────────────────────────────────────────────────
 
+  LeaderboardData _parseLeaderboardData(dynamic data) {
+    final entries = _parseEntries(data);
+    LeaderboardEntry? me;
+
+    if (data is Map<String, dynamic>) {
+      final meRaw = data['me'];
+      if (meRaw is Map<String, dynamic>) {
+        me = _mapEntry(meRaw);
+      }
+    }
+
+    return LeaderboardData(entries: entries, me: me);
+  }
+
   List<LeaderboardEntry> _parseEntries(dynamic data) {
     final items = _unwrapList(data);
     return items.map(_mapEntry).toList();
@@ -103,8 +117,16 @@ class LeaderboardRepository extends BaseRepository {
       avatarUrl: _nullIfEmpty(_string(raw['avatarUrl'])),
       impactPoints: _int(raw['impactPoints']),
       rank: _string(raw['rank']),
+      position: _intOrNull(raw['position'] ?? raw['rankNumber'] ?? raw['pos']),
       profileUrl: _nullIfEmpty(_string(raw['profileUrl'])),
     );
+  }
+
+  int? _intOrNull(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
   }
 
   List<Map<String, dynamic>> _unwrapList(dynamic data) {

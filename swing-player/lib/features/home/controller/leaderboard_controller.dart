@@ -8,7 +8,7 @@ final leaderboardRepositoryProvider =
 
 /// Global leaderboard – paginated, auto-dispose
 final leaderboardProvider =
-    StreamProvider.autoDispose<List<LeaderboardEntry>>((ref) {
+    StreamProvider.autoDispose<LeaderboardData>((ref) {
   return ref.watch(leaderboardRepositoryProvider).loadLeaderboardStream();
 });
 

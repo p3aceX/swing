@@ -133,7 +133,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                 'All': rawBookings.length,
                 'Confirmed':
                     rawBookings.where((b) => b.status == 'CONFIRMED').length,
-                'Checked In':
+                'Paid':
                     rawBookings.where((b) => b.status == 'CHECKED_IN').length,
                 'Cancelled':
                     rawBookings.where((b) => b.status == 'CANCELLED').length,
@@ -162,7 +162,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                 final filtered = rawBookings.where((b) {
                   if (_selectedFilter == 'Confirmed' && b.status != 'CONFIRMED')
                     return false;
-                  if (_selectedFilter == 'Checked In' &&
+                  if (_selectedFilter == 'Paid' &&
                       b.status != 'CHECKED_IN') return false;
                   if (_selectedFilter == 'Cancelled' && b.status != 'CANCELLED')
                     return false;
@@ -230,31 +230,19 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                                 crossAxisCount: 3,
                                 crossAxisSpacing: 10,
                                 mainAxisSpacing: 10,
-                                childAspectRatio: 0.82,
+                                childAspectRatio: 0.6,
                               ),
                               itemCount: dateKeys.length,
                               itemBuilder: (context, i) {
                                 final dk = dateKeys[i];
                                 final dayBookings = groups[dk]!;
                                 final d = DateFormat('yyyy-MM-dd').parse(dk);
-                                final revenue = dayBookings.fold(
-                                    0, (s, b) => s + b.totalAmountPaise);
-                                final confirmed = dayBookings
-                                    .where((b) =>
-                                        b.status == 'CONFIRMED' ||
-                                        b.status == 'CHECKED_IN')
-                                    .length;
                                 return _DateGroupCard(
                                   date: d,
                                   today: today,
-                                  bookingCount: dayBookings.length,
-                                  confirmedCount: confirmed,
-                                  revenuePaise: revenue,
-                                  onTap: () => _showDateBookings(
-                                    context,
-                                    d,
-                                    dayBookings,
-                                  ),
+                                  bookings: dayBookings,
+                                  onTap: () => _showDateBookings(context, d, dayBookings),
+                                  onAdd: () => _showAddBookingSheet(context, d),
                                 );
                               },
                             ),
@@ -1091,11 +1079,11 @@ class _BookingCardState extends State<BookingCard> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
-                          Icon(Icons.how_to_reg_rounded,
+                          Icon(Icons.payments_rounded,
                               size: 16, color: _accent),
                           SizedBox(width: 6),
                           Text(
-                            'Check In Guest',
+                            'Record Payment',
                             style: TextStyle(
                                 color: _accent,
                                 fontSize: 13,
@@ -1172,7 +1160,7 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final filters = ['All', 'Confirmed', 'Checked In', 'Cancelled'];
+    final filters = ['All', 'Confirmed', 'Paid', 'Cancelled'];
     return SizedBox(
       height: 40,
       child: ListView.separated(
@@ -2385,134 +2373,267 @@ class _DateGroupCard extends StatelessWidget {
   const _DateGroupCard({
     required this.date,
     required this.today,
-    required this.bookingCount,
-    required this.confirmedCount,
-    required this.revenuePaise,
+    required this.bookings,
     required this.onTap,
+    required this.onAdd,
   });
 
   final DateTime date;
   final DateTime today;
-  final int bookingCount;
-  final int confirmedCount;
-  final int revenuePaise;
+  final List<ArenaReservation> bookings;
   final VoidCallback onTap;
+  final VoidCallback onAdd;
+
+  static String _fmt(int paise) {
+    final r = paise / 100;
+    if (r >= 100000) return '₹${(r / 100000).toStringAsFixed(1)}L';
+    if (r >= 1000) return '₹${(r / 1000).toStringAsFixed(1)}K';
+    return '₹${r.toStringAsFixed(0)}';
+  }
+
+  static int _timeToMins(String t) {
+    final p = t.split(':');
+    if (p.length < 2) return 0;
+    return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+  }
 
   @override
   Widget build(BuildContext context) {
     final isToday = DateUtils.isSameDay(date, today);
     final isPast = date.isBefore(DateTime(today.year, today.month, today.day));
-    final dayNum = DateFormat('d').format(date);
-    final dayName = DateFormat('EEE').format(date).toUpperCase();
-    final month = DateFormat('MMM').format(date).toUpperCase();
-    final revenue = revenuePaise ~/ 100;
 
-    final bgColor = isToday
-        ? _accent
-        : isPast
-            ? const Color(0xFFF3F4F6)
-            : _surface;
-    final borderColor = isToday
-        ? _accent
-        : isPast
-            ? _border
-            : _border;
-    final dayNumColor = isToday
-        ? Colors.white
-        : isPast
-            ? _muted
-            : _text;
-    final dayNameColor = isToday
-        ? Colors.white.withValues(alpha: 0.8)
-        : isPast
-            ? _muted
-            : _muted;
-    final monthColor = isToday
-        ? Colors.white.withValues(alpha: 0.7)
-        : isPast
-            ? _muted.withValues(alpha: 0.7)
-            : _muted;
+    // ── Derived stats ──────────────────────────────────────────────────────
+    final active = bookings.where((b) => b.status != 'CANCELLED').toList();
+    final total = active.length;
+    final confirmed = active.where((b) => b.status == 'CONFIRMED' || b.status == 'CHECKED_IN').length;
+    final paidPaise = active.where((b) => b.isPaid).fold(0, (s, b) => s + b.totalAmountPaise);
+    final duePaise = active.where((b) => !b.isPaid).fold(0, (s, b) => s + b.totalAmountPaise);
+    final fillRatio = total > 0 ? (confirmed / total).clamp(0.0, 1.0) : 0.0;
+
+    // Time-of-day heat (morning < 12, afternoon 12–17, evening ≥ 17)
+    bool hasMorning = false, hasAfternoon = false, hasEvening = false;
+    for (final b in active) {
+      final m = _timeToMins(b.startTime);
+      if (m < 720) hasMorning = true;
+      else if (m < 1020) hasAfternoon = true;
+      else hasEvening = true;
+    }
+
+    // Unit pills (distinct, max 2 visible)
+    final unitNames = active.map((b) => b.unitName ?? '').where((n) => n.isNotEmpty).toSet().toList();
+
+    // Density label
+    final String densityLabel = total == 0
+        ? 'Free'
+        : total <= 2
+            ? 'Light'
+            : total <= 4
+                ? 'Busy'
+                : 'Full';
+    final Color densityColor = isToday
+        ? Colors.white.withValues(alpha: 0.85)
+        : total == 0
+            ? const Color(0xFF9CA3AF)
+            : total <= 2
+                ? const Color(0xFF059669)
+                : total <= 4
+                    ? const Color(0xFFF59E0B)
+                    : const Color(0xFFDC2626);
+
+    // Next booking countdown (today only)
+    String? nextLabel;
+    if (isToday && active.isNotEmpty) {
+      final nowMins = DateTime.now().hour * 60 + DateTime.now().minute;
+      final upcoming = active
+          .where((b) => b.status == 'CONFIRMED' && _timeToMins(b.startTime) > nowMins)
+          .toList()
+        ..sort((a, b) => _timeToMins(a.startTime).compareTo(_timeToMins(b.startTime)));
+      if (upcoming.isNotEmpty) {
+        final diff = _timeToMins(upcoming.first.startTime) - nowMins;
+        nextLabel = diff < 60 ? 'Next in ${diff}m' : 'Next in ${diff ~/ 60}h ${diff % 60}m';
+      }
+    }
+
+    // ── Colour tokens ──────────────────────────────────────────────────────
+    final Color bg = isToday ? _accent : isPast ? const Color(0xFFF5F6F8) : _surface;
+    final Color primaryText = isToday ? Colors.white : isPast ? const Color(0xFF6B7280) : _text;
+    final Color mutedText = isToday ? Colors.white.withValues(alpha: 0.65) : const Color(0xFF9CA3AF);
+    final Color barBg = isToday ? Colors.white.withValues(alpha: 0.25) : const Color(0xFFE5E7EB);
+    final Color barFill = isToday ? Colors.white : _accent;
 
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onAdd,
       child: Container(
         decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor, width: isToday ? 0 : 1),
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          border: isToday ? null : Border.all(color: const Color(0xFFE5E7EB), width: 1),
+          boxShadow: isToday
+              ? [BoxShadow(color: _accent.withValues(alpha: 0.28), blurRadius: 14, offset: const Offset(0, 5))]
+              : null,
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          padding: const EdgeInsets.all(10),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Day name + month
+              // ── Row 1: day + month ──────────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(dayName,
-                      style: TextStyle(
-                          color: dayNameColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5)),
-                  Text(month,
-                      style: TextStyle(
-                          color: monthColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700)),
+                  Text(DateFormat('EEE').format(date).toUpperCase(),
+                      style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                  Text(DateFormat('MMM').format(date).toUpperCase(),
+                      style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w700)),
                 ],
               ),
-              // Day number (large)
+              const SizedBox(height: 1),
+
+              // ── Row 2: date number ──────────────────────────────────────
+              Text(DateFormat('d').format(date),
+                  style: TextStyle(color: primaryText, fontSize: 28, fontWeight: FontWeight.w900, height: 1.05)),
+              const SizedBox(height: 6),
+
+              // ── Row 3: confirmed fill bar ───────────────────────────────
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: SizedBox(
+                  height: 4,
+                  child: Stack(children: [
+                    Container(color: barBg),
+                    if (total > 0)
+                      FractionallySizedBox(widthFactor: fillRatio, child: Container(color: barFill)),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 6),
+
+              // ── Row 4: density label + time heat dots ───────────────────
+              Row(
+                children: [
+                  Text(densityLabel,
+                      style: TextStyle(color: densityColor, fontSize: 9, fontWeight: FontWeight.w800)),
+                  const Spacer(),
+                  // Morning / Afternoon / Evening dots
+                  _HeatDot(active: hasMorning, isToday: isToday),
+                  const SizedBox(width: 2),
+                  _HeatDot(active: hasAfternoon, isToday: isToday),
+                  const SizedBox(width: 2),
+                  _HeatDot(active: hasEvening, isToday: isToday),
+                ],
+              ),
+              const SizedBox(height: 5),
+
+              // ── Row 5: paid revenue ─────────────────────────────────────
               Text(
-                dayNum,
+                paidPaise > 0 ? _fmt(paidPaise) : (duePaise > 0 ? _fmt(duePaise) : '—'),
                 style: TextStyle(
-                    color: dayNumColor,
-                    fontSize: 32,
+                    color: paidPaise > 0 || duePaise > 0 ? primaryText : mutedText,
+                    fontSize: 13,
                     fontWeight: FontWeight.w900,
                     height: 1),
               ),
-              // Bottom: bookings count + revenue
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isToday
-                          ? Colors.white.withValues(alpha: 0.2)
-                          : _accent.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      '$bookingCount booking${bookingCount == 1 ? '' : 's'}',
-                      style: TextStyle(
-                          color: isToday ? Colors.white : _accent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  if (revenue > 0) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      '₹$revenue',
-                      style: TextStyle(
-                          color: isToday
-                              ? Colors.white.withValues(alpha: 0.85)
-                              : isPast
-                                  ? _muted
-                                  : _text,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700),
+
+              // ── Row 6: due amount ───────────────────────────────────────
+              if (duePaise > 0 && paidPaise > 0) ...[
+                const SizedBox(height: 2),
+                Text('${_fmt(duePaise)} due',
+                    style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 9, fontWeight: FontWeight.w700)),
+              ] else if (paidPaise == 0 && duePaise > 0) ...[
+                const SizedBox(height: 2),
+                Text('Unpaid', style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w600)),
+              ],
+
+              const SizedBox(height: 5),
+
+              // ── Row 7: unit pills ───────────────────────────────────────
+              if (unitNames.isNotEmpty)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 3,
+                        runSpacing: 2,
+                        children: [
+                          for (int i = 0; i < unitNames.length.clamp(0, 2); i++)
+                            _UnitPill(name: unitNames[i], isToday: isToday),
+                          if (unitNames.length > 2)
+                            _UnitPill(name: '+${unitNames.length - 2}', isToday: isToday),
+                        ],
+                      ),
                     ),
                   ],
-                ],
-              ),
+                ),
+
+              // ── Row 8: next booking (today only) ────────────────────────
+              if (nextLabel != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(Icons.schedule_rounded, size: 9, color: Colors.white),
+                    const SizedBox(width: 3),
+                    Expanded(
+                      child: Text(nextLabel,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ],
+
+              // Empty state
+              if (total == 0) ...[
+                const SizedBox(height: 4),
+                Text('Hold to add', style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w600)),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _HeatDot extends StatelessWidget {
+  const _HeatDot({required this.active, required this.isToday});
+  final bool active;
+  final bool isToday;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active
+        ? (isToday ? Colors.white : _accent)
+        : (isToday ? Colors.white.withValues(alpha: 0.25) : const Color(0xFFE5E7EB));
+    return Container(
+      width: 5,
+      height: 5,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+class _UnitPill extends StatelessWidget {
+  const _UnitPill({required this.name, required this.isToday});
+  final String name;
+  final bool isToday;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: isToday ? Colors.white.withValues(alpha: 0.2) : const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        name,
+        style: TextStyle(
+            color: isToday ? Colors.white : _accent,
+            fontSize: 8,
+            fontWeight: FontWeight.w800),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -2670,6 +2791,7 @@ class _ErrorView extends StatelessWidget {
 
 // ─── Add Booking Sheet ────────────────────────────────────────────────────────
 
+// Thin adapter so existing call sites don't need changing.
 class _SlotOption {
   const _SlotOption(
       {required this.durationMins, required this.label, required this.paise});
@@ -2680,80 +2802,10 @@ class _SlotOption {
 
 List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit,
     {int? pricePerHourOverride}) {
-  final pricePerHour =
-      (pricePerHourOverride != null && pricePerHourOverride > 0)
-          ? pricePerHourOverride
-          : unit.pricePerHourPaise;
-  final minMins = unit.minSlotMins > 0 ? unit.minSlotMins : 60;
-  final increment = minMins >= 60
-      ? minMins
-      : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
-  final isGround =
-      unit.unitType == 'FULL_GROUND' || unit.unitType == 'HALF_GROUND';
-
-  // Ground: show only explicitly-priced bundles when any are configured
-  if (isGround && (pricePerHourOverride == null || pricePerHourOverride == 0)) {
-    final bundles = <_SlotOption>[];
-    if (unit.price4HrPaise != null)
-      bundles.add(_SlotOption(
-          durationMins: 240, label: '4 hrs', paise: unit.price4HrPaise!));
-    if (unit.price8HrPaise != null)
-      bundles.add(_SlotOption(
-          durationMins: 480, label: '8 hrs', paise: unit.price8HrPaise!));
-    if (unit.priceFullDayPaise != null)
-      bundles.add(_SlotOption(
-          durationMins: 720,
-          label: 'Full day',
-          paise: unit.priceFullDayPaise!));
-    if (bundles.isNotEmpty) return bundles;
-  }
-  final configuredMax = unit.maxSlotMins > minMins ? unit.maxSlotMins : 0;
-  final autoMax = (minMins * 3).clamp(240, 720);
-  final maxMins =
-      configuredMax > 0 ? configuredMax : (isGround ? 720 : autoMax);
-  final opts = <_SlotOption>[];
-  for (var m = minMins; m <= maxMins; m += increment) {
-    final int paise;
-    // Only use fixed bundle prices when no variant override is active
-    if (pricePerHourOverride == null || pricePerHourOverride == 0) {
-      if (m == 240 && unit.price4HrPaise != null) {
-        opts.add(_SlotOption(
-            durationMins: m,
-            label: _durationLabel(m),
-            paise: unit.price4HrPaise!));
-        continue;
-      }
-      if (m == 480 && unit.price8HrPaise != null) {
-        opts.add(_SlotOption(
-            durationMins: m,
-            label: _durationLabel(m),
-            paise: unit.price8HrPaise!));
-        continue;
-      }
-      if (m >= 720 && unit.priceFullDayPaise != null) {
-        opts.add(_SlotOption(
-            durationMins: m,
-            label: 'Full day',
-            paise: unit.priceFullDayPaise!));
-        continue;
-      }
-    }
-    paise = ((pricePerHour * m) / 60).round();
-    final label = (m >= 720 &&
-            unit.priceFullDayPaise != null &&
-            (pricePerHourOverride == null || pricePerHourOverride == 0))
-        ? 'Full day'
-        : _durationLabel(m);
-    opts.add(_SlotOption(durationMins: m, label: label, paise: paise));
-  }
-  return opts.isEmpty
-      ? [
-          _SlotOption(
-              durationMins: minMins,
-              label: _durationLabel(minMins),
-              paise: ((pricePerHour * minMins) / 60).round())
-        ]
-      : opts;
+  return BookingPricingEngine.durationOptions(
+    unit,
+    variantPricePaise: pricePerHourOverride,
+  ).map((o) => _SlotOption(durationMins: o.durationMins, label: o.label, paise: o.pricePaise)).toList();
 }
 
 String _fmtDate(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
@@ -2928,15 +2980,8 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   int get _variantPricePerHour {
     final unit = _unit;
-    if (unit == null || _netVariantType == null) return 0;
-    try {
-      return unit.netVariants
-              .firstWhere((v) => v.type == _netVariantType)
-              .pricePaise ??
-          0;
-    } catch (_) {
-      return 0;
-    }
+    if (unit == null) return 0;
+    return BookingPricingEngine.variantPricePerHour(unit, _netVariantType);
   }
 
   // Flat list of all variant instances expanded by count.
@@ -2944,46 +2989,27 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   List<({String type, String label, int instance, int count, int? pricePaise})>
       get _variantTabs {
     final unit = _unit;
-    if (unit == null || !unit.hasVariants) return [];
-    return [
-      for (final v in unit.netVariants)
-        for (var i = 0; i < v.count; i++)
-          (
-            type: v.type,
-            label: v.count > 1 ? '${v.label} ${i + 1}' : v.label,
-            instance: i,
-            count: v.count,
-            pricePaise: v.pricePaise
-          ),
-    ];
+    if (unit == null) return [];
+    return BookingPricingEngine.variantTabs(unit)
+        .map((t) => (
+              type: t.type,
+              label: t.label,
+              instance: t.instanceIndex,
+              count: t.count,
+              pricePaise: t.pricePaise,
+            ))
+        .toList();
   }
 
-  // A time slot is busy for this specific variant instance if the number of
-  // existing bookings of that variant type at that time > instanceIndex.
   bool _isTabSlotBusy(String time, String variantType, int instanceIndex) {
-    final tMins = _toMins(time);
-    final durMins = _currentDurationMins;
-
-    // Time block check applies to all variants
-    final blockedBy = _activeTimeBlocks.where((b) {
-      return _toMins(b.startTime) < tMins + durMins &&
-          _toMins(b.endTime) > tMins;
-    }).toList();
-    if (blockedBy.isNotEmpty) {
-      debugPrint(
-          '[booking] TAB BUSY $time+${durMins}m ($variantType): blocked by ${blockedBy.map((b) => '${b.startTime}-${b.endTime} recurring=${b.isRecurring}').toList()}');
-      return true;
-    }
-
-    int count = 0;
-    for (final b in _existingBookings) {
-      if (b.status == 'CANCELLED') continue;
-      if (_toMins(b.startTime) >= tMins + durMins ||
-          _toMins(b.endTime) <= tMins) continue;
-      // Count bookings that are for this variant type (null = legacy, blocks all)
-      if (b.netVariantType == null || b.netVariantType == variantType) count++;
-    }
-    return count > instanceIndex;
+    return BookingPricingEngine.isSlotBusy(
+      time,
+      _currentDurationMins,
+      bookings: _existingBookings,
+      timeBlocks: _activeTimeBlocks,
+      variantType: variantType,
+      variantInstanceIndex: instanceIndex,
+    );
   }
 
   int get _totalPaise {
@@ -3321,54 +3347,17 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     setState(() => _loadingAvail = true);
     try {
       final repo = ref.read(hostArenaBookingRepositoryProvider);
-      final date = _fmtDate(_selectedDate);
-
-      final relatedIds = <String>{_unitId!};
-      final parentId = _unit?.parentUnitId;
-      if (parentId != null) relatedIds.add(parentId);
-      for (final u in widget.arena.units) {
-        if (u.parentUnitId == _unitId) relatedIds.add(u.id);
-      }
-
-      debugPrint(
-          '[booking] _loadAvailability unitId=$_unitId date=$date relatedIds=$relatedIds isFullDay=$_isFullDay');
-
-      final weekday =
-          _selectedDate.weekday; // 1=Mon … 7=Sun (matches DB convention)
-
-      final bookingResults = await Future.wait(
-        relatedIds.map((id) =>
-            repo.listArenaBookings(widget.arena.id, date: date, unitId: id)),
+      final avail = await BookingAvailabilityLoader.load(
+        repo: repo,
+        arenaId: widget.arena.id,
+        unitId: _unitId!,
+        date: _selectedDate,
+        allUnits: widget.arena.units,
       );
-      final merged = bookingResults.expand((b) => b).toList();
-      debugPrint(
-          '[booking] bookings fetched=${merged.length} : ${merged.map((b) => '${b.unitId} ${b.startTime}-${b.endTime} ${b.status}').toList()}');
-
-      // Fetch time blocks for this unit and filter to ones active on this date
-      List<ArenaTimeBlock> blocks = [];
-      try {
-        final all =
-            await repo.listUnitTimeBlocks(widget.arena.id, unitId: _unitId!);
-        blocks = all.where((b) {
-          if (b.isRecurring && b.weekdays.contains(weekday)) return true;
-          if (b.isHoliday && b.date != null && b.date!.startsWith(date))
-            return true;
-          if (!b.isRecurring &&
-              !b.isHoliday &&
-              b.date != null &&
-              b.date!.startsWith(date)) return true;
-          return false;
-        }).toList();
-      } catch (e) {
-        debugPrint('[booking] _loadAvailability timeBlocks ERROR: $e');
-      }
-      debugPrint(
-          '[booking] timeBlocks fetched=${blocks.length} : ${blocks.map((b) => 'recurring=${b.isRecurring} holiday=${b.isHoliday} weekdays=${b.weekdays} date=${b.date} ${b.startTime}-${b.endTime}').toList()}');
-
       if (mounted)
         setState(() {
-          _existingBookings = merged;
-          _activeTimeBlocks = blocks;
+          _existingBookings = avail.bookings;
+          _activeTimeBlocks = avail.timeBlocks;
         });
     } catch (e) {
       debugPrint('[booking] _loadAvailability ERROR: $e');

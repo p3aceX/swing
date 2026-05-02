@@ -653,6 +653,7 @@ model PlayerProfile {
   playerGoal               PlayerGoal?
   queueEntries             MatchmakingQueue[]
   matchmakingRequests      MatchmakingRequest[]
+  matchmakingLobbies       MatchmakingLobby[]
   playerBadges             PlayerBadge[]
   playerMilestones         PlayerMilestone[]
   academyEnrollments       AcademyEnrollment[]
@@ -2174,7 +2175,8 @@ model Team {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tournamentTeams TournamentTeam[]
+  tournamentTeams    TournamentTeam[]
+  matchmakingLobbies MatchmakingLobby[]
 
   @@index([city])
   @@index([powerScore])
@@ -2360,6 +2362,8 @@ model ArenaUnit {
   timeBlocks    ArenaTimeBlock[]
   pricingRules  PricingRule[]
   monthlyPasses MonthlyPass[]
+  lobbyPicks    MatchmakingLobbyPick[]
+  matchmakingMatches MatchmakingMatch[]
 }
 
 model PricingRule {
@@ -2582,6 +2586,62 @@ model MatchmakingRequest {
 
   @@index([format, matchType, status])
   @@index([ipAtRequest, status])
+}
+
+model MatchmakingLobby {
+  id        String   @id @default(cuid())
+  teamId    String
+  playerId  String
+  format    String
+  date      DateTime @db.Date
+  status    String   @default("searching")
+  matchId   String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  team   Team                @relation(fields: [teamId], references: [id])
+  player PlayerProfile       @relation(fields: [playerId], references: [id])
+  picks  MatchmakingLobbyPick[]
+
+  @@index([status, date, format])
+  @@index([teamId, status])
+  @@index([matchId])
+}
+
+model MatchmakingLobbyPick {
+  id              String @id @default(cuid())
+  lobbyId         String
+  groundId        String
+  slotTime        String
+  preferenceOrder Int    @default(1)
+
+  lobby  MatchmakingLobby @relation(fields: [lobbyId], references: [id], onDelete: Cascade)
+  ground ArenaUnit        @relation(fields: [groundId], references: [id])
+
+  @@index([groundId, slotTime])
+  @@index([lobbyId, preferenceOrder])
+}
+
+model MatchmakingMatch {
+  id                   String   @id @default(cuid())
+  lobbyAId             String   @unique
+  lobbyBId             String   @unique
+  groundId             String
+  slotTime             String
+  date                 DateTime @db.Date
+  format               String
+  status               String   @default("pending_confirm")
+  confirmDeadline      DateTime
+  teamAConfirmed       Boolean  @default(false)
+  teamBConfirmed       Boolean  @default(false)
+  paymentAmountPerTeam Int
+  bookingId            String?
+  createdAt            DateTime @default(now())
+
+  ground ArenaUnit @relation(fields: [groundId], references: [id])
+
+  @@index([status, confirmDeadline])
+  @@index([date, format, groundId, slotTime])
 }
 
 // ============================================================

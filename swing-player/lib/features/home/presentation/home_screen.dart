@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
@@ -10,6 +11,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../chat/presentation/conversations_screen.dart';
+import '../../matchmaking/presentation/matchmaking_tab_page.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';
@@ -18,6 +20,8 @@ import '../../booking/presentation/booking_module_tab.dart';
 import '../../../app.dart';
 import '../../profile/controller/profile_controller.dart';
 import '../../profile/data/profile_repository.dart';
+import '../../profile/presentation/profile_qr_sheet.dart';
+import '../../auth/controller/auth_controller.dart';
 import '../../store/domain/store_models.dart';
 import '../../store/presentation/storefront_screen.dart';
 import 'player_home_body.dart';
@@ -33,16 +37,18 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   static const _navItems = [
-    _NavItem(icon: Icons.grid_view_rounded, label: 'Home'),
-    _NavItem(icon: Icons.sports_cricket_rounded, label: 'Play'),
-    _NavItem(icon: Icons.calendar_month_rounded, label: 'Booking'),
-    _NavItem(icon: Icons.storefront_outlined, label: 'Store'),
+    _NavItem(icon: Icons.grid_view_outlined, activeIcon: Icons.grid_view_rounded, label: 'Home'),
+    _NavItem(icon: Icons.sports_cricket_outlined, activeIcon: Icons.sports_cricket_rounded, label: 'Play'),
+    _NavItem(icon: Icons.bolt_rounded, activeIcon: Icons.bolt_rounded, label: 'Rivals'),
+    _NavItem(icon: Icons.calendar_month_outlined, activeIcon: Icons.calendar_month_rounded, label: 'Book'),
+    _NavItem(icon: Icons.storefront_outlined, activeIcon: Icons.storefront_rounded, label: 'Store'),
   ];
 
   int _currentIndex = 0;
-  String _currentCity = 'Fetching...';
+  String _currentCity = 'Location';
   double? _currentLatitude;
   double? _currentLongitude;
+  final _profileRepository = ProfileRepository();
 
   @override
   void initState() {
@@ -50,14 +56,192 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _loadCurrentCity();
   }
 
-  void _onNavTap(int index) {
-    setState(() => _currentIndex = index);
+  void _onNavTap(int index) => setState(() => _currentIndex = index);
+
+  Future<void> _openLocationSheet() async {
+    final searchCtrl = TextEditingController(
+        text: _currentCity == 'Location' ? '' : _currentCity);
+    final searchFocus = FocusNode();
+    Timer? modalDebounce;
+    List<CitySuggestion> modalSuggestions = const [];
+    bool modalSearching = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> handleQuery(String value) async {
+              modalDebounce?.cancel();
+              final query = value.trim();
+              if (query.length < 2) {
+                setSheetState(() {
+                  modalSuggestions = const [];
+                  modalSearching = false;
+                });
+                return;
+              }
+
+              setSheetState(() => modalSearching = true);
+              modalDebounce =
+                  Timer(const Duration(milliseconds: 220), () async {
+                try {
+                  final suggestions =
+                      await _profileRepository.searchCities(query);
+                  if (!mounted || searchCtrl.text.trim() != query) return;
+                  setSheetState(() {
+                    modalSuggestions = suggestions;
+                    modalSearching = false;
+                  });
+                } catch (_) {
+                  if (!mounted || searchCtrl.text.trim() != query) return;
+                  setSheetState(() {
+                    modalSuggestions = const [];
+                    modalSearching = false;
+                  });
+                }
+              });
+            }
+
+            return Container(
+              decoration: BoxDecoration(
+                color: context.bg,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(32)),
+              ),
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 12),
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: context.stroke.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Location',
+                            style: TextStyle(
+                              color: context.fg,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Find facilities in your city',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+                          Container(
+                            height: 52,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            decoration: BoxDecoration(
+                              color: context.panel.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.search_rounded,
+                                    color: context.fgSub, size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextField(
+                                    controller: searchCtrl,
+                                    focusNode: searchFocus,
+                                    autofocus: true,
+                                    onChanged: handleQuery,
+                                    cursorColor: context.accent,
+                                    style: TextStyle(
+                                      color: context.fg,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: 'Search for a city...',
+                                      hintStyle: TextStyle(
+                                        color: context.fgSub
+                                            .withValues(alpha: 0.5),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      border: InputBorder.none,
+                                      isCollapsed: true,
+                                    ),
+                                  ),
+                                ),
+                                if (modalSearching)
+                                  SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: context.accent,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.4,
+                      ),
+                      child: _BookingLocationSuggestionsList(
+                        suggestions: modalSuggestions,
+                        onSelected: (suggestion) {
+                          setState(() {
+                            _currentCity = suggestion.label;
+                            // Clear coordinates when city is manually picked
+                            _currentLatitude = null;
+                            _currentLongitude = null;
+                          });
+                          Navigator.of(sheetContext).pop();
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    modalDebounce?.cancel();
+    searchCtrl.dispose();
+    searchFocus.dispose();
   }
 
   Future<void> _loadCurrentCity() async {
     try {
       final enabled = await Geolocator.isLocationServiceEnabled();
       if (!enabled) {
+        if (mounted && _currentCity == 'Location') {
+          setState(() => _currentCity = 'Mumbai');
+        }
         return;
       }
       var permission = await Geolocator.checkPermission();
@@ -66,27 +250,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
+        if (mounted && _currentCity == 'Location') {
+          setState(() => _currentCity = 'Mumbai');
+        }
         return;
       }
       Position? position;
       try {
         position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.medium,
-            timeLimit: const Duration(seconds: 12));
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 15));
       } catch (_) {
         position = await Geolocator.getLastKnownPosition();
       }
-      if (position == null) return;
+      if (position == null) {
+        if (mounted && _currentCity == 'Location') {
+          setState(() => _currentCity = 'Mumbai');
+        }
+        return;
+      }
       final placemarks =
           await placemarkFromCoordinates(position.latitude, position.longitude);
       final place = placemarks.isEmpty ? null : placemarks.first;
+
+      // Extract city intelligently from various fields
+      final detectedCity =
+          place?.locality ?? place?.subAdministrativeArea ?? place?.name;
+
       if (!mounted) return;
       setState(() {
-        _currentCity = place?.locality ?? 'Unknown';
+        _currentCity = detectedCity ?? 'Mumbai';
         _currentLatitude = position!.latitude;
         _currentLongitude = position.longitude;
       });
-    } catch (_) {}
+    } catch (_) {
+      if (mounted && _currentCity == 'Location') {
+        setState(() => _currentCity = 'Mumbai');
+      }
+    }
   }
 
   void _openSupport() {
@@ -118,18 +319,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       backgroundColor: context.bg,
+      drawer: const _SideNavigation(),
       appBar: _currentIndex == 0
           ? PreferredSize(
               preferredSize: const Size.fromHeight(76),
-              child: _SexyHeader(
-                avatarUrl: avatarUrl,
-                userName: profileData?.identity.fullName,
-                onSearchTap: _openSearchOverlay,
-                onProfileTap: () => context.push('/profile'),
-                onChatTap: () => context.push('/chat'),
-                onNotificationTap: () => context.push('/notifications'),
-                onSupportTap: _openSupport,
-              ),
+              child: Builder(builder: (context) {
+                return _SexyHeader(
+                  avatarUrl: avatarUrl,
+                  userName: profileData?.identity.fullName,
+                  onSearchTap: _openSearchOverlay,
+                  onProfileTap: () => Scaffold.of(context).openDrawer(),
+                  onChatTap: () => context.push('/chat'),
+                  onNotificationTap: () => context.push('/notifications'),
+                  onLeaderboardTap: () => context.push('/leaderboard'),
+                );
+              }),
             )
           : null,
       body: _HomeBody(
@@ -137,6 +341,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         currentCity: _currentCity,
         currentLatitude: _currentLatitude,
         currentLongitude: _currentLongitude,
+        onLocationTap: _openLocationSheet,
+        onSwitchToMatch: () => setState(() => _currentIndex = 2),
       ),
       bottomNavigationBar: _PremiumBottomNav(
         currentIndex: _currentIndex,
@@ -157,7 +363,7 @@ class _SexyHeader extends ConsumerWidget {
     required this.onProfileTap,
     required this.onChatTap,
     required this.onNotificationTap,
-    required this.onSupportTap,
+    required this.onLeaderboardTap,
   });
 
   final String? avatarUrl;
@@ -166,14 +372,12 @@ class _SexyHeader extends ConsumerWidget {
   final VoidCallback onProfileTap;
   final VoidCallback onChatTap;
   final VoidCallback onNotificationTap;
-  final VoidCallback onSupportTap;
+  final VoidCallback onLeaderboardTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final unreadChat = ref.watch(chatUnreadCountProvider).valueOrNull ?? 0;
     final unreadNotif = ref.watch(notificationSummaryProvider).valueOrNull ?? 0;
-    final themeMode = ref.watch(themeModeProvider);
-    final isDark = themeMode == ThemeMode.dark;
 
     return Container(
       color: context.surf,
@@ -188,20 +392,15 @@ class _SexyHeader extends ConsumerWidget {
                 _GradientAvatar(url: avatarUrl, onTap: onProfileTap),
                 const Spacer(),
                 _SoftIconButton(
-                  icon: isDark
-                      ? Icons.wb_sunny_outlined
-                      : Icons.dark_mode_outlined,
-                  onTap: () {
-                    ref.read(themeModeProvider.notifier).state =
-                        isDark ? ThemeMode.light : ThemeMode.dark;
-                  },
-                  tooltip: isDark ? 'Light mode' : 'Dark mode',
-                ),
-                const SizedBox(width: 10),
-                _SoftIconButton(
                   icon: Icons.search_rounded,
                   onTap: onSearchTap,
                   tooltip: 'Search',
+                ),
+                const SizedBox(width: 10),
+                _SoftIconButton(
+                  icon: Icons.emoji_events_outlined,
+                  onTap: onLeaderboardTap,
+                  tooltip: 'Leaderboard',
                 ),
                 const SizedBox(width: 10),
                 _SoftIconButton(
@@ -216,12 +415,6 @@ class _SexyHeader extends ConsumerWidget {
                   onTap: onChatTap,
                   tooltip: 'Messages',
                   hasDot: unreadChat > 0,
-                ),
-                const SizedBox(width: 10),
-                _SoftIconButton(
-                  icon: Icons.headset_mic_outlined,
-                  onTap: onSupportTap,
-                  tooltip: 'Support',
                 ),
               ],
             ),
@@ -1096,21 +1289,25 @@ class _PremiumBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).padding.bottom;
     return Container(
-      height: 64 + bottom,
-      padding: EdgeInsets.fromLTRB(8, 8, 8, 8 + bottom),
+      height: 60 + bottom,
+      padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + bottom),
       decoration: BoxDecoration(
         color: context.surf,
-        border: Border(top: BorderSide(color: context.stroke)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 18,
-            offset: const Offset(0, -6),
-          ),
-        ],
+        border: Border(
+            top: BorderSide(
+                color: context.stroke.withValues(alpha: 0.6), width: 0.5)),
       ),
       child: Row(
         children: List.generate(items.length, (index) {
+          if (index == 2) {
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => onTap(index),
+                behavior: HitTestBehavior.opaque,
+                child: const _CenterMatchButton(),
+              ),
+            );
+          }
           final isSelected = currentIndex == index;
           return Expanded(
             child: GestureDetector(
@@ -1125,6 +1322,36 @@ class _PremiumBottomNav extends StatelessWidget {
   }
 }
 
+class _CenterMatchButton extends StatelessWidget {
+  const _CenterMatchButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: context.ctaBg,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: context.ctaBg.withValues(alpha: 0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Icon(
+          Icons.bolt_rounded,
+          size: 24,
+          color: context.ctaFg,
+        ),
+      ),
+    );
+  }
+}
+
 class _NavButton extends StatelessWidget {
   const _NavButton({required this.isSelected, required this.item});
   final bool isSelected;
@@ -1132,32 +1359,24 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = context.ctaBg;
+    final activeColor = context.accent;
+    final inactiveColor = context.fgSub.withValues(alpha: 0.55);
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? activeColor.withValues(alpha: 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Icon(
-            item.icon,
-            size: 22,
-            color: isSelected ? activeColor : context.fgSub,
-          ),
+        Icon(
+          isSelected ? item.activeIcon : item.icon,
+          size: 24,
+          color: isSelected ? activeColor : inactiveColor,
         ),
         const SizedBox(height: 3),
         Text(
           item.label,
           style: TextStyle(
-            color: isSelected ? activeColor : context.fgSub,
+            color: isSelected ? activeColor : inactiveColor,
             fontSize: 10,
-            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-            letterSpacing: isSelected ? 0.2 : 0,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
           ),
         ),
       ],
@@ -1168,54 +1387,63 @@ class _NavButton extends StatelessWidget {
 // ── Body Switcher ─────────────────────────────────────────────────────────────
 
 class _HomeBody extends StatelessWidget {
-  const _HomeBody(
-      {required this.currentIndex,
-      required this.currentCity,
-      this.currentLatitude,
-      this.currentLongitude});
+  const _HomeBody({
+    required this.currentIndex,
+    required this.currentCity,
+    required this.onSwitchToMatch,
+    this.onLocationTap,
+    this.currentLatitude,
+    this.currentLongitude,
+  });
   final int currentIndex;
   final String currentCity;
+  final VoidCallback onSwitchToMatch;
+  final VoidCallback? onLocationTap;
   final double? currentLatitude;
   final double? currentLongitude;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: _buildTab(currentIndex, context),
-    );
-  }
-
-  Widget _buildTab(int index, BuildContext context) {
-    // Index 0 has an appBar which handles safe area; all others need top SafeArea
-    // since the Scaffold has no appBar for those tabs.
-    Widget tab = switch (index) {
-      0 => const PlayerHomeBody(),
-      1 => PlayTab(currentCity: currentCity),
-      2 => BookingModuleTab(
-          currentCity: currentCity,
-          currentLatitude: currentLatitude,
-          currentLongitude: currentLongitude,
-        ),
-      3 => StorefrontScreen(
-          location: StorefrontLocation(
-            city: currentCity == 'Fetching...' ? null : currentCity,
-            latitude: currentLatitude,
-            longitude: currentLongitude,
+    return IndexedStack(
+      index: currentIndex,
+      children: [
+        // 0: Home — no SafeArea (appBar handles it)
+        PlayerHomeBody(onFindMatch: onSwitchToMatch),
+        // 1: Play
+        SafeArea(bottom: false, child: PlayTab(currentCity: currentCity)),
+        // 2: Match — persistent lobby, no SafeArea (page handles it)
+        const MatchmakingTabPage(),
+        // 3: Book
+        SafeArea(
+          bottom: false,
+          child: BookingModuleTab(
+            currentCity: currentCity,
+            currentLatitude: currentLatitude,
+            currentLongitude: currentLongitude,
+            onLocationTap: onLocationTap,
           ),
         ),
-      _ => const SizedBox.expand(),
-    };
-    if (index != 0) {
-      tab = SafeArea(bottom: false, child: tab);
-    }
-    return tab;
+        // 4: Store
+        SafeArea(
+          bottom: false,
+          child: StorefrontScreen(
+            location: StorefrontLocation(
+              city: currentCity == 'Fetching...' ? null : currentCity,
+              latitude: currentLatitude,
+              longitude: currentLongitude,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
 class _NavItem {
-  const _NavItem({required this.icon, required this.label});
+  const _NavItem({required this.icon, required this.label, IconData? activeIcon})
+      : activeIcon = activeIcon ?? icon;
   final IconData icon;
+  final IconData activeIcon;
   final String label;
 }
 
@@ -1476,6 +1704,7 @@ class _BookingShellScreenState extends State<_BookingShellScreen> {
           currentLatitude: useDeviceCoordinates ? widget.currentLatitude : null,
           currentLongitude:
               useDeviceCoordinates ? widget.currentLongitude : null,
+          onLocationTap: _openLocationSheet,
         ),
       ),
     );
@@ -2097,3 +2326,318 @@ class _MinimalChip extends StatelessWidget {
     );
   }
 }
+
+class _SideNavigation extends ConsumerStatefulWidget {
+  const _SideNavigation({super.key});
+
+  @override
+  ConsumerState<_SideNavigation> createState() => _SideNavigationState();
+}
+
+class _SideNavigationState extends ConsumerState<_SideNavigation> {
+  void _openSupport(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => const _SupportSheet(),
+    );
+  }
+
+  Future<void> _logout() async {
+    final shouldLogout = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            backgroundColor: context.surf,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(color: context.stroke.withValues(alpha: 0.2)),
+            ),
+            title: Text(
+              'Logout',
+              style: TextStyle(
+                color: context.fg,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            content: const Text('Are you sure you want to logout?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text('Cancel', style: TextStyle(color: context.fgSub)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text('Logout',
+                    style: TextStyle(
+                        color: context.danger, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!shouldLogout) return;
+    if (!mounted) return;
+    await ref.read(authControllerProvider.notifier).signOut();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeProvider);
+    final isDark = themeMode == ThemeMode.dark;
+    final profileData = ref.watch(profileControllerProvider).data;
+
+    return Drawer(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      width: 280,
+      child: Stack(
+        children: [
+          // Minimalist Glass
+          ClipRRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: context.bg.withValues(alpha: 0.9),
+                ),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 40),
+                  // Clean Profile Header
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.pop(context);
+                            context.push('/profile');
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Row(
+                            children: [
+                              _GradientAvatar(
+                                url: profileData?.identity.avatarUrl,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  context.push('/profile');
+                                },
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      profileData?.identity.fullName ?? 'Player',
+                                      style: TextStyle(
+                                        color: context.fg,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: -0.5,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      '@${profileData?.identity.swingId ?? 'unknown'}',
+                                      style: TextStyle(
+                                        color: context.fgSub,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (profileData != null) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () {
+                            showModalBottomSheet<void>(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => ProfileQrSheet(
+                                  data: profileData, initialIndex: 0),
+                            );
+                          },
+                          icon: Icon(Icons.qr_code_2_rounded,
+                              color: context.fg, size: 24),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
+                    ],
+                  ),
+
+                  const SizedBox(height: 60),
+
+                  // Minimalist Nav
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        children: [
+                          _SideNavItem(
+                            label: 'Bookings',
+                            icon: Icons.calendar_month_outlined,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/bookings');
+                            },
+                          ),
+                          _SideNavItem(
+                            label: 'Find Friends',
+                            icon: Icons.person_add_outlined,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/recommended-connections');
+                            },
+                          ),
+                          _SideNavItem(
+                            label: 'Go Live',
+                            icon: Icons.sensors_rounded,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/host');
+                            },
+                          ),
+                          _SideNavItem(
+                            label: 'Start a match',
+                            icon: Icons.add_circle_outline_rounded,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/create-match');
+                            },
+                          ),
+                          _SideNavItem(
+                            label: 'Host tournament',
+                            icon: Icons.emoji_events_outlined,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/create-tournament');
+                            },
+                          ),
+                          _SideNavItem(
+                            label: 'My teams',
+                            icon: Icons.groups_outlined,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/create-team');
+                            },
+                          ),
+                          _SideNavItem(
+                            label: 'Subscription',
+                            icon: Icons.workspace_premium_outlined,
+                            onTap: () {
+                              Navigator.pop(context);
+                              context.push('/pro-plans');
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Bottom items
+                  _SideNavItem(
+                    label: isDark ? 'Light Mode' : 'Dark Mode',
+                    icon: isDark
+                        ? Icons.wb_sunny_outlined
+                        : Icons.dark_mode_outlined,
+                    onTap: () {
+                      ref.read(themeModeProvider.notifier).state =
+                          isDark ? ThemeMode.light : ThemeMode.dark;
+                    },
+                  ),
+                  _SideNavItem(
+                    label: 'Support',
+                    icon: Icons.headset_mic_outlined,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openSupport(context);
+                    },
+                  ),
+
+                  // Minimal Logout
+                  InkWell(
+                    onTap: _logout,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: Row(
+                        children: [
+                          Icon(Icons.power_settings_new_rounded,
+                              color: context.fgSub, size: 18),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Sign out',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SideNavItem extends StatelessWidget {
+  const _SideNavItem({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 32),
+      child: InkWell(
+        onTap: onTap,
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        child: Row(
+          children: [
+            Icon(icon, color: context.fg, size: 22),
+            const SizedBox(width: 20),
+            Text(
+              label,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+

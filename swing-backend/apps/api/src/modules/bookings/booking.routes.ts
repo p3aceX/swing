@@ -121,6 +121,13 @@ export async function bookingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.checkin(id, user.userId) })
   })
 
+  // ─── Player: busy slots for an arena — no owner check, no sensitive data ─
+  app.get('/arena/:arenaId/busy', auth, async (request, reply) => {
+    const { arenaId } = request.params as { arenaId: string }
+    const q = request.query as { date?: string }
+    return reply.send({ success: true, data: await svc.listArenaBusySlots(arenaId, q.date) })
+  })
+
   // ─── Owner: list arena bookings (optionally filtered by date) ────────────
   app.get('/arena/:arenaId', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }

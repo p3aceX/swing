@@ -14,7 +14,8 @@ import '../../profile/domain/rank_frame_resolver.dart';
 import '../../profile/domain/rank_visual_theme.dart';
 
 class PlayerHomeBody extends ConsumerStatefulWidget {
-  const PlayerHomeBody({super.key});
+  const PlayerHomeBody({super.key, this.onFindMatch});
+  final VoidCallback? onFindMatch;
 
   @override
   ConsumerState<PlayerHomeBody> createState() => _PlayerHomeBodyState();
@@ -30,20 +31,120 @@ class _PlayerHomeBodyState extends ConsumerState<PlayerHomeBody> {
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          const SliverToBoxAdapter(
-              child: RepaintBoundary(child: _QuickLinks())),
           const SliverToBoxAdapter(child: SizedBox(height: 18)),
+          SliverToBoxAdapter(child: _MatchEntry(onFindMatch: widget.onFindMatch)),
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
           const _FixturesContent(),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          const _LeaderboardContent(),
           const SliverToBoxAdapter(child: SizedBox(height: 28)),
           const SliverToBoxAdapter(
               child: RepaintBoundary(child: _MarketingCarousel())),
-          const SliverToBoxAdapter(child: SizedBox(height: 28)),
-          const SliverToBoxAdapter(
-              child: RepaintBoundary(child: _RecommendedConnections())),
           const SliverToBoxAdapter(child: SizedBox(height: 40)),
         ],
+      ),
+    );
+  }
+}
+
+// ── Match Entry ───────────────────────────────────────────────────────────────
+
+class _MatchEntry extends StatelessWidget {
+  const _MatchEntry({this.onFindMatch});
+  final VoidCallback? onFindMatch;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Find a Match',
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Get paired with a team in seconds.',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _MatchTypeButton(
+                  label: 'Team Match',
+                  icon: Icons.groups_rounded,
+                  primary: true,
+                  onTap: onFindMatch,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MatchTypeButton(
+                  label: 'Play Solo',
+                  icon: Icons.person_rounded,
+                  primary: false,
+                  onTap: onFindMatch,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MatchTypeButton extends StatelessWidget {
+  const _MatchTypeButton({
+    required this.label,
+    required this.icon,
+    required this.primary,
+    this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool primary;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = primary ? context.ctaBg : context.panel;
+    final fg = primary ? context.ctaFg : context.fg;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: fg, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -58,14 +159,14 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
       child: Text(
-        title,
+        title.toUpperCase(),
         style: TextStyle(
           color: context.fg,
-          fontSize: 20,
+          fontSize: 16,
           fontWeight: FontWeight.w900,
-          letterSpacing: -0.5,
+          letterSpacing: 0.5,
         ),
       ),
     );
@@ -376,27 +477,13 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
       ascending: true,
     );
     final upcoming = _sorted(
-      relevantMatches
-          .where((m) => m.lifecycle == MatchLifecycle.upcoming)
-          .toList(),
+      relevantMatches.where((m) => m.lifecycle == MatchLifecycle.upcoming).toList(),
       ascending: true,
     );
     final recent = _sorted(
       relevantMatches.where((m) => m.lifecycle == MatchLifecycle.past).toList(),
       ascending: false,
     ).take(3).toList();
-
-    // Smart default: live → upcoming → recent
-    var effectiveTab = _tab;
-    if (effectiveTab == _FixturesTab.live && live.isEmpty) {
-      effectiveTab =
-          upcoming.isNotEmpty ? _FixturesTab.upcoming : _FixturesTab.recent;
-    } else if (effectiveTab == _FixturesTab.upcoming && upcoming.isEmpty) {
-      effectiveTab = live.isNotEmpty ? _FixturesTab.live : _FixturesTab.recent;
-    } else if (effectiveTab == _FixturesTab.recent && recent.isEmpty) {
-      effectiveTab =
-          live.isNotEmpty ? _FixturesTab.live : _FixturesTab.upcoming;
-    }
 
     if (matchesState.isLoading && matchesState.matches.isEmpty) {
       return const SliverToBoxAdapter(child: _MatchLoadingScroll());
@@ -418,10 +505,20 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
       );
     }
 
+    // Smart default tab
+    var effectiveTab = _tab;
+    if (effectiveTab == _FixturesTab.live && live.isEmpty) {
+      effectiveTab = upcoming.isNotEmpty ? _FixturesTab.upcoming : _FixturesTab.recent;
+    } else if (effectiveTab == _FixturesTab.upcoming && upcoming.isEmpty) {
+      effectiveTab = live.isNotEmpty ? _FixturesTab.live : _FixturesTab.recent;
+    } else if (effectiveTab == _FixturesTab.recent && recent.isEmpty) {
+      effectiveTab = live.isNotEmpty ? _FixturesTab.live : _FixturesTab.upcoming;
+    }
+
     final visible = switch (effectiveTab) {
-      _FixturesTab.live => live,
+      _FixturesTab.live     => live,
       _FixturesTab.upcoming => upcoming,
-      _FixturesTab.recent => recent,
+      _FixturesTab.recent   => recent,
     };
 
     return SliverToBoxAdapter(
@@ -429,11 +526,11 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _FixturesTabBar(
+            _MatchTabPills(
               current: effectiveTab,
-              liveCount: live.length,
-              upcomingCount: upcoming.length,
-              recentCount: recent.length,
+              hasLive: live.isNotEmpty,
+              hasUpcoming: upcoming.isNotEmpty,
+              hasRecent: recent.isNotEmpty,
               onChanged: (t) => setState(() => _tab = t),
             ),
             const SizedBox(height: 12),
@@ -467,113 +564,107 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
   }
 }
 
-// ── Minimal underline tabs (LIVE / UPCOMING) ─────────────────────────────────
-
-class _FixturesTabBar extends StatelessWidget {
-  const _FixturesTabBar({
+class _MatchTabPills extends StatelessWidget {
+  const _MatchTabPills({
     required this.current,
-    required this.liveCount,
-    required this.upcomingCount,
-    required this.recentCount,
+    required this.hasLive,
+    required this.hasUpcoming,
+    required this.hasRecent,
     required this.onChanged,
   });
 
   final _FixturesTab current;
-  final int liveCount;
-  final int upcomingCount;
-  final int recentCount;
+  final bool hasLive;
+  final bool hasUpcoming;
+  final bool hasRecent;
   final ValueChanged<_FixturesTab> onChanged;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          _TabLabel(
-            label: 'Live',
-            count: liveCount,
-            selected: current == _FixturesTab.live,
-            isLive: true,
-            onTap: () => onChanged(_FixturesTab.live),
-          ),
-          const SizedBox(width: 22),
-          _TabLabel(
-            label: 'Upcoming',
-            count: upcomingCount,
-            selected: current == _FixturesTab.upcoming,
-            isLive: false,
-            onTap: () => onChanged(_FixturesTab.upcoming),
-          ),
-          const SizedBox(width: 22),
-          _TabLabel(
-            label: 'Recent',
-            count: recentCount,
-            selected: current == _FixturesTab.recent,
-            isLive: false,
-            onTap: () => onChanged(_FixturesTab.recent),
-          ),
+          if (hasLive)
+            _Pill(
+              icon: Icons.circle,
+              label: 'Live',
+              selected: current == _FixturesTab.live,
+              selectedColor: context.success,
+              onTap: () => onChanged(_FixturesTab.live),
+              isLive: true,
+            ),
+          if (hasLive && (hasUpcoming || hasRecent)) const SizedBox(width: 8),
+          if (hasUpcoming)
+            _Pill(
+              icon: Icons.schedule_rounded,
+              label: 'Next',
+              selected: current == _FixturesTab.upcoming,
+              selectedColor: context.accent,
+              onTap: () => onChanged(_FixturesTab.upcoming),
+            ),
+          if (hasUpcoming && hasRecent) const SizedBox(width: 8),
+          if (hasRecent)
+            _Pill(
+              icon: Icons.check_circle_outline_rounded,
+              label: 'Done',
+              selected: current == _FixturesTab.recent,
+              selectedColor: context.accent,
+              onTap: () => onChanged(_FixturesTab.recent),
+            ),
         ],
       ),
     );
   }
 }
 
-class _TabLabel extends StatelessWidget {
-  const _TabLabel({
+class _Pill extends StatelessWidget {
+  const _Pill({
+    required this.icon,
     required this.label,
-    required this.count,
     required this.selected,
-    required this.isLive,
+    required this.selectedColor,
     required this.onTap,
+    this.isLive = false,
   });
+
+  final IconData icon;
   final String label;
-  final int count;
   final bool selected;
-  final bool isLive;
+  final Color selectedColor;
   final VoidCallback onTap;
+  final bool isLive;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Column(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? selectedColor.withValues(alpha: 0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? selectedColor.withValues(alpha: 0.4) : context.stroke,
+            width: 1,
+          ),
+        ),
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: selected ? context.fg : context.fgSub,
-                    fontSize: 14,
-                    fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '$count',
-                  style: TextStyle(
-                    color: selected
-                        ? context.fgSub
-                        : context.fgSub.withValues(alpha: 0.6),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              height: 2,
-              width: selected ? 24 : 0,
-              color: context.fg,
+            if (isLive && selected)
+              _PulsingLiveDot(color: selectedColor)
+            else
+              Icon(icon, size: 13, color: selected ? selectedColor : context.fgSub),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? selectedColor : context.fgSub,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -594,28 +685,6 @@ class _FixturesCarousel extends StatefulWidget {
 }
 
 class _FixturesCarouselState extends State<_FixturesCarousel> {
-  final PageController _pc = PageController(viewportFraction: 0.92);
-  int _page = 0;
-
-  @override
-  void didUpdateWidget(covariant _FixturesCarousel old) {
-    super.didUpdateWidget(old);
-    if ((old.matches.length != widget.matches.length ||
-            old.tab != widget.tab) &&
-        _page != 0) {
-      _page = 0;
-      if (_pc.hasClients) {
-        _pc.jumpToPage(0);
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _pc.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     if (widget.matches.isEmpty) {
@@ -624,121 +693,35 @@ class _FixturesCarouselState extends State<_FixturesCarousel> {
         child: _EmptyFixtures(isLive: widget.tab == _FixturesTab.live),
       );
     }
-    return Column(
-      children: [
-        SizedBox(
-          height: 178,
-          child: PageView.builder(
-            controller: _pc,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemCount: widget.matches.length,
-            itemBuilder: (ctx, i) =>
-                _MatchTile(match: widget.matches[i], tab: widget.tab),
-          ),
-        ),
-        if (widget.matches.length > 1) ...[
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(widget.matches.length, (i) {
-              final active = i == _page;
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                height: 4,
-                width: active ? 18 : 4,
-                decoration: BoxDecoration(
-                  color: active
-                      ? context.fg
-                      : context.stroke.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              );
-            }),
-          ),
-        ],
-      ],
+    return SizedBox(
+      height: 210,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: 20, right: 8),
+        itemCount: widget.matches.length,
+        itemBuilder: (ctx, i) => _MatchTile(match: widget.matches[i], tab: widget.tab),
+      ),
     );
   }
 }
 
 // ── Section eyebrow (LIVE / UPCOMING) — flat hairline header ─────────────────
 
-class _SectionEyebrow extends StatelessWidget {
-  const _SectionEyebrow({
-    required this.label,
-    required this.count,
-    required this.isLive,
-  });
-  final String label;
-  final int count;
-  final bool isLive;
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
-      child: Row(
-        children: [
-          if (isLive) ...[
-            _PulsingLiveDot(color: context.success),
-            const SizedBox(width: 8),
-          ],
-          Text(
-            label,
-            style: TextStyle(
-              color: context.fgSub,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.6,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '$count',
-            style: TextStyle(
-              color: context.fgSub,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Flat FIFA-style match tile, edge-to-edge ─────────────────────────────────
+// ── Match card ────────────────────────────────────────────────────────────────
 
 class _MatchTile extends ConsumerWidget {
   const _MatchTile({required this.match, required this.tab});
   final PlayerMatch match;
   final _FixturesTab tab;
 
-  String _short(String? short, String full) =>
-      (short != null && short.isNotEmpty) ? short : full;
+  String _short(String? s, String full) => (s != null && s.isNotEmpty) ? s : full;
 
   String _scheduleLine() {
     final d = match.scheduledAt;
     if (d == null) return '';
-    final months = [
-      'JAN',
-      'FEB',
-      'MAR',
-      'APR',
-      'MAY',
-      'JUN',
-      'JUL',
-      'AUG',
-      'SEP',
-      'OCT',
-      'NOV',
-      'DEC'
-    ];
-    final dateLabel = '${months[d.month - 1]} ${d.day}';
-    final timeLabel =
-        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-    return '$dateLabel · $timeLabel';
+    const mo = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    return '${mo[d.month - 1]} ${d.day}  ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
   }
 
   String _countdown(DateTime? date) {
@@ -755,204 +738,139 @@ class _MatchTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isLive = match.lifecycle == MatchLifecycle.live;
-    final centerAsync =
-        isLive ? ref.watch(matchCenterProvider(match.id)) : null;
+    final centerAsync = isLive ? ref.watch(matchCenterProvider(match.id)) : null;
     final center = centerAsync?.valueOrNull;
+    final isDark = context.isDark;
 
-    final isPast = tab == _FixturesTab.recent;
     final formatText = match.formatLabel ?? 'T20';
     final compText = match.competitionLabel?.trim().isNotEmpty == true
         ? match.competitionLabel!
         : (match.title.trim().isNotEmpty ? match.title : 'Match');
 
-    // Subtitle line: format · venue · date  (no LIVE/COUNTDOWN here — tab carries that)
-    final subParts = <String>[
-      formatText,
-      if (match.venueLabel != null) match.venueLabel!,
-      if (_scheduleLine().isNotEmpty) _scheduleLine(),
-    ];
-    final subText = subParts.join(' · ');
+    final teamA = _short(match.playerTeamShortName, match.playerTeamName);
+    final teamB = _short(match.opponentTeamShortName, match.opponentTeamName);
+    final scoreA = isLive && center != null ? _resolveTeamA(center) : '';
+    final scoreB = isLive && center != null ? _resolveTeamB(center) : '';
 
-    final showScore = isLive;
-    final scoreSummary = match.scoreSummary;
-    final playerScore = isLive && center != null ? _resolveTeamA(center) : '';
-    final oppScore = isLive && center != null ? _resolveTeamB(center) : '';
-
-    // Status / toss line — backend supplies "Won toss, chose to bat" etc. via statusLabel.
-    // Strip noisy duplicates of "Live" / "Match in progress" since we already show the LIVE chip.
     final raw = match.statusLabel.trim();
     final lower = raw.toLowerCase();
-    final isJustLive = lower == 'live' ||
-        lower == 'match in progress' ||
-        lower == 'in progress' ||
-        lower == 'in_progress';
+    final isJustLive = lower == 'live' || lower == 'match in progress' || lower == 'in progress' || lower == 'in_progress';
     final statusLine = (raw.isNotEmpty && !isJustLive) ? raw : '';
-    final recentResultLine =
-        isPast ? _cleanResultLine(scoreSummary ?? statusLine) : '';
+    final isPast = tab == _FixturesTab.recent;
+    final bottomLine = isPast
+        ? _cleanResultLine(match.scoreSummary ?? statusLine)
+        : (statusLine.isNotEmpty ? statusLine : _scheduleLine());
 
-    // Richer multi-stop gradients per tab — dark variants flip to deep tints
-    final gradColors = context.isDark
-        ? switch (tab) {
-            _FixturesTab.live => const [
-                Color(0xFF2D170E),
-                Color(0xFF4A2417),
-                Color(0xFF6B331F),
-              ],
-            _FixturesTab.upcoming => const [
-                Color(0xFF0E1530),
-                Color(0xFF1B2754),
-                Color(0xFF293A7A),
-              ],
-            _FixturesTab.recent => const [
-                Color(0xFF1A1230),
-                Color(0xFF2D1F58),
-                Color(0xFF44307D),
-              ],
-          }
-        : switch (tab) {
-            _FixturesTab.live => const [
-                Color(0xFFFFE8D6),
-                Color(0xFFFFD1B5),
-                Color(0xFFFFB89C),
-              ],
-            _FixturesTab.upcoming => const [
-                Color(0xFFE8EFFF),
-                Color(0xFFD4DEFF),
-                Color(0xFFC0CDFF),
-              ],
-            _FixturesTab.recent => const [
-                Color(0xFFEFEAFD),
-                Color(0xFFDED1FA),
-                Color(0xFFC8B6F4),
-              ],
-          };
+    // Soft gradient from card bg → rank accent tinted — matches theme automatically
+    final accent = context.accent;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: InkWell(
+    // Foreground colors on card
+    final fg = context.fg;
+    final fgSub = context.fgSub;
+
+    return Container(
+      width: 290,
+      margin: const EdgeInsets.only(right: 16),
+      child: GestureDetector(
         onTap: () => context.push('/match/${Uri.encodeComponent(match.id)}'),
         child: Container(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: gradColors,
-              stops: const [0.0, 0.55, 1.0],
-            ),
+            color: isDark ? const Color(0xFF0A0A0A) : Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              if (!isDark)
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+            ],
           ),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.all(20),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Title + (countdown for upcoming, result tag for recent) ─
+              // ── Header: Simple & Clean ──────────────────────────
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
+                  if (tab == _FixturesTab.live)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: context.success.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _PulsingLiveDot(color: context.success),
+                          const SizedBox(width: 6),
+                          Text('LIVE',
+                              style: TextStyle(
+                                  color: context.success,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.0)),
+                        ],
+                      ),
+                    )
+                  else
+                    Text(
                       compText.toUpperCase(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: context.fg,
-                        fontSize: 13,
+                        color: accent,
+                        fontSize: 10,
                         fontWeight: FontWeight.w900,
-                        letterSpacing: 0.3,
-                        height: 1.1,
+                        letterSpacing: 1.0,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (tab == _FixturesTab.live)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _PulsingLiveDot(color: const Color(0xFFE3492B)),
-                        const SizedBox(width: 5),
-                        const Text(
-                          'LIVE',
-                          style: TextStyle(
-                            color: Color(0xFFE3492B),
+                  const Spacer(),
+                  if (tab == _FixturesTab.upcoming)
+                    Text(_countdown(match.scheduledAt),
+                        style: TextStyle(
+                            color: fgSub.withValues(alpha: 0.5),
                             fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.4,
-                          ),
-                        ),
-                      ],
-                    )
-                  else if (tab == _FixturesTab.upcoming)
-                    Text(
-                      _countdown(match.scheduledAt),
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.1,
-                      ),
-                    )
-                  else if (tab == _FixturesTab.recent &&
-                      match.result != MatchResult.unknown)
+                            fontWeight: FontWeight.w800))
+                  else if (tab == _FixturesTab.recent)
                     _ResultChip(result: match.result),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(
-                subText.toUpperCase(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: context.fgSub,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                ),
-              ),
 
-              // ── Team A row ─────────────────────────────────────────────
-              _TeamScoreRow(
+              const Spacer(),
+
+              // ── Teams: Focused ─────────────────────────────────────────────────
+              _CardTeamRow(
                 logoUrl: match.playerTeamLogoUrl,
-                shortName:
-                    _short(match.playerTeamShortName, match.playerTeamName),
-                score: playerScore,
-                showScore: showScore,
-              ),
-              const SizedBox(height: 6),
-              _TeamScoreRow(
-                logoUrl: match.opponentTeamLogoUrl,
-                shortName:
-                    _short(match.opponentTeamShortName, match.opponentTeamName),
-                score: oppScore,
-                showScore: showScore,
+                name: teamA,
+                score: scoreA,
+                showScore: isLive,
+                fg: fg,
+                fgSub: fgSub,
               ),
 
-              // ── Status / toss line ─────────────────────────────────────
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      recentResultLine.isNotEmpty
-                          ? recentResultLine
-                          : (statusLine.isNotEmpty
-                              ? statusLine
-                              : (tab == _FixturesTab.upcoming
-                                  ? 'Toss yet to be decided'
-                                  : '')),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: context.fg.withValues(alpha: 0.85),
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        height: 1.2,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 18, color: context.fgSub.withValues(alpha: 0.7)),
-                ],
+              const SizedBox(height: 12),
+
+              _CardTeamRow(
+                logoUrl: match.opponentTeamLogoUrl,
+                name: teamB,
+                score: scoreB,
+                showScore: isLive,
+                fg: fg,
+                fgSub: fgSub,
               ),
+
+              const Spacer(),
+
+              // ── Footer: Minimalist ──────────────────────────────────────────
+              if (bottomLine.isNotEmpty)
+                Text(
+                  bottomLine.toUpperCase(),
+                  style: TextStyle(
+                      color: fgSub.withValues(alpha: 0.4),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5),
+                ),
             ],
           ),
         ),
@@ -963,35 +881,77 @@ class _MatchTile extends ConsumerWidget {
   String _cleanResultLine(String raw) {
     final text = raw.trim();
     if (text.isEmpty) return '';
-    final lower = text.toLowerCase();
-    const duplicate = ' won the match won the match';
-    final duplicateIndex = lower.indexOf(duplicate);
-    if (duplicateIndex != -1) {
-      return '${text.substring(0, duplicateIndex)} won the match'.trim();
-    }
-    return text;
+    const dup = ' won the match won the match';
+    final i = text.toLowerCase().indexOf(dup);
+    return i != -1 ? '${text.substring(0, i)} won the match'.trim() : text;
   }
 
   String _resolveTeamA(MatchCenter c) {
-    final playerName = match.playerTeamName.toLowerCase().trim();
-    final teamAName = c.teamAName.toLowerCase().trim();
-    if (playerName == teamAName ||
-        (match.playerTeamShortName ?? '').toLowerCase().trim() ==
-            (c.teamAShortName ?? '').toLowerCase().trim()) {
+    final pName = match.playerTeamName.toLowerCase().trim();
+    if (pName == c.teamAName.toLowerCase().trim() ||
+        (match.playerTeamShortName ?? '').toLowerCase().trim() == (c.teamAShortName ?? '').toLowerCase().trim()) {
       return c.teamAScore.isEmpty ? '-' : c.teamAScore;
     }
     return c.teamBScore.isEmpty ? '-' : c.teamBScore;
   }
 
   String _resolveTeamB(MatchCenter c) {
-    final playerName = match.playerTeamName.toLowerCase().trim();
-    final teamAName = c.teamAName.toLowerCase().trim();
-    if (playerName == teamAName ||
-        (match.playerTeamShortName ?? '').toLowerCase().trim() ==
-            (c.teamAShortName ?? '').toLowerCase().trim()) {
+    final pName = match.playerTeamName.toLowerCase().trim();
+    if (pName == c.teamAName.toLowerCase().trim() ||
+        (match.playerTeamShortName ?? '').toLowerCase().trim() == (c.teamAShortName ?? '').toLowerCase().trim()) {
       return c.teamBScore.isEmpty ? '-' : c.teamBScore;
     }
     return c.teamAScore.isEmpty ? '-' : c.teamAScore;
+  }
+}
+
+class _CardTeamRow extends StatelessWidget {
+  const _CardTeamRow({
+    required this.logoUrl,
+    required this.name,
+    required this.score,
+    required this.showScore,
+    required this.fg,
+    required this.fgSub,
+  });
+  final String? logoUrl;
+  final String name;
+  final String score;
+  final bool showScore;
+  final Color fg;
+  final Color fgSub;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _TeamLogo(url: logoUrl, name: name, size: 48),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            name.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: fg,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+        if (showScore && score.isNotEmpty)
+          Text(
+            score,
+            style: TextStyle(
+              color: fg,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+            ),
+          ),
+      ],
+    );
   }
 }
 
@@ -1091,7 +1051,7 @@ class _MatchTeam extends StatelessWidget {
       crossAxisAlignment:
           alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
-        _TeamLogo(url: logoUrl, name: shortName, size: 44),
+        _TeamLogo(url: logoUrl, name: shortName, size: 72),
         const SizedBox(height: 8),
         SizedBox(
           width: 90,
@@ -1144,7 +1104,8 @@ class _LeaderboardContentState extends ConsumerState<_LeaderboardContent> {
           ),
         ),
       ),
-      data: (entries) {
+      data: (data) {
+        final entries = data.entries;
         if (entries.isEmpty) {
           return SliverToBoxAdapter(
             child: Padding(
@@ -1725,44 +1686,25 @@ class _TeamLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (url != null && url!.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: CachedNetworkImage(
-          imageUrl: url!,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          memCacheWidth: (size * 3).toInt(),
-          memCacheHeight: (size * 3).toInt(),
-          placeholder: (context, url) => Container(
-            width: size,
-            height: size,
-            color: context.panel,
-          ),
-          errorWidget: (_, __, ___) => _fallback(context),
-        ),
-      );
-    }
-    return _fallback(context);
+    final hasLogo = url != null && url!.isNotEmpty;
+
+    return CircleAvatar(
+      radius: size / 2,
+      backgroundColor: context.panel.withValues(alpha: 0.1),
+      backgroundImage: hasLogo ? CachedNetworkImageProvider(url!) : null,
+      child: !hasLogo ? _fallback(context) : null,
+    );
   }
 
   Widget _fallback(BuildContext context) {
     final ch = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: context.accent.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
+    return Text(
+      ch,
+      style: TextStyle(
+        color: context.accent.withValues(alpha: 0.5),
+        fontSize: size * 0.45,
+        fontWeight: FontWeight.w900,
       ),
-      alignment: Alignment.center,
-      child: Text(ch,
-          style: TextStyle(
-            color: context.accent,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          )),
     );
   }
 }
@@ -1911,7 +1853,7 @@ class _MatchCard extends ConsumerWidget {
                             _TeamLogo(
                               url: match.playerTeamLogoUrl,
                               name: match.playerTeamName,
-                              size: 48,
+                              size: 84,
                             ),
                             const SizedBox(height: 10),
                             Text(
@@ -1984,7 +1926,7 @@ class _MatchCard extends ConsumerWidget {
                             _TeamLogo(
                               url: match.opponentTeamLogoUrl,
                               name: match.opponentTeamName,
-                              size: 48,
+                              size: 84,
                             ),
                             const SizedBox(height: 10),
                             Text(
@@ -2930,3 +2872,4 @@ class _QuickLinkCell extends StatelessWidget {
     );
   }
 }
+

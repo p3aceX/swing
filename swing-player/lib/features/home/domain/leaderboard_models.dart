@@ -7,6 +7,7 @@ class LeaderboardEntry {
     this.avatarUrl,
     required this.impactPoints,
     required this.rank,
+    this.position,
     this.profileUrl,
   });
 
@@ -15,6 +16,7 @@ class LeaderboardEntry {
   final String? avatarUrl;
   final int impactPoints;
   final String rank; // e.g. "ASCENDANT"
+  final int? position;
   final String? profileUrl;
 
   /// Humanised rank label with subdivision (e.g. "ROOKIE_I" → "Rookie I",
@@ -33,3 +35,14 @@ class LeaderboardEntry {
   /// Just the base rank name (e.g. "ROOKIE_I" → "rookie")
   String get rankBase => rank.trim().split(RegExp(r'[_\- ]'))[0].toLowerCase();
 }
+
+class LeaderboardData {
+  const LeaderboardData({
+    required this.entries,
+    this.me,
+  });
+
+  final List<LeaderboardEntry> entries;
+  final LeaderboardEntry? me;
+}
+

@@ -9,86 +9,95 @@ class RankVisualTheme {
     required this.border,
   });
 
-  final Color primary;
-  final Color secondary;
-  final Color deep;
-  final Color glow;
-  final Color border;
+  final Color primary;   // lighter — used in dark mode & on dark surfaces
+  final Color secondary; // vivid/deep — used in light mode CTAs & tints
+  final Color deep;      // near-black tinted for rank deep backgrounds
+  final Color glow;      // very light — glow / highlight
+  final Color border;    // mid-tone border
 }
 
 RankVisualTheme resolveRankVisualTheme(String? rank) {
   switch ((rank ?? '').trim().toLowerCase()) {
     case 'rookie':
+      // Badge: silver-grey metallic
       return const RankVisualTheme(
-        primary: Color(0xFFD8DDE3),
-        secondary: Color(0xFF98A1AB),
-        deep: Color(0xFF050608),
-        glow: Color(0xFFF2F4F7),
-        border: Color(0xFFBBC3CC),
+        primary:   Color(0xFFC2C8CF),
+        secondary: Color(0xFF747A82),
+        deep:      Color(0xFF0D0D0F),
+        glow:      Color(0xFFE3E7EB),
+        border:    Color(0xFFAEB6BF),
       );
     case 'striker':
+      // Badge: vivid green
       return const RankVisualTheme(
-        primary: Color(0xFF76E39E),
-        secondary: Color(0xFF2FA860),
-        deep: Color(0xFF0C1712),
-        glow: Color(0xFF9FF0BC),
-        border: Color(0xFF63D488),
+        primary:   Color(0xFF5DCE88),
+        secondary: Color(0xFF248049),
+        deep:      Color(0xFF04150A),
+        glow:      Color(0xFFB0F3C8),
+        border:    Color(0xFF48BD76),
       );
     case 'vanguard':
+      // Badge: electric blue
       return const RankVisualTheme(
-        primary: Color(0xFF6EA6FF),
-        secondary: Color(0xFF2F63D4),
-        deep: Color(0xFF0C1422),
-        glow: Color(0xFF99BEFF),
-        border: Color(0xFF5A8FF2),
-      );
-    case 'phantom':
-      return const RankVisualTheme(
-        primary: Color(0xFFB06BFF),
-        secondary: Color(0xFF7A3CDE),
-        deep: Color(0xFF160E25),
-        glow: Color(0xFFC79BFF),
-        border: Color(0xFF9A5BEE),
+        primary:   Color(0xFF588FF0),
+        secondary: Color(0xFF244BA1),
+        deep:      Color(0xFF060E22),
+        glow:      Color(0xFFABCAFF),
+        border:    Color(0xFF457AE3),
       );
     case 'dominion':
+      // Badge: orange-amber
       return const RankVisualTheme(
-        primary: Color(0xFFF0B25A),
-        secondary: Color(0xFFC97924),
-        deep: Color(0xFF1D140C),
-        glow: Color(0xFFFFD090),
-        border: Color(0xFFE39A49),
+        primary:   Color(0xFFE29E47),
+        secondary: Color(0xFF995C1B),
+        deep:      Color(0xFF1A0E06),
+        glow:      Color(0xFFFFD8A4),
+        border:    Color(0xFFD78D37),
       );
     case 'ascendant':
+      // Badge: bright cyan
       return const RankVisualTheme(
-        primary: Color(0xFF86F0FF),
-        secondary: Color(0xFF39C7DA),
-        deep: Color(0xFF0B1A20),
-        glow: Color(0xFFB6F7FF),
-        border: Color(0xFF67E0F0),
+        primary:   Color(0xFF6BE2F2),
+        secondary: Color(0xFF2B97A6),
+        deep:      Color(0xFF061518),
+        glow:      Color(0xFFC3F8FF),
+        border:    Color(0xFF54D5E7),
       );
     case 'immortal':
+      // Badge: hot pink / magenta
       return const RankVisualTheme(
-        primary: Color(0xFFF05DBD),
-        secondary: Color(0xFFB8338C),
-        deep: Color(0xFF1E0D19),
-        glow: Color(0xFFFF92D7),
-        border: Color(0xFFE14DAE),
+        primary:   Color(0xFFDC4EAC),
+        secondary: Color(0xFF8C276A),
+        deep:      Color(0xFF180810),
+        glow:      Color(0xFFFFA6DE),
+        border:    Color(0xFFCC429D),
+      );
+    case 'phantom':
+      // Badge: deep violet-purple
+      return const RankVisualTheme(
+        primary:   Color(0xFF9D5BF3),
+        secondary: Color(0xFF5D2EA9),
+        deep:      Color(0xFF0D0618),
+        glow:      Color(0xFFD1ADFF),
+        border:    Color(0xFF8D4CEA),
       );
     case 'apex':
+      // Badge: rich gold
       return const RankVisualTheme(
-        primary: Color(0xFFF3E1A2),
-        secondary: Color(0xFFB88C2C),
-        deep: Color(0xFF17140C),
-        glow: Color(0xFFFFF1C7),
-        border: Color(0xFFD6B45B),
+        primary:   Color(0xFFDEC379),
+        secondary: Color(0xFF8C6A21),
+        deep:      Color(0xFF18140A),
+        glow:      Color(0xFFFFF4D1),
+        border:    Color(0xFFCDAA55),
       );
     default:
+      // Unranked — neutral indigo, no badge clash
       return const RankVisualTheme(
-        primary: Color(0xFFD8DDE3),
-        secondary: Color(0xFF98A1AB),
-        deep: Color(0xFF050608),
-        glow: Color(0xFFF2F4F7),
-        border: Color(0xFFBBC3CC),
+        primary:   Color(0xFF818CF8),
+        secondary: Color(0xFF4338CA),
+        deep:      Color(0xFF08081A),
+        glow:      Color(0xFFC7D2FE),
+        border:    Color(0xFF6366F1),
       );
   }
 }

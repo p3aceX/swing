@@ -11,12 +11,14 @@ class BookingModuleTab extends StatefulWidget {
     this.currentLatitude,
     this.currentLongitude,
     this.initialTabIndex = 0,
+    this.onLocationTap,
   });
 
   final String currentCity;
   final double? currentLatitude;
   final double? currentLongitude;
   final int initialTabIndex;
+  final VoidCallback? onLocationTap;
 
   @override
   State<BookingModuleTab> createState() => _BookingModuleTabState();
@@ -42,35 +44,42 @@ class _BookingModuleTabState extends State<BookingModuleTab> {
                     isScrollable: true,
                     tabAlignment: TabAlignment.start,
                     indicatorColor: context.accent,
-                    indicatorWeight: 3,
+                    indicatorWeight: 4,
                     indicatorSize: TabBarIndicatorSize.label,
                     dividerColor: Colors.transparent,
                     labelColor: context.fg,
-                    unselectedLabelColor: context.fgSub,
-                    labelPadding: const EdgeInsets.only(right: 24),
+                    unselectedLabelColor: context.fgSub.withValues(alpha: 0.5),
+                    labelPadding: const EdgeInsets.only(right: 32),
                     labelStyle: const TextStyle(
-                      fontSize: 20,
+                      fontSize: 15,
                       fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
+                      letterSpacing: 0.2,
                     ),
                     unselectedLabelStyle: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.5,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
                     ),
                     tabs: const [
-                      Tab(text: 'Facilities'),
-                      Tab(text: 'Coaching'),
+                      Tab(text: 'FACILITIES'),
+                      Tab(text: 'COACHING'),
                     ],
                   ),
                 ),
-                _LocationChip(city: widget.currentCity),
-                const SizedBox(width: 8),
+                _LocationChip(
+                  city: widget.currentCity,
+                  onTap: widget.onLocationTap,
+                ),
+                const SizedBox(width: 4),
                 IconButton(
                   onPressed: () => context.push('/bookings'),
                   icon: Icon(Icons.confirmation_number_outlined,
-                      color: context.fg),
+                      color: context.fg, size: 22),
                   tooltip: 'My Bookings',
+                  style: IconButton.styleFrom(
+                    backgroundColor: context.panel.withValues(alpha: 0.3),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
               ],
             ),
@@ -227,42 +236,48 @@ class _CoachingBookingPlaceholder extends StatelessWidget {
 }
 
 class _LocationChip extends StatelessWidget {
-  const _LocationChip({required this.city});
+  const _LocationChip({required this.city, this.onTap});
   final String city;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final label = (city.isEmpty ||
-            city == 'Fetching...' ||
-            city == 'Fetching location...')
-        ? '...'
+    final label = (city.isEmpty || city.toLowerCase().contains('fetching'))
+        ? 'LOCATION'
         : city.split(',').first.trim();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: context.panel.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: context.stroke.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.location_on_rounded, size: 12, color: context.accent),
-          const SizedBox(width: 4),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 100),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: context.fg,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: context.panel.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.stroke.withValues(alpha: 0.1)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.near_me_rounded, size: 12, color: context.accent),
+            const SizedBox(width: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 90),
+              child: Text(
+                label.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Icon(Icons.search_rounded,
+                size: 14, color: context.fgSub.withValues(alpha: 0.5)),
+          ],
+        ),
       ),
     );
   }
@@ -278,17 +293,18 @@ class _CoachingBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: context.panel.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: context.stroke.withValues(alpha: 0.3)),
+        color: context.accent.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.accent.withValues(alpha: 0.1)),
       ),
       child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: context.fg,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.2,
-            ),
+        label.toUpperCase(),
+        style: TextStyle(
+          color: context.fg,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }

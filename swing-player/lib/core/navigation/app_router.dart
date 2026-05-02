@@ -60,6 +60,7 @@ import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/chat/presentation/conversations_screen.dart';
 import '../../features/chat/presentation/chat_screen.dart';
 import '../../features/chat/domain/chat_models.dart';
+import '../../features/matchmaking/presentation/matchmaking_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authNotifier = ref.watch(authControllerProvider.notifier);
@@ -471,6 +472,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ),
           );
         },
+      ),
+      GoRoute(
+        path: '/matchmaking',
+        builder: (_, __) => const MatchmakingPage(),
       ),
       GoRoute(
         path: '/chat',

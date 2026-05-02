@@ -23,6 +23,7 @@ import { arenaRoutes } from './modules/arenas/arena.routes'
 import { bookingRoutes } from './modules/bookings/booking.routes'
 import { matchmakingRoutes } from './modules/matchmaking/matchmaking.routes'
 import { matchmakingQueueRoutes } from './modules/matchmaking/matchmaking-queue.routes'
+import { MatchmakingService } from './modules/matchmaking/matchmaking.service'
 import { gigRoutes } from './modules/gigs/gig.routes'
 import { paymentRoutes } from './modules/payments/payment.routes'
 import { adminRoutes } from './modules/admin/admin.routes'
@@ -210,6 +211,7 @@ export async function buildApp() {
 
   // Start 90-day season reset scheduler (checks once per day)
   startSeasonScheduler()
+  MatchmakingService.startLobbySchedulers()
 
   return app
 }

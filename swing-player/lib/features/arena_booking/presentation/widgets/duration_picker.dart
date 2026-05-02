@@ -1,33 +1,70 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_host_core/flutter_host_core.dart' show ArenaUnitOption;
 
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/arena_slots_models.dart';
+
+/// Neutral constraint model — create from either [ArenaUnitOption] or
+/// [UnitGroupSlots] so both old and new code can use the same picker.
+class DurationConstraints {
+  const DurationConstraints({
+    required this.minSlotMins,
+    required this.maxSlotMins,
+    required this.pricePerHourPaise,
+    this.price4HrPaise,
+    this.price8HrPaise,
+  });
+
+  factory DurationConstraints.fromUnit(ArenaUnitOption u) => DurationConstraints(
+        minSlotMins: u.minSlotMins,
+        maxSlotMins: u.maxSlotMins,
+        pricePerHourPaise: u.pricePerHourPaise,
+        price4HrPaise: u.price4HrPaise,
+        price8HrPaise: u.price8HrPaise,
+      );
+
+  factory DurationConstraints.fromGroup(UnitGroupSlots g) => DurationConstraints(
+        minSlotMins: g.minSlotMins,
+        maxSlotMins: g.maxSlotMins,
+        pricePerHourPaise: g.pricePerHourPaise,
+        price4HrPaise: g.price4HrPaise,
+        price8HrPaise: g.price8HrPaise,
+      );
+
+  final int minSlotMins;
+  final int maxSlotMins;
+  final int pricePerHourPaise;
+  final int? price4HrPaise;
+  final int? price8HrPaise;
+}
 
 class DurationPicker extends StatelessWidget {
   const DurationPicker({
     super.key,
     required this.selectedMins,
-    required this.groups,
+    required this.constraints,
     required this.onChanged,
   });
 
   final int selectedMins;
-  final List<UnitGroupSlots> groups;
+  final List<DurationConstraints> constraints;
   final ValueChanged<int> onChanged;
 
   static const _durations = [60, 120, 240, 480];
 
   List<int> get _validDurations {
-    if (groups.isEmpty) return _durations;
-    return _durations.where((mins) => groups.every(
-          (g) => mins >= g.minSlotMins && mins <= g.maxSlotMins,
-        )).toList();
+    if (constraints.isEmpty) return _durations;
+    return _durations.where((mins) => constraints.every((c) {
+      final min = c.minSlotMins > 0 ? c.minSlotMins : 60;
+      final withinMin = mins >= min;
+      final withinMax = c.maxSlotMins <= 0 || mins <= c.maxSlotMins;
+      return withinMin && withinMax;
+    })).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final valid = _validDurations;
-    // Single valid duration — nothing to pick, hide the widget
     if (valid.length <= 1) return const SizedBox.shrink();
     return SizedBox(
       height: 46,
@@ -43,7 +80,6 @@ class DurationPicker extends StatelessWidget {
           return _DurationChip(
             mins: mins,
             selected: selected,
-            disabled: false,
             saving: saving,
             onTap: () => onChanged(mins),
           );
@@ -56,11 +92,10 @@ class DurationPicker extends StatelessWidget {
     if (mins != 240 && mins != 480) return null;
     final hours = mins ~/ 60;
     int best = 0;
-    for (final group in groups) {
-      final packagePrice =
-          mins == 240 ? group.price4HrPaise : group.price8HrPaise;
+    for (final c in constraints) {
+      final packagePrice = mins == 240 ? c.price4HrPaise : c.price8HrPaise;
       if (packagePrice == null || packagePrice <= 0) continue;
-      final regular = group.pricePerHourPaise * hours;
+      final regular = c.pricePerHourPaise * hours;
       if (regular <= 0 || packagePrice >= regular) continue;
       final saving = (((regular - packagePrice) / regular) * 100).round();
       if (saving > best) best = saving;
@@ -73,24 +108,18 @@ class _DurationChip extends StatelessWidget {
   const _DurationChip({
     required this.mins,
     required this.selected,
-    required this.disabled,
     required this.saving,
     required this.onTap,
   });
 
   final int mins;
   final bool selected;
-  final bool disabled;
   final int? saving;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final textColor = disabled
-        ? context.fgSub.withValues(alpha: 0.35)
-        : selected
-            ? Colors.white
-            : context.fg;
+    final textColor = selected ? Colors.white : context.fg;
 
     return GestureDetector(
       onTap: onTap,
@@ -98,11 +127,7 @@ class _DurationChip extends StatelessWidget {
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
         decoration: BoxDecoration(
-          color: disabled
-              ? context.panel.withValues(alpha: 0.2)
-              : selected
-                  ? context.accent
-                  : context.panel.withValues(alpha: 0.45),
+          color: selected ? context.accent : context.panel.withValues(alpha: 0.45),
           borderRadius: BorderRadius.circular(23),
         ),
         child: Row(
@@ -115,8 +140,6 @@ class _DurationChip extends StatelessWidget {
                 color: textColor,
                 fontSize: 13,
                 fontWeight: FontWeight.w900,
-                decoration: disabled ? TextDecoration.lineThrough : null,
-                decorationColor: textColor,
               ),
             ),
             if (saving != null) ...[

@@ -933,6 +933,17 @@ export class BookingService {
     })
   }
 
+  // ─── Player: busy slots for an arena (no sensitive data) ────────────────
+  async listArenaBusySlots(arenaId: string, date?: string) {
+    const where: any = { arenaId, status: { notIn: ['HELD', 'CANCELLED'] } }
+    if (date) where.date = this.startOfDay(date)
+    const rows = await prisma.slotBooking.findMany({
+      where,
+      select: { unitId: true, startTime: true, endTime: true, netVariantType: true, status: true },
+    })
+    return rows
+  }
+
   // ─── Owner: list payments / collections for the arena ────────────────────
 
   async listArenaPayments(userId: string, arenaId: string, opts: {

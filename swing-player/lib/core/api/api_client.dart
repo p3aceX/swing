@@ -33,6 +33,30 @@ class ApiClient {
           handler.next(options);
         },
         onError: (error, handler) async {
+          // One-time host failover on DNS/connection errors.
+          final failoverTried =
+              error.requestOptions.extra['_hostFailoverTried'] == true;
+          if (error.type == DioExceptionType.connectionError &&
+              !failoverTried) {
+            final current = _dio.options.baseUrl;
+            final currentIdx = _baseUrlFailoverOrder.indexOf(current);
+            final nextIdx =
+                currentIdx >= 0 ? (currentIdx + 1) % _baseUrlFailoverOrder.length : 0;
+            final nextBaseUrl = _baseUrlFailoverOrder[nextIdx];
+            if (nextBaseUrl != current) {
+              _dio.options.baseUrl = nextBaseUrl;
+              final opts = error.requestOptions;
+              opts.baseUrl = nextBaseUrl;
+              opts.extra['_hostFailoverTried'] = true;
+              try {
+                final response = await _dio.fetch(opts);
+                return handler.resolve(response);
+              } catch (e) {
+                return handler.next(e is DioException ? e : error);
+              }
+            }
+          }
+
           // Retry on 429 (too many requests) or 503 with exponential backoff
           final status = error.response?.statusCode;
           if (status == 429 || status == 503) {
@@ -79,10 +103,13 @@ class ApiClient {
 
   static final ApiClient instance = ApiClient._();
   static const String canonicalBaseUrl =
-      'https://swing-backend-1007730655118.asia-south1.run.app';
+      'https://swing-backend-nbid5gga4q-el.a.run.app';
+  static const List<String> _baseUrlFailoverOrder = [
+    'https://swing-backend-nbid5gga4q-el.a.run.app',
+    'https://swing-backend-1007730655118.asia-south1.run.app',
+  ];
   static const Set<String> _deprecatedHosts = {
     'https://swing-backend-nbid5gga4q-de.a.run.app',
-    'https://swing-backend-nbid5gga4q-el.a.run.app',
   };
 
   late final Dio _dio;
