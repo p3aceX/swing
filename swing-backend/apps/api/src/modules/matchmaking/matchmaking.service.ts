@@ -127,7 +127,7 @@ export class MatchmakingService {
       const open = (unit.openTime || unit.arena.openTime || '06:00')
       const close = (unit.closeTime || unit.arena.closeTime || '22:00')
       const step = unit.minSlotMins > 0 ? unit.minSlotMins : 60
-      const starts = this.generateStartSlots(open, close, step, duration)
+      const starts = this.generateStartSlots(open, close, step, duration, this.isToday(input.date))
 
       const busy = bookingsByUnit.get(unit.id) ?? []
       const slots: Array<{ time: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
@@ -992,11 +992,11 @@ export class MatchmakingService {
   }
 
   private formatDurationMins(format: MatchmakingFormat) {
-    if (format === 'T10') return 90
-    if (format === 'T20') return 180
-    if (format === 'ODI') return 480   // ~8h for 50-over match
-    if (format === 'Test') return 360  // 6h per day session
-    return 240                          // Custom: 4h default
+    if (format === 'T10') return 240    // 4h block
+    if (format === 'T20') return 240    // 4h block
+    if (format === 'ODI') return 480    // 8h block (50-over day)
+    if (format === 'Test') return 480   // 8h block (full day session)
+    return 240                          // Custom: 4h block
   }
 
   private startOfDay(dateStr: string) {
@@ -1030,12 +1030,35 @@ export class MatchmakingService {
       this.timeToMinutes(aEnd) > this.timeToMinutes(bStart)
   }
 
-  private generateStartSlots(openTime: string, closeTime: string, stepMins: number, durationMins: number) {
+  private generateStartSlots(
+    openTime: string,
+    closeTime: string,
+    stepMins: number,
+    durationMins: number,
+    filterPastSlotsForToday = false,
+  ) {
     const out: string[] = []
     const open = this.timeToMinutes(openTime)
     const close = this.timeToMinutes(closeTime)
-    for (let t = open; t + durationMins <= close; t += stepMins) out.push(this.minutesToTime(t))
+
+    // Current time in IST (UTC+5:30), with a 60-min booking buffer
+    const IST_OFFSET = 5.5 * 60
+    const nowUtcMins = new Date().getUTCHours() * 60 + new Date().getUTCMinutes()
+    const nowIstMins = (nowUtcMins + IST_OFFSET) % (24 * 60)
+    const cutoffMins = filterPastSlotsForToday ? nowIstMins + 60 : -1
+
+    for (let t = open; t + durationMins <= close; t += stepMins) {
+      if (filterPastSlotsForToday && t < cutoffMins) continue
+      out.push(this.minutesToTime(t))
+    }
     return out
+  }
+
+  private isToday(dateStr: string) {
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+    const istNow = new Date(Date.now() + IST_OFFSET_MS)
+    const todayIst = istNow.toISOString().slice(0, 10)
+    return dateStr === todayIst
   }
 
   private arenaArea(address: string, city: string | null) {
