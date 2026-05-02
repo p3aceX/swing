@@ -56,12 +56,12 @@ export class MatchmakingService {
     const duration = this.formatDurationMins(input.format)
     const query = (input.q ?? '').trim()
 
-    const NET_UNIT_TYPES = ['CRICKET_NET', 'INDOOR_NET', 'BOWLING_MACHINE', 'PRACTICE_NET']
+    const GROUND_UNIT_TYPES = ['FULL_GROUND', 'HALF_GROUND', 'TURF', 'MULTI_SPORT', 'OTHER']
 
     const units = await prisma.arenaUnit.findMany({
       where: {
         isActive: true,
-        unitType: { notIn: NET_UNIT_TYPES },
+        unitType: { in: GROUND_UNIT_TYPES },
         arena: {
           isActive: true,
           ...(query
