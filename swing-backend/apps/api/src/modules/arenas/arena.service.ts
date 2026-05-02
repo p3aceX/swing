@@ -970,18 +970,20 @@ export class ArenaService {
   }
 
   async getBookingContext(arenaId: string, date: string, durationMins: number, includeAvailability = false) {
-    const [arenaDetail, slots] = await Promise.all([
-      this.getArena(arenaId),
+    const [playerSlots, availability] = await Promise.all([
       this.getPlayerSlots(arenaId, date, durationMins),
+      includeAvailability ? this.getAvailability(arenaId, date) : Promise.resolve(null),
     ])
 
     const payload: any = {
-      arena: arenaDetail,
-      slots,
+      arena: playerSlots.arena,
+      unitGroups: playerSlots.unitGroups,
+      date,
+      durationMins,
     }
 
-    if (includeAvailability) {
-      payload.availability = await this.getAvailability(arenaId, date)
+    if (availability !== null) {
+      payload.availability = availability
     }
 
     return payload
@@ -994,10 +996,17 @@ export class ArenaService {
       description: arena.description,
       address: arena.address,
       city: arena.city,
+      state: arena.state,
+      pincode: arena.pincode,
+      latitude: arena.latitude,
+      longitude: arena.longitude,
       photoUrls: arena.photoUrls,
       phone: arena.phone,
+      sports: arena.sports,
       openTime: arena.openTime,
       closeTime: arena.closeTime,
+      operatingDays: arena.operatingDays,
+      bufferMins: arena.bufferMins ?? 30,
       hasParking: arena.hasParking,
       hasLights: arena.hasLights,
       hasWashrooms: arena.hasWashrooms,
