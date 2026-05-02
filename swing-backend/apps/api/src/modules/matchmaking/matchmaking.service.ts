@@ -51,7 +51,9 @@ export class MatchmakingService {
     format: MatchmakingFormat
     teamId?: string
   }) {
-    const callerTeam = await this.resolveCallerTeam(userId, input.teamId)
+    const [callerTeam] = await Promise.all([
+      this.resolveCallerTeam(userId, input.teamId),
+    ])
     const date = this.startOfDay(input.date)
     const duration = this.formatDurationMins(input.format)
     const query = (input.q ?? '').trim()
@@ -77,26 +79,44 @@ export class MatchmakingService {
             : {}),
         },
       },
-      include: {
-        arena: true,
-      },
+      include: { arena: true },
       orderBy: [{ arena: { name: 'asc' } }, { name: 'asc' }],
     })
 
     const unitIds = units.map((u) => u.id)
-    const bookings = unitIds.length
-      ? await prisma.slotBooking.findMany({
-          where: {
-            unitId: { in: unitIds },
-            date,
-            status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
-          },
-          select: { unitId: true, startTime: true, endTime: true },
-        })
-      : []
+
+    // Fetch bookings and opponent lobby picks in parallel — single round-trip each
+    const [bookingsRaw, opponentPicks] = await Promise.all([
+      unitIds.length
+        ? prisma.slotBooking.findMany({
+            where: {
+              unitId: { in: unitIds },
+              date,
+              status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+            },
+            select: { unitId: true, startTime: true, endTime: true },
+          })
+        : Promise.resolve([]),
+      unitIds.length
+        ? prisma.matchmakingLobbyPick.findMany({
+            where: {
+              groundId: { in: unitIds },
+              lobby: {
+                date,
+                format: input.format,
+                status: 'searching',
+                expiresAt: { gt: new Date() },
+                ...(callerTeam ? { teamId: { not: callerTeam.id } } : {}),
+              },
+            },
+            select: { groundId: true, slotTime: true },
+          })
+        : Promise.resolve([]),
+    ])
+    const opponentSet = new Set(opponentPicks.map((p) => `${p.groundId}:${p.slotTime}`))
 
     const bookingsByUnit = new Map<string, Array<{ startTime: string; endTime: string }>>()
-    for (const b of bookings) {
+    for (const b of bookingsRaw) {
       const arr = bookingsByUnit.get(b.unitId) ?? []
       arr.push({ startTime: b.startTime, endTime: b.endTime })
       bookingsByUnit.set(b.unitId, arr)
@@ -115,19 +135,12 @@ export class MatchmakingService {
         const end = this.minutesToTime(this.timeToMinutes(time) + duration)
         const blocked = busy.some((b) => this.isOverlap(time, end, b.startTime, b.endTime))
         if (blocked) continue
-        const hasOpponent = await this.hasOpponentLobby({
-          groundId: unit.id,
-          slotTime: time,
-          date,
-          format: input.format,
-          callerTeamId: callerTeam?.id,
-        })
         const total = Math.round((unit.pricePerHourPaise * duration) / 60)
         slots.push({
           time,
           unitId: unit.id,
           pricePerTeam: Math.floor(total / 2),
-          hasOpponent,
+          hasOpponent: opponentSet.has(`${unit.id}:${time}`),
         })
       }
 
