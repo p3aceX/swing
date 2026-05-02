@@ -1,30 +1,29 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:swing_club/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Theme toggle test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(const SwingClubApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that we start in light mode (check for dark_mode icon)
+    expect(find.byIcon(Icons.dark_mode), findsOneWidget);
+    expect(find.text('Switch to Dark Theme'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Tap the theme toggle button in the body
+    await tester.tap(find.text('Switch to Dark Theme'));
+    await tester.pumpAndSettle();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify that we switched to dark mode (check for light_mode icon)
+    expect(find.byIcon(Icons.light_mode), findsOneWidget);
+    expect(find.text('Switch to Light Theme'), findsOneWidget);
+    
+    // Tap the theme toggle icon in the AppBar
+    await tester.tap(find.byIcon(Icons.light_mode));
+    await tester.pumpAndSettle();
+    
+    // Verify we are back to light mode
+    expect(find.byIcon(Icons.dark_mode), findsOneWidget);
   });
 }
