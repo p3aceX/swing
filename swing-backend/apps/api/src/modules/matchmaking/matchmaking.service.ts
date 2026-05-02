@@ -133,10 +133,11 @@ export class MatchmakingService {
 
       if (slots.length === 0) continue
       grounds.push({
-        id: unit.arenaId,          // arena-level ID for grouping
-        unitId: unit.id,           // actual unit for booking picks
-        name: unit.arena.name,     // always show arena name
+        id: unit.arenaId,
+        unitId: unit.id,
+        name: unit.arena.name,
         area: this.arenaArea(unit.arena.address, unit.arena.city),
+        photoUrl: (unit.arena.photoUrls ?? [])[0] ?? null,
         slots,
       })
     }
@@ -1025,8 +1026,9 @@ export class MatchmakingService {
   }
 
   private arenaArea(address: string, city: string | null) {
-    const first = (address || '').split(',').map((s) => s.trim()).find(Boolean)
-    return first || city || 'Unknown'
+    const parts = (address || '').split(',').map((s) => s.trim()).filter(Boolean)
+    const meaningful = parts.find((p) => !/^\d+$/.test(p))
+    return meaningful || city || 'Unknown'
   }
 
   private async hasOpponentLobby(input: {
