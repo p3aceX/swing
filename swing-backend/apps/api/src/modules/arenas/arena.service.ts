@@ -927,10 +927,16 @@ export class ArenaService {
       const isUnitOperatingDay = unitOpDays?.length > 0 ? unitOpDays.includes(weekday) : isOperatingDay
       if (!isUnitOperatingDay) continue
 
-      // Enforce min/max slot duration — show unit as fully booked for unsupported durations
+      // Duration is valid if >= minSlotMins, is a multiple of minSlotMins,
+      // and fits within the unit's operating window — no maxSlotMins cap needed
+      const unitOpenStr: string = (unit as any).openTime || arena.openTime || '06:00'
+      const unitCloseStr: string = (unit as any).closeTime || arena.closeTime || '22:00'
+      const windowMins = this.timeToMinutes(unitCloseStr) - this.timeToMinutes(unitOpenStr)
+      const minSlot = unit.minSlotMins || 30
       const durationValid =
-        durationMins >= (unit.minSlotMins || 30) &&
-        durationMins <= (unit.maxSlotMins || 480)
+        durationMins >= minSlot &&
+        durationMins % minSlot === 0 &&
+        durationMins <= windowMins
 
       // Single-capacity unit: step by durationMins so slots are sequential and non-overlapping
       const possibleStarts = durationValid ? getPossibleStarts(unit, durationMins) : []

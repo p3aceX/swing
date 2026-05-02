@@ -206,8 +206,10 @@ class BookingPricingEngine {
     final closeStr = unit.closeTime ?? arenaCloseTime;
     final openMins = _toMins(openStr);
     final closeMins = _toMins(closeStr);
-    final increment =
-        unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60;
+    // Ground units are single-capacity: step by durationMins so slots are non-overlapping
+    final increment = unit.isGround
+        ? durationMins
+        : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
     final isToday = _isSameDay(date, DateTime.now());
     final nowMins = DateTime.now().hour * 60 + DateTime.now().minute;
 
