@@ -5,6 +5,10 @@ import Razorpay from 'razorpay'
 const MATCHMAKING_EXPIRY_HOURS = 24
 const MAX_ACTIVE_REQUESTS = 3
 const DEFAULT_MATCH_COST_PER_PLAYER_PAISE = 45000
+const LOBBY_EXPIRY_HOURS = 24
+const MATCH_CONFIRM_MINUTES = 15
+
+export type MatchmakingFormat = 'T10' | 'T20' | '30-over'
 
 let _razorpay: Razorpay | null = null
 function getRazorpay() {
@@ -18,6 +22,424 @@ function getRazorpay() {
 }
 
 export class MatchmakingService {
+  static startLobbySchedulers() {
+    const runLobbyExpiry = async () => {
+      try {
+        const svc = new MatchmakingService()
+        await svc.expireStaleLobbies()
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[matchmaking] lobby expiry error:', error)
+      }
+    }
+    const runMatchExpiry = async () => {
+      try {
+        const svc = new MatchmakingService()
+        await svc.expireUnconfirmedMatches()
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[matchmaking] match expiry error:', error)
+      }
+    }
+    setInterval(runMatchExpiry, 60 * 1000).unref?.()
+    setInterval(runLobbyExpiry, 5 * 60 * 1000).unref?.()
+  }
+
+  async searchGrounds(userId: string, input: {
+    q?: string
+    date: string
+    format: MatchmakingFormat
+    teamId?: string
+  }) {
+    const callerTeam = await this.resolveCallerTeam(userId, input.teamId)
+    const date = this.startOfDay(input.date)
+    const duration = this.formatDurationMins(input.format)
+    const query = (input.q ?? '').trim()
+
+    const NET_UNIT_TYPES = ['CRICKET_NET', 'INDOOR_NET', 'BOWLING_MACHINE', 'PRACTICE_NET']
+
+    const units = await prisma.arenaUnit.findMany({
+      where: {
+        isActive: true,
+        unitType: { notIn: NET_UNIT_TYPES },
+        arena: {
+          isActive: true,
+          ...(query
+            ? {
+                OR: [
+                  { name: { contains: query, mode: 'insensitive' } },
+                  { arenaSlug: { contains: query, mode: 'insensitive' } },
+                  { city: { contains: query, mode: 'insensitive' } },
+                  { address: { contains: query, mode: 'insensitive' } },
+                ],
+              }
+            : {}),
+        },
+      },
+      include: {
+        arena: true,
+      },
+      orderBy: [{ arena: { name: 'asc' } }, { name: 'asc' }],
+    })
+
+    const unitIds = units.map((u) => u.id)
+    const bookings = unitIds.length
+      ? await prisma.slotBooking.findMany({
+          where: {
+            unitId: { in: unitIds },
+            date,
+            status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+          },
+          select: { unitId: true, startTime: true, endTime: true },
+        })
+      : []
+
+    const bookingsByUnit = new Map<string, Array<{ startTime: string; endTime: string }>>()
+    for (const b of bookings) {
+      const arr = bookingsByUnit.get(b.unitId) ?? []
+      arr.push({ startTime: b.startTime, endTime: b.endTime })
+      bookingsByUnit.set(b.unitId, arr)
+    }
+
+    const grounds = [] as any[]
+    for (const unit of units) {
+      const open = (unit.openTime || unit.arena.openTime || '06:00')
+      const close = (unit.closeTime || unit.arena.closeTime || '22:00')
+      const step = unit.minSlotMins > 0 ? unit.minSlotMins : 60
+      const starts = this.generateStartSlots(open, close, step, duration)
+
+      const busy = bookingsByUnit.get(unit.id) ?? []
+      const slots: Array<{ time: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
+      for (const time of starts) {
+        const end = this.minutesToTime(this.timeToMinutes(time) + duration)
+        const blocked = busy.some((b) => this.isOverlap(time, end, b.startTime, b.endTime))
+        if (blocked) continue
+        const hasOpponent = await this.hasOpponentLobby({
+          groundId: unit.id,
+          slotTime: time,
+          date,
+          format: input.format,
+          callerTeamId: callerTeam?.id,
+        })
+        const total = Math.round((unit.pricePerHourPaise * duration) / 60)
+        slots.push({
+          time,
+          unitId: unit.id,
+          pricePerTeam: Math.floor(total / 2),
+          hasOpponent,
+        })
+      }
+
+      if (slots.length === 0) continue
+      grounds.push({
+        id: unit.arenaId,          // arena-level ID for grouping
+        unitId: unit.id,           // actual unit for booking picks
+        name: unit.arena.name,     // always show arena name
+        area: this.arenaArea(unit.arena.address, unit.arena.city),
+        slots,
+      })
+    }
+
+    return { grounds }
+  }
+
+  async createLobby(userId: string, input: {
+    teamId: string
+    format: MatchmakingFormat
+    date: string
+    picks: Array<{ groundId: string; slotTime: string }>
+  }) {
+    if (input.picks.length < 1 || input.picks.length > 3) {
+      throw new AppError('INVALID_PICKS', 'picks must contain 1 to 3 items', 400)
+    }
+    const seen = new Set<string>()
+    for (const p of input.picks) {
+      const key = `${p.groundId}:${p.slotTime}`
+      if (seen.has(key)) throw new AppError('INVALID_PICKS', 'Duplicate picks are not allowed', 400)
+      seen.add(key)
+    }
+
+    const team = await this.resolveCallerTeam(userId, input.teamId)
+    if (!team || team.id !== input.teamId) throw Errors.forbidden()
+    const callerAge = await this.getTeamAgeGroup(team.id)
+    const date = this.startOfDay(input.date)
+    const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
+
+    const result = await prisma.$transaction(async (tx) => {
+      const lobby = await tx.matchmakingLobby.create({
+        data: {
+          teamId: team.id,
+          playerId: team.captainId || '',
+          format: input.format,
+          date,
+          status: 'searching',
+          expiresAt,
+          picks: {
+            create: input.picks.map((p, i) => ({
+              groundId: p.groundId,
+              slotTime: p.slotTime,
+              preferenceOrder: i + 1,
+            })),
+          },
+        },
+        include: { picks: { orderBy: { preferenceOrder: 'asc' } } },
+      })
+
+      const candidateLobbies = await tx.matchmakingLobby.findMany({
+        where: {
+          id: { not: lobby.id },
+          teamId: { not: team.id },
+          format: input.format,
+          date,
+          status: 'searching',
+          expiresAt: { gt: new Date() },
+        },
+        include: { picks: true },
+        orderBy: { createdAt: 'asc' },
+      })
+
+      let matchedLobby: any = null
+      let picked: { groundId: string; slotTime: string } | null = null
+      if (candidateLobbies.length > 0) {
+        const teamIds = candidateLobbies.map((c) => c.teamId)
+        const ages = await this.getTeamAgeGroupsMap(teamIds, tx)
+        for (const c of candidateLobbies) {
+          const age = ages.get(c.teamId) ?? null
+          if ((callerAge ?? null) !== (age ?? null)) continue
+          for (const p of input.picks) {
+            if (c.picks.some((cp: any) => cp.groundId === p.groundId && cp.slotTime === p.slotTime)) {
+              matchedLobby = c
+              picked = { groundId: p.groundId, slotTime: p.slotTime }
+              break
+            }
+          }
+          if (matchedLobby) break
+        }
+      }
+
+      if (!matchedLobby || !picked) {
+        return { lobby, match: null }
+      }
+
+      const unit = await tx.arenaUnit.findUnique({ where: { id: picked.groundId } })
+      if (!unit) throw Errors.notFound('Arena unit')
+      const perTeam = Math.floor(
+        Math.round((unit.pricePerHourPaise * this.formatDurationMins(input.format)) / 60) / 2,
+      )
+      const match = await tx.matchmakingMatch.create({
+        data: {
+          lobbyAId: lobby.id,
+          lobbyBId: matchedLobby.id,
+          groundId: picked.groundId,
+          slotTime: picked.slotTime,
+          date,
+          format: input.format,
+          status: 'pending_confirm',
+          confirmDeadline: new Date(Date.now() + MATCH_CONFIRM_MINUTES * 60 * 1000),
+          teamAConfirmed: false,
+          teamBConfirmed: false,
+          paymentAmountPerTeam: perTeam,
+        },
+      })
+      await tx.matchmakingLobby.updateMany({
+        where: { id: { in: [lobby.id, matchedLobby.id] } },
+        data: { status: 'matched', matchId: match.id },
+      })
+      return { lobby, match }
+    })
+
+    if (!result.match) {
+      return { lobbyId: result.lobby.id, status: 'searching' as const }
+    }
+    return {
+      lobbyId: result.lobby.id,
+      status: 'matched' as const,
+      match: await this.buildMatchSummary(result.match.id, result.lobby.id),
+    }
+  }
+
+  async assertLobbyOwnership(userId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.playerId !== player.id) throw Errors.forbidden()
+  }
+
+  async getLobbyStatus(userId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.playerId !== player.id) throw Errors.forbidden()
+    const out: any = { lobbyId, status: lobby.status }
+    if (lobby.matchId) out.match = await this.buildMatchSummary(lobby.matchId, lobby.id)
+    return out
+  }
+
+  async listOpenLobbies(userId: string, input: {
+    date?: string
+    format?: MatchmakingFormat
+    ageGroup?: string
+  }) {
+    const player = await this.getPlayerProfile(userId)
+    const myTeamIds = await prisma.team.findMany({
+      where: { OR: [{ captainId: player.id }, { createdByUserId: userId }] },
+      select: { id: true },
+    })
+    const mySet = new Set(myTeamIds.map((t) => t.id))
+    const date = input.date ? this.startOfDay(input.date) : this.startOfDay(new Date().toISOString().slice(0, 10))
+
+    const lobbies = await prisma.matchmakingLobby.findMany({
+      where: {
+        status: 'searching',
+        expiresAt: { gt: new Date() },
+        date,
+        ...(input.format ? { format: input.format } : {}),
+        ...(mySet.size > 0 ? { teamId: { notIn: Array.from(mySet) } } : {}),
+      },
+      include: {
+        team: true,
+        picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const teamIds = lobbies.map((l) => l.teamId)
+    const ages = await this.getTeamAgeGroupsMap(teamIds)
+    const callerAge = input.ageGroup ?? this.deriveAgeGroup(player.dateOfBirth)
+    const groundIds = lobbies.flatMap((l) => l.picks.map((p) => p.groundId))
+    const units = groundIds.length
+      ? await prisma.arenaUnit.findMany({
+          where: { id: { in: groundIds } },
+          include: { arena: true },
+        })
+      : []
+    const unitsById = new Map(units.map((u) => [u.id, u]))
+
+    const out = lobbies
+      .filter((l) => (callerAge ?? null) === ((ages.get(l.teamId) ?? null)))
+      .map((l) => {
+        const pick = l.picks[0]
+        const unit = pick ? unitsById.get(pick.groundId) : null
+        return {
+          lobbyId: l.id,
+          teamName: l.team.name,
+          ageGroup: ages.get(l.teamId) ?? null,
+          format: l.format,
+          groundName: unit?.name ?? null,
+          slotTime: pick?.slotTime ?? null,
+          date: this.toDateOnly(l.date),
+          daysFromNow: this.daysFromNow(l.date),
+        }
+      })
+    return { lobbies: out }
+  }
+
+  async confirmMatchLobby(userId: string, matchId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const result = await prisma.$transaction(async (tx) => {
+      const lobby = await tx.matchmakingLobby.findUnique({ where: { id: lobbyId } })
+      if (!lobby) throw Errors.notFound('Lobby')
+      if (lobby.playerId !== player.id) throw Errors.forbidden()
+      if (lobby.matchId !== matchId) throw new AppError('INVALID_MATCH', 'Lobby is not part of this match', 400)
+
+      const match = await tx.matchmakingMatch.findUnique({ where: { id: matchId } })
+      if (!match) throw Errors.notFound('Match')
+      if (match.status !== 'pending_confirm') throw new AppError('INVALID_STATE', 'Match is not pending confirmation', 400)
+
+      if (new Date() > match.confirmDeadline) {
+        await tx.matchmakingMatch.update({ where: { id: match.id }, data: { status: 'cancelled' } })
+        await tx.matchmakingLobby.updateMany({
+          where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
+          data: { status: 'searching', matchId: null },
+        })
+        throw new AppError('MATCH_EXPIRED', 'Match confirmation deadline passed', 410)
+      }
+
+      const updates: any = {}
+      if (match.lobbyAId === lobby.id) updates.teamAConfirmed = true
+      if (match.lobbyBId === lobby.id) updates.teamBConfirmed = true
+      const after = await tx.matchmakingMatch.update({
+        where: { id: match.id },
+        data: updates,
+      })
+
+      if (!(after.teamAConfirmed && after.teamBConfirmed)) {
+        return { status: 'waiting_opponent' as const }
+      }
+
+      const bookingId = await this.createBookedSlotForMatch(after, tx)
+      await tx.matchmakingMatch.update({
+        where: { id: after.id },
+        data: { status: 'confirmed', bookingId },
+      })
+      await tx.matchmakingLobby.updateMany({
+        where: { id: { in: [after.lobbyAId, after.lobbyBId] } },
+        data: { status: 'confirmed' },
+      })
+
+      return { status: 'confirmed' as const, bookingId }
+    })
+    return result
+  }
+
+  async declineMatchLobby(userId: string, matchId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.playerId !== player.id) throw Errors.forbidden()
+    if (lobby.matchId !== matchId) throw new AppError('INVALID_MATCH', 'Lobby is not part of this match', 400)
+
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+    await prisma.$transaction([
+      prisma.matchmakingMatch.update({ where: { id: matchId }, data: { status: 'cancelled' } }),
+      prisma.matchmakingLobby.updateMany({
+        where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
+        data: { status: 'searching', matchId: null },
+      }),
+    ])
+    return { status: 'searching' as const, lobbyId }
+  }
+
+  async leaveLobby(userId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.playerId !== player.id) throw Errors.forbidden()
+    if (lobby.status !== 'searching') {
+      throw new AppError('INVALID_STATE', 'Only searching lobbies can be left', 400)
+    }
+    await prisma.matchmakingLobby.update({
+      where: { id: lobbyId },
+      data: { status: 'cancelled' },
+    })
+  }
+
+  async expireStaleLobbies() {
+    await prisma.matchmakingLobby.updateMany({
+      where: { status: 'searching', expiresAt: { lt: new Date() } },
+      data: { status: 'expired' },
+    })
+  }
+
+  async expireUnconfirmedMatches() {
+    const stale = await prisma.matchmakingMatch.findMany({
+      where: { status: 'pending_confirm', confirmDeadline: { lt: new Date() } },
+      select: { id: true, lobbyAId: true, lobbyBId: true },
+    })
+    if (stale.length === 0) return
+    await prisma.$transaction([
+      prisma.matchmakingMatch.updateMany({
+        where: { id: { in: stale.map((m) => m.id) } },
+        data: { status: 'cancelled' },
+      }),
+      prisma.matchmakingLobby.updateMany({
+        where: { id: { in: stale.flatMap((m) => [m.lobbyAId, m.lobbyBId]) } },
+        data: { status: 'searching', matchId: null },
+      }),
+    ])
+  }
+
   async joinQueue(userId: string, data: {
     sport: string
     format: string
@@ -481,6 +903,219 @@ export class MatchmakingService {
       where: { playerProfileId: player.id },
       orderBy: { createdAt: 'desc' },
     })
+  }
+
+  private async getPlayerProfile(userId: string) {
+    const player = await prisma.playerProfile.findUnique({ where: { userId } })
+    if (!player) throw Errors.notFound('Player profile')
+    return player
+  }
+
+  private async resolveCallerTeam(userId: string, teamId?: string) {
+    const player = await this.getPlayerProfile(userId)
+    if (teamId) {
+      const team = await prisma.team.findUnique({ where: { id: teamId } })
+      if (!team) throw Errors.notFound('Team')
+      if (team.captainId !== player.id && team.createdByUserId !== userId) throw Errors.forbidden()
+      return team
+    }
+    return prisma.team.findFirst({
+      where: { OR: [{ captainId: player.id }, { createdByUserId: userId }] },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  private async getTeamAgeGroup(teamId: string) {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { captainId: true },
+    })
+    if (!team?.captainId) return null
+    const p = await prisma.playerProfile.findUnique({
+      where: { id: team.captainId },
+      select: { dateOfBirth: true },
+    })
+    return this.deriveAgeGroup(p?.dateOfBirth ?? null)
+  }
+
+  private async getTeamAgeGroupsMap(teamIds: string[], tx: any = prisma) {
+    if (teamIds.length === 0) return new Map<string, string | null>()
+    const teams = await tx.team.findMany({
+      where: { id: { in: teamIds } },
+      select: { id: true, captainId: true },
+    })
+    const captainIds = teams
+      .map((t: any) => (typeof t.captainId === 'string' ? t.captainId : null))
+      .filter((v: string | null): v is string => !!v)
+    const captains = captainIds.length
+      ? await tx.playerProfile.findMany({
+          where: { id: { in: captainIds } },
+          select: { id: true, dateOfBirth: true },
+        })
+      : []
+    const capMap = new Map<string, string | null>(
+      captains.map((c: any) => [String(c.id), this.deriveAgeGroup(c.dateOfBirth)]),
+    )
+    const out = new Map<string, string | null>()
+    for (const t of teams as any[]) {
+      const teamId = typeof t.id === 'string' ? t.id : String(t.id)
+      const captainId = typeof t.captainId === 'string' ? t.captainId : null
+      out.set(teamId, captainId ? (capMap.get(captainId) ?? null) : null)
+    }
+    return out
+  }
+
+  private deriveAgeGroup(dob: Date | null | undefined): string | null {
+    if (!dob) return null
+    const now = new Date()
+    let age = now.getUTCFullYear() - dob.getUTCFullYear()
+    const m = now.getUTCMonth() - dob.getUTCMonth()
+    if (m < 0 || (m === 0 && now.getUTCDate() < dob.getUTCDate())) age -= 1
+    if (age < 16) return 'U16'
+    if (age < 19) return 'U19'
+    return 'SENIOR'
+  }
+
+  private formatDurationMins(format: MatchmakingFormat) {
+    if (format === 'T10') return 90
+    if (format === 'T20') return 180
+    return 240
+  }
+
+  private startOfDay(dateStr: string) {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    return new Date(Date.UTC(y, (m || 1) - 1, d || 1))
+  }
+
+  private toDateOnly(d: Date) {
+    return d.toISOString().slice(0, 10)
+  }
+
+  private daysFromNow(d: Date) {
+    const now = new Date()
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    return Math.round((new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).getTime() - today.getTime()) / 86400000)
+  }
+
+  private timeToMinutes(time: string) {
+    const [h, m] = time.split(':').map(Number)
+    return (h || 0) * 60 + (m || 0)
+  }
+
+  private minutesToTime(total: number) {
+    const h = Math.floor(total / 60).toString().padStart(2, '0')
+    const m = (total % 60).toString().padStart(2, '0')
+    return `${h}:${m}`
+  }
+
+  private isOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string) {
+    return this.timeToMinutes(aStart) < this.timeToMinutes(bEnd) &&
+      this.timeToMinutes(aEnd) > this.timeToMinutes(bStart)
+  }
+
+  private generateStartSlots(openTime: string, closeTime: string, stepMins: number, durationMins: number) {
+    const out: string[] = []
+    const open = this.timeToMinutes(openTime)
+    const close = this.timeToMinutes(closeTime)
+    for (let t = open; t + durationMins <= close; t += stepMins) out.push(this.minutesToTime(t))
+    return out
+  }
+
+  private arenaArea(address: string, city: string | null) {
+    const first = (address || '').split(',').map((s) => s.trim()).find(Boolean)
+    return first || city || 'Unknown'
+  }
+
+  private async hasOpponentLobby(input: {
+    groundId: string
+    slotTime: string
+    date: Date
+    format: MatchmakingFormat
+    callerTeamId?: string
+  }) {
+    const count = await prisma.matchmakingLobbyPick.count({
+      where: {
+        groundId: input.groundId,
+        slotTime: input.slotTime,
+        lobby: {
+          date: input.date,
+          format: input.format,
+          status: 'searching',
+          expiresAt: { gt: new Date() },
+          ...(input.callerTeamId ? { teamId: { not: input.callerTeamId } } : {}),
+        },
+      },
+    })
+    return count > 0
+  }
+
+  private async buildMatchSummary(matchId: string, lobbyId: string) {
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) return null
+    const [lobbyA, lobbyB, unit] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
+      prisma.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: true } }),
+    ])
+    const opponent = lobbyA?.id === lobbyId ? lobbyB : lobbyA
+    return {
+      matchId: match.id,
+      groundId: match.groundId,
+      groundName: unit?.name ?? '',
+      groundArea: unit ? this.arenaArea(unit.arena.address, unit.arena.city) : '',
+      slotTime: match.slotTime,
+      date: this.toDateOnly(match.date),
+      format: match.format,
+      opponentTeamName: opponent?.team.name ?? '',
+      pricePerTeam: match.paymentAmountPerTeam,
+      confirmDeadline: match.confirmDeadline.toISOString(),
+    }
+  }
+
+  private async createBookedSlotForMatch(match: any, tx: any) {
+    const unit = await tx.arenaUnit.findUnique({ where: { id: match.groundId } })
+    if (!unit) throw Errors.notFound('Arena unit')
+    const aLobby = await tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } })
+    const bLobby = await tx.matchmakingLobby.findUnique({ where: { id: match.lobbyBId } })
+    if (!aLobby || !bLobby) throw new AppError('INVALID_MATCH', 'Lobby missing for match', 400)
+
+    const durationMins = this.formatDurationMins(match.format as MatchmakingFormat)
+    const endTime = this.minutesToTime(this.timeToMinutes(match.slotTime) + durationMins)
+    const totalAmount = match.paymentAmountPerTeam * 2
+
+    const conflict = await tx.slotBooking.findFirst({
+      where: {
+        unitId: unit.id,
+        date: match.date,
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+        startTime: { lt: endTime },
+        endTime: { gt: match.slotTime },
+      },
+      select: { id: true },
+    })
+    if (conflict) throw new AppError('SLOT_ALREADY_BOOKED', 'Matched slot is no longer available', 409)
+
+    const booking = await tx.slotBooking.create({
+      data: {
+        arenaId: unit.arenaId,
+        unitId: unit.id,
+        bookedById: aLobby.playerId,
+        date: match.date,
+        startTime: match.slotTime,
+        endTime,
+        durationMins,
+        baseAmountPaise: totalAmount,
+        totalAmountPaise: totalAmount,
+        totalPricePaise: totalAmount,
+        advancePaise: totalAmount,
+        status: 'CONFIRMED',
+        paymentMode: 'ONLINE',
+        bookingSource: 'MATCHMAKING',
+        notes: `matchmaking:${match.id};teamA:${aLobby.teamId};teamB:${bLobby.teamId}`,
+        paidAt: new Date(),
+      } as any,
+    })
+    return booking.id
   }
 
   private haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
