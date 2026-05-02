@@ -1,5 +1,6 @@
 import { prisma, FacilityUnitType, Prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
+import { ArenaService } from '../arenas/arena.service'
 import Razorpay from 'razorpay'
 
 const MATCHMAKING_EXPIRY_HOURS = 24
@@ -86,18 +87,11 @@ export class MatchmakingService {
 
     const unitIds = units.map((u) => u.id)
 
-    // Fetch bookings and opponent lobby picks in parallel — single round-trip each
-    const [bookingsRaw, opponentPicks] = await Promise.all([
-      unitIds.length
-        ? prisma.slotBooking.findMany({
-            where: {
-              unitId: { in: unitIds },
-              date,
-              status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
-            },
-            select: { unitId: true, startTime: true, endTime: true },
-          })
-        : Promise.resolve([]),
+    // Fetch opponent lobby picks and booking-context slots in parallel
+    // booking-context/getPlayerSlots returns correct non-overlapping slots sized to match duration
+    const arenaIds = [...new Set(units.map((u) => u.arenaId))]
+    const arenaService = new ArenaService()
+    const [opponentPicks, playerSlotsResults] = await Promise.all([
       unitIds.length
         ? prisma.matchmakingLobbyPick.findMany({
             where: {
@@ -113,60 +107,39 @@ export class MatchmakingService {
             select: { groundId: true, slotTime: true },
           })
         : Promise.resolve([]),
+      arenaIds.length
+        ? Promise.all(arenaIds.map((arenaId) => arenaService.getPlayerSlots(arenaId, input.date, duration)))
+        : Promise.resolve([]),
     ])
     const opponentSet = new Set(opponentPicks.map((p) => `${p.groundId}:${p.slotTime}`))
 
-    const bookingsByUnit = new Map<string, Array<{ startTime: string; endTime: string }>>()
-    for (const b of bookingsRaw) {
-      const arr = bookingsByUnit.get(b.unitId) ?? []
-      arr.push({ startTime: b.startTime, endTime: b.endTime })
-      bookingsByUnit.set(b.unitId, arr)
+    // Build per-unit available-slot map — slots are already non-overlapping and sized to duration
+    const availableSlotsByUnit = new Map<string, Array<{ startTime: string; endTime: string; totalAmountPaise: number }>>()
+    for (const result of playerSlotsResults) {
+      for (const group of result.unitGroups) {
+        if (group.unitId) {
+          availableSlotsByUnit.set(group.unitId, group.availableSlots)
+        }
+      }
     }
 
-    const filterToday = this.isToday(input.date)
-    const IST_OFFSET = 5.5 * 60
-    const nowIstMins = (new Date().getUTCHours() * 60 + new Date().getUTCMinutes() + IST_OFFSET) % (24 * 60)
-    const cutoffMins = filterToday ? nowIstMins + 60 : -1
+    // eslint-disable-next-line no-console
+    console.log(`[MM] searchGrounds format=${input.format} duration=${duration}min date=${input.date} units=${units.length}`)
 
     const grounds = [] as any[]
     for (const unit of units) {
-      const open  = (unit.openTime  || unit.arena.openTime  || '06:00')
-      const close = (unit.closeTime || unit.arena.closeTime || '22:00')
-      const step  = (unit as any).slotIncrementMins > 0 ? (unit as any).slotIncrementMins : 60
-
-      // Use arena's real slot grid (same as arena booking API)
-      const allSlots = this.generateDaySlots(open, close, step)
-
-      const busy = bookingsByUnit.get(unit.id) ?? []
-
-      // Mark each arena slot as free or busy
-      const freeSlots = allSlots.filter((s) => {
-        if (filterToday && this.timeToMinutes(s.start) < cutoffMins) return false
-        return !busy.some((b) => this.isOverlap(s.start, s.end, b.startTime, b.endTime))
-      })
-
-      // Find consecutive runs of free slots whose combined duration >= match duration
-      const slotsNeeded = Math.ceil(duration / step)
+      const freeSlots = availableSlotsByUnit.get(unit.id) ?? []
+      // eslint-disable-next-line no-console
+      console.log(`[MM]   unit=${unit.id} arena="${unit.arena.name}" freeSlots=${freeSlots.length} slots=[${freeSlots.map(s => s.startTime).slice(0, 8).join(',')}${freeSlots.length > 8 ? '...' : ''}]`)
       const slots: Array<{ time: string; endTime: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
 
-      for (let i = 0; i <= freeSlots.length - slotsNeeded; i++) {
-        let consecutive = true
-        for (let j = 0; j < slotsNeeded - 1; j++) {
-          if (freeSlots[i + j].end !== freeSlots[i + j + 1].start) {
-            consecutive = false
-            break
-          }
-        }
-        if (!consecutive) continue
-
-        const startTime = freeSlots[i].start
-        const total = Math.round((unit.pricePerHourPaise * duration) / 60)
+      for (const s of freeSlots) {
         slots.push({
-          time: startTime,
-          endTime: this.minutesToTime(this.timeToMinutes(startTime) + duration),
+          time: s.startTime,
+          endTime: s.endTime,
           unitId: unit.id,
-          pricePerTeam: Math.floor(total / 2),
-          hasOpponent: opponentSet.has(`${unit.id}:${startTime}`),
+          pricePerTeam: Math.floor(s.totalAmountPaise / 2),
+          hasOpponent: opponentSet.has(`${unit.id}:${s.startTime}`),
         })
       }
 

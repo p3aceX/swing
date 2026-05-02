@@ -132,7 +132,7 @@ class HostArenaBookingRepository {
     required int durationMins,
   }) async {
     final response = await _dio.get(
-      _paths.arenaSlots(arenaId),
+      _paths.arenaBookingContext(arenaId),
       queryParameters: {
         'date': date.toIso8601String().split('T').first,
         'durationMins': durationMins,
