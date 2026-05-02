@@ -50,12 +50,13 @@ export class MatchmakingService {
     date: string
     format: MatchmakingFormat
     teamId?: string
+    overs?: number
   }) {
     const [callerTeam] = await Promise.all([
       this.resolveCallerTeam(userId, input.teamId),
     ])
     const date = this.startOfDay(input.date)
-    const duration = this.formatDurationMins(input.format)
+    const duration = this.formatDurationMins(input.format, input.overs)
     const query = (input.q ?? '').trim()
 
     const GROUND_UNIT_TYPES: FacilityUnitType[] = ['FULL_GROUND', 'HALF_GROUND', 'TURF', 'MULTI_SPORT', 'OTHER']
@@ -122,24 +123,49 @@ export class MatchmakingService {
       bookingsByUnit.set(b.unitId, arr)
     }
 
+    const filterToday = this.isToday(input.date)
+    const IST_OFFSET = 5.5 * 60
+    const nowIstMins = (new Date().getUTCHours() * 60 + new Date().getUTCMinutes() + IST_OFFSET) % (24 * 60)
+    const cutoffMins = filterToday ? nowIstMins + 60 : -1
+
     const grounds = [] as any[]
     for (const unit of units) {
-      const open = (unit.openTime || unit.arena.openTime || '06:00')
+      const open  = (unit.openTime  || unit.arena.openTime  || '06:00')
       const close = (unit.closeTime || unit.arena.closeTime || '22:00')
-      const starts = this.generateStartSlots(open, close, 60, duration, this.isToday(input.date))
+      const step  = (unit as any).slotIncrementMins > 0 ? (unit as any).slotIncrementMins : 60
+
+      // Use arena's real slot grid (same as arena booking API)
+      const allSlots = this.generateDaySlots(open, close, step)
 
       const busy = bookingsByUnit.get(unit.id) ?? []
+
+      // Mark each arena slot as free or busy
+      const freeSlots = allSlots.filter((s) => {
+        if (filterToday && this.timeToMinutes(s.start) < cutoffMins) return false
+        return !busy.some((b) => this.isOverlap(s.start, s.end, b.startTime, b.endTime))
+      })
+
+      // Find consecutive runs of free slots whose combined duration >= match duration
+      const slotsNeeded = Math.ceil(duration / step)
       const slots: Array<{ time: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
-      for (const time of starts) {
-        const end = this.minutesToTime(this.timeToMinutes(time) + duration)
-        const blocked = busy.some((b) => this.isOverlap(time, end, b.startTime, b.endTime))
-        if (blocked) continue
+
+      for (let i = 0; i <= freeSlots.length - slotsNeeded; i++) {
+        let consecutive = true
+        for (let j = 0; j < slotsNeeded - 1; j++) {
+          if (freeSlots[i + j].end !== freeSlots[i + j + 1].start) {
+            consecutive = false
+            break
+          }
+        }
+        if (!consecutive) continue
+
+        const startTime = freeSlots[i].start
         const total = Math.round((unit.pricePerHourPaise * duration) / 60)
         slots.push({
-          time,
+          time: startTime,
           unitId: unit.id,
           pricePerTeam: Math.floor(total / 2),
-          hasOpponent: opponentSet.has(`${unit.id}:${time}`),
+          hasOpponent: opponentSet.has(`${unit.id}:${startTime}`),
         })
       }
 
@@ -990,12 +1016,24 @@ export class MatchmakingService {
     return 'SENIOR'
   }
 
-  private formatDurationMins(format: MatchmakingFormat) {
-    if (format === 'T10') return 240    // 4h block
-    if (format === 'T20') return 240    // 4h block
-    if (format === 'ODI') return 480    // 8h block (50-over day)
-    if (format === 'Test') return 480   // 8h block (full day session)
-    return 240                          // Custom: 4h block
+  private formatDurationMins(format: MatchmakingFormat, overs?: number) {
+    if (format === 'T10') return 240
+    if (format === 'T20') return 240
+    if (format === 'ODI') return 480
+    if (format === 'Test') return 480
+    if (format === 'Custom') return (overs ?? 20) > 20 ? 480 : 240
+    return 240
+  }
+
+  private generateDaySlots(openTime: string, closeTime: string, stepMins: number) {
+    const slots: Array<{ start: string; end: string }> = []
+    const open  = this.timeToMinutes(openTime)
+    const close = this.timeToMinutes(closeTime)
+    const step  = stepMins > 0 ? stepMins : 60
+    for (let t = open; t + step <= close; t += step) {
+      slots.push({ start: this.minutesToTime(t), end: this.minutesToTime(t + step) })
+    }
+    return slots
   }
 
   private startOfDay(dateStr: string) {

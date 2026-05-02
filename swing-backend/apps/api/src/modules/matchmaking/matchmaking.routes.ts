@@ -15,12 +15,14 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       format: formatSchema,
       teamId: z.string().optional(),
+      overs: z.coerce.number().int().min(1).max(100).optional(),
     }).parse(request.query)
     const data = await svc.searchGrounds(user.userId, {
       q: q.q,
       date: q.date,
       format: q.format as MatchmakingFormat,
       teamId: q.teamId,
+      overs: q.overs,
     })
     return reply.send({ success: true, data })
   })
