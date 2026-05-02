@@ -521,8 +521,11 @@ class ProfileRepository extends BaseRepository {
         ),
       );
     } catch (e, stack) {
-      debugPrint('ProfileRepo: Global Error: $e');
-      debugPrint(stack.toString());
+      final is401 = e is DioException && e.response?.statusCode == 401;
+      if (kDebugMode && !is401) {
+        debugPrint('ProfileRepo: Global Error: $e');
+        debugPrint(stack.toString());
+      }
       rethrow;
     }
   }
@@ -880,6 +883,7 @@ class ProfileRepository extends BaseRepository {
     try {
       return await _client.get(path, queryParameters: queryParameters);
     } catch (e) {
+      if (e is DioException && e.response?.statusCode == 401) rethrow;
       if (kDebugMode) debugPrint('[Profile] _safeGet failed $path → $e');
       return null;
     }

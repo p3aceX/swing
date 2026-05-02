@@ -1,28 +1,35 @@
 import 'package:flutter/material.dart';
 
-/// Static constants – kept for auth / live-scoring screens.
+/// Static constants based on the brand palette.
 class AppColors {
   AppColors._();
 
-  static const background = Color(0xFF050505); // Pitch Black
-  static const primary = Color(0xFF121212); // Charcoal
-  static const surfaceDark = Color(0xFF1A1A1A); 
-  static const border = Color(0xFF2A2A2A);
-  static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFF888888);
-  static const accent = Color(0xFFE5E4E2); // Platinum / Silver
-  static const gold = Color(0xFFD4AF37); // Metallic Gold
-  static const green = Color(0xFF00FF95);
-  static const blue = Color(0xFF4A90E2);
-  static const warning = Color(0xFFFFB347);
-  static const danger = Color(0xFFFF5252);
-  static const match = Color(0xFFC0C0C0); // Chrome Silver
+  // Primary Palette
+  static const ivory = Color(0xFFF4F2EB);    // Background / base cream
+  static const navy = Color(0xFF071B3D);     // Dark outline / text
+  static const brandBlue = Color(0xFF0057C8); // Primary brand blue
+  static const electricBlue = Color(0xFF00A8F5); // Bright blue highlight
+  static const cyan = Color(0xFF18C8E8);     // Cyan accent
+  static const grassGreen = Color(0xFF72C86A); // Field green
+  static const limeGreen = Color(0xFF8BD622); // Sport green accent
+  static const energyOrange = Color(0xFFFF8A00); // Orange accent
+  static const actionRed = Color(0xFFD9281E); // Cricket ball red
+  static const white = Color(0xFFFFFFFF);    // White highlight
 
-  // Titanium/Chrome depth
-  static const glassSurface = Color(0xFF121212); 
-  static const glassCard = Color(0xFF181818);
-  static const glassBorder = Color(0xFF333333);
-  static const glassPanel = Color(0xFF1F1F1F);
+  // Deprecated / Legacy aliases (mapped to new palette for safety)
+  static const background = ivory;
+  static const primary = navy;
+  static const surfaceDark = Color(0xFF051229); // Derived from navy
+  static const border = Color(0x1A071B3D);      // Navy with 10% opacity
+  static const textPrimary = navy;
+  static const textSecondary = Color(0x99071B3D); // Navy with 60% opacity
+  static const accent = brandBlue;
+  static const gold = energyOrange;
+  static const green = grassGreen;
+  static const blue = electricBlue;
+  static const warning = energyOrange;
+  static const danger = actionRed;
+  static const match = electricBlue;
 }
 
 @immutable
@@ -136,23 +143,23 @@ extension SwingColors on BuildContext {
   SwingPalette get _palette =>
       Theme.of(this).extension<SwingPalette>() ??
       const SwingPalette(
-        bg: AppColors.background,
-        surf: AppColors.primary,
-        cardBg: AppColors.surfaceDark,
+        bg: AppColors.ivory,
+        surf: AppColors.white,
+        cardBg: AppColors.white,
         stroke: AppColors.border,
-        panel: Color(0xFF1F1F1F),
-        fg: AppColors.textPrimary,
+        panel: Color(0xFFF9F8F5), // Slightly lighter cream
+        fg: AppColors.navy,
         fgSub: AppColors.textSecondary,
-        accent: AppColors.accent,
-        accentBg: Color(0x1AFFFFFF),
-        success: AppColors.green,
-        warn: AppColors.warning,
-        danger: AppColors.danger,
-        gold: AppColors.gold,
-        sky: AppColors.blue,
-        match: AppColors.match,
-        ctaBg: AppColors.accent,
-        ctaFg: Color(0xFF050505),
+        accent: AppColors.brandBlue,
+        accentBg: Color(0x1A0057C8),
+        success: AppColors.grassGreen,
+        warn: AppColors.energyOrange,
+        danger: AppColors.actionRed,
+        gold: AppColors.limeGreen,
+        sky: AppColors.electricBlue,
+        match: AppColors.cyan,
+        ctaBg: AppColors.brandBlue,
+        ctaFg: AppColors.white,
       );
 
   Color get bg => _palette.bg;

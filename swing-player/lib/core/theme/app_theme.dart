@@ -17,23 +17,21 @@ class AppTheme {
     final isDark = brightness == Brightness.dark;
 
     // ── Rank tint seeds ───────────────────────────────────────────────────────
-    // Each rank colors the whole environment — bg, panels, borders all breathe
-    // the rank's hue. Light = subtle wash; dark = deep atmospheric tint.
     final rankSeed = isDark ? rankTheme.primary : rankTheme.secondary;
 
-    // ── Dark palette — pure blacks for top/bottom navigation ──────────────────
-    final bg$dark   = const Color(0xFF000000);
-    final surf$dark = const Color(0xFF000000);
-    final card$dark = Color.lerp(const Color(0xFF0A0A0A), rankSeed, 0.04)!;
-    final stroke$dark = Color.lerp(const Color(0xFF1A1A1A), rankSeed, 0.15)!;
-    final panel$dark = Color.lerp(const Color(0xFF0F0F0F), rankSeed, 0.05)!;
+    // ── Dark palette — deep navy base ──────────────────────────────────────────
+    final bg$dark   = const Color(0xFF071B3D); // Brand Navy
+    final surf$dark = const Color(0xFF0A234D); // Slightly lighter navy
+    final card$dark = Color.lerp(const Color(0xFF0D2B59), rankSeed, 0.05)!;
+    final stroke$dark = Color.lerp(const Color(0xFF1A3D66), rankSeed, 0.15)!;
+    final panel$dark = Color.lerp(const Color(0xFF0F2E52), rankSeed, 0.05)!;
 
-    // ── Light palette — rank-tinted clean whites ──────────────────────────────
-    final bg$light   = Color.lerp(const Color(0xFFFFFFFF), rankSeed, 0.04)!;
-    final surf$light = Color.lerp(const Color(0xFFFFFFFF), rankSeed, 0.02)!;
-    final card$light = const Color(0xFFFFFFFF); // cards stay pure white for contrast
-    final stroke$light = Color.lerp(const Color(0xFFE0E0E0), rankSeed, 0.18)!;
-    final panel$light  = Color.lerp(const Color(0xFFF2F2F2), rankSeed, 0.07)!;
+    // ── Light palette — ivory base ────────────────────────────────────────────
+    final bg$light   = const Color(0xFFF4F2EB); // Brand Ivory
+    final surf$light = const Color(0xFFFFFFFF); // White highlights
+    final card$light = const Color(0xFFFFFFFF);
+    final stroke$light = Color.lerp(const Color(0xFFE5E2D9), rankSeed, 0.12)!;
+    final panel$light  = Color.lerp(const Color(0xFFF9F8F5), rankSeed, 0.05)!;
 
     final bg     = isDark ? bg$dark     : bg$light;
     final surf   = isDark ? surf$dark   : surf$light;
@@ -41,27 +39,27 @@ class AppTheme {
     final stroke = isDark ? stroke$dark : stroke$light;
     final panel  = isDark ? panel$dark  : panel$light;
 
-    final fg = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF0A0A0A);
+    final fg = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF071B3D); // Brand Navy for light text
     final fgSub = isDark
-        ? Color.lerp(const Color(0xFF888888), rankTheme.primary, 0.12)!
-        : Color.lerp(const Color(0xFF6B6B80), rankTheme.secondary, 0.15)!;
+        ? Color.lerp(const Color(0xFFB0BCC7), rankTheme.primary, 0.12)!
+        : Color.lerp(const Color(0xFF5C6E82), rankTheme.secondary, 0.15)!;
 
-    // Accent is rank-based in both modes — primary (lighter) for dark, secondary (vivid) for light.
-    final accent = isDark ? rankTheme.primary : rankTheme.secondary;
+    // Brand Palette Overrides
+    final success = const Color(0xFF72C86A); // Field green
+    final warn = const Color(0xFFFF8A00);    // Orange accent
+    final danger = const Color(0xFFD9281E);  // Cricket ball red
+    final gold = const Color(0xFF8BD622);    // Sport green accent (per instructions)
+    final sky = const Color(0xFF00A8F5);     // Electric blue
+    final match = const Color(0xFF18C8E8);   // Fresh cyan
+
+    // Base Brand Blue Accent
+    final brandBlue = const Color(0xFF0057C8);
+    final accent = isDark ? Color.lerp(brandBlue, rankTheme.primary, 0.4)! : Color.lerp(brandBlue, rankTheme.secondary, 0.3)!;
     final accentBg = accent.withValues(alpha: isDark ? 0.15 : 0.12);
 
-    final success = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final warn = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-    final danger = isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
-    final gold = isDark ? const Color(0xFFD4AF37) : const Color(0xFFCA8A04);
-    final sky = isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
-    final match = isDark ? const Color(0xFFA5B4FC) : const Color(0xFF4F46E5);
-
-    // CTA bg is rank accent in both modes. Auto-pick fg by luminance so text always pops.
+    // CTA bg is brand blue or rank accent.
     final ctaBg = accent;
-    final ctaFg = accent.computeLuminance() > 0.45
-        ? const Color(0xFF0A0A0A)
-        : Colors.white;
+    final ctaFg = Colors.white;
 
     final palette = SwingPalette(
       bg: bg,

@@ -965,6 +965,24 @@ export class ArenaService {
     return { arena: this.formatArenaInfo(arena), unitGroups }
   }
 
+  async getBookingContext(arenaId: string, date: string, durationMins: number, includeAvailability = false) {
+    const [arenaDetail, slots] = await Promise.all([
+      this.getArena(arenaId),
+      this.getPlayerSlots(arenaId, date, durationMins),
+    ])
+
+    const payload: any = {
+      arena: arenaDetail,
+      slots,
+    }
+
+    if (includeAvailability) {
+      payload.availability = await this.getAvailability(arenaId, date)
+    }
+
+    return payload
+  }
+
   private formatArenaInfo(arena: any) {
     return {
       id: arena.id,

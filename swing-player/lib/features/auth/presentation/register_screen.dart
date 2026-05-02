@@ -32,100 +32,173 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     ref.listen<AuthState>(authControllerProvider, (previous, next) {
       if (next.errorMessage != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(next.errorMessage!)),
+          SnackBar(
+            content: Text(next.errorMessage!.toUpperCase(),
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 12)),
+            backgroundColor: context.danger,
+          ),
         );
       }
     });
 
     final authState = ref.watch(authControllerProvider);
-    return AuthScaffold(
-      bottom: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: authState.status == AuthStatus.loading || !_hasValidName
-              ? null
-              : _sendOtp,
-          child: Text(
-            authState.status == AuthStatus.loading
-                ? 'Sending OTP...'
-                : 'Continue to OTP',
-          ),
-        ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextButton.icon(
-                  onPressed: () => context.go('/login'),
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  label: const Text('Back'),
+    final isDark = context.isDark;
+
+    return Scaffold(
+      backgroundColor: context.bg,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 60),
+              // HERO LOGO
+              Center(
+                child: Image.asset(
+                  isDark ? 'assets/logo/logo-dark.png' : 'assets/logo/logo-light.png',
+                  height: 64,
+                  fit: BoxFit.contain,
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'Create your player identity',
-                  style: Theme.of(context).textTheme.displayMedium,
+              ),
+              const Spacer(),
+              // HEADLINE
+              Text(
+                'CREATE YOUR\nPLAYER IDENTITY',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.0,
+                  height: 1.0,
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'No account found for ${widget.phoneNumber}. Add your name to continue.',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 14,
-                    height: 1.45,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'ADD YOUR NAME TO CONTINUE',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(height: 40),
+              // TECHNICAL INPUT
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                decoration: BoxDecoration(
+                  color: context.panel,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _hasValidName 
+                        ? context.accent.withValues(alpha: 0.5) 
+                        : context.stroke.withValues(alpha: 0.1),
+                    width: 1.5,
                   ),
                 ),
-                const SizedBox(height: 28),
-                TextField(
+                child: TextField(
                   controller: _nameController,
                   onChanged: (_) => setState(() {}),
                   textCapitalization: TextCapitalization.words,
                   inputFormatters: [
                     LengthLimitingTextInputFormatter(40),
                   ],
+                  cursorColor: context.accent,
                   style: TextStyle(
                     color: context.fg,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.0,
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Full name',
-                    prefixIcon: Icon(Icons.person_outline),
+                  decoration: InputDecoration(
+                    hintText: 'FULL NAME',
+                    hintStyle: TextStyle(
+                      color: context.fgSub.withValues(alpha: 0.2),
+                    ),
+                    border: InputBorder.none,
+                    isCollapsed: true,
                   ),
                 ),
-                const SizedBox(height: 16),
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                  decoration: BoxDecoration(
-                    color: context.panel,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: context.stroke),
+              ),
+              const SizedBox(height: 16),
+              // PHONE READONLY HUD
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(
+                  color: context.panel.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: context.stroke.withValues(alpha: 0.05)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.phone_android_rounded, color: context.fgSub, size: 16),
+                    const SizedBox(width: 12),
+                    Text(
+                      widget.phoneNumber,
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              // ACTION BUTTON
+              SizedBox(
+                width: double.infinity,
+                height: 60,
+                child: ElevatedButton(
+                  onPressed: authState.status == AuthStatus.loading || !_hasValidName
+                      ? null
+                      : _sendOtp,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: context.ctaBg,
+                    foregroundColor: context.ctaFg,
+                    disabledBackgroundColor: context.panel,
+                    disabledForegroundColor: context.fgSub.withValues(alpha: 0.3),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.phone_android_rounded, color: context.fgSub),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          widget.phoneNumber,
+                  child: authState.status == AuthStatus.loading
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: context.ctaFg))
+                      : const Text(
+                          'CONTINUE TO OTP',
                           style: TextStyle(
-                            color: context.fg,
+                            fontWeight: FontWeight.w900,
                             fontSize: 15,
-                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.5,
                           ),
                         ),
-                      ),
-                    ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Center(
+                child: TextButton(
+                  onPressed: () => context.go('/login'),
+                  child: Text(
+                    'GO BACK',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                    ),
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 40),
+            ],
           ),
         ),
       ),

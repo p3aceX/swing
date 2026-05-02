@@ -689,6 +689,7 @@ class _IdleFind extends ConsumerStatefulWidget {
 class _IdleFindState extends ConsumerState<_IdleFind> {
   // 1=team  2=format  3=date  4=grounds
   int _activeStep = 1;
+  int _customOvers = 20;
 
   void _goTo(int step) => setState(() => _activeStep = step);
 
@@ -699,7 +700,8 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _AddGroundSheet(
-        query: (date: dateStr, format: widget.format.apiValue, teamId: widget.team?.id),
+        query: (date: dateStr, format: widget.format.apiValue, teamId: widget.team?.id,
+            overs: widget.format == MatchFormat.custom ? _customOvers : null),
         existingPicks: widget.picks,
         onPick: widget.onAddPick,
       ),
@@ -766,41 +768,117 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   title: 'Format',
                   activeStep: _activeStep,
                   locked: widget.team == null,
-                  summary: widget.format.label,
+                  summary: widget.format == MatchFormat.custom
+                      ? 'Custom · $_customOvers overs'
+                      : widget.format.label,
                   summaryIcon: Icons.sports_cricket_rounded,
                   onEdit: () => _goTo(2),
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 16),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: MatchFormat.values.map((f) {
-                        final sel = widget.format == f;
-                        return GestureDetector(
-                          onTap: () {
-                            widget.onFormat(f);
-                            _goTo(3);
-                          },
-                          behavior: HitTestBehavior.opaque,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 140),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 18, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: sel ? context.ctaBg : context.panel,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              f.label,
-                              style: TextStyle(
-                                color: sel ? context.ctaFg : context.fg,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: MatchFormat.values.map((f) {
+                            final sel = widget.format == f;
+                            return GestureDetector(
+                              onTap: () {
+                                widget.onFormat(f);
+                                if (f != MatchFormat.custom) _goTo(3);
+                              },
+                              behavior: HitTestBehavior.opaque,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 140),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 18, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: sel ? context.ctaBg : context.panel,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  f.label,
+                                  style: TextStyle(
+                                    color: sel ? context.ctaFg : context.fg,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
+                            );
+                          }).toList(),
+                        ),
+                        if (widget.format == MatchFormat.custom) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            'How many overs?',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        );
-                      }).toList(),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              _OversButton(
+                                icon: Icons.remove,
+                                onTap: _customOvers > 1
+                                    ? () => setState(() => _customOvers--)
+                                    : null,
+                              ),
+                              const SizedBox(width: 16),
+                              Text(
+                                '$_customOvers',
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4, top: 4),
+                                child: Text(
+                                  'overs',
+                                  style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              _OversButton(
+                                icon: Icons.add,
+                                onTap: _customOvers < 100
+                                    ? () => setState(() => _customOvers++)
+                                    : null,
+                              ),
+                              const Spacer(),
+                              GestureDetector(
+                                onTap: () => _goTo(3),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: context.ctaBg,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'Confirm',
+                                    style: TextStyle(
+                                      color: context.ctaFg,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -1114,6 +1192,33 @@ class _StepCard extends StatelessWidget {
 }
 
 // ── Pick row ──────────────────────────────────────────────────────────────────
+
+class _OversButton extends StatelessWidget {
+  const _OversButton({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: onTap != null ? context.panel : context.panel.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: onTap != null ? context.fg : context.fgSub.withValues(alpha: 0.3),
+        ),
+      ),
+    );
+  }
+}
 
 class _PickRow extends StatelessWidget {
   const _PickRow({required this.pick, required this.onRemove});

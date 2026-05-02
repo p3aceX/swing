@@ -15,6 +15,7 @@ class MatchmakingRepository {
     required String date,
     required String format,
     String? teamId,
+    int? overs,
   }) async {
     final resp = await _dio.get(
       ApiEndpoints.matchmakingGrounds,
@@ -23,6 +24,7 @@ class MatchmakingRepository {
         'format': format,
         if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
         if (teamId != null && teamId.isNotEmpty) 'teamId': teamId,
+        if (overs != null) 'overs': overs,
       },
     );
     final data = _unwrap(resp.data);

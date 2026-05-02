@@ -67,3 +67,4 @@ flutter:
     - .env
     - assets/ui/rank_frames/
     - assets/bg/
+    - assets/logo/

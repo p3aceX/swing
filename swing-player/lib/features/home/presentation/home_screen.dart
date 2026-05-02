@@ -380,7 +380,7 @@ class _SexyHeader extends ConsumerWidget {
     final unreadNotif = ref.watch(notificationSummaryProvider).valueOrNull ?? 0;
 
     return Container(
-      color: context.surf,
+      color: context.bg,
       child: SafeArea(
         bottom: false,
         child: SizedBox(
@@ -1292,7 +1292,7 @@ class _PremiumBottomNav extends StatelessWidget {
       height: 60 + bottom,
       padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + bottom),
       decoration: BoxDecoration(
-        color: context.surf,
+        color: context.bg,
         border: Border(
             top: BorderSide(
                 color: context.stroke.withValues(alpha: 0.6), width: 0.5)),

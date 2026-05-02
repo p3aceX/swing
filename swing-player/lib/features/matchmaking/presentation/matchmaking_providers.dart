@@ -16,14 +16,14 @@ final mmTeamsProvider = FutureProvider<List<MmTeam>>((ref) async {
   return all.map(MmTeam.fromPlayerTeam).toList();
 });
 
-typedef MmGroundsQuery = ({String date, String format, String? teamId});
+typedef MmGroundsQuery = ({String date, String format, String? teamId, int? overs});
 
 /// Grounds with opponent signals for a given date+format.
 /// Fetched fresh each time the Add-Ground sheet opens.
 final mmGroundsProvider =
     FutureProvider.family<List<MmGround>, MmGroundsQuery>((ref, q) async {
   final repo = ref.read(matchmakingRepositoryProvider);
-  return repo.searchGrounds(date: q.date, format: q.format, teamId: q.teamId);
+  return repo.searchGrounds(date: q.date, format: q.format, teamId: q.teamId, overs: q.overs);
 });
 
 typedef MmLobbiesQuery = ({String? date, String? format});

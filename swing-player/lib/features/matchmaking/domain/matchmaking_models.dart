@@ -48,27 +48,42 @@ class MmSlot {
     required this.unitId,
     required this.hasOpponent,
     required this.pricePerTeamPaise,
+    this.endTime,
   });
 
-  final String time;           // "07:00" 24h
-  final String unitId;         // actual ArenaUnit ID used for booking picks
+  final String time;      // "07:00" 24h start
+  final String? endTime;  // "15:00" 24h end
+  final String unitId;
   final bool hasOpponent;
   final int pricePerTeamPaise;
 
   int get priceRupees => pricePerTeamPaise ~/ 100;
 
   String get displayTime {
-    final parts = time.split(':');
-    final hour = int.parse(parts[0]);
-    final min = parts[1];
-    final ampm = hour < 12 ? 'AM' : 'PM';
-    final h = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    return '$h:$min $ampm';
+    final start = _fmt(time);
+    if (endTime != null && endTime!.isNotEmpty) {
+      return '$start – ${_fmt(endTime!)}';
+    }
+    return start;
+  }
+
+  static String _fmt(String t) {
+    try {
+      final parts = t.split(':');
+      final hour = int.parse(parts[0]);
+      final min = parts[1];
+      final ampm = hour < 12 ? 'AM' : 'PM';
+      final h = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+      return '$h:$min $ampm';
+    } catch (_) {
+      return t;
+    }
   }
 
   factory MmSlot.fromJson(Map<String, dynamic> j, {String? fallbackUnitId}) =>
       MmSlot(
         time: j['time'] as String,
+        endTime: j['endTime'] as String?,
         unitId: (j['unitId'] as String?) ?? fallbackUnitId ?? '',
         hasOpponent: (j['hasOpponent'] as bool?) ?? false,
         pricePerTeamPaise: (j['pricePerTeam'] as num?)?.toInt() ?? 90000,
