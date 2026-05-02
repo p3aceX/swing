@@ -22,7 +22,7 @@ class ArenaSlotsRepository {
     int durationMins,
   ) async {
     final resp = await _dio.get(
-      '/arenas/$arenaId/slots',
+      '/arenas/$arenaId/booking-context',
       queryParameters: {
         'date': DateFormat('yyyy-MM-dd').format(date),
         'durationMins': durationMins.toString(),
