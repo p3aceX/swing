@@ -18,8 +18,9 @@ enum AgeGroup {
 enum MatchFormat {
   t10('T10'),
   t20('T20'),
-  thirtyOver('30 Overs'),
-  boxCricket('Box');
+  odi('ODI'),
+  test('Test'),
+  custom('Custom');
 
   const MatchFormat(this.label);
   final String label;

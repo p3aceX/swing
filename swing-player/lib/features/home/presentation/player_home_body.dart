@@ -59,44 +59,63 @@ class _MatchEntry extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Find a Match',
+            'FIND A RIVALRY',
             style: TextStyle(
               color: context.fg,
-              fontSize: 26,
+              fontSize: 20,
               fontWeight: FontWeight.w900,
               letterSpacing: -0.5,
+              height: 1.0,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            'Get paired with a team in seconds.',
+            'Unlock your next competitive challenge.',
             style: TextStyle(
-              color: context.fgSub,
-              fontSize: 14,
+              color: context.fgSub.withValues(alpha: 0.6),
+              fontSize: 13,
               fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: _MatchTypeButton(
-                  label: 'Team Match',
-                  icon: Icons.groups_rounded,
-                  primary: true,
-                  onTap: onFindMatch,
-                ),
+          InkWell(
+            onTap: onFindMatch,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 24),
+              decoration: BoxDecoration(
+                color: context.fg,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: context.fg.withValues(alpha: 0.2),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MatchTypeButton(
-                  label: 'Play Solo',
-                  icon: Icons.person_rounded,
-                  primary: false,
-                  onTap: onFindMatch,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.bolt_rounded,
+                    color: context.isDark ? Colors.black : Colors.white,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'FIND A RIVAL',
+                    style: TextStyle(
+                      color: context.isDark ? Colors.black : Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ],
       ),
@@ -528,9 +547,9 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
           children: [
             _MatchTabPills(
               current: effectiveTab,
-              hasLive: live.isNotEmpty,
-              hasUpcoming: upcoming.isNotEmpty,
-              hasRecent: recent.isNotEmpty,
+              liveCount: live.length,
+              upcomingCount: upcoming.length,
+              recentCount: recent.length,
               onChanged: (t) => setState(() => _tab = t),
             ),
             const SizedBox(height: 12),
@@ -567,47 +586,52 @@ class _FixturesContentState extends ConsumerState<_FixturesContent> {
 class _MatchTabPills extends StatelessWidget {
   const _MatchTabPills({
     required this.current,
-    required this.hasLive,
-    required this.hasUpcoming,
-    required this.hasRecent,
+    required this.liveCount,
+    required this.upcomingCount,
+    required this.recentCount,
     required this.onChanged,
   });
 
   final _FixturesTab current;
-  final bool hasLive;
-  final bool hasUpcoming;
-  final bool hasRecent;
+  final int liveCount;
+  final int upcomingCount;
+  final int recentCount;
   final ValueChanged<_FixturesTab> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          if (hasLive)
+          if (liveCount > 0)
             _Pill(
               icon: Icons.circle,
               label: 'Live',
+              count: liveCount,
               selected: current == _FixturesTab.live,
               selectedColor: context.success,
               onTap: () => onChanged(_FixturesTab.live),
               isLive: true,
             ),
-          if (hasLive && (hasUpcoming || hasRecent)) const SizedBox(width: 8),
-          if (hasUpcoming)
+          if (liveCount > 0 && (upcomingCount > 0 || recentCount > 0))
+            const SizedBox(width: 8),
+          if (upcomingCount > 0)
             _Pill(
               icon: Icons.schedule_rounded,
               label: 'Next',
+              count: upcomingCount,
               selected: current == _FixturesTab.upcoming,
               selectedColor: context.accent,
               onTap: () => onChanged(_FixturesTab.upcoming),
             ),
-          if (hasUpcoming && hasRecent) const SizedBox(width: 8),
-          if (hasRecent)
+          if (upcomingCount > 0 && recentCount > 0) const SizedBox(width: 8),
+          if (recentCount > 0)
             _Pill(
               icon: Icons.check_circle_outline_rounded,
               label: 'Done',
+              count: recentCount,
               selected: current == _FixturesTab.recent,
               selectedColor: context.accent,
               onTap: () => onChanged(_FixturesTab.recent),
@@ -622,6 +646,7 @@ class _Pill extends StatelessWidget {
   const _Pill({
     required this.icon,
     required this.label,
+    required this.count,
     required this.selected,
     required this.selectedColor,
     required this.onTap,
@@ -630,6 +655,7 @@ class _Pill extends StatelessWidget {
 
   final IconData icon;
   final String label;
+  final int count;
   final bool selected;
   final Color selectedColor;
   final VoidCallback onTap;
@@ -659,11 +685,12 @@ class _Pill extends StatelessWidget {
               Icon(icon, size: 13, color: selected ? selectedColor : context.fgSub),
             const SizedBox(width: 5),
             Text(
-              label,
+              '${label.toUpperCase()} ($count)',
               style: TextStyle(
                 color: selected ? selectedColor : context.fgSub,
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                letterSpacing: 0.5,
               ),
             ),
           ],
@@ -815,16 +842,20 @@ class _MatchTile extends ConsumerWidget {
                       ),
                     )
                   else
-                    Text(
-                      compText.toUpperCase(),
-                      style: TextStyle(
-                        color: accent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.0,
+                    Expanded(
+                      child: Text(
+                        compText.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0,
+                        ),
                       ),
                     ),
-                  const Spacer(),
+                  if (tab != _FixturesTab.live) const SizedBox(width: 8),
                   if (tab == _FixturesTab.upcoming)
                     Text(_countdown(match.scheduledAt),
                         style: TextStyle(

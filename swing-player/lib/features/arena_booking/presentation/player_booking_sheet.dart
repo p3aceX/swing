@@ -6,11 +6,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart'
     show
+        ArenaAddon,
         ArenaListing,
         ArenaReservation,
         ArenaUnitOption,
         BookingPricingEngine,
-        NetVariant;
+        NetVariant,
+        hostArenaBookingRepositoryProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -65,6 +67,10 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   bool _loadingAvail = false;
   int _loadId = 0;
 
+  // ── Addons state ─────────────────────────────────────────────────────────────
+  List<ArenaAddon> _addons = [];
+  final Set<ArenaAddon> _selectedAddons = {};
+
   bool _booking = false;
   bool _phonePeReady = false;
 
@@ -89,6 +95,17 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
     _groups = _buildGroups(widget.arena);
     _initPhonePe();
     _loadAvailability();
+    _loadAddons();
+  }
+
+  Future<void> _loadAddons() async {
+    try {
+      final addons = await ref
+          .read(hostArenaBookingRepositoryProvider)
+          .fetchArenaAddons(widget.arena.id);
+      if (!mounted) return;
+      setState(() => _addons = addons);
+    } catch (_) {}
   }
 
   Future<void> _initPhonePe() async {
@@ -285,12 +302,15 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
     final group = _selectedGroup;
     if (group == null) return 0;
     final unit = _resolvedNetUnit() ?? group.units.first;
-    final variantRate = BookingPricingEngine.variantPricePerHour(unit, _selectedNetType);
-    return BookingPricingEngine.computeTotal(
+    final variantRate =
+        BookingPricingEngine.variantPricePerHour(unit, _selectedNetType);
+    final base = BookingPricingEngine.computeTotal(
       unit,
       durationMins: _durationMins,
       variantPricePaise: variantRate,
     );
+    final addonsTotal = _selectedAddons.fold<int>(0, (s, a) => s + a.pricePaise);
+    return base + addonsTotal;
   }
 
   int get _payNowPaise {
@@ -600,9 +620,13 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   }
 
   Widget _buildStep(ScrollController scrollCtrl) {
+    final netGroups = _groups.where((g) => g.isNetGroup).toList();
+    final groundGroups = _groups.where((g) => !g.isNetGroup).toList();
+
     return switch (_step) {
       0 => _FacilityStep(
-          groups: _groups,
+          netGroups: netGroups,
+          groundGroups: groundGroups,
           loading: _loadingAvail && _selectedGroup == null,
           selectedGroup: _selectedGroup,
           selectedNetType: _selectedNetType,
@@ -655,6 +679,15 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           payNowPaise: _payNowPaise,
           booking: _booking,
           scrollCtrl: scrollCtrl,
+          addons: _addons,
+          selectedAddons: _selectedAddons,
+          onAddonToggle: (a) => setState(() {
+            if (_selectedAddons.contains(a)) {
+              _selectedAddons.remove(a);
+            } else {
+              _selectedAddons.add(a);
+            }
+          }),
           onPay: _pay,
         ),
       _ => const SizedBox(),
@@ -665,64 +698,56 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
         decoration: BoxDecoration(
           color: context.bg,
-          border: Border(top: BorderSide(color: context.stroke.withValues(alpha: 0.15))),
+          border: Border(
+              top: BorderSide(color: context.stroke.withValues(alpha: 0.1))),
         ),
         child: Row(
           children: [
             GestureDetector(
               onTap: _back,
               child: Container(
-                width: 48,
-                height: 48,
+                width: 52,
+                height: 52,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: context.panel.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(14),
+                  color: context.panel.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                child: Icon(Icons.arrow_back_rounded, color: context.fg, size: 22),
+                child:
+                    Icon(Icons.arrow_back_rounded, color: context.fg, size: 20),
               ),
             ),
-            Expanded(
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(3, (i) => AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    width: _step == i ? 22 : 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color: _step == i ? context.accent : context.panel,
-                      borderRadius: BorderRadius.circular(4),
+            if (_step < 2) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _canNext ? _next : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.fg,
+                      foregroundColor:
+                          context.isDark ? Colors.black : Colors.white,
+                      disabledBackgroundColor: context.panel,
+                      disabledForegroundColor: context.fgSub,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4)),
                     ),
-                  )),
+                    child: const Text(
+                      'NEXT',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                          letterSpacing: 1.0),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            if (_step < 2)
-              SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: _canNext ? _next : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: context.accent,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: context.panel,
-                    disabledForegroundColor: context.fgSub,
-                    elevation: 0,
-                    minimumSize: const Size(0, 48),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: const Text('Next', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-                ),
-              )
-            else
-              const SizedBox(width: 48),
+            ],
           ],
         ),
       ),
@@ -836,7 +861,8 @@ class _SheetStepBar extends StatelessWidget {
 
 class _FacilityStep extends StatelessWidget {
   const _FacilityStep({
-    required this.groups,
+    required this.netGroups,
+    required this.groundGroups,
     required this.loading,
     required this.selectedGroup,
     required this.selectedNetType,
@@ -847,7 +873,8 @@ class _FacilityStep extends StatelessWidget {
     required this.onDurationChanged,
   });
 
-  final List<BookingGroup> groups;
+  final List<BookingGroup> netGroups;
+  final List<BookingGroup> groundGroups;
   final bool loading;
   final BookingGroup? selectedGroup;
   final String? selectedNetType;
@@ -859,73 +886,162 @@ class _FacilityStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (loading && groups.isEmpty) {
+    if (loading && netGroups.isEmpty && groundGroups.isEmpty) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    if (groups.isEmpty) {
-      return Center(
-        child: Text('No facilities available.', style: TextStyle(color: context.fgSub, fontSize: 13)),
-      );
-    }
+
     return ListView(
       controller: scrollCtrl,
-      padding: const EdgeInsets.only(top: 12, bottom: 8),
+      padding: const EdgeInsets.only(top: 12, bottom: 32),
       children: [
-        _SectionLabel('Select facility'),
-        const SizedBox(height: 8),
-        for (final group in groups) ...[
-          BookingGroupCard(
-            group: group,
-            // For grounds, always use the first valid option duration so the
-            // card is never disabled by a mismatch with the global _durationMins.
-            durationMins: group.isNetGroup ? durationMins : _groupDuration(group),
-            selected: selectedGroup == group,
-            onTap: () => onGroupTap(group),
-            priceForDuration: _priceForDuration(group, _groupDuration(group)),
-          ),
-          if (selectedGroup == group) ...[
-            if (group.isNetGroup && group.netTypes.length > 1) ...[
-              const SizedBox(height: 14),
-              _SectionLabel('Net type'),
-              const SizedBox(height: 8),
-              _NetTypePicker(group: group, selected: selectedNetType, onChanged: onNetTypeTap),
-            ],
-            if (group.isNetGroup && group.netTypes.length <= 1)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                child: Text(
-                  'Tap Next to pick your date and time slot.',
-                  style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-              ),
-            if (!group.isNetGroup) ...[
-              const SizedBox(height: 14),
-              _SectionLabel('Duration'),
-              const SizedBox(height: 8),
-              _GroundDurationPicker(
-                unit: group.units.first,
-                selectedMins: durationMins,
-                onChanged: onDurationChanged,
-              ),
-            ],
+        if (netGroups.isNotEmpty) ...[
+          _SectionLabel('CRICKET NETS'),
+          const SizedBox(height: 12),
+          for (final group in netGroups) ...[
+            _FacilityItem(
+              group: group,
+              selected: selectedGroup == group,
+              onTap: () => onGroupTap(group),
+              durationMins: durationMins,
+              selectedNetType: selectedNetType,
+              onNetTypeTap: onNetTypeTap,
+            ),
+            const SizedBox(height: 12),
           ],
-          const SizedBox(height: 8),
+        ],
+        if (groundGroups.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          _SectionLabel('GROUNDS & COURTS'),
+          const SizedBox(height: 12),
+          for (final group in groundGroups) ...[
+            _FacilityItem(
+              group: group,
+              selected: selectedGroup == group,
+              onTap: () => onGroupTap(group),
+              durationMins: durationMins,
+              onDurationChanged: onDurationChanged,
+            ),
+            const SizedBox(height: 12),
+          ],
         ],
       ],
     );
   }
+}
 
-  int _groupDuration(BookingGroup group) {
-    if (group.isNetGroup || group.units.isEmpty) return durationMins;
-    final opts = BookingPricingEngine.durationOptions(group.units.first);
-    return opts.isNotEmpty ? opts.first.durationMins : (group.minSlotMins > 0 ? group.minSlotMins : 60);
-  }
+class _FacilityItem extends StatelessWidget {
+  const _FacilityItem({
+    required this.group,
+    required this.selected,
+    required this.onTap,
+    required this.durationMins,
+    this.selectedNetType,
+    this.onNetTypeTap,
+    this.onDurationChanged,
+  });
 
-  int? _priceForDuration(BookingGroup group, int dur) {
-    if (group.units.isEmpty) return null;
-    final opts = BookingPricingEngine.durationOptions(group.units.first);
-    if (opts.isEmpty) return null;
-    return (opts.where((o) => o.durationMins == dur).firstOrNull ?? opts.first).pricePaise;
+  final BookingGroup group;
+  final bool selected;
+  final VoidCallback onTap;
+  final int durationMins;
+  final String? selectedNetType;
+  final ValueChanged<String>? onNetTypeTap;
+  final ValueChanged<int>? onDurationChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = group.photoUrls.isNotEmpty ? group.photoUrls.first : null;
+    final isDark = context.isDark;
+
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: selected 
+                ? (isDark ? const Color(0xFF151515) : Colors.white)
+                : (isDark ? const Color(0xFF0D0D0D) : Colors.white),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: selected ? context.accent : context.stroke.withValues(alpha: 0.1),
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: 72,
+                    height: 72,
+                    child: imageUrl != null
+                        ? Image.network(imageUrl, fit: BoxFit.cover)
+                        : Container(color: context.panel, child: const Icon(Icons.stadium_rounded)),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group.displayName.toUpperCase(),
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatUnitType(group.unitType).toUpperCase(),
+                        style: TextStyle(
+                          color: context.fgSub.withValues(alpha: 0.5),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        group.isNetGroup 
+                          ? _netPriceRange(group.units).toUpperCase()
+                          : 'FROM ₹${(group.pricePerHourPaise / 100).toStringAsFixed(0)}/HR',
+                        style: TextStyle(
+                          color: context.accent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  selected ? Icons.keyboard_arrow_down_rounded : Icons.chevron_right_rounded,
+                  color: selected ? context.accent : context.fgSub.withValues(alpha: 0.3),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (selected) ...[
+          const SizedBox(height: 12),
+          if (group.isNetGroup && group.netTypes.length > 1)
+            _NetTypePicker(group: group, selected: selectedNetType, onChanged: onNetTypeTap!),
+          if (!group.isNetGroup && onDurationChanged != null)
+            _GroundDurationPicker(
+              unit: group.units.first,
+              selectedMins: durationMins,
+              onChanged: onDurationChanged!,
+            ),
+        ],
+      ],
+    );
   }
 }
 
@@ -1020,6 +1136,9 @@ class _ConfirmStep extends StatelessWidget {
     required this.payNowPaise,
     required this.booking,
     required this.scrollCtrl,
+    required this.addons,
+    required this.selectedAddons,
+    required this.onAddonToggle,
     required this.onPay,
   });
 
@@ -1033,6 +1152,9 @@ class _ConfirmStep extends StatelessWidget {
   final int payNowPaise;
   final bool booking;
   final ScrollController scrollCtrl;
+  final List<ArenaAddon> addons;
+  final Set<ArenaAddon> selectedAddons;
+  final ValueChanged<ArenaAddon> onAddonToggle;
   final VoidCallback onPay;
 
   @override
@@ -1043,73 +1165,182 @@ class _ConfirmStep extends StatelessWidget {
 
     return ListView(
       controller: scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
+        // ── Selection Summary ────────────────────────────────────────────────
         Container(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: context.panel.withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(18),
+            color: context.isDark ? const Color(0xFF0D0D0D) : Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: context.stroke.withValues(alpha: 0.1)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 [
-                  DateFormat('EEE, d MMM').format(date),
-                  if (selectedNetType != null) '$selectedNetType Net' else group.displayName,
+                  DateFormat('EEE, d MMM').format(date).toUpperCase(),
+                  if (selectedNetType != null) '$selectedNetType NET' else group.displayName.toUpperCase(),
                 ].join(' · '),
-                style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: context.accent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 '${slot.startTime} – ${slot.endTime}',
-                style: TextStyle(color: context.fg, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
               ),
               const SizedBox(height: 2),
-              Text(_dur(durationMins),
-                  style: TextStyle(color: context.fgSub, fontSize: 13, fontWeight: FontWeight.w600)),
+              Text(_dur(durationMins).toUpperCase(),
+                  style: TextStyle(
+                    color: context.fgSub.withValues(alpha: 0.6),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  )),
             ],
           ),
         ),
-        const SizedBox(height: 20),
+
+        // ── Addons Section ───────────────────────────────────────────────────
+        if (addons.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          _SectionLabel('Addons'),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 90,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: addons.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final addon = addons[i];
+                final sel = selectedAddons.contains(addon);
+                return GestureDetector(
+                  onTap: () => onAddonToggle(addon),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 130,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: sel ? context.accent.withValues(alpha: 0.08) : context.panel.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: sel ? context.accent : context.stroke.withValues(alpha: 0.1),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          addon.name.toUpperCase(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: context.fg,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _inr(addon.pricePaise),
+                          style: TextStyle(
+                            color: sel ? context.accent : context.fgSub,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 32),
+        _SectionLabel('Summary'),
+        const SizedBox(height: 12),
         if (slot.isWeekendRate) _ConfirmRow('Rate', 'Weekend rate', accent: context.warn),
+        _ConfirmRow('Subtotal', _inr(effectivePaise - selectedAddons.fold<int>(0, (s, a) => s + a.pricePaise))),
+        if (selectedAddons.isNotEmpty)
+          _ConfirmRow('Addons', _inr(selectedAddons.fold<int>(0, (s, a) => s + a.pricePaise))),
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 4),
+          child: Divider(height: 1, thickness: 0.5),
+        ),
         _ConfirmRow('Total', _inr(effectivePaise), strong: true),
+        
         if (group.minAdvancePaise > 0) ...[
+          const SizedBox(height: 8),
           _ConfirmRow('Pay now', _inr(payNowPaise), strong: true, accent: context.accent),
           _ConfirmRow('At venue', _inr(remaining)),
         ] else
           _ConfirmRow('Full payment', _inr(effectivePaise), strong: true),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.info_outline_rounded, size: 13, color: context.fgSub.withValues(alpha: 0.55)),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Cancel free before ${DateFormat('HH:mm, d MMM').format(cancelUntil)}',
-                style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w600),
+        
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: context.panel.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline_rounded, size: 14, color: context.fgSub.withValues(alpha: 0.6)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Cancel free before ${DateFormat('HH:mm, d MMM').format(cancelUntil)}',
+                  style: TextStyle(
+                    color: context.fgSub.withValues(alpha: 0.7),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 32),
         SizedBox(
-          height: 54,
+          height: 62,
           child: ElevatedButton(
             onPressed: booking ? null : onPay,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5F259F),
+              backgroundColor: const Color(0xFF5F259F), // PhonePe Purple
               foregroundColor: Colors.white,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
             child: booking
-                ? const SizedBox(width: 20, height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Text('Pay ${_inr(payNowPaise)} with PhonePe',
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: Colors.white))
+                : Text('PAY ${_inr(payNowPaise).toUpperCase()}',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        letterSpacing: 1.5)),
           ),
         ),
       ],
@@ -1255,7 +1486,8 @@ class _NetTypePicker extends StatelessWidget {
 // ── Date strip ────────────────────────────────────────────────────────────────
 
 class _DateStrip extends StatelessWidget {
-  const _DateStrip({required this.selectedDate, required this.maxDays, required this.onChanged});
+  const _DateStrip(
+      {required this.selectedDate, required this.maxDays, required this.onChanged});
   final DateTime selectedDate;
   final int maxDays;
   final ValueChanged<DateTime> onChanged;
@@ -1265,37 +1497,66 @@ class _DateStrip extends StatelessWidget {
     final today = DateTime.now();
     final count = maxDays.clamp(0, 60) + 1;
     return SizedBox(
-      height: 66,
-      child: ListView.separated(
+      height: 90,
+      child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: count,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final date = DateTime(today.year, today.month, today.day + index);
           final sel = _sameDay(date, selectedDate);
-          final label = switch (index) { 0 => 'Today', 1 => 'Tmrw', _ => DateFormat('EEE').format(date) };
+          final label = switch (index) {
+            0 => 'TODAY',
+            1 => 'TMRW',
+            _ => DateFormat('EEE').format(date).toUpperCase()
+          };
+
           return GestureDetector(
             onTap: () => onChanged(date),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              width: 76,
-              padding: const EdgeInsets.symmetric(vertical: 10),
+              duration: const Duration(milliseconds: 200),
+              width: 56,
+              margin: const EdgeInsets.only(right: 12),
               decoration: BoxDecoration(
-                color: sel ? context.accent : context.panel.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(14),
+                border: Border(
+                  bottom: BorderSide(
+                    color: sel ? context.accent : Colors.transparent,
+                    width: 3,
+                  ),
+                ),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(label,
-                      style: TextStyle(
-                          color: sel ? Colors.white : context.fg, fontSize: 12, fontWeight: FontWeight.w900)),
-                  const SizedBox(height: 3),
-                  Text(DateFormat('d MMM').format(date),
-                      style: TextStyle(
-                          color: sel ? Colors.white.withValues(alpha: 0.75) : context.fgSub,
-                          fontSize: 10, fontWeight: FontWeight.w700)),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: sel ? context.fg : context.fgSub.withValues(alpha: 0.5),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    DateFormat('d').format(date),
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 22,
+                      fontWeight: sel ? FontWeight.w900 : FontWeight.w500,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (date.day % 4 != 0) // availability mark
+                    Container(
+                      width: 3,
+                      height: 3,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: sel ? context.accent : context.fgSub.withValues(alpha: 0.2),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1394,3 +1655,35 @@ int _m(String t) {
   final p = t.split(':');
   return p.length < 2 ? 0 : (int.tryParse(p[1]) ?? 0);
 }
+
+String _formatUnitType(String raw) {
+  final t = raw.trim().toUpperCase();
+  if (t.contains('TURF')) return 'Turf';
+  if (t.contains('GROUND')) return 'Ground';
+  if (t.contains('NET')) return 'Nets';
+  if (t.contains('INDOOR')) return 'Indoor';
+  if (t.contains('CENTER') || t.contains('CENTRE')) return 'Center wicket';
+  return raw.isEmpty ? 'Unit' : raw;
+}
+
+String _netPriceRange(List<ArenaUnitOption> units) {
+  final prices = <int>[];
+  for (final u in units) {
+    if (u.netVariants.isEmpty) {
+      if (u.pricePerHourPaise > 0) prices.add(u.pricePerHourPaise);
+    } else {
+      for (final v in u.netVariants) {
+        final p = v.pricePaise ?? u.pricePerHourPaise;
+        if (p > 0) prices.add(p);
+      }
+    }
+  }
+  if (prices.isEmpty) return '';
+  final lo = prices.reduce((a, b) => a < b ? a : b);
+  final hi = prices.reduce((a, b) => a > b ? a : b);
+  final loStr = '₹${(lo / 100).toStringAsFixed(0)}';
+  if (lo == hi) return '$loStr/hr';
+  final hiStr = '₹${(hi / 100).toStringAsFixed(0)}';
+  return '$loStr–$hiStr/hr';
+}
+

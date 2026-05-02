@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';
@@ -25,7 +26,15 @@ class MatchmakingRepository {
       },
     );
     final data = _unwrap(resp.data);
-    final raw = ((data['grounds'] as List?) ?? [])
+    final rawList = (data['grounds'] as List?) ?? [];
+    debugPrint('[MM] ── searchGrounds: format=$format date=$date ──');
+    debugPrint('[MM] raw unit entries: ${rawList.length}');
+    for (final g in rawList.whereType<Map<String, dynamic>>()) {
+      final slots = (g['slots'] as List?) ?? [];
+      final times = slots.whereType<Map<String, dynamic>>().map((s) => s['time']).toList();
+      debugPrint('[MM] unit=${g['unitId']} arena="${g['name']}" slots(${times.length}): $times');
+    }
+    final raw = rawList
         .whereType<Map<String, dynamic>>()
         .map(MmGround.fromJson)
         .toList();
@@ -48,6 +57,7 @@ class MatchmakingRepository {
           id: existing.id,
           name: existing.name,
           area: existing.area,
+          photoUrl: existing.photoUrl,
           slots: merged,
         );
       }

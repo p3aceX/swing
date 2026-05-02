@@ -197,18 +197,24 @@ class _BookingTabState extends ConsumerState<BookingTab> {
                       ? const _FeedbackState(
                           message: 'COMING SOON',
                         )
-                      : ListView.builder(
-                          physics: const BouncingScrollPhysics(),
-                          padding: EdgeInsets.fromLTRB(20, 8, 20, 140 + MediaQuery.of(context).padding.bottom),
-                          itemCount: _visibleArenas.length,
-                          itemBuilder: (context, i) {
-                            final arena = _visibleArenas[i];
-                            return _ArenaCard(
-                              arena: arena,
-                              distanceKm: _calculateDistance(
-                                  arena.latitude, arena.longitude),
-                            );
-                          },
+                      : RefreshIndicator(
+                          onRefresh: _loadArenas,
+                          color: context.accent,
+                          backgroundColor: context.isDark ? Colors.black : Colors.white,
+                          child: ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(
+                                parent: BouncingScrollPhysics()),
+                            padding: EdgeInsets.fromLTRB(20, 8, 20, 140 + MediaQuery.of(context).padding.bottom),
+                            itemCount: _visibleArenas.length,
+                            itemBuilder: (context, i) {
+                              final arena = _visibleArenas[i];
+                              return _ArenaCard(
+                                arena: arena,
+                                distanceKm: _calculateDistance(
+                                    arena.latitude, arena.longitude),
+                              );
+                            },
+                          ),
                         ),
         ),
       ],

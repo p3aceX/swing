@@ -7,12 +7,16 @@ class MmTeam {
     required this.id,
     required this.name,
     required this.ageGroupLabel,
+    this.logoUrl,
+    this.memberCount = 0,
     this.matchesPlayed = 0,
   });
 
   final String id;
   final String name;
   final String ageGroupLabel;
+  final String? logoUrl;
+  final int memberCount;
   final int matchesPlayed;
 
   static MmTeam fromPlayerTeam(PlayerTeam t) {
@@ -26,7 +30,13 @@ class MmTeam {
       _ when type.contains('VETERAN') => 'Veterans',
       _ => 'Open',
     };
-    return MmTeam(id: t.id, name: t.name, ageGroupLabel: ageGroup);
+    return MmTeam(
+      id: t.id,
+      name: t.name,
+      ageGroupLabel: ageGroup,
+      logoUrl: t.logoUrl,
+      memberCount: t.members.length,
+    );
   }
 }
 
@@ -71,11 +81,13 @@ class MmGround {
     required this.name,
     required this.area,
     required this.slots,
+    this.photoUrl,
   });
 
   final String id;
   final String name;
   final String area;
+  final String? photoUrl;
   final List<MmSlot> slots;
 
   factory MmGround.fromJson(Map<String, dynamic> j) {
@@ -84,6 +96,7 @@ class MmGround {
       id: j['id'] as String,
       name: j['name'] as String,
       area: (j['area'] as String?) ?? '',
+      photoUrl: j['photoUrl'] as String?,
       slots: ((j['slots'] as List?) ?? [])
           .whereType<Map<String, dynamic>>()
           .map((s) => MmSlot.fromJson(s, fallbackUnitId: unitId))
