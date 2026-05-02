@@ -147,7 +147,7 @@ export class MatchmakingService {
 
       // Find consecutive runs of free slots whose combined duration >= match duration
       const slotsNeeded = Math.ceil(duration / step)
-      const slots: Array<{ time: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
+      const slots: Array<{ time: string; endTime: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
 
       for (let i = 0; i <= freeSlots.length - slotsNeeded; i++) {
         let consecutive = true
