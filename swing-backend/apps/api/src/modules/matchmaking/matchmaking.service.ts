@@ -126,8 +126,7 @@ export class MatchmakingService {
     for (const unit of units) {
       const open = (unit.openTime || unit.arena.openTime || '06:00')
       const close = (unit.closeTime || unit.arena.closeTime || '22:00')
-      const step = unit.minSlotMins > 0 ? unit.minSlotMins : 60
-      const starts = this.generateStartSlots(open, close, step, duration, this.isToday(input.date))
+      const starts = this.generateStartSlots(open, close, 60, duration, this.isToday(input.date))
 
       const busy = bookingsByUnit.get(unit.id) ?? []
       const slots: Array<{ time: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
