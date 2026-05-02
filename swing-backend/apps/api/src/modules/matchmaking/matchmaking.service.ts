@@ -163,6 +163,7 @@ export class MatchmakingService {
         const total = Math.round((unit.pricePerHourPaise * duration) / 60)
         slots.push({
           time: startTime,
+          endTime: this.minutesToTime(this.timeToMinutes(startTime) + duration),
           unitId: unit.id,
           pricePerTeam: Math.floor(total / 2),
           hasOpponent: opponentSet.has(`${unit.id}:${startTime}`),
