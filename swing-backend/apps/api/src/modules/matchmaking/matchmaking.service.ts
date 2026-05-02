@@ -8,7 +8,7 @@ const DEFAULT_MATCH_COST_PER_PLAYER_PAISE = 45000
 const LOBBY_EXPIRY_HOURS = 24
 const MATCH_CONFIRM_MINUTES = 15
 
-export type MatchmakingFormat = 'T10' | 'T20' | '30-over'
+export type MatchmakingFormat = 'T10' | 'T20' | 'ODI' | 'Test' | 'Custom'
 
 let _razorpay: Razorpay | null = null
 function getRazorpay() {
@@ -980,7 +980,9 @@ export class MatchmakingService {
   private formatDurationMins(format: MatchmakingFormat) {
     if (format === 'T10') return 90
     if (format === 'T20') return 180
-    return 240
+    if (format === 'ODI') return 480   // ~8h for 50-over match
+    if (format === 'Test') return 360  // 6h per day session
+    return 240                          // Custom: 4h default
   }
 
   private startOfDay(dateStr: string) {
