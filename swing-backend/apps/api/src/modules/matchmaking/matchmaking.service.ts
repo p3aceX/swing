@@ -1,4 +1,4 @@
-import { prisma } from '@swing/db'
+import { prisma, FacilityUnitType, Prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import Razorpay from 'razorpay'
 
@@ -56,9 +56,10 @@ export class MatchmakingService {
     const duration = this.formatDurationMins(input.format)
     const query = (input.q ?? '').trim()
 
-    const GROUND_UNIT_TYPES = ['FULL_GROUND', 'HALF_GROUND', 'TURF', 'MULTI_SPORT', 'OTHER']
+    const GROUND_UNIT_TYPES: FacilityUnitType[] = ['FULL_GROUND', 'HALF_GROUND', 'TURF', 'MULTI_SPORT', 'OTHER']
+    type UnitWithArena = Prisma.ArenaUnitGetPayload<{ include: { arena: true } }>
 
-    const units = await prisma.arenaUnit.findMany({
+    const units: UnitWithArena[] = await prisma.arenaUnit.findMany({
       where: {
         isActive: true,
         unitType: { in: GROUND_UNIT_TYPES },
