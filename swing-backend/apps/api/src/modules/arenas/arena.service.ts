@@ -726,11 +726,15 @@ export class ArenaService {
 
     // Build Redis hold set for all unit+start combinations in one batch call
     const slotsDateStr = `${bookingDate.getUTCFullYear()}-${String(bookingDate.getUTCMonth() + 1).padStart(2, '0')}-${String(bookingDate.getUTCDate()).padStart(2, '0')}`
+    const netUnitTypesSet = new Set(['CRICKET_NET', 'INDOOR_NET'])
     const playerHoldEntries: Array<{ unitId: string; date: string; startTime: string }> = []
     for (const u of allUnits) {
       const uOpen: string = (u as any).openTime || arena.openTime || '06:00'
       const uClose: string = (u as any).closeTime || arena.closeTime || '22:00'
-      const uStep: number = (u as any).slotIncrementMins || 60
+      // Net units use slotIncrementMins (multiple nets can overlap); single-capacity units step
+      // by durationMins so held-slot keys align with the non-overlapping slots we generate below
+      const isNet = netUnitTypesSet.has((u as any).unitType)
+      const uStep: number = isNet ? ((u as any).slotIncrementMins || 60) : durationMins
       const uOpenMins = this.timeToMinutes(uOpen)
       const uCloseMins = this.timeToMinutes(uClose)
       for (let cur = uOpenMins; cur < uCloseMins; cur += uStep) {
@@ -765,10 +769,10 @@ export class ArenaService {
       return !getRelatedIds(unit).some(rid => isWindowBusy(rid, startTime, endTime))
     }
 
-    const getPossibleStarts = (unit: any): string[] => {
+    const getPossibleStarts = (unit: any, stepOverride?: number): string[] => {
       const openTime = unit.openTime || arena.openTime || '06:00'
       const closeTime = unit.closeTime || arena.closeTime || '22:00'
-      const step = unit.slotIncrementMins || 60
+      const step = stepOverride ?? unit.slotIncrementMins ?? 60
       const openMins = this.timeToMinutes(openTime)
       const closeMins = this.timeToMinutes(closeTime)
       const unitLeadMins = unit.bufferMins ?? leadTimeMins
@@ -790,9 +794,8 @@ export class ArenaService {
       return Math.round(base * mult)
     }
 
-    const netUnitTypes = ['CRICKET_NET', 'INDOOR_NET']
-    const netUnits = allUnits.filter((u: any) => netUnitTypes.includes(u.unitType))
-    const nonNetUnits = allUnits.filter((u: any) => !netUnitTypes.includes(u.unitType))
+    const netUnits = allUnits.filter((u: any) => netUnitTypesSet.has(u.unitType))
+    const nonNetUnits = allUnits.filter((u: any) => !netUnitTypesSet.has(u.unitType))
 
     const unitGroups: any[] = []
 
@@ -929,7 +932,8 @@ export class ArenaService {
         durationMins >= (unit.minSlotMins || 30) &&
         durationMins <= (unit.maxSlotMins || 480)
 
-      const possibleStarts = durationValid ? getPossibleStarts(unit) : []
+      // Single-capacity unit: step by durationMins so slots are sequential and non-overlapping
+      const possibleStarts = durationValid ? getPossibleStarts(unit, durationMins) : []
       const availableSlots: any[] = []
 
       for (const startTime of possibleStarts) {
