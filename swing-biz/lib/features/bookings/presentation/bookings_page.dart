@@ -782,23 +782,12 @@ class _ModernHeader extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    arena?.name ?? 'All Arenas',
+                    arena?.name ?? arenas.firstOrNull?.name ?? 'Bookings',
                     style: const TextStyle(
                       color: _text,
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    arena == null
-                        ? '${arenas.length} arenas aggregated'
-                        : 'Manage your arena bookings',
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -878,8 +867,6 @@ class _ModernHeader extends ConsumerWidget {
               ),
               title: const Text('All Arenas',
                   style: TextStyle(color: _text, fontWeight: FontWeight.w800)),
-              subtitle: Text('Aggregated view of ${arenas.length} locations',
-                  style: const TextStyle(fontSize: 12)),
               onTap: () {
                 ref.read(_selectedArenaProvider.notifier).state = null;
                 Navigator.pop(context);
