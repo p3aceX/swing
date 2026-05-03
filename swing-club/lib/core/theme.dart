@@ -49,7 +49,7 @@ class AppTheme {
         borderSide: const BorderSide(color: Colors.black, width: 1.5),
       ),
       filled: true,
-      fillColor: const Color(0xFFF0F0F0),
+      fillColor: const Color(0xFFECEAE3),
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       labelStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
       hintStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w400),
