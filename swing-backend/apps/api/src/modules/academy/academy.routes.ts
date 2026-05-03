@@ -130,8 +130,8 @@ export async function academyRoutes(app: FastifyInstance) {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
     const q = z.object({
-      from: z.string().datetime().optional(),
-      to: z.string().datetime().optional(),
+      from: z.string().optional(),
+      to: z.string().optional(),
       batchId: z.string().optional(),
     }).parse(request.query)
     return reply.send({ success: true, data: await svc.getSessions(id, user.userId, q) })

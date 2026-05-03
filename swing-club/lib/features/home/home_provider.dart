@@ -31,28 +31,37 @@ class HomeNotifier extends AsyncNotifier<HomeData> {
     final api = ref.read(apiClientProvider);
     final id = academyState.academyId;
 
-    final today = DateTime.now();
-    final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final now   = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day).toIso8601String();
+    final end   = DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
 
-    final results = await Future.wait([
-      api.get('/academy/my'),
-      api.get('/academy/$id/sessions', params: {'from': todayStr, 'to': todayStr}),
-      api.get('/academy/$id/fee-payments', params: {'status': 'PENDING', 'limit': 1}),
-    ]);
-
-    final academyData = results[0].data['data'] as Map<String, dynamic>;
-    final sessionsRaw = results[1].data['data'];
-    final feesRaw = results[2].data['data'];
-
-    final sessions = sessionsRaw is List
-        ? sessionsRaw.cast<Map<String, dynamic>>()
-        : (sessionsRaw?['items'] as List? ?? []).cast<Map<String, dynamic>>();
-
+    List<Map<String, dynamic>> sessions = [];
     int pendingCount = 0;
-    if (feesRaw is Map && feesRaw['total'] != null) {
-      pendingCount = feesRaw['total'] as int;
-    } else if (feesRaw is List) {
-      pendingCount = feesRaw.length;
+    Map<String, dynamic> academyData = academyState.data;
+
+    try {
+      final results = await Future.wait([
+        api.get('/academy/my'),
+        api.get('/academy/$id/sessions', params: {'from': start, 'to': end}),
+        api.get('/academy/$id/fee-payments', params: {'limit': '1'}),
+      ]);
+
+      final raw = results[0].data['data'];
+      if (raw != null) academyData = Map<String, dynamic>.from(raw as Map);
+
+      final sessionsRaw = results[1].data['data'];
+      sessions = sessionsRaw is List
+          ? sessionsRaw.cast<Map<String, dynamic>>()
+          : (sessionsRaw?['items'] as List? ?? []).cast<Map<String, dynamic>>();
+
+      final feesRaw = results[2].data['data'];
+      if (feesRaw is Map && feesRaw['total'] != null) {
+        pendingCount = feesRaw['total'] as int;
+      } else if (feesRaw is List) {
+        pendingCount = feesRaw.length;
+      }
+    } catch (_) {
+      // Partial failure — show academy info with empty sessions/fees
     }
 
     return HomeData(
