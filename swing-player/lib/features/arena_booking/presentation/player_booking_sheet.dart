@@ -121,9 +121,12 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
       final repo = ref.read(arenaSlotsRepositoryProvider);
       final slots = await repo.getArenaSlots(widget.arena.id, _selectedDate, 60);
       if (!mounted) return;
+      debugPrint('[PKG] unitGroups: ${slots.unitGroups.map((g) => '${g.groupKey} isNet=${g.isNetGroup} monthlyPassEnabled=${g.monthlyPassEnabled} monthlyPassRatePaise=${g.monthlyPassRatePaise} bulkDayRatePaise=${g.bulkDayRatePaise}').join(' | ')}');
       // Only set if no real availability load has happened yet
       if (_arenaSlots == null) setState(() => _arenaSlots = slots);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[PKG] _loadUnitGroupMeta error: $e');
+    }
   }
 
   Future<void> _initPhonePe() async {

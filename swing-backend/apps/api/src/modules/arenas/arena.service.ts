@@ -917,8 +917,8 @@ export class ArenaService {
         price8HrPaise: rep.price8HrPaise ?? null,
         weekendMultiplier: rep.weekendMultiplier,
         hasFloodlights: activeNetUnits.some((u: any) => u.hasFloodlights),
-        monthlyPassEnabled: activeNetUnits.some((u: any) => u.monthlyPassEnabled),
-        monthlyPassRatePaise: Math.min(...activeNetUnits.map((u: any) => u.monthlyPassRatePaise ?? Infinity).filter((v: number) => v !== Infinity)) || null,
+        monthlyPassEnabled: netUnits.some((u: any) => u.monthlyPassEnabled),
+        monthlyPassRatePaise: (() => { const rates = netUnits.map((u: any) => u.monthlyPassRatePaise).filter((v: any) => v != null && Number(v) > 0); return rates.length > 0 ? Math.min(...rates.map(Number)) : null })(),
         availableSlots,
       })
     }
