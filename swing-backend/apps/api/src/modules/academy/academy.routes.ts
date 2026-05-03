@@ -79,6 +79,23 @@ export async function academyRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.listBatches(id) })
   })
 
+  app.get('/:id/batches/:batchId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, batchId } = request.params as { id: string; batchId: string }
+    return reply.send({ success: true, data: await svc.getBatchDetail(id, user.userId, batchId) })
+  })
+
+  app.get('/:id/batches/:batchId/schedules', auth, async (request, reply) => {
+    const { id, batchId } = request.params as { id: string; batchId: string }
+    return reply.send({ success: true, data: await svc.getBatchSchedules(id, batchId) })
+  })
+
+  app.get('/:id/coaches', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    return reply.send({ success: true, data: await svc.listCoaches(id, user.userId) })
+  })
+
   app.post('/:id/batches/:batchId/students', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id, batchId } = request.params as { id: string; batchId: string }

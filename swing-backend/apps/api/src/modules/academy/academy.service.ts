@@ -193,6 +193,79 @@ export class AcademyService {
     return this.attachFeeStructures(academyId, batches)
   }
 
+  async getBatchDetail(academyId: string, userId: string, batchId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const batch = await prisma.batch.findFirst({
+      where: { id: batchId, academyId },
+      include: {
+        schedules: { where: { isActive: true }, orderBy: { dayOfWeek: 'asc' } },
+        _count: { select: { enrollments: true } },
+        enrollments: {
+          where: { isActive: true },
+          include: {
+            playerProfile: {
+              include: { user: { select: { name: true, phone: true, avatarUrl: true } } },
+            },
+          },
+          orderBy: { enrolledAt: 'desc' },
+        },
+      },
+    })
+    if (!batch) throw Errors.notFound('Batch')
+
+    const coaches: any[] = []
+    if (batch.primaryCoachId) {
+      const coachLink = await prisma.academyCoach.findFirst({
+        where: { academyId, coachId: batch.primaryCoachId, isActive: true },
+        include: { coach: { include: { user: { select: { name: true, phone: true, avatarUrl: true } } } } },
+      })
+      if (coachLink) {
+        coaches.push({
+          id: coachLink.id,
+          isHeadCoach: coachLink.isHeadCoach,
+          coachProfileId: coachLink.coachId,
+          user: coachLink.coach.user,
+        })
+      }
+    }
+
+    const [withFees] = await this.attachFeeStructures(academyId, [batch])
+    return {
+      ...withFees,
+      coaches,
+      enrollments: batch.enrollments.map(e => ({
+        id: e.id,
+        enrollmentStatus: e.isTrial ? 'TRIAL' : 'ACTIVE',
+        feeStatus: e.feeStatus,
+        user: {
+          name: e.playerProfile.user.name,
+          phone: e.playerProfile.user.phone,
+          avatarUrl: e.playerProfile.user.avatarUrl,
+        },
+      })),
+    }
+  }
+
+  async getBatchSchedules(academyId: string, batchId: string) {
+    const batch = await prisma.batch.findFirst({ where: { id: batchId, academyId } })
+    if (!batch) throw Errors.notFound('Batch')
+    return prisma.batchSchedule.findMany({
+      where: { batchId, isActive: true },
+      orderBy: { dayOfWeek: 'asc' },
+    })
+  }
+
+  async listCoaches(academyId: string, userId: string) {
+    await this.verifyOwnership(academyId, userId)
+    return prisma.academyCoach.findMany({
+      where: { academyId, isActive: true },
+      include: {
+        coach: { include: { user: { select: { name: true, avatarUrl: true, phone: true } } } },
+      },
+      orderBy: { id: 'asc' },
+    })
+  }
+
   async updateBatch(academyId: string, userId: string, batchId: string, data: any) {
     await this.verifyOwnership(academyId, userId)
     const allowed = ['name', 'ageGroup', 'maxStudents', 'sport', 'description', 'isActive']

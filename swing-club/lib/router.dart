@@ -78,6 +78,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
 
+      // ── Batch detail / wizard (pushed, no shell) ─────────────────────────────
+      GoRoute(path: '/batches/new', builder: (_, _) => const BatchCreateWizard()),
+      GoRoute(
+        path: '/batches/:batchId',
+        builder: (_, state) => BatchDetailScreen(batchId: state.pathParameters['batchId']!),
+      ),
+
       // ── Drawer routes (pushed, no shell) ─────────────────────────────────────
       GoRoute(
         path: '/coaches',
@@ -115,17 +122,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           ]),
           // 1 — Batches
           StatefulShellBranch(routes: [
-            GoRoute(
-              path: '/batches',
-              builder: (_, _) => const BatchListScreen(),
-              routes: [
-                GoRoute(path: 'new', builder: (_, _) => const BatchCreateWizard()),
-                GoRoute(
-                  path: ':batchId',
-                  builder: (_, state) => BatchDetailScreen(batchId: state.pathParameters['batchId']!),
-                ),
-              ],
-            ),
+            GoRoute(path: '/batches', builder: (_, _) => const BatchListScreen()),
           ]),
           // 2 — Students
           StatefulShellBranch(routes: [
