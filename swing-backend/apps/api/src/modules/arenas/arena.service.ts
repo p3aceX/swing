@@ -228,7 +228,6 @@ export class ArenaService {
       },
       include: {
         units: {
-          where: { isActive: true },
           orderBy: { name: 'asc' },
           include: { addons: { where: { isAvailable: true }, orderBy: { name: 'asc' } } },
         },
@@ -702,7 +701,7 @@ export class ArenaService {
     const leadTimeMins = (arena as any).bufferMins ?? 30
 
     const allUnits: any[] = await (prisma.arenaUnit as any).findMany({
-      where: { arenaId, isActive: true },
+      where: { arenaId },
     })
     const allUnitIds = allUnits.map((u: any) => u.id)
 

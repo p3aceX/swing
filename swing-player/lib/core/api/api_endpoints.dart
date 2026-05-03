@@ -141,6 +141,7 @@ class ApiEndpoints {
   // Matchmaking (lobby-based)
   static const String matchmakingGrounds = '/matchmaking/grounds';
   static const String matchmakingLobbies = '/matchmaking/lobbies';
+  static const String matchmakingActiveLobby = '/matchmaking/lobbies/active';
   static String matchmakingLobby(String id) => '/matchmaking/lobbies/$id';
   static String matchmakingMatchConfirm(String id) =>
       '/matchmaking/matches/$id/confirm';

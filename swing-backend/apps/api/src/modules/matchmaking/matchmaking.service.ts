@@ -361,8 +361,14 @@ export class MatchmakingService {
     const arenasById = new Map(arenas.map((a) => [a.id, a]))
 
     const out = lobbiesAny
-      // owner-created lobbies (arenaId set) are visible to all players regardless of age
-      .filter((l) => l.arenaId != null || l.teamId == null || (callerAge ?? null) === ((ages.get(l.teamId) ?? null)))
+      .filter((l) => {
+        // Arena-owner lobbies are always visible
+        if (l.arenaId != null || l.teamId == null) return true
+        const lobbyAge = ages.get(l.teamId) ?? null
+        // Only filter by age group when both sides have an explicit group
+        if (callerAge == null || lobbyAge == null) return true
+        return callerAge === lobbyAge
+      })
       .map((l) => {
         const pick = l.picks[0]
         const unit = pick ? unitsById.get(pick.groundId) : null

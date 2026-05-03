@@ -88,6 +88,13 @@ class MatchmakingRepository {
     return MmCreateLobbyResult.fromJson(_unwrap(resp.data));
   }
 
+  Future<MmLobbyStatus?> getActiveLobby() async {
+    final resp = await _dio.get(ApiEndpoints.matchmakingActiveLobby);
+    final data = _unwrap(resp.data);
+    if (data.isEmpty || data['lobbyId'] == null) return null;
+    return MmLobbyStatus.fromJson(data);
+  }
+
   Future<MmLobbyStatus> getLobbyStatus(String lobbyId) async {
     final resp = await _dio.get(ApiEndpoints.matchmakingLobby(lobbyId));
     return MmLobbyStatus.fromJson(_unwrap(resp.data));
@@ -97,6 +104,7 @@ class MatchmakingRepository {
     String? date,
     String? format,
   }) async {
+    debugPrint('[OpenLobbies] GET ${ApiEndpoints.matchmakingLobbies} date=$date format=$format');
     final resp = await _dio.get(
       ApiEndpoints.matchmakingLobbies,
       queryParameters: {
@@ -105,10 +113,17 @@ class MatchmakingRepository {
       },
     );
     final data = _unwrap(resp.data);
-    return ((data['lobbies'] as List?) ?? [])
+    final rawList = (data['lobbies'] as List?) ?? [];
+    debugPrint('[OpenLobbies] raw lobbies count=${rawList.length}');
+    for (final l in rawList.whereType<Map<String, dynamic>>()) {
+      debugPrint('[OpenLobbies]   lobbyId=${l['lobbyId']} team=${l['teamName']} isArena=${l['isArenaLobby']} format=${l['format']} date=${l['date']} slot=${l['slotTime']}');
+    }
+    final lobbies = rawList
         .whereType<Map<String, dynamic>>()
         .map(MmOpenLobby.fromJson)
         .toList();
+    debugPrint('[OpenLobbies] parsed=${lobbies.length}');
+    return lobbies;
   }
 
   Future<({String status, String? bookingId})> confirmMatch(

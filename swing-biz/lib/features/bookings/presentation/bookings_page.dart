@@ -28,7 +28,7 @@ const _muted = Color(0xFF6B7280);
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
-final _selectedArenaProvider = StateProvider<String?>((ref) => null);
+final _selectedArenaProvider = StateProvider.autoDispose<String?>((ref) => null);
 
 final _bookingsProvider =
     FutureProvider.autoDispose<List<ArenaReservation>>((ref) async {
@@ -109,11 +109,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     final today = DateTime.now();
     final allBookingsAsync = ref.watch(_bookingsProvider);
 
-    final arenaId = widget.arena?.id ??
-        (widget.arenas.isNotEmpty ? widget.arenas.first.id : null);
-    final arenaName = widget.arena?.name ??
-        (widget.arenas.isNotEmpty ? widget.arenas.first.name : '');
-
     return Scaffold(
       backgroundColor: _bg,
       body: Column(
@@ -132,7 +127,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               duration: const Duration(milliseconds: 200),
               child: _tab == 0
                   ? _buildBookingsTab(context, today, allBookingsAsync)
-                  : _buildInvitationsTab(arenaId, arenaName),
+                  : _buildInvitationsTab(),
             ),
           ),
         ],
@@ -301,12 +296,12 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     );
   }
 
-  Widget _buildInvitationsTab(String? arenaId, String arenaName) {
-    if (arenaId == null) return const SizedBox.shrink();
+  Widget _buildInvitationsTab() {
+    final filtered =
+        widget.arena == null ? widget.arenas : [widget.arena!];
     return _InvitationsTab(
-      key: const ValueKey('invitations'),
-      arenaId: arenaId,
-      arenaName: arenaName,
+      key: ValueKey(widget.arena?.id ?? 'all'),
+      arenas: filtered,
     );
   }
 
@@ -494,61 +489,115 @@ class _BigTabHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final statusBarH = MediaQuery.of(context).padding.top;
+    final top = MediaQuery.of(context).padding.top;
     return Container(
-      color: _text,
+      color: _bg,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(height: statusBarH),
-          // Arena switcher row (only when multiple arenas)
-          if (arenas.length > 1)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: GestureDetector(
-                onTap: () => _showArenaPicker(context, ref),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.stadium_rounded,
-                        color: Colors.white60, size: 14),
-                    const SizedBox(width: 6),
-                    Text(
-                      arena?.name ?? arenas.first.name,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+          SizedBox(height: top + 16),
+
+          // Arena filter chips — All + individual arenas
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: arenas.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                if (i == 0) {
+                  final active = arena == null;
+                  return GestureDetector(
+                    onTap: () =>
+                        ref.read(_selectedArenaProvider.notifier).state = null,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: active ? _accent : _surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: active ? _accent : _border),
+                      ),
+                      child: Text(
+                        'All',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: active ? Colors.white : _muted,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.unfold_more_rounded,
-                        color: Colors.white38, size: 14),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 8),
-          // Big tab row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-            child: Row(
-              children: [
-                _BigTab(
-                  label: 'Bookings',
-                  active: selected == 0,
-                  onTap: () => onSelect(0),
-                ),
-                const SizedBox(width: 8),
-                _BigTab(
-                  label: 'Invitations',
-                  active: selected == 1,
-                  onTap: () => onSelect(1),
-                ),
-              ],
+                  );
+                }
+                final a = arenas[i - 1];
+                final active = a.id == arena?.id;
+                return GestureDetector(
+                  onTap: () =>
+                      ref.read(_selectedArenaProvider.notifier).state = a.id,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active ? _accent : _surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border:
+                          Border.all(color: active ? _accent : _border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.stadium_rounded,
+                            size: 13,
+                            color: active ? Colors.white : _muted),
+                        const SizedBox(width: 5),
+                        Text(
+                          a.name,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: active ? Colors.white : _muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 12),
+
+          // Bookings / Invitations tab bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Container(
+              height: 44,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(3),
+              child: Row(
+                children: [
+                  _BigTab(
+                    label: 'Bookings',
+                    active: selected == 0,
+                    onTap: () => onSelect(0),
+                  ),
+                  _BigTab(
+                    label: 'Invitations',
+                    active: selected == 1,
+                    onTap: () => onSelect(1),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -606,23 +655,25 @@ class _BigTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.white.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? _text : Colors.white60,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.2,
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: active ? _accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          alignment: Alignment.center,
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            style: TextStyle(
+              color: active ? Colors.white : _muted,
+              fontSize: 15,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+            child: Text(label),
           ),
         ),
       ),
@@ -635,65 +686,93 @@ class _BigTab extends StatelessWidget {
 class _InvitationsTab extends ConsumerWidget {
   const _InvitationsTab({
     super.key,
-    required this.arenaId,
-    required this.arenaName,
+    required this.arenas,
   });
-  final String arenaId;
-  final String arenaName;
+  final List<ArenaListing> arenas;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(arenaLobbiesProvider(arenaId));
-    return async.when(
-      loading: () => const Center(
-          child: CircularProgressIndicator(strokeWidth: 1.5, color: _accent)),
-      error: (_, __) => Center(
+    // Watch one provider per arena, combine results
+    final results = [
+      for (final a in arenas) (a, ref.watch(arenaLobbiesProvider(a.id)))
+    ];
+
+    final isLoading = results.any((r) => r.$2.isLoading);
+    final allErrored =
+        results.isNotEmpty && results.every((r) => r.$2.hasError);
+
+    if (isLoading) {
+      return const Center(
+          child: CircularProgressIndicator(strokeWidth: 1.5, color: _accent));
+    }
+    if (allErrored) {
+      debugPrint('[InvitationsTab] ERROR all arenas failed');
+      return Center(
         child: Text('Could not load invitations',
             style: TextStyle(color: _muted, fontSize: 13)),
-      ),
-      data: (lobbies) {
-        if (lobbies.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.sports_cricket_rounded,
-                    color: _muted.withValues(alpha: 0.4), size: 40),
-                const SizedBox(height: 12),
-                const Text(
-                  'No teams waiting to play',
-                  style: TextStyle(
-                      color: _muted,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Create an Invitation to attract teams',
-                  style: TextStyle(color: _muted, fontSize: 12),
-                ),
-              ],
+      );
+    }
+
+    // (lobby, arenaId, arenaName) tuples — dedup by lobbyId
+    final seen = <String>{};
+    final combined = [
+      for (final (arena, async) in results)
+        if (async.hasValue)
+          for (final lobby in async.value!)
+            if (seen.add(lobby.lobbyId)) (lobby, arena.id, arena.name),
+    ];
+
+    debugPrint('[InvitationsTab] total lobbies=${combined.length}');
+    for (final (l, aId, _) in combined) {
+      debugPrint('[InvitationsTab]   arenaId=$aId lobby=${l.lobbyId} team=${l.teamName}');
+    }
+
+    if (combined.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.sports_cricket_rounded,
+                color: _muted.withValues(alpha: 0.4), size: 40),
+            const SizedBox(height: 12),
+            const Text(
+              'No teams waiting to play',
+              style: TextStyle(
+                  color: _muted, fontSize: 14, fontWeight: FontWeight.w500),
             ),
-          );
+            const SizedBox(height: 4),
+            const Text(
+              'Create an Invitation to attract teams',
+              style: TextStyle(color: _muted, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      color: _accent,
+      backgroundColor: _surface,
+      onRefresh: () async {
+        for (final a in arenas) {
+          ref.invalidate(arenaLobbiesProvider(a.id));
         }
-        return RefreshIndicator(
-          color: _accent,
-          backgroundColor: _surface,
-          onRefresh: () async => ref.invalidate(arenaLobbiesProvider(arenaId)),
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            itemCount: lobbies.length,
-            separatorBuilder: (_, __) =>
-                Divider(height: 1, color: Colors.grey.shade100),
-            itemBuilder: (_, i) => _InvitationRow(
-              lobby: lobbies[i],
-              arenaId: arenaId,
-              arenaName: arenaName,
-              onAccepted: () => ref.invalidate(arenaLobbiesProvider(arenaId)),
-            ),
-          ),
-        );
       },
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        itemCount: combined.length,
+        separatorBuilder: (_, __) =>
+            Divider(height: 1, color: Colors.grey.shade100),
+        itemBuilder: (_, i) {
+          final (lobby, arenaId, arenaName) = combined[i];
+          return _InvitationRow(
+            lobby: lobby,
+            arenaId: arenaId,
+            arenaName: arenaName,
+            onAccepted: () => ref.invalidate(arenaLobbiesProvider(arenaId)),
+          );
+        },
+      ),
     );
   }
 }
@@ -742,6 +821,21 @@ class _InvitationRow extends StatelessWidget {
                         color: _muted.withValues(alpha: 0.7), fontSize: 11),
                   ),
                 ],
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(Icons.stadium_rounded,
+                        size: 11, color: _accent.withValues(alpha: 0.7)),
+                    const SizedBox(width: 3),
+                    Text(
+                      arenaName,
+                      style: TextStyle(
+                          color: _accent.withValues(alpha: 0.8),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

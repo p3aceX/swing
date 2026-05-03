@@ -65,7 +65,7 @@ class _CoachTile extends StatelessWidget {
           const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
         ],
       ),
-      onTap: () => context.push('/more/coaches/${coach['id']}'),
+      onTap: () => context.push('/coaches/${coach['id']}'),
     );
   }
 }

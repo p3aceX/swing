@@ -22,7 +22,7 @@ class AcademyNotifier extends AsyncNotifier<AcademyState> {
 
     final academy = Map<String, dynamic>.from(academies.first as Map);
     final academyId = academy['id'] as String;
-    await ref.read(tokenStorageProvider).saveAcademyId(academyId);
+    await ref.read(secureStorageProvider).saveAcademyId(academyId);
     return AcademyState(academyId: academyId, data: academy);
   }
 }

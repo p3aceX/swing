@@ -72,51 +72,115 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              children: [
-                const Icon(Icons.sports_cricket_rounded, size: 72, color: Color(0xFF0057C8)),
-                const SizedBox(height: 20),
-                Text(
-                  'Swing Club',
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text('Academy Management Suite',
-                    style: TextStyle(color: Colors.grey, fontSize: 15)),
-                const SizedBox(height: 56),
-                TextField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Mobile Number',
-                    hintText: '9958955622',
-                    prefixIcon: Icon(Icons.phone_iphone_outlined),
-                  ),
-                  onSubmitted: (_) => _handleContinue(),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _handleContinue,
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                        )
-                      : const Text('Get Started',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-              ],
+      body: Stack(
+        children: [
+          // Background accent
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withOpacity(0.05),
+                shape: BoxShape.circle,
+              ),
             ),
           ),
-        ),
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Image.asset(
+                      'asset/logolight.png',
+                      height: 120,
+                    ),
+                    const SizedBox(height: 48),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Welcome to\nSwing Academy',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900,
+                          height: 1.1,
+                          letterSpacing: -1,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Premium Academy Management',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 64),
+                    TextField(
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      decoration: InputDecoration(
+                        labelText: 'Mobile Number',
+                        hintText: '9958955622',
+                        prefixIcon: const Icon(Icons.phone_iphone_rounded),
+                        border: UnderlineInputBorder(
+                          borderRadius: BorderRadius.circular(0),
+                          borderSide: const BorderSide(color: Colors.black12),
+                        ),
+                        enabledBorder: UnderlineInputBorder(
+                          borderRadius: BorderRadius.circular(0),
+                          borderSide: const BorderSide(color: Colors.black12),
+                        ),
+                        focusedBorder: UnderlineInputBorder(
+                          borderRadius: BorderRadius.circular(0),
+                          borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
+                        ),
+                        filled: false,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onSubmitted: (_) => _handleContinue(),
+                    ),
+                    const SizedBox(height: 48),
+                    ElevatedButton(
+                      onPressed: _isLoading ? null : _handleContinue,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 60),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Text(
+                              'Continue',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                    ),
+                    const SizedBox(height: 32),
+                    const Text(
+                      'By continuing, you agree to our Terms and Privacy Policy',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

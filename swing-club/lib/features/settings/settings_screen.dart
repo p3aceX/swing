@@ -40,7 +40,7 @@ class SettingsScreen extends ConsumerWidget {
                   title: Text(academy['name'] as String? ?? '—'),
                   subtitle: Text(academy['city'] as String? ?? ''),
                   trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-                  onTap: () => context.push('/more/settings/profile'),
+                  onTap: () => context.push('/settings/profile'),
                 ),
               ]),
               const Divider(),

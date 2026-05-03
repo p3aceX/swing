@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/theme.dart';
 import '../../shared/widgets.dart';
 import 'home_provider.dart';
+
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -37,53 +37,62 @@ class _HomeBody extends StatelessWidget {
       onRefresh: onRefresh,
       child: CustomScrollView(
         slivers: [
-          SliverAppBar(
-            expandedHeight: 140,
-            pinned: true,
-            backgroundColor: AppTheme.deepBlue,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                color: AppTheme.deepBlue,
-                padding: const EdgeInsets.fromLTRB(20, 60, 20, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text(
-                      academy['name'] as String? ?? 'My Academy',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on_outlined, color: Colors.white70, size: 14),
-                        const SizedBox(width: 4),
-                        Text(
-                          academy['city'] as String? ?? '',
-                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              academy['name'] as String? ?? 'My Academy',
+                              style: const TextStyle(
+                                color: Color(0xFF071B3D),
+                                fontSize: 26,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, color: Colors.grey, size: 14),
+                                const SizedBox(width: 3),
+                                Text(
+                                  academy['city'] as String? ?? '',
+                                  style: const TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w500),
+                                ),
+                                if (academy['planTier'] != null) ...[
+                                  const SizedBox(width: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0057C8).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      academy['planTier'] as String,
+                                      style: const TextStyle(
+                                        color: Color(0xFF0057C8),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
                         ),
-                        if (academy['planTier'] != null) ...[
-                          const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.white24,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              academy['planTier'] as String,
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
@@ -117,7 +126,7 @@ class _HomeBody extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w500),
                     ),
                     trailing: TextButton(
-                      onPressed: () => context.go('/fees'),
+                      onPressed: () => context.go('/more/fees'),
                       child: const Text('View'),
                     ),
                   ),
@@ -145,49 +154,68 @@ class _StatsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
       child: Row(
         children: [
-          _StatTile(value: '$students', label: 'Students'),
-          _VerticalDivider(),
-          _StatTile(value: '$coaches', label: 'Coaches'),
-          _VerticalDivider(),
-          _StatTile(value: '$batches', label: 'Batches'),
+          _StatCard(value: '$students', label: 'Students', icon: Icons.people_rounded, color: const Color(0xFF0057C8)),
+          const SizedBox(width: 12),
+          _StatCard(value: '$coaches', label: 'Coaches', icon: Icons.sports_cricket_rounded, color: const Color(0xFF1B8A5A)),
+          const SizedBox(width: 12),
+          _StatCard(value: '$batches', label: 'Batches', icon: Icons.groups_rounded, color: const Color(0xFFD97706)),
         ],
       ),
     );
   }
 }
 
-class _VerticalDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) =>
-      const SizedBox(width: 1, height: 40, child: VerticalDivider());
-}
-
-class _StatTile extends StatelessWidget {
+class _StatCard extends StatelessWidget {
   final String value;
   final String label;
+  final IconData icon;
+  final Color color;
 
-  const _StatTile({required this.value, required this.label});
+  const _StatCard({required this.value, required this.label, required this.icon, required this.color});
 
   @override
-  Widget build(BuildContext context) => Expanded(
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE0DED6)),
+        ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 16, color: color),
+            ),
+            const SizedBox(height: 12),
             Text(
               value,
               style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.deepNavy,
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF071B3D),
+                letterSpacing: -0.5,
               ),
             ),
-            const SizedBox(height: 2),
-            Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
           ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _SectionHeader extends StatelessWidget {
@@ -198,23 +226,36 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
         child: Row(
           children: [
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            if (trailing != null) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.deepBlue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF071B3D),
+                  letterSpacing: -0.3,
                 ),
-                child: Text(trailing!,
-                    style: const TextStyle(
-                        fontSize: 12, color: AppTheme.deepBlue, fontWeight: FontWeight.w600)),
               ),
-            ],
+            ),
+            if (trailing != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0057C8).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  trailing!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF0057C8),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
           ],
         ),
       );
@@ -232,21 +273,47 @@ class _SessionTile extends StatelessWidget {
     final startTime = session['startTime'] as String? ?? '';
     final status = session['status'] as String? ?? '';
 
-    return Column(
-      children: [
-        ListTile(
-          title: Text(
-            batch['name'] as String? ?? session['sessionType'] as String? ?? 'Session',
-            style: const TextStyle(fontWeight: FontWeight.w500),
-          ),
-          subtitle: Text(
-            '${coach['name'] ?? 'Unassigned'} · $startTime',
-            style: const TextStyle(fontSize: 13),
-          ),
-          trailing: statusBadge(status),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE0DED6)),
         ),
-        const Divider(),
-      ],
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0057C8).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.sports_cricket_rounded, size: 20, color: Color(0xFF0057C8)),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    batch['name'] as String? ?? session['sessionType'] as String? ?? 'Session',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: Color(0xFF071B3D)),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${coach['name'] ?? 'Unassigned'} · $startTime',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+            statusBadge(status),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -255,25 +322,28 @@ class _QuickActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: Row(
         children: [
           _ActionChip(
-            icon: Icons.person_add_outlined,
+            icon: Icons.person_add_rounded,
             label: 'Add Student',
+            color: const Color(0xFF0057C8),
             onTap: () => context.go('/students'),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           _ActionChip(
-            icon: Icons.campaign_outlined,
+            icon: Icons.campaign_rounded,
             label: 'Announce',
-            onTap: () => context.go('/more/announcements/create'),
+            color: const Color(0xFF7C3AED),
+            onTap: () => context.go('/announcements/create'),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           _ActionChip(
-            icon: Icons.groups_outlined,
+            icon: Icons.groups_rounded,
             label: 'Batches',
-            onTap: () => context.go('/more/batches'),
+            color: const Color(0xFFD97706),
+            onTap: () => context.go('/batches'),
           ),
         ],
       ),
@@ -284,28 +354,38 @@ class _QuickActions extends StatelessWidget {
 class _ActionChip extends StatelessWidget {
   final IconData icon;
   final String label;
+  final Color color;
   final VoidCallback onTap;
 
-  const _ActionChip({required this.icon, required this.label, required this.onTap});
+  const _ActionChip({required this.icon, required this.label, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) => Expanded(
-        child: InkWell(
+        child: GestureDetector(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
+            padding: const EdgeInsets.symmetric(vertical: 16),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE0DED6)),
             ),
             child: Column(
               children: [
-                Icon(icon, size: 22, color: AppTheme.deepBlue),
-                const SizedBox(height: 6),
-                Text(label,
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-                    textAlign: TextAlign.center),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 20, color: color),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF071B3D)),
+                  textAlign: TextAlign.center,
+                ),
               ],
             ),
           ),

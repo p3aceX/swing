@@ -64,7 +64,7 @@ class _BatchTile extends StatelessWidget {
             .replaceAll(RegExp(r'^ · '), ''),
       ),
       trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-      onTap: () => context.push('/more/batches/${batch['id']}'),
+      onTap: () => context.push('/batches/${batch['id']}'),
     );
   }
 }

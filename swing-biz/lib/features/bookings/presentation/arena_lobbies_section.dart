@@ -78,13 +78,16 @@ final arenaLobbiesProvider =
     FutureProvider.family.autoDispose<List<ArenaLobby>, String>(
   (ref, arenaId) async {
     final dio = ref.watch(hostDioProvider);
+    debugPrint('[arenaLobbiesProvider] GET /matchmaking/lobbies?arenaId=$arenaId');
     final resp = await dio.get(
       '/matchmaking/lobbies',
       queryParameters: {'arenaId': arenaId},
     );
     final body = resp.data;
+    debugPrint('[arenaLobbiesProvider] raw response: $body');
     final data = (body is Map) ? (body['data'] ?? body) : body;
     final list = (data is Map) ? (data['lobbies'] as List?) : (data as List?);
+    debugPrint('[arenaLobbiesProvider] parsed list: $list');
     return (list ?? [])
         .whereType<Map<String, dynamic>>()
         .map(ArenaLobby.fromJson)

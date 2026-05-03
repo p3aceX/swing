@@ -125,34 +125,63 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Academy Onboarding')),
+      appBar: AppBar(
+        title: const Text('New Academy'),
+        centerTitle: true,
+      ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
         child: Form(
           key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Set up your academy', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Text('Provide details to register.', style: TextStyle(color: Colors.grey)),
-              const SizedBox(height: 32),
+              const Text(
+                'Let\'s build\nyour legacy.',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
+                  letterSpacing: -1,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Provide your academy details to get started.',
+                style: TextStyle(color: Colors.grey, fontSize: 16),
+              ),
+              const SizedBox(height: 48),
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
                   labelText: 'Owner Full Name',
-                  prefixIcon: Icon(Icons.person_outline),
+                  prefixIcon: const Icon(Icons.person_outline_rounded),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.black.withOpacity(0.05),
                 ),
                 validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               TextFormField(
                 controller: _addressController,
                 onChanged: _onAddressChanged,
+                style: const TextStyle(fontWeight: FontWeight.bold),
                 decoration: InputDecoration(
                   labelText: 'Academy Address',
                   prefixIcon: const Icon(Icons.location_on_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.black.withOpacity(0.05),
                   suffixIcon: _isSearching
                       ? const Padding(
                           padding: EdgeInsets.all(14),
@@ -168,40 +197,54 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
               ),
               if (_suggestions.isNotEmpty)
                 Container(
-                  margin: const EdgeInsets.only(top: 4),
+                  margin: const EdgeInsets.only(top: 8),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    border: Border.all(color: const Color(0xFFE0DED6)),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: ListView.separated(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _suggestions.length,
-                    separatorBuilder: (_, __) => const Divider(),
+                    separatorBuilder: (_, __) => Divider(color: Colors.black.withOpacity(0.05), height: 1),
                     itemBuilder: (_, i) {
                       final s = _suggestions[i] as Map<String, dynamic>;
                       return ListTile(
                         dense: true,
                         leading: const Icon(Icons.place_outlined, size: 18),
                         title: Text(s['description'] as String,
-                            style: const TextStyle(fontSize: 13)),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                         onTap: () => _selectPlace(s),
                       );
                     },
                   ),
                 ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 56),
               ElevatedButton(
                 onPressed: _isLoading ? null : _handleRegister,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 60),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
                 child: _isLoading
                     ? const SizedBox(
-                        height: 20,
-                        width: 20,
+                        height: 24,
+                        width: 24,
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
-                    : const Text('Continue to Verify',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : const Text(
+                        'Create Account',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
               ),
             ],
           ),

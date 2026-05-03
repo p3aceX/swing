@@ -26,15 +26,6 @@ class _SessionListScreenState extends ConsumerState<SessionListScreen> {
     final batchesState = ref.watch(batchesProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sessions'),
-        actions: [
-          TextButton(
-            onPressed: () => context.push('/sessions/report'),
-            child: const Text('Report'),
-          ),
-        ],
-      ),
       body: Column(
         children: [
           _FilterBar(
@@ -46,7 +37,7 @@ class _SessionListScreenState extends ConsumerState<SessionListScreen> {
             onToChanged: (d) => setState(() => _to = d),
             onBatchChanged: (id) => setState(() => _batchId = id),
           ),
-          const Divider(),
+          const Divider(height: 1),
           Expanded(
             child: sessionsState.when(
               loading: loadingBody,
@@ -57,14 +48,19 @@ class _SessionListScreenState extends ConsumerState<SessionListScreen> {
                   : RefreshIndicator(
                       onRefresh: () async => ref.invalidate(sessionsProvider(_filter)),
                       child: ListView.separated(
+                        padding: EdgeInsets.zero,
                         itemCount: sessions.length,
-                        separatorBuilder: (_, __) => const Divider(),
+                        separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (_, i) => _SessionTile(session: sessions[i]),
                       ),
                     ),
             ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => context.push('/sessions/report'),
+        child: const Icon(Icons.assessment_outlined),
       ),
     );
   }
@@ -93,34 +89,53 @@ class _FilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final fmt = DateFormat('d MMM');
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
         children: [
-          OutlinedButton.icon(
-            icon: const Icon(Icons.calendar_today_outlined, size: 15),
-            label: Text('${fmt.format(from)} – ${fmt.format(to)}',
-                style: const TextStyle(fontSize: 13)),
-            onPressed: () => _pickRange(context),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          Expanded(
+            child: InkWell(
+              onTap: () => _pickRange(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today_rounded, size: 16),
+                    const SizedBox(width: 8),
+                    Text('${fmt.format(from)} – ${fmt.format(to)}',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           if (batches.isNotEmpty)
             Expanded(
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String?>(
-                  value: batchId,
-                  hint: const Text('All Batches', style: TextStyle(fontSize: 13)),
-                  isDense: true,
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('All Batches')),
-                    ...batches.map((b) => DropdownMenuItem(
-                        value: b['id'] as String,
-                        child: Text(b['name'] as String? ?? ''))),
-                  ],
-                  onChanged: onBatchChanged,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String?>(
+                    value: batchId,
+                    hint: const Text('All Batches', style: TextStyle(fontSize: 13)),
+                    isDense: true,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('All Batches')),
+                      ...batches.map((b) => DropdownMenuItem(
+                          value: b['id'] as String,
+                          child: Text(b['name'] as String? ?? ''))),
+                    ],
+                    onChanged: onBatchChanged,
+                  ),
                 ),
               ),
             ),
@@ -164,11 +179,12 @@ class _SessionTile extends StatelessWidget {
     }
 
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       title: Text(
         batch['name'] as String? ?? session['sessionType'] as String? ?? 'Session',
-        style: const TextStyle(fontWeight: FontWeight.w500),
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
       ),
-      subtitle: Text('${coach['name'] ?? 'Unassigned'} · $dateLabel'),
+      subtitle: Text('${coach['name'] ?? 'Unassigned'} · $dateLabel', style: const TextStyle(fontSize: 13)),
       trailing: statusBadge(status),
       onTap: () => context.push('/sessions/${session['id']}'),
     );

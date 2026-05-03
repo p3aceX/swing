@@ -1,12 +1,12 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'constants.dart';
-import 'token_storage.dart';
+import 'secure_storage.dart';
 import '../providers/auth_provider.dart';
 
 class ApiClient {
   late final Dio _dio;
-  final TokenStorage _storage;
+  final SecureStorage _storage;
   final Ref _ref;
   bool _isRefreshing = false;
 
@@ -20,7 +20,7 @@ class ApiClient {
 
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) {
-        final token = _storage.accessToken;
+        final token = _storage.cachedAccessToken;
         if (token != null) options.headers['Authorization'] = 'Bearer $token';
         handler.next(options);
       },
@@ -28,14 +28,14 @@ class ApiClient {
         if (err.response?.statusCode == 401 && !_isRefreshing) {
           _isRefreshing = true;
           try {
-            final refresh = _storage.refreshToken;
+            final refresh = _storage.cachedRefreshToken;
             if (refresh != null) {
               final res = await Dio().post(
                 '$kBackendBaseUrl/auth/refresh',
                 data: {'refreshToken': refresh},
               );
               if (res.data['success'] == true) {
-                final newAccess = res.data['data']['accessToken'] as String;
+                final newAccess  = res.data['data']['accessToken'] as String;
                 final newRefresh = (res.data['data']['refreshToken'] as String?) ?? refresh;
                 await _storage.saveTokens(access: newAccess, refresh: newRefresh);
                 _ref.read(authProvider.notifier).updateTokens(newAccess, newRefresh);
@@ -73,6 +73,6 @@ class ApiClient {
 }
 
 final apiClientProvider = Provider<ApiClient>((ref) {
-  final storage = ref.read(tokenStorageProvider);
+  final storage = ref.read(secureStorageProvider);
   return ApiClient(storage, ref);
 });

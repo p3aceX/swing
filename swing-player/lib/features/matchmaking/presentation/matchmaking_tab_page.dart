@@ -99,6 +99,33 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   String get _dateStr => DateFormat('yyyy-MM-dd').format(_date);
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreActiveLobby());
+  }
+
+  Future<void> _restoreActiveLobby() async {
+    try {
+      final repo = ref.read(matchmakingRepositoryProvider);
+      final active = await repo.getActiveLobby();
+      if (active == null || !mounted) return;
+      debugPrint('[MM] restored lobby=${active.lobbyId} status=${active.status}');
+      setState(() {
+        _lobbyId = active.lobbyId;
+        if (active.status == 'matched' && active.match != null) {
+          _matchSummary = active.match;
+          _lobbyState = _LobbyState.matched;
+        } else {
+          _lobbyState = _LobbyState.searching;
+        }
+      });
+      if (_lobbyState == _LobbyState.searching) _startPolling();
+    } catch (e) {
+      debugPrint('[MM] restoreActiveLobby error: $e');
+    }
+  }
+
+  @override
   void dispose() {
     _pollTimer?.cancel();
     super.dispose();
@@ -353,9 +380,9 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
             child: IndexedStack(
               index: _tab,
               children: [
-                // Tab 0: Open
+                // Tab 0: Open — no date filter so all upcoming lobbies show
                 _OpenTab(
-                  query: (date: _dateStr, format: null),
+                  query: (date: null, format: null),
                   ownLobby: () {
                     if (_lobbyState != _LobbyState.searching ||
                         _lobbyId == null ||
@@ -465,7 +492,7 @@ class _TabLabel extends StatelessWidget {
 
 // ── Tab 0: Open ───────────────────────────────────────────────────────────────
 
-class _OpenTab extends ConsumerWidget {
+class _OpenTab extends ConsumerStatefulWidget {
   const _OpenTab({
     required this.query,
     required this.onCounter,
@@ -478,73 +505,217 @@ class _OpenTab extends ConsumerWidget {
   final VoidCallback? onLeave;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(mmOpenLobbiesProvider(query));
+  ConsumerState<_OpenTab> createState() => _OpenTabState();
+}
+
+class _OpenTabState extends ConsumerState<_OpenTab> {
+  String? _selectedDate;
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(mmOpenLobbiesProvider(widget.query));
     return async.when(
-      loading: () =>
-          const Center(child: CircularProgressIndicator(strokeWidth: 1.5)),
+      loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 1.5)),
       error: (_, __) => Center(
-        child: Text('Could not load open games',
-            style: TextStyle(color: context.fgSub, fontSize: 13)),
+        child: Text('Could not load open games', style: TextStyle(color: context.fgSub, fontSize: 13)),
       ),
       data: (lobbies) {
-        // Filter out own lobby from the API list (backend may or may not include it)
-        final others = ownLobby != null
-            ? lobbies
-                .where((l) => l.lobbyId != ownLobby!.lobbyId)
-                .toList()
-            : lobbies;
-
-        if (ownLobby == null && lobbies.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.sports_cricket_rounded,
-                    color: context.fgSub.withValues(alpha: 0.4), size: 40),
-                const SizedBox(height: 12),
-                Text(
-                  'No open games right now',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Post one in Find or send a Challenge',
-                  style: TextStyle(
-                    color: context.fgSub.withValues(alpha: 0.5),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          );
+        debugPrint('[OpenTab] total=${lobbies.length} ownLobby=${widget.ownLobby?.lobbyId}');
+        for (final l in lobbies) {
+          debugPrint('[OpenTab]   ${l.lobbyId} team=${l.teamName} isArena=${l.isArenaLobby} arena=${l.arenaName} date=${l.date} slot=${l.slotTime}');
         }
 
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        final others = widget.ownLobby != null
+            ? lobbies.where((l) => l.lobbyId != widget.ownLobby!.lobbyId).toList()
+            : lobbies;
+        debugPrint('[OpenTab] others=${others.length}');
+
+        // Group by date
+        final Map<String, List<MmOpenLobby>> byDate = {};
+        for (final l in others) {
+          (byDate[l.date] ??= []).add(l);
+        }
+
+        // Only show dates that have lobbies
+        final today = DateTime.now();
+        final todayStr = DateFormat('yyyy-MM-dd').format(today);
+        final sortedDates = (byDate.keys.toList()..sort())
+            .where((d) => d.compareTo(todayStr) >= 0)
+            .toList();
+
+        // Auto-select first available date; reset if selected date no longer has lobbies
+        final autoDate = sortedDates.isNotEmpty ? sortedDates.first : todayStr;
+        final selected = (_selectedDate != null && sortedDates.contains(_selectedDate))
+            ? _selectedDate!
+            : autoDate;
+        final filtered = byDate[selected] ?? [];
+
+        final totalCount = others.length;
+
+        return Column(
           children: [
-            if (ownLobby != null) ...[
-              _OpenSectionLabel(label: 'YOU'),
-              _OwnLobbyRow(lobby: ownLobby!, onLeave: onLeave),
-            ],
-            if (others.isNotEmpty) ...[
-              if (ownLobby != null) const SizedBox(height: 16),
-              _OpenSectionLabel(label: 'OTHERS'),
-              for (var i = 0; i < others.length; i++) ...[
-                if (i > 0)
-                  Container(
-                      height: 1,
-                      color: context.stroke.withValues(alpha: 0.3)),
-                _OpenLobbyRow(
-                  lobby: others[i],
-                  onCounter: () => onCounter(others[i]),
-                ),
-              ],
-            ],
+            // ── Date strip ──────────────────────────────────────────────────
+            Container(
+              color: context.bg,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Open Games',
+                          style: TextStyle(
+                            color: context.fg,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        if (totalCount > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: context.accent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$totalCount',
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (sortedDates.isNotEmpty) ...[
+                    SizedBox(
+                      height: 62,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                        itemCount: sortedDates.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) {
+                          final dateStr = sortedDates[i];
+                          final isSelected = dateStr == selected;
+                          final count = byDate[dateStr]!.length;
+                          final d = DateTime.tryParse(dateStr) ?? today;
+                          final isToday = dateStr == todayStr;
+                          final dayName = isToday ? 'Today' : DateFormat('EEE').format(d);
+                          return GestureDetector(
+                            onTap: () => setState(() => _selectedDate = dateStr),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              padding: const EdgeInsets.symmetric(horizontal: 14),
+                              decoration: BoxDecoration(
+                                color: isSelected ? context.accent : context.surf,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSelected ? context.accent : context.accent.withValues(alpha: 0.35),
+                                  width: isSelected ? 0 : 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        dayName,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSelected ? Colors.white.withValues(alpha: 0.8) : context.fgSub,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${d.day} ${DateFormat('MMM').format(d)}',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: isSelected ? Colors.white : context.fg,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    width: 20,
+                                    height: 20,
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? Colors.white.withValues(alpha: 0.25)
+                                          : context.success,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      '$count',
+                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Divider(height: 1, color: context.stroke.withValues(alpha: 0.5)),
+                  ],
+                ],
+              ),
+            ),
+
+            // ── Lobby list ──────────────────────────────────────────────────
+            Expanded(
+              child: (widget.ownLobby == null && filtered.isEmpty)
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.sports_cricket_rounded,
+                              color: context.fgSub.withValues(alpha: 0.3), size: 44),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No open games on this day',
+                            style: TextStyle(color: context.fgSub, fontSize: 14, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Try another date',
+                            style: TextStyle(color: context.fgSub.withValues(alpha: 0.5), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                      children: [
+                        if (widget.ownLobby != null) ...[
+                          _OpenSectionLabel(label: 'YOU'),
+                          _OwnLobbyRow(lobby: widget.ownLobby!, onLeave: widget.onLeave),
+                        ],
+                        if (filtered.isNotEmpty) ...[
+                          if (widget.ownLobby != null) const SizedBox(height: 16),
+                          _OpenSectionLabel(label: 'OTHERS · ${filtered.length}'),
+                          for (var i = 0; i < filtered.length; i++) ...[
+                            if (i > 0) Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
+                            _OpenLobbyRow(
+                              lobby: filtered[i],
+                              onCounter: () => widget.onCounter(filtered[i]),
+                            ),
+                          ],
+                        ],
+                      ],
+                    ),
+            ),
           ],
         );
       },
@@ -685,7 +856,7 @@ class _OpenLobbyRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -693,24 +864,50 @@ class _OpenLobbyRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  lobby.teamName,
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.2,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        lobby.teamName,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: context.panel,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        lobby.format,
+                        style: TextStyle(color: context.fg, fontSize: 10, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${lobby.ageGroup}  ·  ${lobby.format}  ·  ${lobby.groundName}  ·  ${lobby.displaySlot}  ·  ${lobby.dateLabel}',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
+                  '${lobby.displaySlot}${lobby.groundName.isNotEmpty ? '  ·  ${lobby.groundName}' : ''}',
+                  style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
                 ),
+                if (lobby.isArenaLobby && lobby.arenaName.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.stadium_rounded, size: 11, color: context.accent),
+                      const SizedBox(width: 3),
+                      Text(
+                        lobby.arenaName,
+                        style: TextStyle(color: context.accent, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -719,19 +916,14 @@ class _OpenLobbyRow extends StatelessWidget {
             onTap: onCounter,
             behavior: HitTestBehavior.opaque,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: context.panel,
+                color: context.accent,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                'Counter',
-                style: TextStyle(
-                  color: context.fg,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
+                lobby.isArenaLobby ? 'Book' : 'Counter',
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
               ),
             ),
           ),

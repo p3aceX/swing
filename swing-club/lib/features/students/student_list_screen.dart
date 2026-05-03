@@ -46,59 +46,73 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
     final state = ref.watch(studentsProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Students'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(100),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: TextField(
-                  decoration: const InputDecoration(
-                    hintText: 'Search students...',
-                    prefixIcon: Icon(Icons.search, size: 20),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+      body: Column(
+        children: [
+          Container(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: 'Search students...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: Colors.black.withOpacity(0.05),
+                    ),
+                    onChanged: (v) => setState(() => _search = v),
                   ),
-                  onChanged: (v) => setState(() => _search = v),
                 ),
-              ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: _filters
-                      .map((f) => Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: FilterChip(
-                              label: Text(f),
-                              selected: _filter == f,
-                              onSelected: (_) => setState(() => _filter = f),
-                            ),
-                          ))
-                      .toList(),
+                const SizedBox(height: 12),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: _filters
+                        .map((f) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(f),
+                                selected: _filter == f,
+                                onSelected: (_) => setState(() => _filter = f),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                showCheckmark: false,
+                              ),
+                            ))
+                        .toList(),
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      body: state.when(
-        loading: loadingBody,
-        error: (e, _) => errorBody(e, () => ref.invalidate(studentsProvider)),
-        data: (all) {
-          final students = _apply(all);
-          if (students.isEmpty) return emptyBody('No students found');
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(studentsProvider),
-            child: ListView.separated(
-              itemCount: students.length,
-              separatorBuilder: (_, __) => const Divider(),
-              itemBuilder: (_, i) => _StudentTile(student: students[i]),
+              ],
             ),
-          );
-        },
+          ),
+          Expanded(
+            child: state.when(
+              loading: loadingBody,
+              error: (e, _) => errorBody(e, () => ref.invalidate(studentsProvider)),
+              data: (all) {
+                final students = _apply(all);
+                if (students.isEmpty) return emptyBody('No students found');
+                return RefreshIndicator(
+                  onRefresh: () async => ref.invalidate(studentsProvider),
+                  child: ListView.separated(
+                    padding: EdgeInsets.zero,
+                    itemCount: students.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) => _StudentTile(student: students[i]),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => showModalBottomSheet(
@@ -127,9 +141,10 @@ class _StudentTile extends StatelessWidget {
     final enrollStatus = student['enrollmentStatus'] as String? ?? '';
 
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       title: Text(user['name'] as String? ?? '—',
-          style: const TextStyle(fontWeight: FontWeight.w500)),
-      subtitle: Text(batch['name'] as String? ?? '—'),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+      subtitle: Text(batch['name'] as String? ?? '—', style: const TextStyle(fontSize: 13)),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

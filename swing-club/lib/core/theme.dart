@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   static const deepBlue = Color(0xFF0057C8);
@@ -9,6 +10,7 @@ class AppTheme {
   static final ThemeData light = ThemeData(
     useMaterial3: true,
     scaffoldBackgroundColor: ivory,
+    textTheme: GoogleFonts.outfitTextTheme(),
     colorScheme: const ColorScheme.light(
       primary: deepBlue,
       onPrimary: white,
@@ -19,11 +21,13 @@ class AppTheme {
       backgroundColor: ivory,
       elevation: 0,
       scrolledUnderElevation: 0,
-      foregroundColor: deepNavy,
+      foregroundColor: Colors.black,
+      centerTitle: false,
       titleTextStyle: TextStyle(
-        color: deepNavy,
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
+        color: Colors.black,
+        fontSize: 20,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.5,
       ),
     ),
     dividerTheme: const DividerThemeData(
@@ -32,10 +36,23 @@ class AppTheme {
       space: 1,
     ),
     inputDecorationTheme: InputDecorationTheme(
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Colors.black, width: 1.5),
+      ),
       filled: true,
-      fillColor: white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      fillColor: const Color(0xFFF0F0F0),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      labelStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
+      hintStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w400),
     ),
     navigationBarTheme: const NavigationBarThemeData(
       backgroundColor: white,
@@ -46,11 +63,12 @@ class AppTheme {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: deepBlue,
-        foregroundColor: white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        minimumSize: const Size(double.infinity, 52),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        minimumSize: const Size(double.infinity, 56),
         elevation: 0,
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 0.5),
       ),
     ),
     chipTheme: ChipThemeData(

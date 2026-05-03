@@ -29,7 +29,7 @@ class AnnouncementListScreen extends ConsumerWidget {
               ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/more/announcements/create'),
+        onPressed: () => context.push('/announcements/create'),
         child: const Icon(Icons.add),
       ),
     );

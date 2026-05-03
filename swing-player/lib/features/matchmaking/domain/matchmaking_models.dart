@@ -143,6 +143,8 @@ class MmOpenLobby {
     required this.slotTime,
     required this.date,
     required this.daysFromNow,
+    this.isArenaLobby = false,
+    this.arenaName = '',
   });
 
   final String lobbyId;
@@ -150,9 +152,11 @@ class MmOpenLobby {
   final String ageGroup;
   final String format;
   final String groundName;
-  final String slotTime;   // "07:00"
-  final String date;       // "YYYY-MM-DD"
+  final String slotTime;
+  final String date;
   final int daysFromNow;
+  final bool isArenaLobby;
+  final String arenaName;
 
   String get displaySlot {
     try {
@@ -201,6 +205,8 @@ class MmOpenLobby {
       slotTime: (j['slotTime'] as String?) ?? '',
       date: date,
       daysFromNow: daysFromNow,
+      isArenaLobby: (j['isArenaLobby'] as bool?) ?? false,
+      arenaName: (j['arenaName'] as String?) ?? '',
     );
   }
 }
