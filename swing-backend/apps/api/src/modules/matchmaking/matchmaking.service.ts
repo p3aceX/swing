@@ -306,13 +306,14 @@ export class MatchmakingService {
       select: { id: true },
     })
     const mySet = new Set(myTeamIds.map((t) => t.id))
-    const date = input.date ? this.startOfDay(input.date) : this.startOfDay(new Date().toISOString().slice(0, 10))
+    const today = this.startOfDay(new Date().toISOString().slice(0, 10))
 
     const lobbies = await prisma.matchmakingLobby.findMany({
       where: {
         status: 'searching',
         expiresAt: { gt: new Date() },
-        date,
+        // if date given → exact match; otherwise show all upcoming lobbies from today
+        ...(input.date ? { date: this.startOfDay(input.date) } : { date: { gte: today } }),
         ...(input.format ? { format: input.format } : {}),
         ...(mySet.size > 0 ? { OR: [{ teamId: null }, { teamId: { notIn: Array.from(mySet) } }] } as any : {}),
       },
