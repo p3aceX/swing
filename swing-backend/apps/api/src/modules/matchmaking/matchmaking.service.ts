@@ -272,6 +272,22 @@ export class MatchmakingService {
     }
   }
 
+  async getMyActiveLobby(userId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const lobby = await prisma.matchmakingLobby.findFirst({
+      where: {
+        playerId: player.id,
+        status: { in: ['searching', 'matched'] },
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!lobby) return null
+    const out: any = { lobbyId: lobby.id, status: lobby.status }
+    if (lobby.matchId) out.match = await this.buildMatchSummary(lobby.matchId, lobby.id)
+    return out
+  }
+
   async assertLobbyOwnership(userId: string, lobbyId: string) {
     const player = await this.getPlayerProfile(userId)
     const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })

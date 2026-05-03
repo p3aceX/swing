@@ -47,6 +47,12 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data })
   })
 
+  app.get('/lobbies/active', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const data = await svc.getMyActiveLobby(user.userId)
+    return reply.send({ success: true, data })
+  })
+
   app.get('/lobbies/:lobbyId', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }
