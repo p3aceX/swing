@@ -314,7 +314,7 @@ export class MatchmakingService {
         expiresAt: { gt: new Date() },
         date,
         ...(input.format ? { format: input.format } : {}),
-        ...(mySet.size > 0 ? { teamId: { notIn: Array.from(mySet) } } : {}),
+        ...(mySet.size > 0 ? { OR: [{ teamId: null }, { teamId: { notIn: Array.from(mySet) } }] } as any : {}),
       },
       include: {
         team: true,
