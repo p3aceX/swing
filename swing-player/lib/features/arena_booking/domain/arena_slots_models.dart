@@ -88,6 +88,10 @@ class UnitGroupSlots {
     required this.weekendMultiplier,
     this.hasFloodlights,
     required this.availableSlots,
+    this.minBulkDays,
+    this.bulkDayRatePaise,
+    this.monthlyPassEnabled = false,
+    this.monthlyPassRatePaise,
   });
 
   final String groupKey, displayName, unitType;
@@ -102,6 +106,9 @@ class UnitGroupSlots {
   final double weekendMultiplier;
   final bool? hasFloodlights;
   final List<AvailableSlot> availableSlots;
+  final int? minBulkDays, bulkDayRatePaise;
+  final bool monthlyPassEnabled;
+  final int? monthlyPassRatePaise;
 
   bool get isNetGroup => netType != null || netTypes.isNotEmpty;
   bool get isFullyBooked => availableSlots.isEmpty;
@@ -134,6 +141,10 @@ class UnitGroupSlots {
             .whereType<Map>()
             .map((e) => AvailableSlot.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
+        minBulkDays: _intOrNull(j['minBulkDays']),
+        bulkDayRatePaise: _intOrNull(j['bulkDayRatePaise']),
+        monthlyPassEnabled: j['monthlyPassEnabled'] == true,
+        monthlyPassRatePaise: _intOrNull(j['monthlyPassRatePaise']),
       );
 }
 

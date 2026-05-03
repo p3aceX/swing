@@ -917,6 +917,8 @@ export class ArenaService {
         price8HrPaise: rep.price8HrPaise ?? null,
         weekendMultiplier: rep.weekendMultiplier,
         hasFloodlights: activeNetUnits.some((u: any) => u.hasFloodlights),
+        monthlyPassEnabled: activeNetUnits.some((u: any) => u.monthlyPassEnabled),
+        monthlyPassRatePaise: Math.min(...activeNetUnits.map((u: any) => u.monthlyPassRatePaise ?? Infinity).filter((v: number) => v !== Infinity)) || null,
         availableSlots,
       })
     }
@@ -968,6 +970,8 @@ export class ArenaService {
         price8HrPaise: unit.price8HrPaise ?? null,
         weekendMultiplier: unit.weekendMultiplier,
         hasFloodlights: unit.hasFloodlights,
+        minBulkDays: unit.minBulkDays ?? null,
+        bulkDayRatePaise: unit.bulkDayRatePaise ?? null,
         availableSlots,
       })
     }

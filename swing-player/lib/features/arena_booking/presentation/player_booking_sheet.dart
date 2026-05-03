@@ -8,10 +8,8 @@ import 'package:flutter_host_core/flutter_host_core.dart'
     show
         ArenaAddon,
         ArenaListing,
-        ArenaReservation,
         ArenaUnitOption,
         BookingPricingEngine,
-        NetVariant,
         hostArenaBookingRepositoryProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,10 +20,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../booking/domain/booking_models.dart';
 import '../data/arena_slots_repository.dart';
+import '../domain/arena_slots_models.dart';
 import '../domain/player_booking_types.dart';
 import 'widgets/duration_picker.dart';
 import 'widgets/slot_time_grid.dart';
-import 'widgets/unit_group_card.dart' show BookingGroupCard;
 
 const _kMerchantId = 'SU2507111540338505172019';
 const _kAppSchema = 'swingplayer';
@@ -63,9 +61,14 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   PlayerSlot? _selectedSlot;
 
   // ── Availability state ────────────────────────────────────────────────────────
-  List<ArenaReservation> _allBookings = [];
+  ArenaSlots? _arenaSlots;
   bool _loadingAvail = false;
   int _loadId = 0;
+
+  // ── Calendar state ────────────────────────────────────────────────────────────
+  final Map<String, int?> _dateFillLevel = {};
+  int _calendarLoadId = 0;
+  late DateTime _displayedMonth;
 
   // ── Addons state ─────────────────────────────────────────────────────────────
   List<ArenaAddon> _addons = [];
@@ -82,6 +85,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
     if (_step == 0) {
       if (_selectedGroup == null) return false;
       if (_isNets && (_selectedGroup!.netTypes.length > 1) && _selectedNetType == null) return false;
+      if (!_isNets && _durationMins <= 0) return false;
       return true;
     }
     if (_step == 1) return _selectedSlot != null;
@@ -92,10 +96,12 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   void initState() {
     super.initState();
     _selectedDate = DateTime.now();
+    _displayedMonth = DateTime(DateTime.now().year, DateTime.now().month);
     _groups = _buildGroups(widget.arena);
     _initPhonePe();
     _loadAvailability();
     _loadAddons();
+    _loadUnitGroupMeta();
   }
 
   Future<void> _loadAddons() async {
@@ -105,6 +111,18 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           .fetchArenaAddons(widget.arena.id);
       if (!mounted) return;
       setState(() => _addons = addons);
+    } catch (_) {}
+  }
+
+  // Loads booking context with a minimal duration just to get unit group metadata
+  // (package flags, rates) before the user selects a group/duration.
+  Future<void> _loadUnitGroupMeta() async {
+    try {
+      final repo = ref.read(arenaSlotsRepositoryProvider);
+      final slots = await repo.getArenaSlots(widget.arena.id, _selectedDate, 60);
+      if (!mounted) return;
+      // Only set if no real availability load has happened yet
+      if (_arenaSlots == null) setState(() => _arenaSlots = slots);
     } catch (_) {}
   }
 
@@ -201,6 +219,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   // ── Availability loading ──────────────────────────────────────────────────────
 
   Future<void> _loadAvailability() async {
+    if (_durationMins <= 0 || _selectedGroup == null) return;
     final id = ++_loadId;
     setState(() {
       _loadingAvail = true;
@@ -208,18 +227,43 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
     });
     try {
       final repo = ref.read(arenaSlotsRepositoryProvider);
-      final dateStr = _fmtDate(_selectedDate);
-      final bookings = await repo.listArenaBusySlots(widget.arena.id, date: dateStr);
+      final slots = await repo.getArenaSlots(widget.arena.id, _selectedDate, _durationMins);
       if (!mounted || id != _loadId) return;
       setState(() {
-        _allBookings = bookings;
+        _arenaSlots = slots;
         _loadingAvail = false;
       });
     } catch (_) {
       if (!mounted || id != _loadId) return;
       setState(() {
-        _allBookings = [];
+        _arenaSlots = null;
         _loadingAvail = false;
+      });
+    }
+  }
+
+  // ── Calendar availability ─────────────────────────────────────────────────────
+
+  void _loadCalendarAvailability() {
+    final group = _selectedGroup;
+    if (group == null) return;
+    final loadId = ++_calendarLoadId;
+    setState(() => _dateFillLevel.clear());
+    final today = DateTime.now();
+    final maxDays = widget.arena.advanceBookingDays > 0 ? widget.arena.advanceBookingDays : 30;
+    final repo = ref.read(arenaSlotsRepositoryProvider);
+    for (var i = 0; i <= maxDays; i++) {
+      final date = DateTime(today.year, today.month, today.day + i);
+      final dateStr = _dateKey(date);
+      repo.getArenaSlots(widget.arena.id, date, _durationMins).then((slots) {
+        if (!mounted || loadId != _calendarLoadId) return;
+        final unitGroup = slots.unitGroups
+            .where((g) => g.groupKey == group.key).firstOrNull;
+        final count = unitGroup?.availableSlots.length ?? 0;
+        setState(() => _dateFillLevel[dateStr] = count == 0 ? 2 : (count <= 2 ? 1 : 0));
+      }).catchError((_) {
+        if (!mounted || loadId != _calendarLoadId) return;
+        setState(() => _dateFillLevel[dateStr] = 2);
       });
     }
   }
@@ -228,72 +272,27 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
 
   List<PlayerSlot> get _availableSlots {
     final group = _selectedGroup;
-    if (group == null) return [];
+    if (group == null || _arenaSlots == null) return [];
 
-    final firstUnit = group.units.first;
-    final times = BookingPricingEngine.buildDaySlots(
-      firstUnit,
-      widget.arena.openTime,
-      widget.arena.closeTime,
-      _selectedDate,
-      durationMins: _durationMins,
-      bufferMins: widget.arena.bufferMins > 0 ? widget.arena.bufferMins : 30,
-    );
-    if (times.isEmpty) return [];
+    final unitGroup = _arenaSlots!.unitGroups
+        .where((g) => g.groupKey == group.key)
+        .firstOrNull;
+    if (unitGroup == null) return [];
 
-    final isWeekend = _selectedDate.weekday >= 6;
-    final result = <PlayerSlot>[];
-
-    for (final startTime in times) {
-      final endTime = _addMins(startTime, _durationMins);
-
-      if (group.isNetGroup) {
-        final variantCounts = <String, int>{};
-        for (final unit in group.units) {
-          final variants = unit.netVariants.isEmpty
-              ? [NetVariant(type: unit.netType ?? 'Standard', label: unit.netType ?? 'Standard', count: 1)]
-              : unit.netVariants;
-
-          for (final variant in variants) {
-            final booked = _allBookings.where((b) =>
-                b.unitId == unit.id &&
-                b.status != 'CANCELLED' &&
-                (b.netVariantType == null || b.netVariantType == variant.type) &&
-                _overlaps(b.startTime, b.endTime, startTime, endTime)).length;
-            final avail = (variant.count - booked).clamp(0, variant.count);
-            if (avail > 0) {
-              variantCounts[variant.type] = (variantCounts[variant.type] ?? 0) + avail;
-            }
-          }
-        }
-
-        if (variantCounts.isEmpty) continue;
-        final total = variantCounts.values.fold(0, (s, c) => s + c);
-        result.add(PlayerSlot(
-          startTime: startTime,
-          endTime: endTime,
-          totalCount: total,
-          variantCounts: variantCounts,
-          isWeekendRate: isWeekend && group.units.any((u) => u.weekendMultiplier > 1.0),
-        ));
-      } else {
-        final unit = group.units.first;
-        final busy = BookingPricingEngine.isSlotBusy(
-          startTime,
-          _durationMins,
-          bookings: _allBookings.where((b) => b.unitId == unit.id).toList(),
-          timeBlocks: const [],
-        );
-        if (busy) continue;
-        result.add(PlayerSlot(
-          startTime: startTime,
-          endTime: endTime,
-          totalCount: 1,
-          isWeekendRate: isWeekend && unit.weekendMultiplier > 1.0,
-        ));
-      }
-    }
-    return result;
+    return unitGroup.availableSlots.map((s) {
+      final variantCounts = <String, int>{
+        for (final opt in s.netTypeOptions) opt.netType: opt.availableCount,
+      };
+      final total = s.availableCount ??
+          (variantCounts.isEmpty ? 1 : variantCounts.values.fold<int>(0, (a, b) => a + b));
+      return PlayerSlot(
+        startTime: s.startTime,
+        endTime: s.endTime,
+        totalCount: total,
+        variantCounts: variantCounts,
+        isWeekendRate: s.isWeekendRate,
+      );
+    }).toList();
   }
 
   // ── Pricing ───────────────────────────────────────────────────────────────────
@@ -301,15 +300,30 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   int get _effectivePaise {
     final group = _selectedGroup;
     if (group == null) return 0;
-    final unit = _resolvedNetUnit() ?? group.units.first;
-    final variantRate =
-        BookingPricingEngine.variantPricePerHour(unit, _selectedNetType);
-    final base = BookingPricingEngine.computeTotal(
-      unit,
-      durationMins: _durationMins,
-      variantPricePaise: variantRate,
-    );
     final addonsTotal = _selectedAddons.fold<int>(0, (s, a) => s + a.pricePaise);
+
+    final slot = _selectedSlot;
+    if (slot != null && _arenaSlots != null) {
+      final unitGroup = _arenaSlots!.unitGroups
+          .where((g) => g.groupKey == group.key).firstOrNull;
+      final apiSlot = unitGroup?.availableSlots
+          .where((s) => s.startTime == slot.startTime).firstOrNull;
+      if (apiSlot != null) {
+        if (group.isNetGroup && _selectedNetType != null) {
+          final netOpt = apiSlot.netTypeOptions
+              .where((o) => o.netType == _selectedNetType).firstOrNull;
+          if (netOpt != null) return netOpt.totalAmountPaise + addonsTotal;
+        }
+        return apiSlot.totalAmountPaise + addonsTotal;
+      }
+    }
+
+    // Fallback to local pricing engine when API data unavailable
+    final unit = group.units.first;
+    final variantRate = BookingPricingEngine.variantPricePerHour(unit, _selectedNetType);
+    final base = BookingPricingEngine.computeTotal(
+      unit, durationMins: _durationMins, variantPricePaise: variantRate,
+    );
     return base + addonsTotal;
   }
 
@@ -320,35 +334,36 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
 
   // ── Unit resolution ───────────────────────────────────────────────────────────
 
-  /// For net bookings: find the first unit+variant with remaining capacity.
-  ArenaUnitOption? _resolvedNetUnit() {
-    final group = _selectedGroup;
-    final slot = _selectedSlot;
-    if (group == null || slot == null || !group.isNetGroup) return null;
-
-    for (final unit in group.units) {
-      final variants = unit.netVariants.isEmpty
-          ? [NetVariant(type: unit.netType ?? 'Standard', label: unit.netType ?? 'Standard', count: 1)]
-          : unit.netVariants;
-
-      for (final variant in variants) {
-        if (_selectedNetType != null && variant.type != _selectedNetType) continue;
-        final booked = _allBookings.where((b) =>
-            b.unitId == unit.id &&
-            b.status != 'CANCELLED' &&
-            (b.netVariantType == null || b.netVariantType == variant.type) &&
-            _overlaps(b.startTime, b.endTime, slot.startTime, slot.endTime)).length;
-        if (booked < variant.count) return unit;
-      }
-    }
-    return group.units.firstOrNull;
-  }
-
   String? get _resolvedUnitId {
     final group = _selectedGroup;
     if (group == null) return null;
-    if (!group.isNetGroup) return group.singleUnitId;
-    return _resolvedNetUnit()?.id;
+
+    if (!group.isNetGroup) {
+      final unitGroup = _arenaSlots?.unitGroups
+          .where((g) => g.groupKey == group.key).firstOrNull;
+      return unitGroup?.unitId ?? group.singleUnitId;
+    }
+
+    // For nets: use assignedUnitId from the selected slot's netTypeOptions
+    final slot = _selectedSlot;
+    if (slot != null && _arenaSlots != null) {
+      final unitGroup = _arenaSlots!.unitGroups
+          .where((g) => g.groupKey == group.key).firstOrNull;
+      final apiSlot = unitGroup?.availableSlots
+          .where((s) => s.startTime == slot.startTime).firstOrNull;
+      if (apiSlot != null) {
+        if (_selectedNetType != null) {
+          final netOpt = apiSlot.netTypeOptions
+              .where((o) => o.netType == _selectedNetType).firstOrNull;
+          if (netOpt != null && netOpt.assignedUnitId.isNotEmpty) {
+            return netOpt.assignedUnitId;
+          }
+        }
+        if (apiSlot.assignedUnitId?.isNotEmpty == true) return apiSlot.assignedUnitId;
+      }
+    }
+
+    return group.units.firstOrNull?.id;
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────────
@@ -559,11 +574,10 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
       });
       return;
     }
-    int newDur = group.minSlotMins > 0 ? group.minSlotMins : 60;
-    if (!group.isNetGroup && group.units.isNotEmpty) {
-      final opts = BookingPricingEngine.durationOptions(group.units.first);
-      if (opts.isNotEmpty) newDur = opts.first.durationMins;
-    }
+    // Nets default to minSlot; grounds require explicit duration selection
+    final int newDur = group.isNetGroup
+        ? (group.minSlotMins > 0 ? group.minSlotMins : 60)
+        : 0;
     setState(() {
       _selectedGroup = group;
       _selectedSlot = null;
@@ -573,6 +587,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           : null;
     });
     _loadAvailability();
+    _loadCalendarAvailability();
   }
 
   void _snack(String msg) {
@@ -632,15 +647,20 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           selectedNetType: _selectedNetType,
           durationMins: _durationMins,
           scrollCtrl: scrollCtrl,
+          arenaPhone: widget.arena.phone,
+          apiUnitGroups: _arenaSlots?.unitGroups ?? const [],
           onGroupTap: _onGroupTap,
           onNetTypeTap: (t) => setState(() {
             _selectedNetType = t;
             _selectedSlot = null;
           }),
-          onDurationChanged: (d) => setState(() {
-            _durationMins = d;
-            _selectedSlot = null;
-          }),
+          onDurationChanged: (d) {
+            setState(() {
+              _durationMins = d;
+              _selectedSlot = null;
+            });
+            _loadAvailability();
+          },
         ),
       1 => _ScheduleStep(
           slots: _availableSlots,
@@ -653,6 +673,9 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           isNets: _isNets,
           advanceBookingDays: widget.arena.advanceBookingDays,
           scrollCtrl: scrollCtrl,
+          fillLevels: _dateFillLevel,
+          displayedMonth: _displayedMonth,
+          onMonthChanged: (m) => setState(() => _displayedMonth = m),
           onDateChanged: (d) {
             setState(() {
               _selectedDate = d;
@@ -666,6 +689,8 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
               _durationMins = d;
               _selectedSlot = null;
             });
+            _loadAvailability();
+            _loadCalendarAvailability();
           },
         ),
       2 => _ConfirmStep(
@@ -868,6 +893,8 @@ class _FacilityStep extends StatelessWidget {
     required this.selectedNetType,
     required this.durationMins,
     required this.scrollCtrl,
+    required this.arenaPhone,
+    required this.apiUnitGroups,
     required this.onGroupTap,
     required this.onNetTypeTap,
     required this.onDurationChanged,
@@ -880,6 +907,8 @@ class _FacilityStep extends StatelessWidget {
   final String? selectedNetType;
   final int durationMins;
   final ScrollController scrollCtrl;
+  final String? arenaPhone;
+  final List<UnitGroupSlots> apiUnitGroups;
   final ValueChanged<BookingGroup> onGroupTap;
   final ValueChanged<String> onNetTypeTap;
   final ValueChanged<int> onDurationChanged;
@@ -908,6 +937,10 @@ class _FacilityStep extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
+          _NetsPackageSection(
+            apiUnitGroups: apiUnitGroups,
+            phone: arenaPhone,
+          ),
         ],
         if (groundGroups.isNotEmpty) ...[
           const SizedBox(height: 24),
@@ -923,6 +956,11 @@ class _FacilityStep extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
+          _GroundsPackageSection(
+            groundGroups: groundGroups,
+            apiUnitGroups: apiUnitGroups,
+            phone: arenaPhone,
+          ),
         ],
       ],
     );
@@ -973,17 +1011,17 @@ class _FacilityItem extends StatelessWidget {
             ),
             child: Row(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: SizedBox(
-                    width: 72,
-                    height: 72,
-                    child: imageUrl != null
-                        ? Image.network(imageUrl, fit: BoxFit.cover)
-                        : Container(color: context.panel, child: const Icon(Icons.stadium_rounded)),
+                if (imageUrl != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SizedBox(
+                      width: 72,
+                      height: 72,
+                      child: Image.network(imageUrl, fit: BoxFit.cover),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
+                  const SizedBox(width: 16),
+                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1009,9 +1047,9 @@ class _FacilityItem extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        group.isNetGroup 
-                          ? _netPriceRange(group.units).toUpperCase()
-                          : 'FROM ₹${(group.pricePerHourPaise / 100).toStringAsFixed(0)}/HR',
+                        group.isNetGroup
+                            ? _netPriceRange(group.units).toUpperCase()
+                            : _groundPriceLabel(group.units.first).toUpperCase(),
                         style: TextStyle(
                           color: context.accent,
                           fontSize: 13,
@@ -1059,6 +1097,9 @@ class _ScheduleStep extends StatelessWidget {
     required this.isNets,
     required this.advanceBookingDays,
     required this.scrollCtrl,
+    required this.fillLevels,
+    required this.displayedMonth,
+    required this.onMonthChanged,
     required this.onDateChanged,
     required this.onSlotSelected,
     required this.onDurationChanged,
@@ -1074,22 +1115,31 @@ class _ScheduleStep extends StatelessWidget {
   final bool isNets;
   final int advanceBookingDays;
   final ScrollController scrollCtrl;
+  final Map<String, int?> fillLevels;
+  final DateTime displayedMonth;
+  final ValueChanged<DateTime> onMonthChanged;
   final ValueChanged<DateTime> onDateChanged;
   final ValueChanged<PlayerSlot> onSlotSelected;
   final ValueChanged<int> onDurationChanged;
 
   @override
   Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final maxDays = advanceBookingDays > 0 ? advanceBookingDays : 30;
+    final maxDate = DateTime(today.year, today.month, today.day + maxDays);
     return ListView(
       controller: scrollCtrl,
       padding: const EdgeInsets.only(top: 12, bottom: 8),
       children: [
-        _SectionLabel('Date'),
-        const SizedBox(height: 10),
-        _DateStrip(
+        _SectionLabel('Select Date'),
+        const SizedBox(height: 12),
+        _AvailabilityCalendar(
           selectedDate: selectedDate,
-          maxDays: advanceBookingDays > 0 ? advanceBookingDays : 14,
-          onChanged: onDateChanged,
+          displayedMonth: displayedMonth,
+          maxDate: maxDate,
+          fillLevels: fillLevels,
+          onDateChanged: onDateChanged,
+          onMonthChanged: onMonthChanged,
         ),
         if (isNets) ...[
           const SizedBox(height: 20),
@@ -1101,9 +1151,9 @@ class _ScheduleStep extends StatelessWidget {
             onChanged: onDurationChanged,
           ),
         ],
-        const SizedBox(height: 20),
+        const SizedBox(height: 28),
         _SectionLabel('Start time'),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         if (loading)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 32),
@@ -1365,43 +1415,42 @@ class _GroundDurationPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     final opts = BookingPricingEngine.durationOptions(unit);
     if (opts.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 52,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: opts.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final opt = opts[i];
-          final selected = selectedMins == opt.durationMins;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: opts.map((opt) {
+          // selectedMins == 0 means nothing chosen yet — show all as unselected
+          final selected = selectedMins > 0 && selectedMins == opt.durationMins;
           return GestureDetector(
             onTap: () => onChanged(opt.durationMins),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
                 color: selected ? context.accent : context.panel.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(26),
+                borderRadius: BorderRadius.circular(6),
               ),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     opt.label,
                     style: TextStyle(
                       color: selected ? Colors.white : context.fg,
-                      fontSize: 13,
+                      fontSize: 15,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
+                  const SizedBox(height: 4),
                   Text(
                     _inr(opt.pricePaise),
                     style: TextStyle(
                       color: selected
                           ? Colors.white.withValues(alpha: 0.8)
                           : context.accent,
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -1409,7 +1458,7 @@ class _GroundDurationPicker extends StatelessWidget {
               ),
             ),
           );
-        },
+        }).toList(),
       ),
     );
   }
@@ -1433,135 +1482,531 @@ class _NetTypePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final type in group.netTypes)
-          GestureDetector(
-            onTap: () => onChanged(type),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              margin: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: selected == type
-                    ? context.accent.withValues(alpha: 0.09)
-                    : context.panel.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(12),
-                border: selected == type
-                    ? Border.all(color: context.accent.withValues(alpha: 0.4), width: 1.5)
-                    : null,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('$type Net',
-                        style: TextStyle(color: context.fg, fontSize: 14, fontWeight: FontWeight.w800)),
-                  ),
-                  if (_priceFor(type) != null)
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final type in group.netTypes)
+            GestureDetector(
+              onTap: () => onChanged(type),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 17),
+                decoration: BoxDecoration(
+                  color: selected == type
+                      ? context.accent
+                      : context.panel.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      '${_inr(_priceFor(type)!)}/hr',
+                      '$type Net'.toUpperCase(),
                       style: TextStyle(
-                        color: selected == type ? context.accent : context.fg,
-                        fontSize: 14,
+                        color: selected == type ? Colors.white : context.fg,
+                        fontSize: 13,
                         fontWeight: FontWeight.w900,
-                        letterSpacing: -0.3,
+                        letterSpacing: 0.2,
                       ),
                     ),
-                  const SizedBox(width: 10),
-                  Icon(
-                    selected == type ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                    color: selected == type ? context.accent : context.fgSub.withValues(alpha: 0.35),
-                    size: 18,
-                  ),
-                ],
+                    if (_priceFor(type) != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_inr(_priceFor(type)!)}/hr',
+                        style: TextStyle(
+                          color: selected == type
+                              ? Colors.white.withValues(alpha: 0.75)
+                              : context.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Package sections ──────────────────────────────────────────────────────────
+
+class _NetsPackageSection extends StatelessWidget {
+  const _NetsPackageSection({required this.apiUnitGroups, this.phone});
+
+  final List<UnitGroupSlots> apiUnitGroups;
+  final String? phone;
+
+  @override
+  Widget build(BuildContext context) {
+    final netsSlots = apiUnitGroups.where((g) => g.isNetGroup).toList();
+    final enabled = netsSlots.any((g) => g.monthlyPassEnabled);
+    if (!enabled) return const SizedBox.shrink();
+
+    final ratePaise = netsSlots
+        .where((g) => g.monthlyPassRatePaise != null)
+        .map((g) => g.monthlyPassRatePaise!)
+        .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
+    final subtitle = ratePaise != null
+        ? 'From ₹${(ratePaise / 100).toStringAsFixed(0)}/month\nUnlimited net sessions'
+        : 'Unlimited net sessions\nfor a full month';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel('PACKAGES'),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _PackageCard(
+            icon: Icons.workspace_premium_rounded,
+            title: 'Monthly\nPass',
+            subtitle: subtitle,
+            phone: phone,
           ),
+        ),
+        const SizedBox(height: 12),
       ],
     );
   }
 }
 
-// ── Date strip ────────────────────────────────────────────────────────────────
+class _GroundsPackageSection extends StatelessWidget {
+  const _GroundsPackageSection({
+    required this.groundGroups,
+    required this.apiUnitGroups,
+    this.phone,
+  });
 
-class _DateStrip extends StatelessWidget {
-  const _DateStrip(
-      {required this.selectedDate, required this.maxDays, required this.onChanged});
+  final List<BookingGroup> groundGroups;
+  final List<UnitGroupSlots> apiUnitGroups;
+  final String? phone;
+
+  @override
+  Widget build(BuildContext context) {
+    final groundKeys = groundGroups.map((g) => g.key).toSet();
+    final groundSlots = apiUnitGroups.where((g) => groundKeys.contains(g.groupKey)).toList();
+    final hasAny = groundSlots.any((g) => g.bulkDayRatePaise != null && g.bulkDayRatePaise! > 0);
+    if (!hasAny) return const SizedBox.shrink();
+
+    final minDays = groundSlots
+        .where((g) => g.minBulkDays != null)
+        .map((g) => g.minBulkDays!)
+        .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
+    final ratePaise = groundSlots
+        .where((g) => g.bulkDayRatePaise != null)
+        .map((g) => g.bulkDayRatePaise!)
+        .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
+    final subtitle = (ratePaise != null && minDays != null)
+        ? 'Book $minDays+ days · ₹${(ratePaise / 100).toStringAsFixed(0)}/day'
+        : (minDays != null ? 'Book $minDays+ days at discounted rates' : 'Book multiple days\nat discounted rates');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel('PACKAGES'),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _PackageCard(
+            icon: Icons.calendar_month_rounded,
+            title: 'Bulk\nBooking',
+            subtitle: subtitle,
+            phone: phone,
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
+// ── Package card (Bulk / Monthly) ─────────────────────────────────────────────
+
+class _PackageCard extends StatelessWidget {
+  const _PackageCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.phone,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? phone;
+
+  void _enquire(BuildContext context) async {
+    final p = phone;
+    if (p == null || p.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contact the arena to enquire.')),
+      );
+      return;
+    }
+    final digits = p.replaceAll(RegExp(r'\D'), '');
+    final wa = Uri.parse('https://wa.me/91$digits?text=${Uri.encodeComponent('Hi, I\'d like to enquire about ${title.replaceAll('\n', ' ')}.')}');
+    if (await canLaunchUrl(wa)) {
+      await launchUrl(wa, mode: LaunchMode.externalApplication);
+    } else {
+      final tel = Uri.parse('tel:$digits');
+      await launchUrl(tel);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    return GestureDetector(
+      onTap: () => _enquire(context),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF0D0D0D) : const Color(0xFFF8F8F8),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.stroke.withValues(alpha: 0.1)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: context.accent, size: 22),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: context.fgSub.withValues(alpha: 0.55),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: context.accent,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                'ENQUIRE',
+                style: TextStyle(
+                  color: isDark ? Colors.black : Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Availability calendar ─────────────────────────────────────────────────────
+
+class _AvailabilityCalendar extends StatelessWidget {
+  const _AvailabilityCalendar({
+    required this.selectedDate,
+    required this.displayedMonth,
+    required this.maxDate,
+    required this.fillLevels,
+    required this.onDateChanged,
+    required this.onMonthChanged,
+  });
+
   final DateTime selectedDate;
-  final int maxDays;
-  final ValueChanged<DateTime> onChanged;
+  final DateTime displayedMonth;
+  final DateTime maxDate;
+  final Map<String, int?> fillLevels;
+  final ValueChanged<DateTime> onDateChanged;
+  final ValueChanged<DateTime> onMonthChanged;
+
+  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    final count = maxDays.clamp(0, 60) + 1;
-    return SizedBox(
-      height: 90,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: count,
-        itemBuilder: (context, index) {
-          final date = DateTime(today.year, today.month, today.day + index);
-          final sel = _sameDay(date, selectedDate);
-          final label = switch (index) {
-            0 => 'TODAY',
-            1 => 'TMRW',
-            _ => DateFormat('EEE').format(date).toUpperCase()
-          };
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final firstOfMonth = DateTime(displayedMonth.year, displayedMonth.month, 1);
+    final startOffset = (firstOfMonth.weekday - 1) % 7;
+    final daysInMonth = DateTime(displayedMonth.year, displayedMonth.month + 1, 0).day;
+    final canGoPrev = displayedMonth.isAfter(DateTime(today.year, today.month));
+    final canGoNext = DateTime(displayedMonth.year, displayedMonth.month + 1)
+        .isBefore(DateTime(maxDate.year, maxDate.month + 1));
 
-          return GestureDetector(
-            onTap: () => onChanged(date),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 56,
-              margin: const EdgeInsets.only(right: 12),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: sel ? context.accent : Colors.transparent,
-                    width: 3,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Header: nav + month + year ──
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              _NavBtn(
+                icon: Icons.chevron_left_rounded,
+                enabled: canGoPrev,
+                onTap: canGoPrev ? () => onMonthChanged(
+                    DateTime(displayedMonth.year, displayedMonth.month - 1)) : null,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  DateFormat('MMMM yyyy').format(displayedMonth),
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
                   ),
                 ),
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: sel ? context.fg : context.fgSub.withValues(alpha: 0.5),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
-                    ),
+              _NavBtn(
+                icon: Icons.chevron_right_rounded,
+                enabled: canGoNext,
+                onTap: canGoNext ? () => onMonthChanged(
+                    DateTime(displayedMonth.year, displayedMonth.month + 1)) : null,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        // ── Weekday labels ──
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: _days.map((d) => Expanded(
+              child: Center(
+                child: Text(
+                  d.substring(0, 1),
+                  style: TextStyle(
+                    color: context.fgSub.withValues(alpha: 0.3),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    DateFormat('d').format(date),
-                    style: TextStyle(
-                      color: context.fg,
-                      fontSize: 22,
-                      fontWeight: sel ? FontWeight.w900 : FontWeight.w500,
-                      height: 1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (date.day % 4 != 0) // availability mark
-                    Container(
-                      width: 3,
-                      height: 3,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: sel ? context.accent : context.fgSub.withValues(alpha: 0.2),
-                      ),
-                    ),
-                ],
+                ),
+              ),
+            )).toList(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        // ── Date grid ──
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              childAspectRatio: 0.72,
+              mainAxisSpacing: 2,
+            ),
+            itemCount: startOffset + daysInMonth,
+            itemBuilder: (_, i) {
+              if (i < startOffset) return const SizedBox();
+              final day = i - startOffset + 1;
+              final date = DateTime(displayedMonth.year, displayedMonth.month, day);
+              final isPast = date.isBefore(todayDate);
+              final isBeyond = date.isAfter(maxDate);
+              final disabled = isPast || isBeyond;
+              return _DateCell(
+                day: day,
+                isSelected: _sameDay(date, selectedDate),
+                isToday: _sameDay(date, todayDate),
+                isDisabled: disabled,
+                fillLevel: disabled ? null : fillLevels[_dateKey(date)],
+                onTap: disabled ? null : () => onDateChanged(date),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        // ── Legend ──
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              _CalLegend(color: const Color(0xFF4ADE80), label: 'Open'),
+              const SizedBox(width: 20),
+              _CalLegend(color: const Color(0xFFFBBF24), label: 'Few left'),
+              const SizedBox(width: 20),
+              _CalLegend(color: const Color(0xFFF87171), label: 'Full'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _NavBtn extends StatelessWidget {
+  const _NavBtn({required this.icon, required this.enabled, this.onTap});
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: enabled
+              ? context.panel.withValues(alpha: 0.5)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: enabled
+              ? context.fg
+              : context.fgSub.withValues(alpha: 0.15),
+        ),
+      ),
+    );
+  }
+}
+
+class _CalLegend extends StatelessWidget {
+  const _CalLegend({required this.color, required this.label});
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: context.fgSub.withValues(alpha: 0.5),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// fillLevel: null=disabled/unknown, 0=open, 1=few left, 2=full
+class _DateCell extends StatelessWidget {
+  const _DateCell({
+    required this.day,
+    required this.isSelected,
+    required this.isToday,
+    required this.isDisabled,
+    required this.fillLevel,
+    required this.onTap,
+  });
+
+  final int day;
+  final bool isSelected;
+  final bool isToday;
+  final bool isDisabled;
+  final int? fillLevel;
+  final VoidCallback? onTap;
+
+  static const _green = Color(0xFF4ADE80);
+  static const _amber = Color(0xFFFBBF24);
+  static const _red   = Color(0xFFF87171);
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+
+    Color? dotColor;
+    if (!isDisabled && !isSelected) {
+      if (fillLevel == 0) dotColor = _green;
+      else if (fillLevel == 1) dotColor = _amber;
+      else if (fillLevel == 2) dotColor = _red;
+    }
+
+    final numColor = isDisabled
+        ? context.fgSub.withValues(alpha: 0.2)
+        : isSelected
+            ? (isDark ? Colors.black : Colors.white)
+            : fillLevel == 2
+                ? context.fgSub.withValues(alpha: 0.5)
+                : context.fg;
+
+    final circleBg = isSelected
+        ? context.accent
+        : (isToday && !isSelected)
+            ? context.accent.withValues(alpha: 0.12)
+            : Colors.transparent;
+
+    final circleBorder = isToday && !isSelected
+        ? Border.all(color: context.accent.withValues(alpha: 0.5), width: 1.5)
+        : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: circleBg,
+              shape: BoxShape.circle,
+              border: circleBorder,
+            ),
+            child: Center(
+              child: Text(
+                '$day',
+                style: TextStyle(
+                  color: numColor,
+                  fontSize: 14,
+                  fontWeight: (isSelected || isToday)
+                      ? FontWeight.w900
+                      : FontWeight.w500,
+                  height: 1,
+                ),
               ),
             ),
-          );
-        },
+          ),
+          const SizedBox(height: 4),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: dotColor ?? Colors.transparent,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1618,6 +2063,10 @@ class _ConfirmRow extends StatelessWidget {
 
 bool _sameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
 
+String _dateKey(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+
 String _inr(int paise) => '₹${(paise / 100).toStringAsFixed(0)}';
 
 String _dur(int mins) {
@@ -1627,28 +2076,8 @@ String _dur(int mins) {
   return m == 0 ? '${h}h' : '${h}h ${m}m';
 }
 
-String _fmtDate(DateTime d) =>
-    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-String _addMins(String time, int mins) {
-  final parts = time.split(':').map(int.parse).toList();
-  final total = parts[0] * 60 + parts[1] + mins;
-  final h = (total ~/ 60).clamp(0, 23);
-  final m = total % 60;
-  return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-}
 
-bool _overlaps(String s1, String e1, String s2, String e2) {
-  final s1m = _toMins(s1), e1m = _toMins(e1);
-  final s2m = _toMins(s2), e2m = _toMins(e2);
-  return s1m < e2m && e1m > s2m;
-}
-
-int _toMins(String t) {
-  final parts = t.split(':');
-  if (parts.length < 2) return 0;
-  return (int.tryParse(parts[0]) ?? 0) * 60 + (int.tryParse(parts[1]) ?? 0);
-}
 
 int _h(String t) => int.tryParse(t.split(':').first) ?? 0;
 int _m(String t) {
@@ -1664,6 +2093,25 @@ String _formatUnitType(String raw) {
   if (t.contains('INDOOR')) return 'Indoor';
   if (t.contains('CENTER') || t.contains('CENTRE')) return 'Center wicket';
   return raw.isEmpty ? 'Unit' : raw;
+}
+
+String _groundPriceLabel(ArenaUnitOption unit) {
+  if (unit.price4HrPaise != null && unit.price4HrPaise! > 0) {
+    return '₹${(unit.price4HrPaise! / 100).toStringAsFixed(0)} / 4 hr match';
+  }
+  if (unit.price8HrPaise != null && unit.price8HrPaise! > 0) {
+    return '₹${(unit.price8HrPaise! / 100).toStringAsFixed(0)} / 8 hr match';
+  }
+  if (unit.priceFullDayPaise != null && unit.priceFullDayPaise! > 0) {
+    return '₹${(unit.priceFullDayPaise! / 100).toStringAsFixed(0)} / full day';
+  }
+  if (unit.pricePerHourPaise > 0) {
+    final minSlot = unit.minSlotMins > 0 ? unit.minSlotMins : 240;
+    final matchPrice = ((unit.pricePerHourPaise * minSlot) / 60).round();
+    final hrs = minSlot ~/ 60;
+    return '₹${(matchPrice / 100).toStringAsFixed(0)} / ${hrs}hr match';
+  }
+  return '';
 }
 
 String _netPriceRange(List<ArenaUnitOption> units) {

@@ -17,6 +17,10 @@ class BookingGroup {
     required this.photoUrls,
     required this.hasFloodlights,
     this.totalCount,
+    this.minBulkDays,
+    this.bulkDayRatePaise,
+    this.monthlyPassEnabled = false,
+    this.monthlyPassRatePaise,
   });
 
   final String key;
@@ -32,6 +36,9 @@ class BookingGroup {
   final List<String> photoUrls;
   final bool hasFloodlights;
   final int? totalCount;
+  final int? minBulkDays, bulkDayRatePaise;
+  final bool monthlyPassEnabled;
+  final int? monthlyPassRatePaise;
 
   String? get singleUnitId => isNetGroup ? null : units.firstOrNull?.id;
 }
