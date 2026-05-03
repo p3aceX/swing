@@ -91,6 +91,7 @@ class _BookingsBody extends ConsumerStatefulWidget {
 }
 
 class _BookingsBodyState extends ConsumerState<_BookingsBody> {
+  int _tab = 0; // 0=Bookings  1=Invitations
   String _selectedFilter = 'All';
   String _selectedUnitId = 'All';
   late DateTime _calendarMonth;
@@ -108,6 +109,11 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     final today = DateTime.now();
     final allBookingsAsync = ref.watch(_bookingsProvider);
 
+    final arenaId = widget.arena?.id ??
+        (widget.arenas.isNotEmpty ? widget.arenas.first.id : null);
+    final arenaName = widget.arena?.name ??
+        (widget.arenas.isNotEmpty ? widget.arenas.first.name : '');
+
     return Scaffold(
       backgroundColor: _bg,
       body: Column(
@@ -123,151 +129,23 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
             ),
           ),
 
-          const SizedBox(height: 16),
-
-          // Status filter
-          allBookingsAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (e, _) => const SizedBox.shrink(),
-            data: (rawBookings) => _FilterBar(
-              selected: _selectedFilter,
-              counts: {
-                'All': rawBookings.length,
-                'Confirmed':
-                    rawBookings.where((b) => b.status == 'CONFIRMED').length,
-                'Paid':
-                    rawBookings.where((b) => b.status == 'CHECKED_IN').length,
-                'Cancelled':
-                    rawBookings.where((b) => b.status == 'CANCELLED').length,
-              },
-              onSelect: (v) => setState(() => _selectedFilter = v),
-            ),
-          ),
-
           const SizedBox(height: 12),
-          // Unit filter
-          _UnitFilterBar(
-            units: widget.arena?.units ??
-                widget.arenas.expand((a) => a.units).toList(),
-            selectedId: _selectedUnitId,
-            onSelect: (id) => setState(() => _selectedUnitId = id),
+
+          // Tab bar
+          _BookingTabBar(
+            selected: _tab,
+            onSelect: (i) => setState(() => _tab = i),
           ),
 
+          const SizedBox(height: 4),
+
+          // Tab content
           Expanded(
-            child: allBookingsAsync.when(
-              loading: () => const Center(
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: _accent)),
-              error: (e, _) => _ErrorView(message: '$e'),
-              data: (rawBookings) {
-                // Apply filters
-                final filtered = rawBookings.where((b) {
-                  if (_selectedFilter == 'Confirmed' && b.status != 'CONFIRMED')
-                    return false;
-                  if (_selectedFilter == 'Paid' &&
-                      b.status != 'CHECKED_IN') return false;
-                  if (_selectedFilter == 'Cancelled' && b.status != 'CANCELLED')
-                    return false;
-                  if (_selectedUnitId != 'All' && b.unitId != _selectedUnitId)
-                    return false;
-                  return true;
-                }).toList();
-
-                // Sort by date + startTime
-                filtered.sort((a, b) {
-                  final da = a.bookingDate ?? today;
-                  final db = b.bookingDate ?? today;
-                  final dateCmp = da.compareTo(db);
-                  if (dateCmp != 0) return db.compareTo(da); // Newest first
-                  return b.startTime.compareTo(a.startTime);
-                });
-
-                // Group by date for list
-                final groups = <String, List<ArenaReservation>>{};
-                for (final b in filtered) {
-                  final key = b.bookingDate == null
-                      ? DateFormat('yyyy-MM-dd').format(today)
-                      : DateFormat('yyyy-MM-dd').format(b.bookingDate!);
-                  groups.putIfAbsent(key, () => []).add(b);
-                }
-                final todayKey = DateFormat('yyyy-MM-dd').format(today);
-                final dateKeys = groups.keys.toList()
-                  ..sort((a, b) {
-                    final isPastA = a.compareTo(todayKey) < 0;
-                    final isPastB = b.compareTo(todayKey) < 0;
-                    if (!isPastA && !isPastB)
-                      return a.compareTo(b); // future: ascending
-                    if (isPastA && isPastB)
-                      return b.compareTo(a); // past: descending
-                    return isPastA ? 1 : -1; // today/future before past
-                  });
-
-                final arenaId = widget.arena?.id ??
-                    (widget.arenas.isNotEmpty
-                        ? widget.arenas.first.id
-                        : null);
-                final arenaName = widget.arena?.name ??
-                    (widget.arenas.isNotEmpty
-                        ? widget.arenas.first.name
-                        : '');
-
-                return Column(children: [
-                  // Teams looking to play (split booking interest)
-                  if (arenaId != null)
-                    ArenaLobbiesSection(
-                      arenaId: arenaId,
-                      arenaName: arenaName,
-                    ),
-
-                  // Month calendar (toggle)
-                  _MonthCalendar(
-                    bookings: rawBookings,
-                    month: _calendarMonth,
-                    expanded: _calendarExpanded,
-                    onMonthChanged: (m) => setState(() => _calendarMonth = m),
-                  ),
-
-                  // List
-                  Expanded(
-                    child: filtered.isEmpty
-                        ? _EmptyBookings(
-                            onAdd: widget.arenas.isEmpty
-                                ? null
-                                : () => _showAddBookingSheet(context, today),
-                            isFiltered: rawBookings.isNotEmpty,
-                          )
-                        : RefreshIndicator(
-                            color: _accent,
-                            backgroundColor: _surface,
-                            onRefresh: () =>
-                                ref.refresh(_bookingsProvider.future),
-                            child: GridView.builder(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 3,
-                                crossAxisSpacing: 10,
-                                mainAxisSpacing: 10,
-                                childAspectRatio: 0.6,
-                              ),
-                              itemCount: dateKeys.length,
-                              itemBuilder: (context, i) {
-                                final dk = dateKeys[i];
-                                final dayBookings = groups[dk]!;
-                                final d = DateFormat('yyyy-MM-dd').parse(dk);
-                                return _DateGroupCard(
-                                  date: d,
-                                  today: today,
-                                  bookings: dayBookings,
-                                  onTap: () => _showDateBookings(context, d, dayBookings),
-                                  onAdd: () => _showAddBookingSheet(context, d),
-                                );
-                              },
-                            ),
-                          ),
-                  ),
-                ]);
-              },
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _tab == 0
+                  ? _buildBookingsTab(context, today, allBookingsAsync)
+                  : _buildInvitationsTab(arenaId, arenaName),
             ),
           ),
         ],
@@ -277,57 +155,230 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 52,
-                        child: FilledButton.icon(
-                          onPressed: () =>
-                              _showAddBookingSheet(context, today),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _text,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                          ),
-                          icon: const Icon(Icons.add_rounded, size: 20),
-                          label: const Text(
-                            'Full Booking',
-                            style: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: () => _showBookingTypeModal(context, today),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _text,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: SizedBox(
-                        height: 52,
-                        child: OutlinedButton.icon(
-                          onPressed: () =>
-                              _showSplitBookingSheet(context, today),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _text,
-                            side: const BorderSide(
-                                color: _border, width: 1.5),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                          ),
-                          icon: const Icon(Icons.call_split_rounded,
-                              size: 20),
-                          label: const Text(
-                            'Split Booking',
-                            style: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ),
+                    icon: const Icon(Icons.add_rounded, size: 22),
+                    label: const Text(
+                      'Book',
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700),
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildBookingsTab(BuildContext context, DateTime today,
+      AsyncValue<List<ArenaReservation>> allBookingsAsync) {
+    return Column(
+      key: const ValueKey('bookings'),
+      children: [
+        // Status filter
+        allBookingsAsync.when(
+          loading: () => const SizedBox.shrink(),
+          error: (e, _) => const SizedBox.shrink(),
+          data: (rawBookings) => _FilterBar(
+            selected: _selectedFilter,
+            counts: {
+              'All': rawBookings.length,
+              'Confirmed':
+                  rawBookings.where((b) => b.status == 'CONFIRMED').length,
+              'Paid':
+                  rawBookings.where((b) => b.status == 'CHECKED_IN').length,
+              'Cancelled':
+                  rawBookings.where((b) => b.status == 'CANCELLED').length,
+            },
+            onSelect: (v) => setState(() => _selectedFilter = v),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // Unit filter
+        _UnitFilterBar(
+          units: widget.arena?.units ??
+              widget.arenas.expand((a) => a.units).toList(),
+          selectedId: _selectedUnitId,
+          onSelect: (id) => setState(() => _selectedUnitId = id),
+        ),
+
+        Expanded(
+          child: allBookingsAsync.when(
+            loading: () => const Center(
+                child:
+                    CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+            error: (e, _) => _ErrorView(message: '$e'),
+            data: (rawBookings) {
+              final filtered = rawBookings.where((b) {
+                if (_selectedFilter == 'Confirmed' && b.status != 'CONFIRMED')
+                  return false;
+                if (_selectedFilter == 'Paid' && b.status != 'CHECKED_IN')
+                  return false;
+                if (_selectedFilter == 'Cancelled' && b.status != 'CANCELLED')
+                  return false;
+                if (_selectedUnitId != 'All' && b.unitId != _selectedUnitId)
+                  return false;
+                return true;
+              }).toList();
+
+              filtered.sort((a, b) {
+                final da = a.bookingDate ?? today;
+                final db = b.bookingDate ?? today;
+                final dateCmp = da.compareTo(db);
+                if (dateCmp != 0) return db.compareTo(da);
+                return b.startTime.compareTo(a.startTime);
+              });
+
+              final groups = <String, List<ArenaReservation>>{};
+              for (final b in filtered) {
+                final key = b.bookingDate == null
+                    ? DateFormat('yyyy-MM-dd').format(today)
+                    : DateFormat('yyyy-MM-dd').format(b.bookingDate!);
+                groups.putIfAbsent(key, () => []).add(b);
+              }
+              final todayKey = DateFormat('yyyy-MM-dd').format(today);
+              final dateKeys = groups.keys.toList()
+                ..sort((a, b) {
+                  final isPastA = a.compareTo(todayKey) < 0;
+                  final isPastB = b.compareTo(todayKey) < 0;
+                  if (!isPastA && !isPastB) return a.compareTo(b);
+                  if (isPastA && isPastB) return b.compareTo(a);
+                  return isPastA ? 1 : -1;
+                });
+
+              return Column(children: [
+                _MonthCalendar(
+                  bookings: rawBookings,
+                  month: _calendarMonth,
+                  expanded: _calendarExpanded,
+                  onMonthChanged: (m) => setState(() => _calendarMonth = m),
+                ),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? _EmptyBookings(
+                          onAdd: widget.arenas.isEmpty
+                              ? null
+                              : () => _showAddBookingSheet(context, today),
+                          isFiltered: rawBookings.isNotEmpty,
+                        )
+                      : RefreshIndicator(
+                          color: _accent,
+                          backgroundColor: _surface,
+                          onRefresh: () =>
+                              ref.refresh(_bookingsProvider.future),
+                          child: GridView.builder(
+                            padding:
+                                const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              crossAxisSpacing: 10,
+                              mainAxisSpacing: 10,
+                              childAspectRatio: 0.6,
+                            ),
+                            itemCount: dateKeys.length,
+                            itemBuilder: (context, i) {
+                              final dk = dateKeys[i];
+                              final dayBookings = groups[dk]!;
+                              final d =
+                                  DateFormat('yyyy-MM-dd').parse(dk);
+                              return _DateGroupCard(
+                                date: d,
+                                today: today,
+                                bookings: dayBookings,
+                                onTap: () => _showDateBookings(
+                                    context, d, dayBookings),
+                                onAdd: () =>
+                                    _showAddBookingSheet(context, d),
+                              );
+                            },
+                          ),
+                        ),
+                ),
+              ]);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInvitationsTab(String? arenaId, String arenaName) {
+    if (arenaId == null) return const SizedBox.shrink();
+    return _InvitationsTab(
+      key: const ValueKey('invitations'),
+      arenaId: arenaId,
+      arenaName: arenaName,
+    );
+  }
+
+  void _showBookingTypeModal(BuildContext context, DateTime today) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'New Booking',
+                style: TextStyle(
+                  color: _text,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _BookingTypeOption(
+                icon: Icons.calendar_month_rounded,
+                title: 'Full Booking',
+                subtitle: 'Collect full payment from one team',
+                onTap: () {
+                  Navigator.pop(context);
+                  _showAddBookingSheet(context, today);
+                },
+              ),
+              const SizedBox(height: 10),
+              _BookingTypeOption(
+                icon: Icons.call_split_rounded,
+                title: 'Invitation',
+                subtitle: 'Half price · find rival team via matchmaking',
+                onTap: () {
+                  Navigator.pop(context);
+                  _showSplitBookingSheet(context, today);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -435,6 +486,272 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           b.arenaId,
         ),
         onCheckin: (b) => _handleCheckinCheckout(context, b),
+      ),
+    );
+  }
+}
+
+// ─── Tab bar ─────────────────────────────────────────────────────────────────
+
+class _BookingTabBar extends StatelessWidget {
+  const _BookingTabBar({required this.selected, required this.onSelect});
+  final int selected;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          _Tab(label: 'Bookings', active: selected == 0, onTap: () => onSelect(0)),
+          const SizedBox(width: 4),
+          _Tab(label: 'Invitations', active: selected == 1, onTap: () => onSelect(1)),
+        ],
+      ),
+    );
+  }
+}
+
+class _Tab extends StatelessWidget {
+  const _Tab({required this.label, required this.active, required this.onTap});
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? _text : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : _muted,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Invitations tab ─────────────────────────────────────────────────────────
+
+class _InvitationsTab extends ConsumerWidget {
+  const _InvitationsTab({
+    super.key,
+    required this.arenaId,
+    required this.arenaName,
+  });
+  final String arenaId;
+  final String arenaName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(arenaLobbiesProvider(arenaId));
+    return async.when(
+      loading: () => const Center(
+          child: CircularProgressIndicator(strokeWidth: 1.5, color: _accent)),
+      error: (_, __) => Center(
+        child: Text('Could not load invitations',
+            style: TextStyle(color: _muted, fontSize: 13)),
+      ),
+      data: (lobbies) {
+        if (lobbies.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.sports_cricket_rounded,
+                    color: _muted.withValues(alpha: 0.4), size: 40),
+                const SizedBox(height: 12),
+                const Text(
+                  'No teams waiting to play',
+                  style: TextStyle(
+                      color: _muted,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Create an Invitation to attract teams',
+                  style: TextStyle(color: _muted, fontSize: 12),
+                ),
+              ],
+            ),
+          );
+        }
+        return RefreshIndicator(
+          color: _accent,
+          backgroundColor: _surface,
+          onRefresh: () async => ref.invalidate(arenaLobbiesProvider(arenaId)),
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            itemCount: lobbies.length,
+            separatorBuilder: (_, __) =>
+                Divider(height: 1, color: Colors.grey.shade100),
+            itemBuilder: (_, i) => _InvitationRow(
+              lobby: lobbies[i],
+              arenaId: arenaId,
+              arenaName: arenaName,
+              onAccepted: () => ref.invalidate(arenaLobbiesProvider(arenaId)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _InvitationRow extends StatelessWidget {
+  const _InvitationRow({
+    required this.lobby,
+    required this.arenaId,
+    required this.arenaName,
+    required this.onAccepted,
+  });
+  final ArenaLobby lobby;
+  final String arenaId;
+  final String arenaName;
+  final VoidCallback onAccepted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  lobby.teamName,
+                  style: const TextStyle(
+                    color: _text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${lobby.format}  ·  ${lobby.dateLabel}  ·  ${lobby.displaySlot}',
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+                if (lobby.groundName.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    lobby.groundName,
+                    style: TextStyle(
+                        color: _muted.withValues(alpha: 0.7), fontSize: 11),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => AcceptLobbySheet(
+                lobby: lobby,
+                arenaId: arenaId,
+                arenaName: arenaName,
+                onAccepted: onAccepted,
+              ),
+            ),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: _accent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Accept',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Booking type option ──────────────────────────────────────────────────────
+
+class _BookingTypeOption extends StatelessWidget {
+  const _BookingTypeOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _border),
+              ),
+              child: Icon(icon, color: _text, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: _text,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style:
+                          const TextStyle(color: _muted, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: _muted, size: 20),
+          ],
+        ),
       ),
     );
   }

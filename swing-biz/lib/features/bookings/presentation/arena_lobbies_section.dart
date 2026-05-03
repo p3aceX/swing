@@ -273,7 +273,7 @@ class _LobbyCard extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _AcceptLobbySheet(
+      builder: (_) => AcceptLobbySheet(
         lobby: lobby,
         arenaId: arenaId,
         arenaName: arenaName,
@@ -285,8 +285,9 @@ class _LobbyCard extends StatelessWidget {
 
 // ─── Accept Sheet ─────────────────────────────────────────────────────────────
 
-class _AcceptLobbySheet extends ConsumerStatefulWidget {
-  const _AcceptLobbySheet({
+class AcceptLobbySheet extends ConsumerStatefulWidget {
+  const AcceptLobbySheet({
+    super.key,
     required this.lobby,
     required this.arenaId,
     required this.arenaName,
@@ -299,10 +300,10 @@ class _AcceptLobbySheet extends ConsumerStatefulWidget {
   final VoidCallback onAccepted;
 
   @override
-  ConsumerState<_AcceptLobbySheet> createState() => _AcceptLobbySheetState();
+  ConsumerState<AcceptLobbySheet> createState() => _AcceptLobbySheetState();
 }
 
-class _AcceptLobbySheetState extends ConsumerState<_AcceptLobbySheet> {
+class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
   bool _loading = false;
   String? _error;
 
