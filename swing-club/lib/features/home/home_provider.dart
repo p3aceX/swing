@@ -6,18 +6,28 @@ class HomeData {
   final Map<String, dynamic> academy;
   final List<Map<String, dynamic>> todaySessions;
   final int pendingFeesCount;
+  final bool hasNoAcademy;
 
   const HomeData({
     required this.academy,
     required this.todaySessions,
     required this.pendingFeesCount,
+    this.hasNoAcademy = false,
   });
+
+  static const empty = HomeData(academy: {}, todaySessions: [], pendingFeesCount: 0, hasNoAcademy: true);
 }
 
 class HomeNotifier extends AsyncNotifier<HomeData> {
   @override
   Future<HomeData> build() async {
-    final academyState = await ref.watch(academyProvider.future);
+    AcademyState academyState;
+    try {
+      academyState = await ref.watch(academyProvider.future);
+    } catch (_) {
+      return HomeData.empty;
+    }
+
     final api = ref.read(apiClientProvider);
     final id = academyState.academyId;
 

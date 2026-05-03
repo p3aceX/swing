@@ -24,10 +24,81 @@ class HomeScreen extends ConsumerWidget {
       body: state.when(
         loading: loadingBody,
         error: (e, _) => errorBody(e, () => ref.invalidate(homeProvider)),
-        data: (data) => _HomeBody(
-          data: data,
-          userInitial: initial,
-          onRefresh: () => ref.read(homeProvider.notifier).refresh(),
+        data: (data) => data.hasNoAcademy
+            ? _NoAcademyBody(userInitial: initial)
+            : _HomeBody(
+                data: data,
+                userInitial: initial,
+                onRefresh: () => ref.read(homeProvider.notifier).refresh(),
+              ),
+      ),
+    );
+  }
+}
+
+class _NoAcademyBody extends StatelessWidget {
+  final String userInitial;
+  const _NoAcademyBody({required this.userInitial});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => context.push('/profile'),
+                  child: CircleAvatar(
+                    radius: 22,
+                    backgroundColor: const Color(0xFF071B3D),
+                    child: Text(
+                      userInitial,
+                      style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0057C8).withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.school_outlined, size: 40, color: Color(0xFF0057C8)),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Set up your Academy',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF071B3D)),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Create your academy to start managing students, batches, coaches, and sessions.',
+                    style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500, height: 1.5),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => context.go('/academy-setup'),
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Create Academy'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(flex: 2),
+          ],
         ),
       ),
     );
