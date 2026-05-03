@@ -386,11 +386,13 @@ export class MatchmakingService {
         const pick = l.picks[0]
         const unit = pick ? unitsById.get(pick.groundId) : null
         const arena = l.arenaId ? arenasById.get(l.arenaId) : null
+        // For player lobbies (no arenaId), derive arena name from the pick's unit
+        const arenaName = arena?.name ?? (unit as any)?.arena?.name ?? null
         return {
           lobbyId: l.id,
           teamName: l.team?.name ?? (arena ? arena.name : 'TBD'),
           isArenaLobby: l.arenaId != null,
-          arenaName: arena?.name ?? null,
+          arenaName,
           ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
           format: l.format,
           groundName: unit?.name ?? null,
