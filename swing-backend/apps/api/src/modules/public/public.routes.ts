@@ -3213,28 +3213,74 @@ startRealtime();
       arenaUnitId: z.string(),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       endTime: z.string().regex(/^\d{2}:\d{2}$/),
-      daysOfWeek: z.array(z.number().int().min(1).max(7)).min(1),
+      daysOfWeek: z.array(z.number().int().min(1).max(7)).min(1).default([1,2,3,4,5,6,7]),
       startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       months: z.number().int().min(1).max(12).default(1),
-      guestName: z.string().min(1).max(100),
-      guestPhone: z.string().min(5).max(20),
+      guestName: z.string().min(1).max(100).optional(),
+      guestPhone: z.string().min(5).max(20).optional(),
+      variantType: z.string().optional(),
+      phonePeOrderId: z.string().optional(),
+      paymentGateway: z.string().optional(),
     })
     const parsed = bodySchema.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send({ success: false, error: 'Invalid request' })
 
-    const { arenaUnitId, startTime, endTime, daysOfWeek, startDate, months, guestName, guestPhone } = parsed.data
+    const { arenaUnitId, startTime, endTime, daysOfWeek, startDate, months, variantType, phonePeOrderId, paymentGateway } = parsed.data
+
+    // Resolve identity — prefer authenticated player, fall back to body params
+    let authUserId: string | null = null
+    try { await request.jwtVerify(); authUserId = ((request as any).user as { userId: string })?.userId ?? null } catch {}
+
+    let guestName: string
+    let guestPhone: string
+    let bookedByPlayerId: string | null = null
+
+    if (authUserId) {
+      const user = await prisma.user.findUnique({ where: { id: authUserId }, select: { name: true, phone: true } })
+      guestName = user?.name ?? 'Player'
+      guestPhone = user?.phone ?? ''
+      const player = await prisma.playerProfile.findUnique({ where: { userId: authUserId }, select: { id: true } })
+      bookedByPlayerId = player?.id ?? null
+    } else {
+      if (!parsed.data.guestName || !parsed.data.guestPhone) {
+        return reply.code(400).send({ success: false, error: 'guestName and guestPhone are required' })
+      }
+      guestName = parsed.data.guestName
+      guestPhone = parsed.data.guestPhone
+    }
+
+    const isPhonePe = paymentGateway === 'PHONEPE'
+    if (isPhonePe) {
+      if (!phonePeOrderId) return reply.code(400).send({ success: false, error: 'phonePeOrderId is required for PhonePe payment' })
+      const status = await phonePeService.checkOrderStatus(phonePeOrderId)
+      if (status.state !== 'COMPLETED') return reply.code(400).send({ success: false, error: `Payment not completed (state: ${status.state})` })
+    }
 
     const unit = await prisma.arenaUnit.findUnique({ where: { id: arenaUnitId }, include: { arena: true } })
     if (!unit || !unit.isActive) return reply.code(404).send({ success: false, error: 'Unit not found' })
     if (!(unit.arena as any).isPublicPage || !(unit.arena as any).isActive) return reply.code(404).send({ success: false, error: 'Arena not found' })
-    if (!(unit as any).monthlyPassEnabled) return reply.code(400).send({ success: false, error: 'Monthly pass not available for this unit' })
+
+    // Support both unit-level and per-variant monthly pass rates
+    const netVariants: any[] = Array.isArray((unit as any).netVariants) ? (unit as any).netVariants : []
+    const variantRates = netVariants
+      .filter(v => v.monthlyPassRatePaise && Number(v.monthlyPassRatePaise) > 0)
+      .map(v => Number(v.monthlyPassRatePaise))
+    const isEnabled = (unit as any).monthlyPassEnabled || variantRates.length > 0
+    if (!isEnabled) return reply.code(400).send({ success: false, error: 'Monthly pass not available for this unit' })
+
+    // Pick rate: specific variant > unit-level > min variant rate
+    let ratePaise = Number((unit as any).monthlyPassRatePaise ?? 0)
+    if (!ratePaise && variantType) {
+      const variant = netVariants.find(v => v.type === variantType)
+      if (variant?.monthlyPassRatePaise) ratePaise = Number(variant.monthlyPassRatePaise)
+    }
+    if (!ratePaise && variantRates.length > 0) ratePaise = Math.min(...variantRates)
 
     const start = new Date(startDate)
     const end = new Date(start)
     end.setUTCMonth(end.getUTCMonth() + months)
     end.setUTCDate(end.getUTCDate() - 1)
 
-    const ratePaise = (unit as any).monthlyPassRatePaise ?? 0
     const totalPaise = ratePaise * months
 
     const pass = await prisma.monthlyPass.create({
@@ -3250,9 +3296,29 @@ startRealtime();
         endDate: end,
         totalAmountPaise: totalPaise,
         status: 'ACTIVE',
-        bookingSource: 'PUBLIC_WEB',
+        bookingSource: authUserId ? 'PLAYER_APP' : 'PUBLIC_WEB',
+        paymentMode: isPhonePe ? 'ONLINE' : 'CASH',
+        ...(isPhonePe ? { advancePaise: totalPaise } : {}),
+        ...(bookedByPlayerId ? { bookedById: bookedByPlayerId } : {}),
       } as any,
     })
+
+    if (isPhonePe && phonePeOrderId && authUserId) {
+      await prisma.payment.create({
+        data: {
+          userId: authUserId,
+          entityType: 'MONTHLY_PASS',
+          entityId: pass.id,
+          amountPaise: totalPaise,
+          currency: 'INR',
+          status: 'COMPLETED',
+          gateway: 'PHONEPE',
+          gatewayOrderId: phonePeOrderId,
+          completedAt: new Date(),
+          description: `Monthly pass ${startTime}–${endTime}`,
+        } as any,
+      })
+    }
 
     return reply.code(201).send({ success: true, data: { id: pass.id, startDate, endDate: end.toISOString().slice(0, 10), totalAmountPaise: totalPaise } })
   })
@@ -3263,22 +3329,52 @@ startRealtime();
       arenaUnitId: z.string(),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       endTime: z.string().regex(/^\d{2}:\d{2}$/),
-      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      numDays: z.number().int().min(1),
-      guestName: z.string().min(1).max(100),
-      guestPhone: z.string().min(5).max(20),
+      dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1),
+      guestName: z.string().min(1).max(100).optional(),
+      guestPhone: z.string().min(5).max(20).optional(),
+      phonePeOrderId: z.string().optional(),
+      paymentGateway: z.string().optional(),
     })
     const parsed = bodySchema.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send({ success: false, error: 'Invalid request' })
 
-    const { arenaUnitId, startTime, endTime, startDate, numDays, guestName, guestPhone } = parsed.data
+    const { arenaUnitId, startTime, endTime, dates, phonePeOrderId, paymentGateway } = parsed.data
+
+    // Resolve identity
+    let authUserId: string | null = null
+    try { await request.jwtVerify(); authUserId = ((request as any).user as { userId: string })?.userId ?? null } catch {}
+
+    let guestName: string
+    let guestPhone: string
+    let bookedByPlayerId: string | null = null
+
+    if (authUserId) {
+      const user = await prisma.user.findUnique({ where: { id: authUserId }, select: { name: true, phone: true } })
+      guestName = user?.name ?? 'Player'
+      guestPhone = user?.phone ?? ''
+      const player = await prisma.playerProfile.findUnique({ where: { userId: authUserId }, select: { id: true } })
+      bookedByPlayerId = player?.id ?? null
+    } else {
+      if (!parsed.data.guestName || !parsed.data.guestPhone) {
+        return reply.code(400).send({ success: false, error: 'guestName and guestPhone are required' })
+      }
+      guestName = parsed.data.guestName
+      guestPhone = parsed.data.guestPhone
+    }
+
+    const isPhonePe = paymentGateway === 'PHONEPE'
+    if (isPhonePe) {
+      if (!phonePeOrderId) return reply.code(400).send({ success: false, error: 'phonePeOrderId is required for PhonePe payment' })
+      const status = await phonePeService.checkOrderStatus(phonePeOrderId)
+      if (status.state !== 'COMPLETED') return reply.code(400).send({ success: false, error: `Payment not completed (state: ${status.state})` })
+    }
 
     const unit = await prisma.arenaUnit.findUnique({ where: { id: arenaUnitId }, include: { arena: true } })
     if (!unit || !unit.isActive) return reply.code(404).send({ success: false, error: 'Unit not found' })
     if (!(unit.arena as any).isPublicPage || !(unit.arena as any).isActive) return reply.code(404).send({ success: false, error: 'Arena not found' })
 
     const minDays = (unit as any).minBulkDays ?? 1
-    if (numDays < minDays) return reply.code(400).send({ success: false, error: `Minimum ${minDays} days required for bulk booking` })
+    if (dates.length < minDays) return reply.code(400).send({ success: false, error: `Minimum ${minDays} days required for bulk booking` })
 
     const dayRatePaise = (unit as any).bulkDayRatePaise ?? 0
     const startMins = parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1])
@@ -3286,23 +3382,29 @@ startRealtime();
     const durationMins = endMins - startMins
 
     const arenaId = unit.arenaId
-    const walkinEmail = `walkin+${arenaId}@swing.internal`
-    let walkinUser = await prisma.user.findUnique({ where: { email: walkinEmail } })
-    if (!walkinUser) {
-      walkinUser = await prisma.user.create({ data: { phone: `000000000000_${arenaId.slice(0, 8)}`, email: walkinEmail, name: 'Walk-in Guest', roles: ['PLAYER'] } })
-    }
-    let walkinPlayer = await prisma.playerProfile.findUnique({ where: { userId: walkinUser.id } })
-    if (!walkinPlayer) walkinPlayer = await prisma.playerProfile.create({ data: { userId: walkinUser.id } })
 
-    const bookings = []
-    for (let i = 0; i < numDays; i++) {
-      const d = new Date(startDate)
-      d.setUTCDate(d.getUTCDate() + i)
-      bookings.push(prisma.slotBooking.create({
+    // For unauthenticated, use/create a walk-in profile; for authenticated, use actual player
+    let playerProfileId: string
+    if (bookedByPlayerId) {
+      playerProfileId = bookedByPlayerId
+    } else {
+      const walkinEmail = `walkin+${arenaId}@swing.internal`
+      let walkinUser = await prisma.user.findUnique({ where: { email: walkinEmail } })
+      if (!walkinUser) {
+        walkinUser = await prisma.user.create({ data: { phone: `000000000000_${arenaId.slice(0, 8)}`, email: walkinEmail, name: 'Walk-in Guest', roles: ['PLAYER'] } })
+      }
+      let walkinPlayer = await prisma.playerProfile.findUnique({ where: { userId: walkinUser.id } })
+      if (!walkinPlayer) walkinPlayer = await prisma.playerProfile.create({ data: { userId: walkinUser.id } })
+      playerProfileId = walkinPlayer.id
+    }
+
+    const bookings = dates.map(dateStr => {
+      const d = new Date(dateStr + 'T00:00:00Z')
+      return prisma.slotBooking.create({
         data: {
           arenaId,
           unitId: arenaUnitId,
-          bookedById: walkinPlayer.id,
+          bookedById: playerProfileId,
           date: d,
           startTime,
           endTime,
@@ -3311,18 +3413,36 @@ startRealtime();
           totalAmountPaise: dayRatePaise,
           totalPricePaise: dayRatePaise,
           status: 'CONFIRMED',
-          isOfflineBooking: true,
+          isOfflineBooking: !authUserId,
           isBulkBooking: true,
           bulkDayRatePaise: dayRatePaise,
           guestName,
           guestPhone,
-          guestSource: 'PUBLIC_WEB',
-          paymentMode: 'CASH',
+          guestSource: authUserId ? 'PLAYER_APP' : 'PUBLIC_WEB',
+          paymentMode: isPhonePe ? 'ONLINE' : 'CASH',
+          ...(isPhonePe ? { isOfflineBooking: false, advancePaise: dayRatePaise, paidAt: new Date() } : {}),
         } as any,
-      }))
-    }
+      })
+    })
 
     const created = await prisma.$transaction(bookings)
+
+    if (isPhonePe && phonePeOrderId && authUserId && created[0]) {
+      await prisma.payment.create({
+        data: {
+          userId: authUserId,
+          entityType: 'BULK_BOOKING',
+          entityId: created[0].id,
+          amountPaise: dayRatePaise * dates.length,
+          currency: 'INR',
+          status: 'COMPLETED',
+          gateway: 'PHONEPE',
+          gatewayOrderId: phonePeOrderId,
+          completedAt: new Date(),
+          description: `Bulk booking ${dates.length} days ${startTime}–${endTime}`,
+        } as any,
+      })
+    }
 
     // Notify arena owner (fire-and-forget)
     if (created[0]) {
@@ -3333,7 +3453,7 @@ startRealtime();
         date: created[0].date,
         startTime,
         endTime,
-        bookedById: walkinPlayer.id,
+        bookedById: playerProfileId,
         notifyPlayer: false,
         customerName: guestName,
       }).catch((err) => console.error('[notify] bulk booking confirmed failed:', err))
@@ -3341,7 +3461,7 @@ startRealtime();
 
     return reply.code(201).send({
       success: true,
-      data: { numDays, startDate, startTime, endTime, totalAmountPaise: dayRatePaise * numDays },
+      data: { numDays: dates.length, dates, startTime, endTime, totalAmountPaise: dayRatePaise * dates.length },
     })
   })
 }

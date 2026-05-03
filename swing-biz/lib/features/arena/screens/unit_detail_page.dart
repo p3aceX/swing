@@ -466,7 +466,13 @@ class _ScheduleTabState extends State<_ScheduleTab> {
     final opDays = widget.unit.operatingDays.isNotEmpty
         ? widget.unit.operatingDays
         : widget.arena.operatingDays;
-    final slots = _computeSlots(openTime, closeTime, widget.unit.minSlotMins);
+    // Grounds are single-capacity: step by maxSlotMins so slots are non-overlapping
+    final slotStep = widget.unit.isGround
+        ? widget.unit.maxSlotMins
+        : widget.unit.minSlotMins;
+    debugPrint('🔵 [slots] unitType=${widget.unit.unitType} isGround=${widget.unit.isGround} minSlotMins=${widget.unit.minSlotMins} maxSlotMins=${widget.unit.maxSlotMins} slotStep=$slotStep openTime=$openTime closeTime=$closeTime');
+    final slots = _computeSlots(openTime, closeTime, slotStep);
+    debugPrint('🔵 [slots] generated ${slots.length} slots: ${slots.map((s) => '${s.$1}-${s.$2}').join(', ')}');
     final blocks = widget.blocks ?? const [];
     final isOperatingDay =
         opDays.isEmpty || opDays.contains(_selectedDate.weekday);
@@ -2565,14 +2571,20 @@ String _weekdayLabels(List<int> days) {
 
 List<(String, String)> _computeSlots(
     String openTime, String closeTime, int slotMins) {
+  debugPrint('🟡 [_computeSlots] openTime=$openTime closeTime=$closeTime slotMins=$slotMins');
   try {
     final start = _timeToMins(openTime);
     final end = _timeToMins(closeTime);
-    if (start < 0 || end <= start || slotMins <= 0) return const [];
+    debugPrint('🟡 [_computeSlots] start=$start end=$end guard: start<0=${start < 0} end<=start=${end <= start} slotMins<=0=${slotMins <= 0}');
+    if (start < 0 || end <= start || slotMins <= 0) {
+      debugPrint('🔴 [_computeSlots] early return — bad inputs');
+      return const [];
+    }
     final slots = <(String, String)>[];
     for (var m = start; m + slotMins <= end; m += slotMins) {
       slots.add((_minsToTime(m), _minsToTime(m + slotMins)));
     }
+    debugPrint('🟡 [_computeSlots] result: ${slots.map((s) => '${s.$1}→${s.$2}').join(', ')}');
     return slots;
   } catch (_) {
     return const [];

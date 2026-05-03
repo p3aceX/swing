@@ -74,12 +74,136 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
   List<ArenaAddon> _addons = [];
   final Set<ArenaAddon> _selectedAddons = {};
 
+  // null = not yet chosen; 'session' = pick a slot; 'package' = open package sheet
+  String? _bookingMode;
+  VoidCallback? _packageAction;
+
   bool _booking = false;
   bool _phonePeReady = false;
 
-  static const _stepLabels = ['Facility', 'Schedule', 'Confirm'];
+  // 0=Facility  1=Options (session vs package)  2=Schedule  3=Confirm
+  static const _stepLabels = ['Facility', 'Options', 'Schedule', 'Confirm'];
 
   bool get _isNets => _selectedGroup?.isNetGroup == true;
+
+  bool _groupHasPackage(BookingGroup group) {
+    if (group.isNetGroup) {
+      // Only counts if a monthly pass exists for the specific selected net type
+      final selectedType = _selectedNetType;
+      if (selectedType == null) return false;
+      const netUnitTypes = {'CRICKET_NET', 'INDOOR_NET'};
+      for (final u in widget.arena.units.where((u) => netUnitTypes.contains(u.unitType))) {
+        if (u.netVariants.isNotEmpty) {
+          for (final v in u.netVariants) {
+            if (v.type.toUpperCase() == selectedType.toUpperCase() &&
+                v.monthlyPassRatePaise != null && v.monthlyPassRatePaise! > 0) return true;
+          }
+        } else {
+          final uType = (u.netType ?? '').toUpperCase();
+          if ((uType.isEmpty || uType == selectedType.toUpperCase()) &&
+              u.monthlyPassRatePaise != null && u.monthlyPassRatePaise! > 0) return true;
+        }
+      }
+      return false;
+    } else {
+      final unitId = group.singleUnitId;
+      for (final u in widget.arena.units.where((u) => unitId == null || u.id == unitId)) {
+        if (u.bulkDayRatePaise != null && u.bulkDayRatePaise! > 0) return true;
+      }
+      return false;
+    }
+  }
+
+  _PackageInfo? _computeNetsPackage(BuildContext context, BookingGroup group) {
+    // Only show monthly pass for the net type the user actually selected.
+    final selectedType = _selectedNetType;
+    if (selectedType == null) return null;
+
+    const netUnitTypes = {'CRICKET_NET', 'INDOOR_NET'};
+    final netUnits = widget.arena.units.where((u) => netUnitTypes.contains(u.unitType)).toList();
+    int? bestRate; String? bestLabel, bestUnitId, bestNetType, bestOpenTime, bestCloseTime; int bestMins = 60;
+    for (final u in netUnits) {
+      if (u.netVariants.isNotEmpty) {
+        for (final v in u.netVariants) {
+          if (v.type.toUpperCase() != selectedType.toUpperCase()) continue;
+          if (v.monthlyPassRatePaise != null && v.monthlyPassRatePaise! > 0 &&
+              (bestRate == null || v.monthlyPassRatePaise! < bestRate)) {
+            bestRate = v.monthlyPassRatePaise; bestLabel = v.label;
+            bestUnitId = u.id; bestNetType = v.type;
+            bestMins = u.minSlotMins > 0 ? u.minSlotMins : 60;
+            bestOpenTime = u.openTime; bestCloseTime = u.closeTime;
+          }
+        }
+      } else {
+        final unitType = (u.netType ?? '').toUpperCase();
+        if (unitType.isNotEmpty && unitType != selectedType.toUpperCase()) continue;
+        if (u.monthlyPassRatePaise != null && u.monthlyPassRatePaise! > 0 &&
+            (bestRate == null || u.monthlyPassRatePaise! < bestRate)) {
+          bestRate = u.monthlyPassRatePaise; bestLabel = u.unitTypeLabel ?? u.name;
+          bestUnitId = u.id; bestNetType = u.netType ?? selectedType;
+          bestMins = u.minSlotMins > 0 ? u.minSlotMins : 60;
+          bestOpenTime = u.openTime; bestCloseTime = u.closeTime;
+        }
+      }
+    }
+    if (bestRate == null) return null;
+    final rate = bestRate, uid = bestUnitId ?? netUnits.firstOrNull?.id ?? '';
+    final label = bestLabel ?? 'Cricket Net', netType = bestNetType ?? '', mins = bestMins;
+    final openTime = bestOpenTime, closeTime = bestCloseTime;
+    return _PackageInfo(
+      icon: Icons.workspace_premium_rounded,
+      title: 'Monthly Pass',
+      priceText: '${_inr(rate)}/month',
+      description: 'Unlimited sessions for a month',
+      onTap: () => showModalBottomSheet(
+        context: context, isScrollControlled: true, useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _MonthlyPassSheet(arenaId: widget.arena.id, arenaName: widget.arena.name,
+            unitId: uid, label: label, netType: netType, ratePaise: rate, minSlotMins: mins,
+            openTime: openTime, closeTime: closeTime),
+      ),
+    );
+  }
+
+  _PackageInfo? _computeGroundPackage(BuildContext context, BookingGroup group) {
+    const netTypes = {'CRICKET_NET', 'INDOOR_NET'};
+    final unitId = group.singleUnitId;
+    final groundUnits = widget.arena.units
+        .where((u) => !netTypes.contains(u.unitType) && (unitId == null || u.id == unitId))
+        .toList();
+    final minDays = groundUnits.where((u) => u.minBulkDays != null).map((u) => u.minBulkDays!)
+        .fold<int?>(null, (b, v) => b == null ? v : (v < b ? v : b));
+    final ratePaise = groundUnits.where((u) => u.bulkDayRatePaise != null && u.bulkDayRatePaise! > 0)
+        .map((u) => u.bulkDayRatePaise!)
+        .fold<int?>(null, (b, v) => b == null ? v : (v < b ? v : b));
+    if (ratePaise == null || ratePaise == 0) return null;
+    final uid = unitId ?? groundUnits.firstOrNull?.id ?? '';
+    final days = minDays ?? 5;
+    final mins = groundUnits.where((u) => u.minSlotMins > 0).map((u) => u.minSlotMins)
+        .fold<int>(240, (b, v) => v < b ? v : b);
+    final openTime = groundUnits.map((u) => u.openTime).whereType<String>().firstOrNull;
+    final closeTime = groundUnits.map((u) => u.closeTime).whereType<String>().firstOrNull;
+    return _PackageInfo(
+      icon: Icons.calendar_month_rounded,
+      title: 'Bulk Booking',
+      priceText: '${_inr(ratePaise)}/day',
+      description: 'Book $days+ days at a discounted rate',
+      onTap: () => showModalBottomSheet(
+        context: context, isScrollControlled: true, useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _BulkBookingSheet(arenaId: widget.arena.id, arenaName: widget.arena.name,
+            unitId: uid, groundName: group.displayName, minBulkDays: days,
+            bulkDayRatePaise: ratePaise, minSlotMins: mins,
+            openTime: openTime, closeTime: closeTime),
+      ),
+    );
+  }
+
+  _PackageInfo? _buildPackageInfo(BuildContext context) {
+    final g = _selectedGroup;
+    if (g == null) return null;
+    return g.isNetGroup ? _computeNetsPackage(context, g) : _computeGroundPackage(context, g);
+  }
 
   bool get _canNext {
     if (_step == 0) {
@@ -88,7 +212,8 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
       if (!_isNets && _durationMins <= 0) return false;
       return true;
     }
-    if (_step == 1) return _selectedSlot != null;
+    if (_step == 1) return _bookingMode != null;
+    if (_step == 2) return _selectedSlot != null;
     return false;
   }
 
@@ -101,7 +226,6 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
     _initPhonePe();
     _loadAvailability();
     _loadAddons();
-    _loadUnitGroupMeta();
   }
 
   Future<void> _loadAddons() async {
@@ -116,20 +240,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
 
   // Loads booking context with a minimal duration just to get unit group metadata
   // (package flags, rates) before the user selects a group/duration.
-  Future<void> _loadUnitGroupMeta() async {
-    try {
-      final repo = ref.read(arenaSlotsRepositoryProvider);
-      final slots = await repo.getArenaSlots(widget.arena.id, _selectedDate, 60);
-      if (!mounted) return;
-      debugPrint('[PKG] unitGroups: ${slots.unitGroups.map((g) => '${g.groupKey} isNet=${g.isNetGroup} monthlyPassEnabled=${g.monthlyPassEnabled} monthlyPassRatePaise=${g.monthlyPassRatePaise} bulkDayRatePaise=${g.bulkDayRatePaise}').join(' | ')}');
-      // Only set if no real availability load has happened yet
-      if (_arenaSlots == null) setState(() => _arenaSlots = slots);
-    } catch (e) {
-      debugPrint('[PKG] _loadUnitGroupMeta error: $e');
-    }
-  }
-
-  Future<void> _initPhonePe() async {
+Future<void> _initPhonePe() async {
     final envs = kReleaseMode
         ? const <String>['PRODUCTION']
         : const <String>['PRODUCTION', 'SANDBOX'];
@@ -373,17 +484,37 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
 
   void _next() {
     if (!_canNext) return;
-    if (_step == 0 && _isNets && (_selectedGroup!.netTypes.length == 1) && _selectedNetType == null) {
-      setState(() => _selectedNetType = _selectedGroup!.netTypes.first);
+    if (_step == 0) {
+      if (_isNets && _selectedGroup!.netTypes.length == 1 && _selectedNetType == null) {
+        setState(() => _selectedNetType = _selectedGroup!.netTypes.first);
+      }
+      // skip Options step when no package available for this group
+      final nextStep = _groupHasPackage(_selectedGroup!) ? 1 : 2;
+      setState(() { _step = nextStep; _bookingMode = nextStep == 2 ? 'session' : null; });
+      if (nextStep == 2) _loadAvailability();
+      return;
+    }
+    if (_step == 1) {
+      if (_bookingMode == 'package') {
+        _packageAction?.call();
+        return;
+      }
+      // session — go to schedule
+      setState(() => _step = 2);
+      _loadAvailability();
+      return;
     }
     setState(() => _step++);
   }
 
   void _back() {
-    if (_step > 0) {
-      setState(() => _step--);
-    } else {
+    if (_step == 0) {
       Navigator.of(context).pop();
+    } else if (_step == 2 && !_groupHasPackage(_selectedGroup!)) {
+      // skipped Options, go straight back to Facility
+      setState(() { _step = 0; _bookingMode = null; });
+    } else {
+      setState(() => _step--);
     }
   }
 
@@ -588,6 +719,9 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
       _selectedNetType = (group.isNetGroup && group.netTypes.length == 1)
           ? group.netTypes.first
           : null;
+      _selectedAddons.clear();
+      _bookingMode = null;
+      _packageAction = null;
     });
     _loadAvailability();
     _loadCalendarAvailability();
@@ -650,8 +784,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           selectedNetType: _selectedNetType,
           durationMins: _durationMins,
           scrollCtrl: scrollCtrl,
-          arenaPhone: widget.arena.phone,
-          apiUnitGroups: _arenaSlots?.unitGroups ?? const [],
+          arenaUnits: widget.arena.units,
           onGroupTap: _onGroupTap,
           onNetTypeTap: (t) => setState(() {
             _selectedNetType = t;
@@ -665,7 +798,18 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
             _loadAvailability();
           },
         ),
-      1 => _ScheduleStep(
+      1 => _OptionsStep(
+          group: _selectedGroup!,
+          durationMins: _durationMins,
+          bookingMode: _bookingMode,
+          packageInfo: _buildPackageInfo(context),
+          scrollCtrl: scrollCtrl,
+          onModeChange: (m, {VoidCallback? action}) => setState(() {
+            _bookingMode = m;
+            if (action != null) _packageAction = action;
+          }),
+        ),
+      2 => _ScheduleStep(
           slots: _availableSlots,
           loading: _loadingAvail,
           selectedDate: _selectedDate,
@@ -696,7 +840,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
             _loadCalendarAvailability();
           },
         ),
-      2 => _ConfirmStep(
+      3 => _ConfirmStep(
           arena: widget.arena,
           group: _selectedGroup!,
           slot: _selectedSlot!,
@@ -707,7 +851,9 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
           payNowPaise: _payNowPaise,
           booking: _booking,
           scrollCtrl: scrollCtrl,
-          addons: _addons,
+          addons: _addons
+              .where((a) => a.unitId == null || a.unitId == _resolvedUnitId)
+              .toList(),
           selectedAddons: _selectedAddons,
           onAddonToggle: (a) => setState(() {
             if (_selectedAddons.contains(a)) {
@@ -748,7 +894,7 @@ class _PlayerBookingSheetState extends ConsumerState<PlayerBookingSheet> {
                     Icon(Icons.arrow_back_rounded, color: context.fg, size: 20),
               ),
             ),
-            if (_step < 2) ...[
+            if (_step < 3) ...[
               const SizedBox(width: 12),
               Expanded(
                 child: SizedBox(
@@ -885,6 +1031,23 @@ class _SheetStepBar extends StatelessWidget {
   }
 }
 
+// ── Package info ──────────────────────────────────────────────────────────────
+
+class _PackageInfo {
+  const _PackageInfo({
+    required this.icon,
+    required this.title,
+    required this.priceText,
+    required this.description,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title;
+  final String priceText;
+  final String description;
+  final VoidCallback onTap;
+}
+
 // ── Step 0: Facility ──────────────────────────────────────────────────────────
 
 class _FacilityStep extends StatelessWidget {
@@ -896,8 +1059,7 @@ class _FacilityStep extends StatelessWidget {
     required this.selectedNetType,
     required this.durationMins,
     required this.scrollCtrl,
-    required this.arenaPhone,
-    required this.apiUnitGroups,
+    required this.arenaUnits,
     required this.onGroupTap,
     required this.onNetTypeTap,
     required this.onDurationChanged,
@@ -910,11 +1072,29 @@ class _FacilityStep extends StatelessWidget {
   final String? selectedNetType;
   final int durationMins;
   final ScrollController scrollCtrl;
-  final String? arenaPhone;
-  final List<UnitGroupSlots> apiUnitGroups;
+  final List<ArenaUnitOption> arenaUnits;
   final ValueChanged<BookingGroup> onGroupTap;
   final ValueChanged<String> onNetTypeTap;
   final ValueChanged<int> onDurationChanged;
+
+  bool _hasPackage(BookingGroup group) {
+    if (group.isNetGroup) {
+      const t = {'CRICKET_NET', 'INDOOR_NET'};
+      for (final u in arenaUnits.where((u) => t.contains(u.unitType))) {
+        if (u.monthlyPassRatePaise != null && u.monthlyPassRatePaise! > 0) return true;
+        for (final v in u.netVariants) {
+          if (v.monthlyPassRatePaise != null && v.monthlyPassRatePaise! > 0) return true;
+        }
+      }
+      return false;
+    } else {
+      final uid = group.singleUnitId;
+      for (final u in arenaUnits.where((u) => uid == null || u.id == uid)) {
+        if (u.bulkDayRatePaise != null && u.bulkDayRatePaise! > 0) return true;
+      }
+      return false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -933,6 +1113,7 @@ class _FacilityStep extends StatelessWidget {
             _FacilityItem(
               group: group,
               selected: selectedGroup == group,
+              hasPackage: _hasPackage(group),
               onTap: () => onGroupTap(group),
               durationMins: durationMins,
               selectedNetType: selectedNetType,
@@ -940,30 +1121,22 @@ class _FacilityStep extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
-          _NetsPackageSection(
-            apiUnitGroups: apiUnitGroups,
-            phone: arenaPhone,
-          ),
         ],
         if (groundGroups.isNotEmpty) ...[
-          const SizedBox(height: 24),
+          if (netGroups.isNotEmpty) const SizedBox(height: 12),
           _SectionLabel('GROUNDS & COURTS'),
           const SizedBox(height: 12),
           for (final group in groundGroups) ...[
             _FacilityItem(
               group: group,
               selected: selectedGroup == group,
+              hasPackage: _hasPackage(group),
               onTap: () => onGroupTap(group),
               durationMins: durationMins,
               onDurationChanged: onDurationChanged,
             ),
             const SizedBox(height: 12),
           ],
-          _GroundsPackageSection(
-            groundGroups: groundGroups,
-            apiUnitGroups: apiUnitGroups,
-            phone: arenaPhone,
-          ),
         ],
       ],
     );
@@ -974,6 +1147,7 @@ class _FacilityItem extends StatelessWidget {
   const _FacilityItem({
     required this.group,
     required this.selected,
+    required this.hasPackage,
     required this.onTap,
     required this.durationMins,
     this.selectedNetType,
@@ -983,6 +1157,7 @@ class _FacilityItem extends StatelessWidget {
 
   final BookingGroup group;
   final bool selected;
+  final bool hasPackage;
   final VoidCallback onTap;
   final int durationMins;
   final String? selectedNetType;
@@ -995,6 +1170,7 @@ class _FacilityItem extends StatelessWidget {
     final isDark = context.isDark;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GestureDetector(
           onTap: onTap,
@@ -1003,9 +1179,9 @@ class _FacilityItem extends StatelessWidget {
             margin: const EdgeInsets.symmetric(horizontal: 20),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: selected 
-                ? (isDark ? const Color(0xFF151515) : Colors.white)
-                : (isDark ? const Color(0xFF0D0D0D) : Colors.white),
+              color: selected
+                  ? (isDark ? const Color(0xFF151515) : Colors.white)
+                  : (isDark ? const Color(0xFF0D0D0D) : Colors.white),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
                 color: selected ? context.accent : context.stroke.withValues(alpha: 0.1),
@@ -1048,16 +1224,39 @@ class _FacilityItem extends StatelessWidget {
                           letterSpacing: 0.5,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        group.isNetGroup
-                            ? _netPriceRange(group.units).toUpperCase()
-                            : _groundPriceLabel(group.units.first).toUpperCase(),
-                        style: TextStyle(
-                          color: context.accent,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                        ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text(
+                            group.isNetGroup
+                                ? _netPriceRange(group.units)
+                                : _groundPriceLabel(group.units.first),
+                            style: TextStyle(
+                              color: context.accent,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          if (hasPackage) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: context.accent.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                group.isNetGroup ? 'MONTHLY PASS' : 'BULK BOOKING',
+                                style: TextStyle(
+                                  color: context.accent,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
@@ -1086,7 +1285,201 @@ class _FacilityItem extends StatelessWidget {
   }
 }
 
-// ── Step 1: Schedule ──────────────────────────────────────────────────────────
+// ── Step 1: Options ───────────────────────────────────────────────────────────
+
+class _OptionsStep extends StatelessWidget {
+  const _OptionsStep({
+    required this.group,
+    required this.durationMins,
+    required this.bookingMode,
+    required this.packageInfo,
+    required this.scrollCtrl,
+    required this.onModeChange,
+  });
+
+  final BookingGroup group;
+  final int durationMins;
+  final String? bookingMode;
+  final _PackageInfo? packageInfo;
+  final ScrollController scrollCtrl;
+  final void Function(String? mode, {VoidCallback? action}) onModeChange;
+
+  @override
+  Widget build(BuildContext context) {
+    final sessionPrice = group.isNetGroup
+        ? _netPriceRange(group.units)
+        : _groundPriceLabel(group.units.first, durationMins: durationMins);
+
+    return ListView(
+      controller: scrollCtrl,
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+      children: [
+        Text(
+          group.displayName,
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'How would you like to book?',
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 28),
+        _OptionCard(
+          icon: group.isNetGroup
+              ? Icons.sports_cricket_rounded
+              : Icons.schedule_rounded,
+          title: 'Book a Session',
+          subtitle: group.isNetGroup
+              ? 'Pick a date, time and duration'
+              : 'Pick a date and a time slot',
+          priceText: sessionPrice.isNotEmpty ? sessionPrice : null,
+          priceLabel: group.isNetGroup ? null : null,
+          isSelected: bookingMode == 'session',
+          onTap: () => onModeChange('session'),
+        ),
+        if (packageInfo != null) ...[
+          const SizedBox(height: 12),
+          _OptionCard(
+            icon: packageInfo!.icon,
+            title: packageInfo!.title,
+            subtitle: packageInfo!.description,
+            priceText: packageInfo!.priceText,
+            isSelected: bookingMode == 'package',
+            onTap: () => onModeChange('package', action: packageInfo!.onTap),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _OptionCard extends StatelessWidget {
+  const _OptionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.isSelected,
+    required this.onTap,
+    this.priceText,
+    this.priceLabel,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? priceText;
+  final String? priceLabel;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? context.accent.withValues(alpha: 0.07)
+              : (isDark ? const Color(0xFF0D0D0D) : Colors.white),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? context.accent : context.stroke.withValues(alpha: 0.1),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? context.accent.withValues(alpha: 0.15)
+                    : context.panel.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                icon,
+                color: isSelected ? context.accent : context.fgSub,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isSelected ? context.accent : context.fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: context.fgSub.withValues(alpha: 0.65),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (priceText != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      priceText!,
+                      style: TextStyle(
+                        color: context.accent,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? context.accent : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? context.accent : context.stroke.withValues(alpha: 0.3),
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? Icon(Icons.check_rounded,
+                      size: 14,
+                      color: isDark ? Colors.black : Colors.white)
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Step 2: Schedule ──────────────────────────────────────────────────────────
 
 class _ScheduleStep extends StatelessWidget {
   const _ScheduleStep({
@@ -1128,14 +1521,20 @@ class _ScheduleStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    final maxDays = advanceBookingDays > 0 ? advanceBookingDays : 30;
+    // Prefer the unit-level advanceBookingDays; fall back to arena-level, then 30.
+    final unitDays = selectedGroup.units
+        .map((u) => u.advanceBookingDays ?? 0)
+        .where((d) => d > 0)
+        .fold<int>(0, (a, b) => b > a ? b : a);
+    final maxDays = unitDays > 0 ? unitDays : (advanceBookingDays > 0 ? advanceBookingDays : 30);
     final maxDate = DateTime(today.year, today.month, today.day + maxDays);
+    final dateLabel = DateFormat('EEE, d MMM').format(selectedDate);
+
     return ListView(
       controller: scrollCtrl,
-      padding: const EdgeInsets.only(top: 12, bottom: 8),
+      padding: const EdgeInsets.only(top: 8, bottom: 24),
       children: [
-        _SectionLabel('Select Date'),
-        const SizedBox(height: 12),
+        // Calendar
         _AvailabilityCalendar(
           selectedDate: selectedDate,
           displayedMonth: displayedMonth,
@@ -1144,24 +1543,52 @@ class _ScheduleStep extends StatelessWidget {
           onDateChanged: onDateChanged,
           onMonthChanged: onMonthChanged,
         ),
+
+        // Duration segmented control (nets only)
         if (isNets) ...[
           const SizedBox(height: 20),
-          _SectionLabel('Duration'),
-          const SizedBox(height: 8),
-          DurationPicker(
+          _SegmentedDurationPicker(
             selectedMins: durationMins,
             constraints: selectedGroup.units.map(DurationConstraints.fromUnit).toList(),
             onChanged: onDurationChanged,
           ),
         ],
-        const SizedBox(height: 28),
-        _SectionLabel('Start time'),
+
+        const SizedBox(height: 24),
+
+        // Slots header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                dateLabel,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (!loading && slots.isNotEmpty)
+                Text(
+                  '${slots.length} slot${slots.length == 1 ? '' : 's'}',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+            ],
+          ),
+        ),
         const SizedBox(height: 14),
+
         if (loading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          )
+          _SlotSkeleton()
         else
           PlayerSlotGrid(
             slots: slots,
@@ -1171,6 +1598,192 @@ class _ScheduleStep extends StatelessWidget {
             onSelected: onSlotSelected,
           ),
       ],
+    );
+  }
+}
+
+class _SegmentedDurationPicker extends StatelessWidget {
+  const _SegmentedDurationPicker({
+    required this.selectedMins,
+    required this.constraints,
+    required this.onChanged,
+  });
+
+  final int selectedMins;
+  final List<DurationConstraints> constraints;
+  final ValueChanged<int> onChanged;
+
+  static const _durations = [60, 120, 240, 480];
+
+  List<int> get _validDurations {
+    if (constraints.isEmpty) return _durations;
+    return _durations.where((mins) => constraints.every((c) {
+      final min = c.minSlotMins > 0 ? c.minSlotMins : 60;
+      final withinMin = mins >= min;
+      final withinMax = c.maxSlotMins <= 0 || mins <= c.maxSlotMins;
+      return withinMin && withinMax;
+    })).toList();
+  }
+
+  int? _savingPercent(int mins) {
+    if (mins != 240 && mins != 480) return null;
+    final hours = mins ~/ 60;
+    int best = 0;
+    for (final c in constraints) {
+      final packagePrice = mins == 240 ? c.price4HrPaise : c.price8HrPaise;
+      if (packagePrice == null || packagePrice <= 0) continue;
+      final regular = c.pricePerHourPaise * hours;
+      if (regular <= 0 || packagePrice >= regular) continue;
+      final saving = (((regular - packagePrice) / regular) * 100).round();
+      if (saving > best) best = saving;
+    }
+    return best > 0 ? best : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final valid = _validDurations;
+    if (valid.length <= 1) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        height: 44,
+        decoration: BoxDecoration(
+          color: context.panel.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          children: [
+            for (int i = 0; i < valid.length; i++) ...[
+              Expanded(
+                child: _SegmentChip(
+                  mins: valid[i],
+                  selected: selectedMins == valid[i],
+                  saving: _savingPercent(valid[i]),
+                  onTap: () => onChanged(valid[i]),
+                ),
+              ),
+              if (i < valid.length - 1) const SizedBox(width: 3),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SegmentChip extends StatelessWidget {
+  const _SegmentChip({
+    required this.mins,
+    required this.selected,
+    required this.saving,
+    required this.onTap,
+  });
+
+  final int mins;
+  final bool selected;
+  final int? saving;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        decoration: BoxDecoration(
+          color: selected ? context.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '${mins ~/ 60}hr',
+              style: TextStyle(
+                color: selected ? Colors.white : context.fg,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                height: 1,
+              ),
+            ),
+            if (saving != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                'save $saving%',
+                style: TextStyle(
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.7)
+                      : context.success,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.1,
+                  height: 1,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SlotSkeleton extends StatefulWidget {
+  @override
+  State<_SlotSkeleton> createState() => _SlotSkeletonState();
+}
+
+class _SlotSkeletonState extends State<_SlotSkeleton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder: (context, _) {
+          final opacity = 0.08 + _anim.value * 0.12;
+          final color = context.fg.withValues(alpha: opacity);
+          return GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 1.55,
+            ),
+            itemCount: 9,
+            itemBuilder: (_, __) => Container(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -1539,223 +2152,9 @@ class _NetTypePicker extends StatelessWidget {
   }
 }
 
-// ── Package sections ──────────────────────────────────────────────────────────
+// ── Availability calendar — horizontal day strip ──────────────────────────────
 
-class _NetsPackageSection extends StatelessWidget {
-  const _NetsPackageSection({required this.apiUnitGroups, this.phone});
-
-  final List<UnitGroupSlots> apiUnitGroups;
-  final String? phone;
-
-  @override
-  Widget build(BuildContext context) {
-    final netsSlots = apiUnitGroups.where((g) => g.isNetGroup).toList();
-    final ratePaise = netsSlots
-        .where((g) => g.monthlyPassRatePaise != null)
-        .map((g) => g.monthlyPassRatePaise!)
-        .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionLabel('PACKAGES'),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _PackageCard(
-            icon: Icons.workspace_premium_rounded,
-            title: 'Monthly Pass',
-            description: 'Unlimited net sessions for a full month',
-            ratePaise: ratePaise,
-            rateLabel: '/month',
-            phone: phone,
-          ),
-        ),
-        const SizedBox(height: 12),
-      ],
-    );
-  }
-}
-
-class _GroundsPackageSection extends StatelessWidget {
-  const _GroundsPackageSection({
-    required this.groundGroups,
-    required this.apiUnitGroups,
-    this.phone,
-  });
-
-  final List<BookingGroup> groundGroups;
-  final List<UnitGroupSlots> apiUnitGroups;
-  final String? phone;
-
-  @override
-  Widget build(BuildContext context) {
-    final groundKeys = groundGroups.map((g) => g.key).toSet();
-    final groundSlots = apiUnitGroups.where((g) => groundKeys.contains(g.groupKey)).toList();
-    final minDays = groundSlots
-        .where((g) => g.minBulkDays != null)
-        .map((g) => g.minBulkDays!)
-        .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
-    final ratePaise = groundSlots
-        .where((g) => g.bulkDayRatePaise != null)
-        .map((g) => g.bulkDayRatePaise!)
-        .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
-    final description = minDays != null
-        ? 'Book $minDays+ days at discounted rates'
-        : 'Book multiple days at discounted rates';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionLabel('PACKAGES'),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _PackageCard(
-            icon: Icons.calendar_month_rounded,
-            title: 'Bulk Booking',
-            description: description,
-            ratePaise: ratePaise,
-            rateLabel: '/day',
-            phone: phone,
-          ),
-        ),
-        const SizedBox(height: 12),
-      ],
-    );
-  }
-}
-
-// ── Package card (Bulk / Monthly) ─────────────────────────────────────────────
-
-class _PackageCard extends StatelessWidget {
-  const _PackageCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    this.ratePaise,
-    this.rateLabel,
-    this.phone,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-  final int? ratePaise;
-  final String? rateLabel; // e.g. '/month' or '/day'
-  final String? phone;
-
-  bool get _hasPricing => ratePaise != null && ratePaise! > 0;
-
-  void _contact(BuildContext context) async {
-    final p = phone;
-    if (p == null || p.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact the arena to enquire.')),
-      );
-      return;
-    }
-    final digits = p.replaceAll(RegExp(r'\D'), '');
-    final wa = Uri.parse('https://wa.me/91$digits?text=${Uri.encodeComponent('Hi, I\'d like to know more about ${title.replaceAll('\n', ' ')}.')}');
-    if (await canLaunchUrl(wa)) {
-      await launchUrl(wa, mode: LaunchMode.externalApplication);
-    } else {
-      await launchUrl(Uri.parse('tel:$digits'));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDark;
-    final priceText = _hasPricing
-        ? '₹${(ratePaise! / 100).toStringAsFixed(0)}${rateLabel ?? ''}'
-        : null;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0D0D0D) : const Color(0xFFF8F8F8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.stroke.withValues(alpha: 0.1)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: context.accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: context.accent, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                    height: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: TextStyle(
-                    color: context.fgSub.withValues(alpha: 0.6),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
-                ),
-                if (priceText != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    priceText,
-                    style: TextStyle(
-                      color: context.accent,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (!_hasPricing)
-            GestureDetector(
-              onTap: () => _contact(context),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: context.accent,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  'ENQUIRE',
-                  style: TextStyle(
-                    color: isDark ? Colors.black : Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Availability calendar ─────────────────────────────────────────────────────
-
-class _AvailabilityCalendar extends StatelessWidget {
+class _AvailabilityCalendar extends StatefulWidget {
   const _AvailabilityCalendar({
     required this.selectedDate,
     required this.displayedMonth,
@@ -1766,125 +2165,326 @@ class _AvailabilityCalendar extends StatelessWidget {
   });
 
   final DateTime selectedDate;
-  final DateTime displayedMonth;
+  final DateTime displayedMonth;  // unused in strip mode, kept for API compat
   final DateTime maxDate;
   final Map<String, int?> fillLevels;
   final ValueChanged<DateTime> onDateChanged;
-  final ValueChanged<DateTime> onMonthChanged;
+  final ValueChanged<DateTime> onMonthChanged;  // unused in strip mode
 
-  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  @override
+  State<_AvailabilityCalendar> createState() => _AvailabilityCalendarState();
+}
+
+class _AvailabilityCalendarState extends State<_AvailabilityCalendar> {
+  static const int _visibleCount = 7;
+  static const double _cellGap = 6;
+  static const double _padH = 20;
+
+  late final ScrollController _scroll;
+  late final List<DateTime> _dates;
+  double _cellW = 44; // computed on first build
+
+  @override
+  void initState() {
+    super.initState();
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final totalDays = widget.maxDate.difference(todayDate).inDays + 1;
+    _dates = List.generate(totalDays, (i) => todayDate.add(Duration(days: i)));
+    _scroll = ScrollController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected(animate: false));
+  }
+
+  @override
+  void didUpdateWidget(_AvailabilityCalendar old) {
+    super.didUpdateWidget(old);
+    if (!_sameDay(old.selectedDate, widget.selectedDate)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected(animate: true));
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _scrollToSelected({required bool animate}) {
+    final idx = _dates.indexWhere((d) => _sameDay(d, widget.selectedDate));
+    if (idx < 0 || !_scroll.hasClients) return;
+    final stride = _cellW + _cellGap;
+    final viewportW = _scroll.position.viewportDimension;
+    final offset = stride * idx + _padH - (viewportW - _cellW) / 2;
+    final target = offset.clamp(0.0, _scroll.position.maxScrollExtent);
+    if (animate) {
+      _scroll.animateTo(target,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+    } else {
+      _scroll.jumpTo(target);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
-    final firstOfMonth = DateTime(displayedMonth.year, displayedMonth.month, 1);
-    final startOffset = (firstOfMonth.weekday - 1) % 7;
-    final daysInMonth = DateTime(displayedMonth.year, displayedMonth.month + 1, 0).day;
-    final canGoPrev = displayedMonth.isAfter(DateTime(today.year, today.month));
-    final canGoNext = DateTime(displayedMonth.year, displayedMonth.month + 1)
-        .isBefore(DateTime(maxDate.year, maxDate.month + 1));
+    final monthLabel = DateFormat('MMMM yyyy').format(widget.selectedDate);
+    final screenW = MediaQuery.of(context).size.width;
+    // fit exactly 7 cells: screenW = 2*padH + 7*cellW + 6*cellGap
+    _cellW = (screenW - 2 * _padH - (_visibleCount - 1) * _cellGap) / _visibleCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Header: nav + month + year ──
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              _NavBtn(
-                icon: Icons.chevron_left_rounded,
-                enabled: canGoPrev,
-                onTap: canGoPrev ? () => onMonthChanged(
-                    DateTime(displayedMonth.year, displayedMonth.month - 1)) : null,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  DateFormat('MMMM yyyy').format(displayedMonth),
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-              _NavBtn(
-                icon: Icons.chevron_right_rounded,
-                enabled: canGoNext,
-                onTap: canGoNext ? () => onMonthChanged(
-                    DateTime(displayedMonth.year, displayedMonth.month + 1)) : null,
-              ),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: _padH),
+          child: Text(
+            monthLabel,
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.4,
+            ),
           ),
         ),
         const SizedBox(height: 14),
-        // ── Weekday labels ──
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: _days.map((d) => Expanded(
-              child: Center(
-                child: Text(
-                  d.substring(0, 1),
-                  style: TextStyle(
-                    color: context.fgSub.withValues(alpha: 0.3),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+        SizedBox(
+          height: 72,
+          child: ListView.builder(
+            controller: _scroll,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: _padH),
+            itemCount: _dates.length,
+            itemExtent: _cellW + _cellGap,
+            itemBuilder: (context, i) {
+              final date = _dates[i];
+              final isToday = _sameDay(date, todayDate);
+              final isSelected = _sameDay(date, widget.selectedDate);
+              final fillLevel = widget.fillLevels[_dateKey(date)];
+              return Padding(
+                padding: const EdgeInsets.only(right: _cellGap),
+                child: _DateStripCell(
+                  date: date,
+                  cellWidth: _cellW,
+                  isSelected: isSelected,
+                  isToday: isToday,
+                  fillLevel: fillLevel,
+                  onTap: () => widget.onDateChanged(date),
                 ),
-              ),
-            )).toList(),
-          ),
-        ),
-        const SizedBox(height: 8),
-        // ── Date grid ──
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              childAspectRatio: 0.72,
-              mainAxisSpacing: 2,
-            ),
-            itemCount: startOffset + daysInMonth,
-            itemBuilder: (_, i) {
-              if (i < startOffset) return const SizedBox();
-              final day = i - startOffset + 1;
-              final date = DateTime(displayedMonth.year, displayedMonth.month, day);
-              final isPast = date.isBefore(todayDate);
-              final isBeyond = date.isAfter(maxDate);
-              final disabled = isPast || isBeyond;
-              return _DateCell(
-                day: day,
-                isSelected: _sameDay(date, selectedDate),
-                isToday: _sameDay(date, todayDate),
-                isDisabled: disabled,
-                fillLevel: disabled ? null : fillLevels[_dateKey(date)],
-                onTap: disabled ? null : () => onDateChanged(date),
               );
             },
           ),
         ),
-        const SizedBox(height: 10),
-        // ── Legend ──
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+class _DateStripCell extends StatelessWidget {
+  const _DateStripCell({
+    required this.date,
+    required this.cellWidth,
+    required this.isSelected,
+    required this.isToday,
+    required this.fillLevel,
+    required this.onTap,
+  });
+
+  final DateTime date;
+  final double cellWidth;
+  final bool isSelected;
+  final bool isToday;
+  final int? fillLevel;
+  final VoidCallback onTap;
+
+  static const _green = Color(0xFF4ADE80);
+  static const _amber = Color(0xFFFBBF24);
+  static const _red   = Color(0xFFF87171);
+
+  Color? _stripeColor() {
+    if (isSelected || fillLevel == null) return null;
+    if (fillLevel == 0) return _green;
+    if (fillLevel == 1) return _amber;
+    if (fillLevel == 2) return _red;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    final stripe = _stripeColor();
+    final dayName = DateFormat('EEE').format(date).toUpperCase();
+    final dayNum = date.day;
+
+    final textColor = isSelected
+        ? (isDark ? Colors.black : Colors.white)
+        : fillLevel == 2
+            ? context.fgSub.withValues(alpha: 0.4)
+            : context.fg;
+
+    final subColor = isSelected
+        ? (isDark ? Colors.black.withValues(alpha: 0.55) : Colors.white.withValues(alpha: 0.65))
+        : context.fgSub;
+
+    final cellBg = isSelected
+        ? context.accent
+        : isToday
+            ? context.accent.withValues(alpha: 0.1)
+            : context.panel.withValues(alpha: 0.45);
+
+    final cellBorder = isToday && !isSelected
+        ? Border.all(color: context.accent.withValues(alpha: 0.5), width: 1.5)
+        : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: cellWidth,
+        decoration: BoxDecoration(
+          color: cellBg,
+          borderRadius: BorderRadius.circular(12),
+          border: cellBorder,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
             children: [
-              _CalLegend(color: const Color(0xFF4ADE80), label: 'Open'),
-              const SizedBox(width: 20),
-              _CalLegend(color: const Color(0xFFFBBF24), label: 'Few left'),
-              const SizedBox(width: 20),
-              _CalLegend(color: const Color(0xFFF87171), label: 'Full'),
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      dayName,
+                      style: TextStyle(
+                        color: subColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                        height: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '$dayNum',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (stripe != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    height: 3,
+                    color: stripe.withValues(alpha: 0.8),
+                  ),
+                ),
             ],
           ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+// fillLevel: null=disabled/unknown, 0=open, 1=few left, 2=full
+class _DateCell extends StatelessWidget {
+  const _DateCell({
+    required this.day,
+    required this.isSelected,
+    required this.isToday,
+    required this.isDisabled,
+    required this.fillLevel,
+    required this.onTap,
+  });
+
+  final int day;
+  final bool isSelected;
+  final bool isToday;
+  final bool isDisabled;
+  final int? fillLevel;
+  final VoidCallback? onTap;
+
+  static const _green = Color(0xFF4ADE80);
+  static const _amber = Color(0xFFFBBF24);
+  static const _red   = Color(0xFFF87171);
+
+  @override
+  Widget build(BuildContext context) {
+    // Used by bulk booking sheet — keep old circle style
+    final isDark = context.isDark;
+    Color? dotColor;
+    if (!isDisabled && !isSelected) {
+      if (fillLevel == 0) dotColor = _green;
+      else if (fillLevel == 1) dotColor = _amber;
+      else if (fillLevel == 2) dotColor = _red;
+    }
+    final numColor = isDisabled
+        ? context.fgSub.withValues(alpha: 0.2)
+        : isSelected
+            ? (isDark ? Colors.black : Colors.white)
+            : fillLevel == 2
+                ? context.fgSub.withValues(alpha: 0.5)
+                : context.fg;
+    final circleBg = isSelected
+        ? context.accent
+        : (isToday && !isSelected)
+            ? context.accent.withValues(alpha: 0.12)
+            : Colors.transparent;
+    final circleBorder = isToday && !isSelected
+        ? Border.all(color: context.accent.withValues(alpha: 0.5), width: 1.5)
+        : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: circleBg,
+              shape: BoxShape.circle,
+              border: circleBorder,
+            ),
+            child: Center(
+              child: Text(
+                '$day',
+                style: TextStyle(
+                  color: numColor,
+                  fontSize: 14,
+                  fontWeight: (isSelected || isToday) ? FontWeight.w900 : FontWeight.w500,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: dotColor ?? Colors.transparent,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1899,21 +2499,13 @@ class _NavBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: enabled
-              ? context.panel.withValues(alpha: 0.5)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
+      child: SizedBox(
+        width: 34,
+        height: 34,
         child: Icon(
           icon,
           size: 18,
-          color: enabled
-              ? context.fg
-              : context.fgSub.withValues(alpha: 0.15),
+          color: enabled ? context.fg : context.fgSub.withValues(alpha: 0.2),
         ),
       ),
     );
@@ -1945,101 +2537,6 @@ class _CalLegend extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-// fillLevel: null=disabled/unknown, 0=open, 1=few left, 2=full
-class _DateCell extends StatelessWidget {
-  const _DateCell({
-    required this.day,
-    required this.isSelected,
-    required this.isToday,
-    required this.isDisabled,
-    required this.fillLevel,
-    required this.onTap,
-  });
-
-  final int day;
-  final bool isSelected;
-  final bool isToday;
-  final bool isDisabled;
-  final int? fillLevel;
-  final VoidCallback? onTap;
-
-  static const _green = Color(0xFF4ADE80);
-  static const _amber = Color(0xFFFBBF24);
-  static const _red   = Color(0xFFF87171);
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDark;
-
-    Color? dotColor;
-    if (!isDisabled && !isSelected) {
-      if (fillLevel == 0) dotColor = _green;
-      else if (fillLevel == 1) dotColor = _amber;
-      else if (fillLevel == 2) dotColor = _red;
-    }
-
-    final numColor = isDisabled
-        ? context.fgSub.withValues(alpha: 0.2)
-        : isSelected
-            ? (isDark ? Colors.black : Colors.white)
-            : fillLevel == 2
-                ? context.fgSub.withValues(alpha: 0.5)
-                : context.fg;
-
-    final circleBg = isSelected
-        ? context.accent
-        : (isToday && !isSelected)
-            ? context.accent.withValues(alpha: 0.12)
-            : Colors.transparent;
-
-    final circleBorder = isToday && !isSelected
-        ? Border.all(color: context.accent.withValues(alpha: 0.5), width: 1.5)
-        : null;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: circleBg,
-              shape: BoxShape.circle,
-              border: circleBorder,
-            ),
-            child: Center(
-              child: Text(
-                '$day',
-                style: TextStyle(
-                  color: numColor,
-                  fontSize: 14,
-                  fontWeight: (isSelected || isToday)
-                      ? FontWeight.w900
-                      : FontWeight.w500,
-                  height: 1,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            width: 5,
-            height: 5,
-            decoration: BoxDecoration(
-              color: dotColor ?? Colors.transparent,
-              shape: BoxShape.circle,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -2127,21 +2624,22 @@ String _formatUnitType(String raw) {
   return raw.isEmpty ? 'Unit' : raw;
 }
 
-String _groundPriceLabel(ArenaUnitOption unit) {
-  if (unit.price4HrPaise != null && unit.price4HrPaise! > 0) {
-    return '₹${(unit.price4HrPaise! / 100).toStringAsFixed(0)} / 4 hr match';
-  }
-  if (unit.price8HrPaise != null && unit.price8HrPaise! > 0) {
-    return '₹${(unit.price8HrPaise! / 100).toStringAsFixed(0)} / 8 hr match';
-  }
-  if (unit.priceFullDayPaise != null && unit.priceFullDayPaise! > 0) {
+String _groundPriceLabel(ArenaUnitOption unit, {int durationMins = 0}) {
+  final minSlot = unit.minSlotMins > 0 ? unit.minSlotMins : 60;
+  final effective = (durationMins >= minSlot) ? durationMins : minSlot;
+  if (effective >= 720 && unit.priceFullDayPaise != null && unit.priceFullDayPaise! > 0) {
     return '₹${(unit.priceFullDayPaise! / 100).toStringAsFixed(0)} / full day';
   }
+  if (effective >= 480 && unit.price8HrPaise != null && unit.price8HrPaise! > 0) {
+    return '₹${(unit.price8HrPaise! / 100).toStringAsFixed(0)} / 8 hr';
+  }
+  if (effective >= 240 && unit.price4HrPaise != null && unit.price4HrPaise! > 0) {
+    return '₹${(unit.price4HrPaise! / 100).toStringAsFixed(0)} / 4 hr';
+  }
   if (unit.pricePerHourPaise > 0) {
-    final minSlot = unit.minSlotMins > 0 ? unit.minSlotMins : 240;
-    final matchPrice = ((unit.pricePerHourPaise * minSlot) / 60).round();
-    final hrs = minSlot ~/ 60;
-    return '₹${(matchPrice / 100).toStringAsFixed(0)} / ${hrs}hr match';
+    final price = ((unit.pricePerHourPaise * effective) / 60).round();
+    final hrs = effective ~/ 60;
+    return '₹${(price / 100).toStringAsFixed(0)} / ${hrs}hr';
   }
   return '';
 }
@@ -2165,5 +2663,654 @@ String _netPriceRange(List<ArenaUnitOption> units) {
   if (lo == hi) return '$loStr/hr';
   final hiStr = '₹${(hi / 100).toStringAsFixed(0)}';
   return '$loStr–$hiStr/hr';
+}
+
+
+
+// ── Monthly Pass Sheet ────────────────────────────────────────────────────────
+
+class _MonthlyPassSheet extends ConsumerStatefulWidget {
+  const _MonthlyPassSheet({
+    required this.arenaId,
+    required this.arenaName,
+    required this.unitId,
+    required this.label,
+    required this.netType,
+    required this.ratePaise,
+    required this.minSlotMins,
+    this.openTime,
+    this.closeTime,
+  });
+
+  final String arenaId;
+  final String arenaName;
+  final String unitId;
+  final String label;
+  final String netType;
+  final int ratePaise;
+  final int minSlotMins;
+  final String? openTime;
+  final String? closeTime;
+
+  @override
+  ConsumerState<_MonthlyPassSheet> createState() => _MonthlyPassSheetState();
+}
+
+class _MonthlyPassSheetState extends ConsumerState<_MonthlyPassSheet> {
+  late int _startHour;
+  late DateTime _startDate;
+  bool _booking = false;
+  bool _phonePeReady = false;
+
+  int get _openHour => _h(widget.openTime ?? '05:00');
+  int get _closeHour {
+    // Last valid start = closeTime minus one slot duration
+    final closeH = _h(widget.closeTime ?? '23:00');
+    final closeM = _m(widget.closeTime ?? '23:00');
+    final latestStartMins = closeH * 60 + closeM - widget.minSlotMins;
+    return latestStartMins ~/ 60;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _startHour = _openHour;
+    _startDate = DateTime.now().add(const Duration(days: 1));
+    _initPhonePe();
+  }
+
+  Future<void> _initPhonePe() async {
+    final ready = await _initPhonePeSdk();
+    if (!mounted) return;
+    setState(() => _phonePeReady = ready);
+  }
+
+  String _hhmm(int h) => '${h.toString().padLeft(2, '0')}:00';
+
+  String get _endTimeStr {
+    final endMins = _startHour * 60 + widget.minSlotMins;
+    return '${(endMins ~/ 60).toString().padLeft(2, '0')}:${(endMins % 60).toString().padLeft(2, '0')}';
+  }
+
+  DateTime get _endDate => DateTime(_startDate.year, _startDate.month + 1, _startDate.day);
+
+  Future<void> _pickStartDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate,
+      firstDate: DateTime.now().add(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+    );
+    if (picked != null) setState(() => _startDate = picked);
+  }
+
+  Future<void> _book() async {
+    if (_booking) return;
+    if (!_phonePeReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment not ready. Please try again.')),
+      );
+      return;
+    }
+    setState(() => _booking = true);
+    final repo = ref.read(arenaSlotsRepositoryProvider);
+    try {
+      final order = await repo.createPaymentOrder(widget.ratePaise);
+      debugPrint('[PhonePe] monthly pass order=${order.orderId} amount=${order.amountPaise}');
+      final paid = await _phonePeTransact(order, (msg) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      });
+      if (!mounted) return;
+      if (!paid) { setState(() => _booking = false); return; }
+      await repo.createMonthlyPass(
+        arenaUnitId: widget.unitId,
+        startTime: _hhmm(_startHour),
+        endTime: _endTimeStr,
+        startDate: DateFormat('yyyy-MM-dd').format(_startDate),
+        variantType: widget.netType,
+        phonePeOrderId: order.orderId,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.label} Monthly Pass booked!')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _booking = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(repo.messageFor(e, fallback: 'Could not book monthly pass.'))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (_, scrollCtrl) => Container(
+        decoration: BoxDecoration(
+          color: context.bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+                children: [
+                  Text('${widget.label} Monthly Pass',
+                    style: TextStyle(color: context.fg, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.3)),
+                  const SizedBox(height: 4),
+                  Text('${_inr(widget.ratePaise)}/month',
+                    style: TextStyle(color: context.accent, fontSize: 16, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 28),
+
+                  _SectionLabel('Session time'),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 44,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: (_closeHour - _openHour + 1).clamp(1, 24),
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) {
+                        final h = _openHour + i;
+                        final sel = _startHour == h;
+                        return GestureDetector(
+                          onTap: () => setState(() => _startHour = h),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: sel ? context.accent : context.panel.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(_hhmm(h),
+                              style: TextStyle(
+                                color: sel ? Colors.white : context.fg,
+                                fontSize: 14, fontWeight: FontWeight.w900,
+                              )),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text('${_hhmm(_startHour)} – $_endTimeStr · ${_dur(widget.minSlotMins)} per session',
+                    style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 28),
+
+                  _SectionLabel('Start date'),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: _pickStartDate,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: context.panel.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.calendar_today_rounded, size: 16, color: context.accent),
+                          const SizedBox(width: 10),
+                          Text(DateFormat('EEE, d MMM yyyy').format(_startDate),
+                            style: TextStyle(color: context.fg, fontSize: 15, fontWeight: FontWeight.w700)),
+                          const Spacer(),
+                          Icon(Icons.chevron_right_rounded, size: 18, color: context.fgSub.withValues(alpha: 0.4)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text('Valid until ${DateFormat('d MMM yyyy').format(_endDate)}',
+                    style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 36),
+
+                  SizedBox(
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: !_booking ? _book : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: context.accent,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: context.panel,
+                        disabledForegroundColor: context.fgSub,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: _booking
+                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                          : Text('BOOK – ${_inr(widget.ratePaise)}/MONTH',
+                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1.0)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Bulk Booking Sheet ────────────────────────────────────────────────────────
+
+class _BulkBookingSheet extends ConsumerStatefulWidget {
+  const _BulkBookingSheet({
+    required this.arenaId,
+    required this.arenaName,
+    required this.unitId,
+    required this.groundName,
+    required this.minBulkDays,
+    required this.bulkDayRatePaise,
+    required this.minSlotMins,
+    this.openTime,
+    this.closeTime,
+  });
+
+  final String arenaId;
+  final String arenaName;
+  final String unitId;
+  final String groundName;
+  final int minBulkDays;
+  final int bulkDayRatePaise;
+  final int minSlotMins;
+  final String? openTime;
+  final String? closeTime;
+
+  @override
+  ConsumerState<_BulkBookingSheet> createState() => _BulkBookingSheetState();
+}
+
+class _BulkBookingSheetState extends ConsumerState<_BulkBookingSheet> {
+  final Set<DateTime> _selectedDates = {};
+  late DateTime _displayedMonth;
+  bool _booking = false;
+  bool _phonePeReady = false;
+
+  // availability: null=loading, 0=open, 1=few, 2=full
+  final Map<String, int?> _avail = {};
+  int _availLoadId = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+    _loadMonthAvail();
+    _initPhonePe();
+  }
+
+  Future<void> _initPhonePe() async {
+    final ready = await _initPhonePeSdk();
+    if (!mounted) return;
+    setState(() => _phonePeReady = ready);
+  }
+
+  void _loadMonthAvail() {
+    final loadId = ++_availLoadId;
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final maxDate = todayDate.add(const Duration(days: 90));
+    final daysInMonth = DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0).day;
+    final repo = ref.read(arenaSlotsRepositoryProvider);
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      final date = DateTime(_displayedMonth.year, _displayedMonth.month, d);
+      if (date.isBefore(todayDate) || date.isAfter(maxDate)) continue;
+      final key = _dateKey(date);
+      repo.getArenaSlots(widget.arenaId, date, widget.minSlotMins).then((slots) {
+        if (!mounted || loadId != _availLoadId) return;
+        final group = slots.unitGroups.where((g) => g.unitId == widget.unitId || g.groupKey == widget.unitId).firstOrNull;
+        final count = group?.availableSlots.length ?? 0;
+        final level = count == 0 ? 2 : (count <= 2 ? 1 : 0);
+        setState(() {
+          _avail[key] = level;
+          if (level == 2) _selectedDates.remove(date);
+        });
+      }).catchError((_) {
+        if (!mounted || loadId != _availLoadId) return;
+        setState(() => _avail[_dateKey(date)] = 2);
+      });
+    }
+  }
+
+  String get _startTimeStr => widget.openTime ?? '05:00';
+  String get _endTimeStr => widget.closeTime ?? '23:00';
+
+  int get _totalPaise => widget.bulkDayRatePaise * _selectedDates.length;
+
+  bool get _canBook => _selectedDates.length >= widget.minBulkDays;
+
+  void _toggleDate(DateTime date) {
+    final key = DateTime(date.year, date.month, date.day);
+    setState(() {
+      if (_selectedDates.contains(key)) _selectedDates.remove(key);
+      else _selectedDates.add(key);
+    });
+  }
+
+  Future<void> _book() async {
+    if (!_canBook || _booking) return;
+    if (!_phonePeReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment not ready. Please try again.')),
+      );
+      return;
+    }
+    setState(() => _booking = true);
+    final repo = ref.read(arenaSlotsRepositoryProvider);
+    try {
+      final order = await repo.createPaymentOrder(_totalPaise);
+      debugPrint('[PhonePe] bulk booking order=${order.orderId} amount=${order.amountPaise}');
+      final paid = await _phonePeTransact(order, (msg) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      });
+      if (!mounted) return;
+      if (!paid) { setState(() => _booking = false); return; }
+      final sorted = _selectedDates.toList()..sort();
+      final dates = sorted.map((d) => DateFormat('yyyy-MM-dd').format(d)).toList();
+      await repo.createBulkBooking(
+        arenaUnitId: widget.unitId,
+        startTime: _startTimeStr,
+        endTime: _endTimeStr,
+        dates: dates,
+        phonePeOrderId: order.orderId,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${_selectedDates.length} days booked for ${widget.groundName}!')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _booking = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(repo.messageFor(e, fallback: 'Could not complete bulk booking.'))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final maxDate = todayDate.add(const Duration(days: 90));
+    final firstOfMonth = DateTime(_displayedMonth.year, _displayedMonth.month, 1);
+    final startOffset = (firstOfMonth.weekday - 1) % 7;
+    final daysInMonth = DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0).day;
+    final canGoPrev = _displayedMonth.isAfter(DateTime(today.year, today.month));
+    final canGoNext = DateTime(_displayedMonth.year, _displayedMonth.month + 1)
+        .isBefore(DateTime(maxDate.year, maxDate.month + 1));
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.93,
+      minChildSize: 0.6,
+      maxChildSize: 0.97,
+      expand: false,
+      builder: (_, scrollCtrl) => Container(
+        decoration: BoxDecoration(
+          color: context.bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.only(top: 20, bottom: 40),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Bulk Booking',
+                          style: TextStyle(color: context.fg, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.3)),
+                        const SizedBox(height: 4),
+                        Text('${widget.groundName} · ${_inr(widget.bulkDayRatePaise)}/day',
+                          style: TextStyle(color: context.accent, fontSize: 14, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Month nav
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(DateFormat('MMMM yyyy').format(_displayedMonth),
+                            style: TextStyle(color: context.fg, fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
+                        ),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: context.panel.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _NavBtn(icon: Icons.chevron_left_rounded, enabled: canGoPrev,
+                                onTap: canGoPrev ? () {
+                                  setState(() {
+                                    _displayedMonth = DateTime(_displayedMonth.year, _displayedMonth.month - 1);
+                                    _avail.clear();
+                                  });
+                                  _loadMonthAvail();
+                                } : null),
+                              Container(width: 1, height: 16, color: context.fgSub.withValues(alpha: 0.1)),
+                              _NavBtn(icon: Icons.chevron_right_rounded, enabled: canGoNext,
+                                onTap: canGoNext ? () {
+                                  setState(() {
+                                    _displayedMonth = DateTime(_displayedMonth.year, _displayedMonth.month + 1);
+                                    _avail.clear();
+                                  });
+                                  _loadMonthAvail();
+                                } : null),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => Expanded(
+                        child: Center(child: Text(d,
+                          style: TextStyle(color: context.fgSub.withValues(alpha: 0.35), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.3))),
+                      )).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 7, childAspectRatio: 0.85, mainAxisSpacing: 4, crossAxisSpacing: 2),
+                      itemCount: startOffset + daysInMonth,
+                      itemBuilder: (_, i) {
+                        if (i < startOffset) return const SizedBox();
+                        final day = i - startOffset + 1;
+                        final date = DateTime(_displayedMonth.year, _displayedMonth.month, day);
+                        final outOfRange = date.isBefore(todayDate) || date.isAfter(maxDate);
+                        final fillLevel = outOfRange ? null : _avail[_dateKey(date)];
+                        final disabled = outOfRange || fillLevel == 2;
+                        return _DateCell(
+                          day: day,
+                          isSelected: _selectedDates.contains(date),
+                          isToday: _sameDay(date, todayDate),
+                          isDisabled: disabled,
+                          fillLevel: outOfRange ? null : fillLevel,
+                          onTap: disabled ? null : () => _toggleDate(date),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        Text('${_selectedDates.length} days selected',
+                          style: TextStyle(color: context.fg, fontSize: 14, fontWeight: FontWeight.w800)),
+                        const SizedBox(width: 8),
+                        if (_selectedDates.length < widget.minBulkDays)
+                          Text('(min ${widget.minBulkDays})',
+                            style: TextStyle(color: context.warn, fontSize: 12, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text('$_startTimeStr – $_endTimeStr · full day',
+                      style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+
+                  if (_selectedDates.isNotEmpty) ...[
+                    const SizedBox(height: 28),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Total (${_selectedDates.length} × ${_inr(widget.bulkDayRatePaise)})',
+                            style: TextStyle(color: context.fgSub, fontSize: 13, fontWeight: FontWeight.w700)),
+                          Text(_inr(_totalPaise),
+                            style: TextStyle(color: context.accent, fontSize: 18, fontWeight: FontWeight.w900)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 36),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: SizedBox(
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed: (_canBook && !_booking) ? _book : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.accent,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: context.panel,
+                          disabledForegroundColor: context.fgSub,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: _booking
+                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                            : Text(
+                                _selectedDates.length >= widget.minBulkDays
+                                    ? 'BOOK – ${_inr(_totalPaise)}'
+                                    : 'SELECT ${widget.minBulkDays - _selectedDates.length} MORE DAY${widget.minBulkDays - _selectedDates.length == 1 ? '' : 'S'}',
+                                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.8)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+}
+
+// ── Shared PhonePe helper ─────────────────────────────────────────────────────
+
+/// Initialises the PhonePe SDK (idempotent across sheets).
+Future<bool> _initPhonePeSdk() async {
+  final envs = kReleaseMode
+      ? const <String>['PRODUCTION']
+      : const <String>['PRODUCTION', 'SANDBOX'];
+  for (final env in envs) {
+    try {
+      await PhonePePaymentSdk.init(env, _kMerchantId, _kPhonePeFlowId, false);
+      debugPrint('[PhonePe] init success env=$env');
+      return true;
+    } catch (e) {
+      debugPrint('[PhonePe] init failed env=$env error=$e');
+    }
+  }
+  return false;
+}
+
+/// Runs the PhonePe payment UI for [order].
+/// Returns true if payment completed, false if cancelled/failed.
+/// Calls [onError] with a user-facing message on non-fatal failures.
+/// Throws on hard errors (missing token+redirect, bad URL, etc.).
+Future<bool> _phonePeTransact(
+  ArenaPaymentOrder order,
+  void Function(String) onError,
+) async {
+  if (order.orderId.trim().isEmpty) throw Exception('Missing PhonePe order ID.');
+  if (order.token.trim().isNotEmpty) {
+    final payload = jsonEncode({
+      'orderId': order.orderId,
+      'merchantId': _kMerchantId,
+      'token': order.token,
+      'paymentMode': {'type': 'PAY_PAGE'},
+    });
+    debugPrint('[PhonePe] startTransaction orderId=${order.orderId}');
+    final response = await PhonePePaymentSdk.startTransaction(payload, _kAppSchema);
+    if (response == null) {
+      onError('PhonePe did not return a response. Please try again.');
+      return false;
+    }
+    final status = response['status']?.toString() ?? 'FAILURE';
+    debugPrint('[PhonePe] transaction status=$status');
+    if (status == 'SUCCESS') return true;
+    if (status == 'INTERRUPTED') { onError('Payment was cancelled.'); return false; }
+    final err = response['error']?.toString() ?? '';
+    onError(err.isNotEmpty ? err : 'Payment failed. Please try again.');
+    return false;
+  } else {
+    final redirect = order.redirectUrl;
+    if (redirect == null || redirect.trim().isEmpty) {
+      throw Exception('PhonePe token and redirect URL both missing.');
+    }
+    final uri = Uri.tryParse(redirect.trim());
+    if (uri == null) throw Exception('Invalid PhonePe redirect URL.');
+    debugPrint('[PhonePe] launching redirectUrl=$redirect');
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched) { onError('Could not open PhonePe checkout. Please try again.'); return false; }
+    await Future<void>.delayed(const Duration(seconds: 2));
+    return true;
+  }
 }
 

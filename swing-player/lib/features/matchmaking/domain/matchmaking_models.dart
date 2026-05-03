@@ -59,6 +59,11 @@ class MmSlot {
 
   int get priceRupees => pricePerTeamPaise ~/ 100;
 
+  // Short label used when stacking start/end in a tile: "7:00 AM"
+  String get startLabel => _fmt(time);
+  // Short label for the end time: "3:00 PM"
+  String get endLabel => endTime != null && endTime!.isNotEmpty ? _fmt(endTime!) : '';
+
   String get displayTime {
     final start = _fmt(time);
     if (endTime != null && endTime!.isNotEmpty) {

@@ -3295,8 +3295,12 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final closeStr = unit.closeTime ?? arena.closeTime ?? '23:00';
     final openMins = _toMins(openStr);
     final closeMins = _toMins(closeStr);
-    final increment = unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60;
     final durMins = _currentDurationMins;
+    // Grounds are single-capacity: step by durMins so slots are non-overlapping
+    final increment = unit.isGround
+        ? durMins
+        : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
+    debugPrint('🔵 [bookings slots] unitType=${unit.unitType} isGround=${unit.isGround} durMins=$durMins increment=$increment openMins=$openMins closeMins=$closeMins');
 
     List<String> _slotsForDate(DateTime date) {
       final isToday = DateUtils.isSameDay(date, DateTime.now());

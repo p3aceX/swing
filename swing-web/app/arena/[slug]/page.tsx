@@ -402,6 +402,7 @@ export default async function ArenaPage({ params }: PageProps) {
             {units.length > 0 ? (
               <BookingFlow
                 units={units}
+                arenaId={arena.id}
                 arenaSlug={slug}
                 apiBaseUrl={API}
                 arenaName={arena.name}

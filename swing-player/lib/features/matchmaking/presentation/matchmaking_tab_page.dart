@@ -1584,12 +1584,24 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             if (hot)
-                              const Text('⚡', style: TextStyle(fontSize: 11)),
-                            Text(slot.displayTime,
-                                style: TextStyle(
-                                  color: hot ? context.accent : context.fg,
-                                  fontSize: 14, fontWeight: FontWeight.w800,
-                                )),
+                              const Text('⚡', style: TextStyle(fontSize: 10)),
+                            if (slot.endTime != null && slot.endTime!.isNotEmpty) ...[
+                              Text(slot.startLabel,
+                                  style: TextStyle(
+                                    color: hot ? context.accent : context.fg,
+                                    fontSize: 13, fontWeight: FontWeight.w800,
+                                  )),
+                              Text('→ ${slot.endLabel}',
+                                  style: TextStyle(
+                                    color: hot ? context.accent.withValues(alpha: 0.8) : context.fgSub,
+                                    fontSize: 11, fontWeight: FontWeight.w700,
+                                  )),
+                            ] else
+                              Text(slot.displayTime,
+                                  style: TextStyle(
+                                    color: hot ? context.accent : context.fg,
+                                    fontSize: 14, fontWeight: FontWeight.w800,
+                                  )),
                             const SizedBox(height: 2),
                             Text('₹${slot.priceRupees}',
                                 style: TextStyle(color: context.fgSub,

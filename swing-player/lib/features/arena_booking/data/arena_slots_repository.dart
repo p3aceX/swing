@@ -116,6 +116,53 @@ class ArenaSlotsRepository {
         .toList();
   }
 
+  Future<Map<String, dynamic>> createMonthlyPass({
+    required String arenaUnitId,
+    required String startTime,
+    required String endTime,
+    required String startDate,
+    String? variantType,
+    int months = 1,
+    String? phonePeOrderId,
+  }) async {
+    final resp = await _dio.post(
+      '/public/monthly-passes',
+      data: {
+        'arenaUnitId': arenaUnitId,
+        'startTime': startTime,
+        'endTime': endTime,
+        'daysOfWeek': [1, 2, 3, 4, 5, 6, 7],
+        'startDate': startDate,
+        'months': months,
+        if (variantType != null) 'variantType': variantType,
+        if (phonePeOrderId != null) 'phonePeOrderId': phonePeOrderId,
+        if (phonePeOrderId != null) 'paymentGateway': 'PHONEPE',
+      },
+    );
+    return _unwrapMap(resp.data);
+  }
+
+  Future<Map<String, dynamic>> createBulkBooking({
+    required String arenaUnitId,
+    required String startTime,
+    required String endTime,
+    required List<String> dates,
+    String? phonePeOrderId,
+  }) async {
+    final resp = await _dio.post(
+      '/public/bulk-bookings',
+      data: {
+        'arenaUnitId': arenaUnitId,
+        'startTime': startTime,
+        'endTime': endTime,
+        'dates': dates,
+        if (phonePeOrderId != null) 'phonePeOrderId': phonePeOrderId,
+        if (phonePeOrderId != null) 'paymentGateway': 'PHONEPE',
+      },
+    );
+    return _unwrapMap(resp.data);
+  }
+
   String messageFor(Object error,
       {String fallback = 'Could not complete request.'}) {
     if (error is DioException) {

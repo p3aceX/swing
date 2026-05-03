@@ -68,7 +68,15 @@
       "Bash(gcloud logging read *)",
       "Bash(curl -s \"https://photon.komoot.io/api/?q=Mumbai+India&limit=5&lang=en\")",
       "Bash(curl -s \"https://nominatim.openstreetmap.org/search?format=json&q=Mumbai+India&countrycodes=in&limit=5&addressdetails=1\" -H \"User-Agent: SwingApp/1.0\")",
-      "WebFetch(domain:developer.phonepe.com)"
+      "WebFetch(domain:developer.phonepe.com)",
+      "Bash(find /Users/sangwanhq/dhandha/swing/swing-player/lib/features/book* -name \"*.dart\")",
+      "Bash(curl -s \"https://swing-backend-nbid5gga4q-el.a.run.app/arenas/cmon4u02f001diemyck66jbyi/booking-context?date=2026-05-03&durationMins=480\")",
+      "Bash(curl -s \"https://swing-backend-nbid5gga4q-el.a.run.app/arenas/cmon4u02f001diemyck66jbyi/booking-context?date=2026-05-03&durationMins=240\")",
+      "Bash(curl -s \"https://swing-backend-nbid5gga4q-el.a.run.app/arenas/cmon4u02f001diemyck66jbyi/booking-context?date=2026-05-03&durationMins=720\")",
+      "Bash(curl -s \"https://swing-backend-nbid5gga4q-el.a.run.app/arenas/cmon4u02f001diemyck66jbyi/booking-context?date=2026-05-04&durationMins=480\")",
+      "Bash(adb shell *)",
+      "Bash(adb devices *)",
+      "Bash(adb logcat *)"
     ]
   }
 }

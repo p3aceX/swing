@@ -35,6 +35,7 @@ type ArenaUnit = {
 };
 type Props = {
   units: ArenaUnit[];
+  arenaId: string;
   arenaSlug: string;
   apiBaseUrl: string;
   arenaName?: string;
@@ -91,7 +92,7 @@ function shortDate(s: string) {
   return { day: String(d.getDate()), wd: ["SUN","MON","TUE","WED","THU","FRI","SAT"][d.getDay()] };
 }
 
-export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = "", address, latitude, longitude, phone, openTime, closeTime }: Props) {
+export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, arenaName = "", address, latitude, longitude, phone, openTime, closeTime }: Props) {
   const today = getToday();
   const [unitId, setUnitId] = useState(units[0]?.id ?? "");
   const [selectedVariant, setSelectedVariant] = useState<string>(units[0]?.netVariants?.[0]?.type ?? "");
@@ -182,30 +183,30 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
     const dates14 = Array.from({ length: 14 }, (_, i) => addDays(getToday(), i));
     dates14.forEach(async (d) => {
       try {
-        const res = await fetch(`/api/arena/${arenaSlug}/slots?date=${d}`);
+        const res = await fetch(`/api/arena/${arenaId}/booking-context?date=${d}&durationMins=${dm}&includeAvailability=true`);
         if (!res.ok || cancelled) return;
-        const body = await res.json() as { data?: { units?: SlotUnit[] } };
-        const su = (body.data?.units ?? []).find(u => u.id === unitId);
+        const body = await res.json() as { data?: { availability?: Array<{ unit?: SlotUnit; slots?: Array<{ start: string; end: string; available: boolean }> }> } };
+        const su = (body.data?.availability ?? []).find((entry) => entry.unit?.id === unitId)?.unit;
         if (!su || cancelled) return;
         const result = computeAvail(su, dm, d);
         if (!cancelled) setDateAvail(prev => ({ ...prev, [d]: result }));
       } catch {}
     });
     return () => { cancelled = true; };
-  }, [step, unitId, arenaSlug, durMins, computeAvail]);
+  }, [step, unitId, arenaId, durMins, computeAvail]);
 
   // Re-fetch a single date's availability (called after a booking is confirmed)
   const refreshDateAvail = useCallback(async (d: string) => {
     try {
-      const res = await fetch(`/api/arena/${arenaSlug}/slots?date=${d}`);
+      const res = await fetch(`/api/arena/${arenaId}/booking-context?date=${d}&durationMins=${durMins || 60}&includeAvailability=true`);
       if (!res.ok) return;
-      const body = await res.json() as { data?: { units?: SlotUnit[] } };
-      const su = (body.data?.units ?? []).find(u => u.id === unitId);
+      const body = await res.json() as { data?: { availability?: Array<{ unit?: SlotUnit }> } };
+      const su = (body.data?.availability ?? []).find((entry) => entry.unit?.id === unitId)?.unit;
       if (!su) return;
       const result = computeAvail(su, durMins || 60, d);
       setDateAvail(prev => ({ ...prev, [d]: result }));
     } catch {}
-  }, [arenaSlug, unitId, durMins, computeAvail]);
+  }, [arenaId, unitId, durMins, computeAvail]);
 
   const unit = units.find((u) => u.id === unitId);
   const isGround = GROUND_TYPES.has(unit?.unitType ?? "");
@@ -216,10 +217,20 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
   const fetchSlots = useCallback(async (d: string) => {
     setLoading(true); setSlotUnits([]); setSelectedStart("");
     try {
-      const res = await fetch(`/api/arena/${arenaSlug}/slots?date=${d}`);
+      const effectiveDuration = durMins || 60;
+      const res = await fetch(`/api/arena/${arenaId}/booking-context?date=${d}&durationMins=${effectiveDuration}&includeAvailability=true`);
       if (!res.ok) throw new Error();
-      const body = (await res.json()) as { data?: { units?: SlotUnit[] } };
-      const fetched = body.data?.units ?? [];
+      const body = (await res.json()) as { data?: { availability?: Array<{ unit?: SlotUnit; slots?: Array<{ start: string; end: string; available: boolean }> }> } };
+      const fetched = (body.data?.availability ?? [])
+        .map((entry) => {
+          const unitData = entry.unit;
+          if (!unitData) return null;
+          const bookedSlots = (entry.slots ?? [])
+            .filter((slot) => !slot.available)
+            .map((slot) => ({ startTime: slot.start, endTime: slot.end }));
+          return { ...unitData, bookedSlots } as SlotUnit;
+        })
+        .filter(Boolean) as SlotUnit[];
       setSlotUnits(fetched);
       // Only seed durMins from API if not already set by the user
       setDurMins((cur) => {
@@ -230,7 +241,7 @@ export default function BookingFlow({ units, arenaSlug, apiBaseUrl, arenaName = 
       });
     } catch { setError("Couldn't load slots. Try again."); }
     finally { setLoading(false); }
-  }, [apiBaseUrl, arenaSlug, unitId, unit]);
+  }, [arenaId, durMins, unitId, unit]);
 
   function handleDateSelect(d: string) {
     setDate(d); setStep("slot"); fetchSlots(d);

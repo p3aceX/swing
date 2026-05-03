@@ -203,21 +203,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ],
                       ),
                     ),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: MediaQuery.of(context).size.height * 0.4,
-                      ),
-                      child: _BookingLocationSuggestionsList(
-                        suggestions: modalSuggestions,
-                        onSelected: (suggestion) {
-                          setState(() {
-                            _currentCity = suggestion.label;
-                            // Clear coordinates when city is manually picked
-                            _currentLatitude = null;
-                            _currentLongitude = null;
-                          });
-                          Navigator.of(sheetContext).pop();
-                        },
+                    Flexible(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(context).size.height * 0.4,
+                        ),
+                        child: _BookingLocationSuggestionsList(
+                          suggestions: modalSuggestions,
+                          onSelected: (suggestion) {
+                            setState(() {
+                              _currentCity = suggestion.label;
+                              _currentLatitude = null;
+                              _currentLongitude = null;
+                            });
+                            Navigator.of(sheetContext).pop();
+                          },
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),

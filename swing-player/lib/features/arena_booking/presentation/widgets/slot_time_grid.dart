@@ -88,10 +88,10 @@ class _LegacySlotChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        padding: EdgeInsets.symmetric(horizontal: 14, vertical: showTag ? 8 : 11),
+        padding: EdgeInsets.symmetric(horizontal: 20, vertical: showTag ? 13 : 17),
         decoration: BoxDecoration(
           color: selected ? context.accent : context.panel.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(6),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -99,7 +99,7 @@ class _LegacySlotChip extends StatelessWidget {
             Text(slot.startTime,
                 style: TextStyle(
                     color: selected ? Colors.white : context.fg,
-                    fontSize: 14,
+                    fontSize: 15,
                     fontWeight: FontWeight.w900)),
             if (showTag) ...[
               const SizedBox(height: 3),
@@ -123,6 +123,7 @@ class _LegacySlotChip extends StatelessWidget {
 }
 
 /// New slot grid widget for [PlayerBookingSheet] — uses [PlayerSlot].
+/// 3-column grid, each card shows start + end time stacked.
 class PlayerSlotGrid extends StatelessWidget {
   const PlayerSlotGrid({
     super.key,
@@ -147,27 +148,36 @@ class PlayerSlotGrid extends StatelessWidget {
 
     if (visible.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Text('No slots available for this selection.',
-            style: TextStyle(color: context.fgSub, fontSize: 13)),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: Text(
+          'No slots available on this date.',
+          style: TextStyle(color: context.fgSub, fontSize: 13, height: 1.5),
+        ),
       );
     }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final slot in visible)
-            _PlayerSlotChip(
-              slot: slot,
-              isNetGroup: isNetGroup,
-              selectedNetType: selectedNetType,
-              selected: selectedSlot?.startTime == slot.startTime,
-              onTap: () => onSelected(slot),
-            ),
-        ],
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          childAspectRatio: 1.55,
+        ),
+        itemCount: visible.length,
+        itemBuilder: (_, i) {
+          final slot = visible[i];
+          return _PlayerSlotChip(
+            slot: slot,
+            isNetGroup: isNetGroup,
+            selectedNetType: selectedNetType,
+            selected: selectedSlot?.startTime == slot.startTime,
+            onTap: () => onSelected(slot),
+          );
+        },
       ),
     );
   }
@@ -192,39 +202,82 @@ class _PlayerSlotChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final displayCount = isNetGroup ? slot.countForType(selectedNetType) : null;
     final scarce = displayCount != null && displayCount <= 2;
-    final showTag = scarce || slot.isWeekendRate;
 
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        padding: EdgeInsets.symmetric(horizontal: 14, vertical: showTag ? 8 : 11),
         decoration: BoxDecoration(
           color: selected ? context.accent : context.panel.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: Stack(
           children: [
-            Text(slot.startTime,
-                style: TextStyle(
-                    color: selected ? Colors.white : context.fg,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900)),
-            if (showTag) ...[
-              const SizedBox(height: 3),
-              Text(
-                scarce ? '$displayCount left' : 'Weekend',
-                style: TextStyle(
-                  color: selected
-                      ? Colors.white.withValues(alpha: 0.75)
-                      : (scarce ? context.warn : context.fgSub),
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.2,
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    slot.startTime,
+                    style: TextStyle(
+                      color: selected ? Colors.white : context.fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.3,
+                      height: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    slot.endTime,
+                    style: TextStyle(
+                      color: selected
+                          ? Colors.white.withValues(alpha: 0.65)
+                          : context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      height: 1,
+                    ),
+                  ),
+                  if (slot.isWeekendRate) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      'WEEKEND',
+                      style: TextStyle(
+                        color: selected
+                            ? Colors.white.withValues(alpha: 0.6)
+                            : context.fgSub,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (scarce)
+              Positioned(
+                top: 7,
+                right: 9,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? Colors.white.withValues(alpha: 0.18)
+                        : context.warn.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '$displayCount',
+                    style: TextStyle(
+                      color: selected ? Colors.white : context.warn,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
               ),
-            ],
           ],
         ),
       ),

@@ -33,8 +33,9 @@ class MatchmakingRepository {
     debugPrint('[MM] raw unit entries: ${rawList.length}');
     for (final g in rawList.whereType<Map<String, dynamic>>()) {
       final slots = (g['slots'] as List?) ?? [];
-      final times = slots.whereType<Map<String, dynamic>>().map((s) => s['time']).toList();
-      debugPrint('[MM] unit=${g['unitId']} arena="${g['name']}" slots(${times.length}): $times');
+      final slotInfo = slots.whereType<Map<String, dynamic>>()
+          .map((s) => '${s['time']}→${s['endTime'] ?? '?'}').toList();
+      debugPrint('[MM] unit=${g['unitId']} arena="${g['name']}" slots(${slotInfo.length}): $slotInfo');
     }
     final raw = rawList
         .whereType<Map<String, dynamic>>()

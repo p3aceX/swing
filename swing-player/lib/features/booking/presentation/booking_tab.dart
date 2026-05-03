@@ -299,10 +299,14 @@ class _ArenaCard extends StatelessWidget {
     final prices = arena.units.expand((u) {
       final isGround = u.unitType == 'FULL_GROUND' || u.unitType == 'HALF_GROUND';
       if (isGround) {
-        // Show the actual match price, not hourly rate
-        final p = u.price8HrPaise ?? u.price4HrPaise;
-        if (p != null && p > 0) return [p];
-        return [u.pricePerHourPaise].where((p) => p > 0);
+        // Prefer explicit bundle prices; fall back to hourly × minSlot (default 4hr)
+        final bundle = u.price4HrPaise ?? u.price8HrPaise ?? u.priceFullDayPaise;
+        if (bundle != null && bundle > 0) return [bundle];
+        if (u.pricePerHourPaise > 0) {
+          final minSlot = u.minSlotMins > 0 ? u.minSlotMins : 240;
+          return [((u.pricePerHourPaise * minSlot) / 60).round()];
+        }
+        return <int>[];
       }
       if (u.netVariants.isNotEmpty) {
         return u.netVariants
