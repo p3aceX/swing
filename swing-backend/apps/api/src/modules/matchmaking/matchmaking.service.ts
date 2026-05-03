@@ -323,6 +323,7 @@ export class MatchmakingService {
     })
     const mySet = new Set(myTeamIds.map((t) => t.id))
     const today = this.startOfDay(new Date().toISOString().slice(0, 10))
+    console.log(`[listOpenLobbies] userId=${userId} playerId=${player.id} myTeams=[${[...mySet].join(',')}] today=${today.toISOString()}`)
 
     const lobbies = await prisma.matchmakingLobby.findMany({
       where: {
@@ -341,9 +342,16 @@ export class MatchmakingService {
     })
 
     const lobbiesAny = lobbies as any[]
+    console.log(`[listOpenLobbies] raw DB rows=${lobbiesAny.length}`)
+    for (const l of lobbiesAny) {
+      console.log(`  lobby=${l.id} status=${l.status} teamId=${l.teamId} arenaId=${l.arenaId} date=${l.date?.toISOString()} expiresAt=${l.expiresAt?.toISOString()} picks=${l.picks.length}`)
+    }
+
     const teamIds: string[] = lobbiesAny.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
     const callerAge = input.ageGroup ?? this.deriveAgeGroup(player.dateOfBirth)
+    console.log(`[listOpenLobbies] callerAge=${callerAge} callerDob=${player.dateOfBirth}`)
+
     const groundIds = lobbiesAny.flatMap((l) => l.picks.map((p: any) => p.groundId))
     const units = groundIds.length
       ? await prisma.arenaUnit.findMany({
@@ -367,7 +375,9 @@ export class MatchmakingService {
         const lobbyAge = ages.get(l.teamId) ?? null
         // Only filter by age group when both sides have an explicit group
         if (callerAge == null || lobbyAge == null) return true
-        return callerAge === lobbyAge
+        const pass = callerAge === lobbyAge
+        if (!pass) console.log(`[listOpenLobbies] FILTERED OUT lobby=${l.id} callerAge=${callerAge} lobbyAge=${lobbyAge}`)
+        return pass
       })
       .map((l) => {
         const pick = l.picks[0]
@@ -386,6 +396,7 @@ export class MatchmakingService {
           daysFromNow: this.daysFromNow(l.date),
         }
       })
+    console.log(`[listOpenLobbies] out=${out.length}`)
     return { lobbies: out }
   }
 
