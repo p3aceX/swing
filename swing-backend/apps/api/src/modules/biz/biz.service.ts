@@ -127,11 +127,24 @@ export class BizService {
     if (!businessAccount) throw new AppError('BUSINESS_DETAILS_REQUIRED', 'Complete common business details first', 400)
 
     await this.addRole(userId, UserRole.COACH)
-    return prisma.coachProfile.upsert({
+    const profile = await prisma.coachProfile.upsert({
       where: { userId },
-      create: { userId, businessAccountId: businessAccount.id, ...data },
+      create: {
+        userId,
+        businessAccountId: businessAccount.id,
+        ...data,
+        city: data.city ?? businessAccount.city ?? undefined,
+        state: data.state ?? businessAccount.state ?? undefined,
+      },
       update: { businessAccountId: businessAccount.id, ...data },
+      include: { user: { select: { name: true, avatarUrl: true, phone: true } } },
     })
+    return {
+      ...profile,
+      name: profile.user?.name ?? '',
+      phone: profile.user?.phone ?? '',
+      avatarUrl: profile.user?.avatarUrl ?? null,
+    }
   }
 
   async createArenaProfile(userId: string, data: any) {

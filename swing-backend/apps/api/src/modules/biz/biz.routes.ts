@@ -91,7 +91,7 @@ export async function bizRoutes(app: FastifyInstance) {
 
   app.post('/coach', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const body = coachProfileSchema.parse(request.body)
+    const body = coachProfileSchema.parse(request.body ?? {})
     return reply.send({ success: true, data: await svc.upsertCoachProfile(user.userId, body) })
   })
 
