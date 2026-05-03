@@ -900,6 +900,7 @@ export class ArenaService {
       }
 
       console.log(`[slots] NETS group: activeUnits=${activeNetUnits.length} netTypeKeys=${JSON.stringify(netTypeKeys)} slots=${availableSlots.length} firstSlotOpts=${JSON.stringify(availableSlots[0]?.netTypeOptions ?? [])}`)
+      console.log(`[slots] NETS monthly: unitMonthlyPassEnabled=${netUnits.map((u:any)=>u.monthlyPassEnabled)} unitMonthlyPassRatePaise=${netUnits.map((u:any)=>u.monthlyPassRatePaise)} netVariants=${JSON.stringify(netUnits.map((u:any)=>u.netVariants))}`)
       unitGroups.push({
         groupKey: 'NETS',
         displayName: 'Cricket Nets',
