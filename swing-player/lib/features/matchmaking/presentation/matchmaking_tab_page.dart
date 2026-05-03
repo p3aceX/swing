@@ -356,6 +356,29 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                 // Tab 0: Open
                 _OpenTab(
                   query: (date: _dateStr, format: null),
+                  ownLobby: () {
+                    if (_lobbyState != _LobbyState.searching ||
+                        _lobbyId == null ||
+                        _team == null) return null;
+                    final now = DateTime.now();
+                    final today = DateTime(now.year, now.month, now.day);
+                    return MmOpenLobby(
+                      lobbyId: _lobbyId!,
+                      teamName: _team!.name,
+                      ageGroup: _team!.ageGroupLabel,
+                      format: _format.apiValue,
+                      groundName: _picks.isNotEmpty
+                          ? _picks.first.ground.name
+                          : '',
+                      slotTime: _picks.isNotEmpty
+                          ? _picks.first.slot.time
+                          : '',
+                      date: _dateStr,
+                      daysFromNow:
+                          _date.difference(today).inDays,
+                    );
+                  }(),
+                  onLeave: _leaveLobby,
                   onCounter: (lobby) {
                     try {
                       final fmt = MatchFormat.values.firstWhere(
@@ -443,22 +466,36 @@ class _TabLabel extends StatelessWidget {
 // ── Tab 0: Open ───────────────────────────────────────────────────────────────
 
 class _OpenTab extends ConsumerWidget {
-  const _OpenTab({required this.query, required this.onCounter});
+  const _OpenTab({
+    required this.query,
+    required this.onCounter,
+    this.ownLobby,
+    this.onLeave,
+  });
   final MmLobbiesQuery query;
   final ValueChanged<MmOpenLobby> onCounter;
+  final MmOpenLobby? ownLobby;
+  final VoidCallback? onLeave;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(mmOpenLobbiesProvider(query));
     return async.when(
-      loading: () => const Center(
-          child: CircularProgressIndicator(strokeWidth: 1.5)),
+      loading: () =>
+          const Center(child: CircularProgressIndicator(strokeWidth: 1.5)),
       error: (_, __) => Center(
         child: Text('Could not load open games',
             style: TextStyle(color: context.fgSub, fontSize: 13)),
       ),
       data: (lobbies) {
-        if (lobbies.isEmpty) {
+        // Filter out own lobby from the API list (backend may or may not include it)
+        final others = ownLobby != null
+            ? lobbies
+                .where((l) => l.lobbyId != ownLobby!.lobbyId)
+                .toList()
+            : lobbies;
+
+        if (ownLobby == null && lobbies.isEmpty) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -486,17 +523,156 @@ class _OpenTab extends ConsumerWidget {
             ),
           );
         }
-        return ListView.separated(
+
+        return ListView(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-          itemCount: lobbies.length,
-          separatorBuilder: (_, __) => Container(
-              height: 1, color: context.stroke.withValues(alpha: 0.3)),
-          itemBuilder: (_, i) => _OpenLobbyRow(
-            lobby: lobbies[i],
-            onCounter: () => onCounter(lobbies[i]),
-          ),
+          children: [
+            if (ownLobby != null) ...[
+              _OpenSectionLabel(label: 'YOU'),
+              _OwnLobbyRow(lobby: ownLobby!, onLeave: onLeave),
+            ],
+            if (others.isNotEmpty) ...[
+              if (ownLobby != null) const SizedBox(height: 16),
+              _OpenSectionLabel(label: 'OTHERS'),
+              for (var i = 0; i < others.length; i++) ...[
+                if (i > 0)
+                  Container(
+                      height: 1,
+                      color: context.stroke.withValues(alpha: 0.3)),
+                _OpenLobbyRow(
+                  lobby: others[i],
+                  onCounter: () => onCounter(others[i]),
+                ),
+              ],
+            ],
+          ],
         );
       },
+    );
+  }
+}
+
+class _OpenSectionLabel extends StatelessWidget {
+  const _OpenSectionLabel({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: context.fgSub.withValues(alpha: 0.5),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+}
+
+class _OwnLobbyRow extends StatefulWidget {
+  const _OwnLobbyRow({required this.lobby, this.onLeave});
+  final MmOpenLobby lobby;
+  final VoidCallback? onLeave;
+
+  @override
+  State<_OwnLobbyRow> createState() => _OwnLobbyRowState();
+}
+
+class _OwnLobbyRowState extends State<_OwnLobbyRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      widget.lobby.teamName,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    AnimatedBuilder(
+                      animation: _pulse,
+                      builder: (_, __) => Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(
+                              alpha: 0.4 + 0.6 * _pulse.value),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${widget.lobby.ageGroup}  ·  ${widget.lobby.format}  ·  ${widget.lobby.groundName}  ·  ${widget.lobby.displaySlot}  ·  ${widget.lobby.dateLabel}',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          GestureDetector(
+            onTap: widget.onLeave,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: context.panel,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Leave',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
