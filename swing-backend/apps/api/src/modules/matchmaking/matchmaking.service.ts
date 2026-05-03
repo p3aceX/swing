@@ -173,11 +173,14 @@ export class MatchmakingService {
       seen.add(key)
     }
 
+    console.log(`[createLobby] userId=${userId} teamId=${input.teamId} format=${input.format} date=${input.date} picks=${JSON.stringify(input.picks)}`)
     const team = await this.resolveCallerTeam(userId, input.teamId)
+    console.log(`[createLobby] resolved team=${team?.id} captainId=${team?.captainId}`)
     if (!team || team.id !== input.teamId) throw Errors.forbidden()
     const callerAge = await this.getTeamAgeGroup(team.id)
     const date = this.startOfDay(input.date)
     const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
+    console.log(`[createLobby] callerAge=${callerAge} date=${date.toISOString()} expiresAt=${expiresAt.toISOString()}`)
 
     const result = await prisma.$transaction(async (tx) => {
       const lobby = await tx.matchmakingLobby.create({
