@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
+import 'arena_lobbies_section.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
 const _bg = Color(0xFFF9FAFB);
@@ -200,7 +201,23 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                     return isPastA ? 1 : -1; // today/future before past
                   });
 
+                final arenaId = widget.arena?.id ??
+                    (widget.arenas.isNotEmpty
+                        ? widget.arenas.first.id
+                        : null);
+                final arenaName = widget.arena?.name ??
+                    (widget.arenas.isNotEmpty
+                        ? widget.arenas.first.name
+                        : '');
+
                 return Column(children: [
+                  // Teams looking to play (split booking interest)
+                  if (arenaId != null)
+                    ArenaLobbiesSection(
+                      arenaId: arenaId,
+                      arenaName: arenaName,
+                    ),
+
                   // Month calendar (toggle)
                   _MonthCalendar(
                     bookings: rawBookings,
