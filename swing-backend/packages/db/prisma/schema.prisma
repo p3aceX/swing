@@ -2295,11 +2295,12 @@ model Arena {
   businessAccount BusinessAccount?  @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
   units           ArenaUnit[]
   addons          ArenaAddon[]
-  bookings        SlotBooking[]
-  timeBlocks      ArenaTimeBlock[]
-  reviews         Review[]
-  managers        ArenaManager[]
-  monthlyPasses   MonthlyPass[]
+  bookings           SlotBooking[]
+  timeBlocks         ArenaTimeBlock[]
+  reviews            Review[]
+  managers           ArenaManager[]
+  monthlyPasses      MonthlyPass[]
+  matchmakingLobbies MatchmakingLobby[]
 
   citySlug     String?
   arenaSlug    String?
