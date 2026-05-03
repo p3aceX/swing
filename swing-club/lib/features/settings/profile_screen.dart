@@ -35,7 +35,33 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     final bizState = ref.watch(settingsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Logout'),
+                  content: const Text('Are you sure you want to logout?'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Logout', style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                ref.read(settingsProvider.notifier).logout();
+              }
+            },
+          ),
+        ],
+      ),
       body: bizState.when(
         loading: loadingBody,
         error: (e, _) => errorBody(e, () => ref.invalidate(settingsProvider)),
