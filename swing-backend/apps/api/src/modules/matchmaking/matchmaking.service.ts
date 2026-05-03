@@ -215,10 +215,10 @@ export class MatchmakingService {
       let matchedLobby: any = null
       let picked: { groundId: string; slotTime: string } | null = null
       if (candidateLobbies.length > 0) {
-        const teamIds = candidateLobbies.map((c) => c.teamId)
+        const teamIds: string[] = candidateLobbies.flatMap((c) => c.teamId ? [c.teamId] : [])
         const ages = await this.getTeamAgeGroupsMap(teamIds, tx)
         for (const c of candidateLobbies) {
-          const age = ages.get(c.teamId) ?? null
+          const age = c.teamId ? (ages.get(c.teamId) ?? null) : null
           if ((callerAge ?? null) !== (age ?? null)) continue
           for (const p of input.picks) {
             if (c.picks.some((cp: any) => cp.groundId === p.groundId && cp.slotTime === p.slotTime)) {
