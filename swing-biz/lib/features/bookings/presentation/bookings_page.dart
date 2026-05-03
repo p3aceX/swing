@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import 'arena_lobbies_section.dart';
+import 'split_booking_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
 const _bg = Color(0xFFF9FAFB);
@@ -276,23 +277,54 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: SizedBox(
-                  height: 52,
-                  child: FilledButton.icon(
-                    onPressed: () => _showAddBookingSheet(context, today),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _text,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 52,
+                        child: FilledButton.icon(
+                          onPressed: () =>
+                              _showAddBookingSheet(context, today),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _text,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                          icon: const Icon(Icons.add_rounded, size: 20),
+                          label: const Text(
+                            'Full Booking',
+                            style: TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
                     ),
-                    icon: const Icon(Icons.add_rounded, size: 20),
-                    label: const Text(
-                      'New Booking',
-                      style:
-                          TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: SizedBox(
+                        height: 52,
+                        child: OutlinedButton.icon(
+                          onPressed: () =>
+                              _showSplitBookingSheet(context, today),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _text,
+                            side: const BorderSide(
+                                color: _border, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                          icon: const Icon(Icons.call_split_rounded,
+                              size: 20),
+                          label: const Text(
+                            'Split Booking',
+                            style: TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
@@ -307,6 +339,28 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           builder: (_) => AddBookingSheet(arena: arena, date: date),
         ))
         .then((_) => ref.invalidate(_bookingsProvider));
+  }
+
+  void _showSplitBookingSheet(BuildContext context, DateTime date) {
+    final arena = widget.arena ?? widget.arenas.first;
+    Navigator.of(context, rootNavigator: true)
+        .push(MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              SplitBookingSheet(arena: arena, initialDate: date),
+        ))
+        .then((created) {
+      if (created == true) {
+        ref.invalidate(_bookingsProvider);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Split booking created — lobby is now live for players'),
+            backgroundColor: Color(0xFF059669),
+          ),
+        );
+      }
+    });
   }
 
   void _showBookingDetail(BuildContext context, ArenaReservation booking,
