@@ -160,7 +160,7 @@ class _HomeBody extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: GestureDetector(
-        onTap: () => context.go('/more/fees'),
+        onTap: () => context.go('/payments'),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
@@ -222,9 +222,9 @@ class _HomeBody extends StatelessWidget {
         childAspectRatio: 2.4,
         children: [
           _ActionTile(icon: Icons.person_add_rounded,   label: 'Add Student',  color: const Color(0xFF0057C8), onTap: () => context.go('/students')),
-          _ActionTile(icon: Icons.groups_rounded,        label: 'Batches',      color: const Color(0xFFD97706), onTap: () => context.go('/more/batches')),
-          _ActionTile(icon: Icons.campaign_rounded,      label: 'Announcement', color: const Color(0xFF7C3AED), onTap: () => context.go('/more/announcements/create')),
-          _ActionTile(icon: Icons.payments_outlined,     label: 'Fees',         color: const Color(0xFF1B8A5A), onTap: () => context.go('/more/fees')),
+          _ActionTile(icon: Icons.groups_rounded,        label: 'Batches',      color: const Color(0xFFD97706), onTap: () => context.go('/batches')),
+          _ActionTile(icon: Icons.campaign_rounded,      label: 'Announcement', color: const Color(0xFF7C3AED), onTap: () => context.push('/announcements/create')),
+          _ActionTile(icon: Icons.payments_outlined,     label: 'Fees',         color: const Color(0xFF1B8A5A), onTap: () => context.go('/payments')),
         ],
       ),
     );

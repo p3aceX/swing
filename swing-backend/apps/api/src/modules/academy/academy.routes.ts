@@ -46,8 +46,8 @@ export async function academyRoutes(app: FastifyInstance) {
   app.post('/:id/coaches', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
-    const body = z.object({ phone: z.string().min(10), isHeadCoach: z.boolean().default(false) }).parse(request.body)
-    return reply.code(201).send({ success: true, data: await svc.inviteCoach(id, user.userId, body.phone, body.isHeadCoach) })
+    const body = z.object({ phone: z.string().min(10), name: z.string().optional(), isHeadCoach: z.boolean().default(false) }).parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.inviteCoach(id, user.userId, body.phone, body.isHeadCoach, body.name) })
   })
 
   app.patch('/:id/coaches/:coachLinkId', auth, async (request, reply) => {

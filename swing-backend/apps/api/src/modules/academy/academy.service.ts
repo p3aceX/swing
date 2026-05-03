@@ -99,21 +99,19 @@ export class AcademyService {
     return prisma.academy.update({ where: { id: academyId }, data: update })
   }
 
-  async inviteCoach(academyId: string, userId: string, phone: string, isHeadCoach: boolean) {
+  async inviteCoach(academyId: string, userId: string, phone: string, isHeadCoach: boolean, name?: string) {
     await this.verifyOwnership(academyId, userId)
     const normalizedPhone = normalizePhone(phone)
     let coachUser = await prisma.user.findUnique({ where: { phone: normalizedPhone } })
+    const isNew = !coachUser
     if (!coachUser) {
-      // Coach hasn't registered yet — create a stub account so the link is ready when they sign up
       coachUser = await prisma.user.create({
-        data: {
-          phone: normalizedPhone,
-          name: 'Coach',
-          roles: ['COACH'],
-          activeRole: 'COACH',
-        },
+        data: { phone: normalizedPhone, name: name ?? 'Coach', roles: ['COACH'], activeRole: 'COACH' },
       })
+    } else if (name && coachUser.name === 'Coach') {
+      coachUser = await prisma.user.update({ where: { id: coachUser.id }, data: { name } })
     }
+
     let coachProfile = await prisma.coachProfile.findUnique({ where: { userId: coachUser.id } })
     if (!coachProfile) {
       coachProfile = await prisma.coachProfile.create({ data: { userId: coachUser.id } })
@@ -125,13 +123,17 @@ export class AcademyService {
     const existing = await prisma.academyCoach.findUnique({
       where: { academyId_coachId: { academyId, coachId: coachProfile.id } },
     })
+    let link = existing
     if (existing) {
-      if (!existing.isActive) return prisma.academyCoach.update({ where: { id: existing.id }, data: { isActive: true, isHeadCoach } })
-      throw new AppError('COACH_ALREADY_ADDED', 'This coach is already in the academy', 409)
+      if (!existing.isActive) {
+        link = await prisma.academyCoach.update({ where: { id: existing.id }, data: { isActive: true, isHeadCoach } })
+      }
+      // already active — return existing link with profile info
+    } else {
+      link = await prisma.academyCoach.create({ data: { academyId, coachId: coachProfile.id, isHeadCoach } })
+      await prisma.academy.update({ where: { id: academyId }, data: { totalCoaches: { increment: 1 } } })
     }
-    const result = await prisma.academyCoach.create({ data: { academyId, coachId: coachProfile.id, isHeadCoach } })
-    await prisma.academy.update({ where: { id: academyId }, data: { totalCoaches: { increment: 1 } } })
-    return result
+    return { ...link, coachProfileId: coachProfile.id, userName: coachUser.name, isNew }
   }
 
   async updateCoachLink(academyId: string, userId: string, coachLinkId: string, data: { isHeadCoach?: boolean; isActive?: boolean }) {
