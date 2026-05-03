@@ -323,7 +323,7 @@ export class MatchmakingService {
       orderBy: { createdAt: 'asc' },
     })
 
-    const teamIds = lobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
+    const teamIds: string[] = lobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
     const callerAge = input.ageGroup ?? this.deriveAgeGroup(player.dateOfBirth)
     const groundIds = lobbies.flatMap((l) => l.picks.map((p) => p.groundId))
@@ -379,7 +379,7 @@ export class MatchmakingService {
       orderBy: { createdAt: 'asc' },
     })
 
-    const teamIds = playerLobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
+    const teamIds: string[] = playerLobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
     const groundIds = playerLobbies.flatMap((l) => l.picks.map((p) => p.groundId))
     const units = groundIds.length
@@ -1231,7 +1231,7 @@ export class MatchmakingService {
       slotTime: match.slotTime,
       date: this.toDateOnly(match.date),
       format: match.format,
-      opponentTeamName: opponent?.team.name ?? '',
+      opponentTeamName: opponent?.team?.name ?? '',
       pricePerTeam: match.paymentAmountPerTeam,
       confirmDeadline: match.confirmDeadline.toISOString(),
     }
