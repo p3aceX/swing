@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api_client.dart';
 import 'auth_provider.dart';
@@ -14,15 +15,22 @@ class AcademyNotifier extends AsyncNotifier<AcademyState> {
     final auth = ref.watch(authProvider);
     if (!auth.isAuthenticated) throw Exception('Not authenticated');
 
-    final api  = ref.read(apiClientProvider);
-    final res  = await api.get('/academy/my');
-    final raw  = res.data['data'];
-    if (raw == null) throw Exception('NO_ACADEMY');
+    final api = ref.read(apiClientProvider);
+    try {
+      final res = await api.get('/academy/my');
+      final raw = res.data['data'];
+      if (raw == null) throw Exception('NO_ACADEMY');
 
-    final academy   = Map<String, dynamic>.from(raw as Map);
-    final academyId = academy['id'] as String;
-    await ref.read(secureStorageProvider).saveAcademyId(academyId);
-    return AcademyState(academyId: academyId, data: academy);
+      final academy   = Map<String, dynamic>.from(raw as Map);
+      final academyId = academy['id'] as String;
+      await ref.read(secureStorageProvider).saveAcademyId(academyId);
+      return AcademyState(academyId: academyId, data: academy);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404 || e.response?.statusCode == 403) {
+        throw Exception('NO_ACADEMY');
+      }
+      rethrow;
+    }
   }
 }
 

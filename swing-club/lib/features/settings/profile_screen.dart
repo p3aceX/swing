@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -366,8 +367,9 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
     return academyState.when(
       loading: loadingBody,
       error: (e, _) {
-        // No academy registered yet — guide user to create one
-        if (e.toString().contains('NO_ACADEMY')) {
+        final isNoAcademy = e.toString().contains('NO_ACADEMY') ||
+            (e is DioException && (e.response?.statusCode == 404 || e.response?.statusCode == 403));
+        if (isNoAcademy) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(32),
