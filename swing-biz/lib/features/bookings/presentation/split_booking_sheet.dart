@@ -60,8 +60,9 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
   void initState() {
     super.initState();
     _date = widget.initialDate;
-    if (widget.arena.units.isNotEmpty) {
-      _unit = widget.arena.units.first;
+    final grounds = widget.arena.units.where((u) => u.isGround).toList();
+    if (grounds.isNotEmpty) {
+      _unit = grounds.first;
       _rebuildSlots();
     }
   }
@@ -309,7 +310,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: widget.arena.units.map((u) {
+          children: widget.arena.units.where((u) => u.isGround).map((u) {
             final selected = _unit?.id == u.id;
             return GestureDetector(
               onTap: () {

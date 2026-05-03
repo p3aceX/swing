@@ -150,7 +150,7 @@ class ArenaLobbiesSection extends ConsumerWidget {
               ),
             ),
             SizedBox(
-              height: 112,
+              height: 124,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
@@ -242,17 +242,6 @@ class _LobbyCard extends StatelessWidget {
               fontSize: 11,
             ),
           ),
-          if (lobby.ageGroup.isNotEmpty && lobby.ageGroup != 'Open')
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                lobby.ageGroup,
-                style: const TextStyle(
-                  color: Color(0xFF9CA3AF),
-                  fontSize: 10,
-                ),
-              ),
-            ),
           const Spacer(),
           GestureDetector(
             onTap: () => _showAcceptSheet(context),
