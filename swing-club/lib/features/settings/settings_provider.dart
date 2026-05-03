@@ -17,6 +17,11 @@ class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
     ref.invalidateSelf();
   }
 
+  Future<void> updateBusinessDetails(Map<String, dynamic> payload) async {
+    await ref.read(apiClientProvider).put('/biz/business-details', data: payload);
+    ref.invalidateSelf();
+  }
+
   Future<void> logout() async {
     try {
       await ref.read(apiClientProvider).post('/auth/logout');

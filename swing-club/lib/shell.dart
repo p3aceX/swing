@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'providers/auth_provider.dart';
 
-class AppShell extends StatelessWidget {
+class AppShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
   const AppShell({super.key, required this.navigationShell});
 
@@ -14,14 +16,21 @@ class AppShell extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final idx = navigationShell.currentIndex;
+    final scaffoldKey = GlobalKey<ScaffoldState>();
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
       child: Scaffold(
+        key: scaffoldKey,
         backgroundColor: const Color(0xFFF4F2EB),
-        appBar: _SwingAppBar(currentIndex: idx),
+        appBar: _SwingAppBar(
+          currentIndex: idx,
+          onProfileTap: () => scaffoldKey.currentState?.openEndDrawer(),
+        ),
         body: navigationShell,
+        endDrawer: _ProfileDrawer(),
         bottomNavigationBar: _SwingBottomNav(
           currentIndex: idx,
           tabs: _tabs,
@@ -30,6 +39,130 @@ class AppShell extends StatelessWidget {
             initialLocation: i == idx,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProfileDrawer extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Drawer(
+      backgroundColor: const Color(0xFFF4F2EB),
+      child: Column(
+        children: [
+          DrawerHeader(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF4F2EB),
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFE0DED6), width: 0.5),
+              ),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0057C8).withOpacity(0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.person_outline_rounded,
+                      size: 32,
+                      color: Color(0xFF0057C8),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Academy Admin',
+                    style: TextStyle(
+                      color: Color(0xFF071B3D),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('Settings'),
+            onTap: () {
+              context.pop(); // Close drawer
+              context.push('/settings');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.inventory_2_outlined),
+            title: const Text('Inventory'),
+            onTap: () {
+              context.pop();
+              context.push('/inventory');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.campaign_outlined),
+            title: const Text('Announcements'),
+            onTap: () {
+              context.pop();
+              context.push('/announcements');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.sports_cricket_outlined),
+            title: const Text('Coaches'),
+            onTap: () {
+              context.pop();
+              context.push('/coaches');
+            },
+          ),
+          const Spacer(),
+          const Divider(color: Color(0xFFE0DED6), thickness: 0.5),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: ListTile(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              tileColor: Colors.red.withOpacity(0.1),
+              leading: const Icon(Icons.logout_rounded, color: Colors.red),
+              title: const Text(
+                'Logout',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              onTap: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Logout'),
+                    content: const Text('Are you sure you want to logout?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Logout', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  ref.read(authProvider.notifier).logout();
+                }
+              },
+            ),
+          ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom),
+        ],
       ),
     );
   }
@@ -46,7 +179,8 @@ class _TabInfo {
 
 class _SwingAppBar extends StatelessWidget implements PreferredSizeWidget {
   final int currentIndex;
-  const _SwingAppBar({required this.currentIndex});
+  final VoidCallback onProfileTap;
+  const _SwingAppBar({required this.currentIndex, required this.onProfileTap});
 
   static const _titles = ['Swing Academy', 'Students', 'Batches', 'Payments'];
 
@@ -88,7 +222,7 @@ class _SwingAppBar extends StatelessWidget implements PreferredSizeWidget {
             const SizedBox(width: 8),
             // Profile avatar
             GestureDetector(
-              onTap: () {},
+              onTap: onProfileTap,
               child: Container(
                 width: 36,
                 height: 36,

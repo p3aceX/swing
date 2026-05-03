@@ -26,6 +26,7 @@ import 'features/announcements/create_announcement_screen.dart';
 import 'features/inventory/inventory_list_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/academy_profile_screen.dart';
+import 'features/settings/profile_screen.dart';
 
 // Auth-only paths — never redirect away from these
 const _authPaths = {'/splash', '/phone', '/name', '/otp', '/business-details', '/academy-setup'};
@@ -33,7 +34,7 @@ const _authPaths = {'/splash', '/phone', '/name', '/otp', '/business-details', '
 class _RouterNotifier extends ChangeNotifier {
   final Ref _ref;
   _RouterNotifier(this._ref) {
-    _ref.listen<AuthState>(authProvider, (_, __) => notifyListeners());
+    _ref.listen<AuthState>(authProvider, (_, _) => notifyListeners());
   }
 
   String? redirect(BuildContext context, GoRouterState state) {
@@ -59,8 +60,8 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/splash',
     routes: [
       // ── Auth flow ────────────────────────────────────────────────────────
-      GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
-      GoRoute(path: '/phone',  builder: (_, __) => const PhoneScreen()),
+      GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
+      GoRoute(path: '/phone',  builder: (_, _) => const PhoneScreen()),
       GoRoute(
         path: '/name',
         builder: (_, state) => NameScreen(
@@ -79,20 +80,21 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
-      GoRoute(path: '/business-details', builder: (_, __) => const BusinessDetailsScreen()),
-      GoRoute(path: '/academy-setup',    builder: (_, __) => const AcademyRegistrationScreen()),
+      GoRoute(path: '/business-details', builder: (_, _) => const BusinessDetailsScreen()),
+      GoRoute(path: '/academy-setup',    builder: (_, _) => const AcademyRegistrationScreen()),
+      GoRoute(path: '/profile',          builder: (_, _) => const ProfileScreen()),
 
       // ── Main app ─────────────────────────────────────────────────────────
       StatefulShellRoute.indexedStack(
-        builder: (_, __, shell) => AppShell(navigationShell: shell),
+        builder: (_, _, shell) => AppShell(navigationShell: shell),
         branches: [
           StatefulShellBranch(routes: [
-            GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
+            GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/students',
-              builder: (_, __) => const StudentListScreen(),
+              builder: (_, _) => const StudentListScreen(),
               routes: [
                 GoRoute(
                   path: ':enrollmentId',
@@ -106,9 +108,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/sessions',
-              builder: (_, __) => const SessionListScreen(),
+              builder: (_, _) => const SessionListScreen(),
               routes: [
-                GoRoute(path: 'report', builder: (_, __) => const AttendanceReportScreen()),
+                GoRoute(path: 'report', builder: (_, _) => const AttendanceReportScreen()),
                 GoRoute(
                   path: ':sessionId',
                   builder: (_, state) => SessionDetailScreen(
@@ -121,11 +123,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/more',
-              builder: (_, __) => const MoreScreen(),
+              builder: (_, _) => const MoreScreen(),
               routes: [
                 GoRoute(
                   path: 'batches',
-                  builder: (_, __) => const BatchListScreen(),
+                  builder: (_, _) => const BatchListScreen(),
                   routes: [
                     GoRoute(
                       path: ':batchId',
@@ -137,7 +139,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 ),
                 GoRoute(
                   path: 'coaches',
-                  builder: (_, __) => const CoachListScreen(),
+                  builder: (_, _) => const CoachListScreen(),
                   routes: [
                     GoRoute(
                       path: ':coachId',
@@ -147,20 +149,20 @@ final routerProvider = Provider<GoRouter>((ref) {
                     ),
                   ],
                 ),
-                GoRoute(path: 'fees',          builder: (_, __) => const FeeOverviewScreen()),
+                GoRoute(path: 'fees',          builder: (_, _) => const FeeOverviewScreen()),
                 GoRoute(
                   path: 'announcements',
-                  builder: (_, __) => const AnnouncementListScreen(),
+                  builder: (_, _) => const AnnouncementListScreen(),
                   routes: [
-                    GoRoute(path: 'create', builder: (_, __) => const CreateAnnouncementScreen()),
+                    GoRoute(path: 'create', builder: (_, _) => const CreateAnnouncementScreen()),
                   ],
                 ),
-                GoRoute(path: 'inventory', builder: (_, __) => const InventoryListScreen()),
+                GoRoute(path: 'inventory', builder: (_, _) => const InventoryListScreen()),
                 GoRoute(
                   path: 'settings',
-                  builder: (_, __) => const SettingsScreen(),
+                  builder: (_, _) => const SettingsScreen(),
                   routes: [
-                    GoRoute(path: 'profile', builder: (_, __) => const AcademyProfileScreen()),
+                    GoRoute(path: 'profile', builder: (_, _) => const AcademyProfileScreen()),
                   ],
                 ),
               ],

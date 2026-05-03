@@ -14,13 +14,12 @@ class AcademyNotifier extends AsyncNotifier<AcademyState> {
     final auth = ref.watch(authProvider);
     if (!auth.isAuthenticated) throw Exception('Not authenticated');
 
-    final api = ref.read(apiClientProvider);
-    final res = await api.get('/biz/me');
-    final bizData = res.data['data'] as Map<String, dynamic>;
-    final academies = (bizData['businessAccount']?['academyOwnerProfile']?['academies'] as List?) ?? [];
-    if (academies.isEmpty) throw Exception('No academy found');
+    final api  = ref.read(apiClientProvider);
+    final res  = await api.get('/academy/my');
+    final raw  = res.data['data'];
+    if (raw == null) throw Exception('NO_ACADEMY');
 
-    final academy = Map<String, dynamic>.from(academies.first as Map);
+    final academy   = Map<String, dynamic>.from(raw as Map);
     final academyId = academy['id'] as String;
     await ref.read(secureStorageProvider).saveAcademyId(academyId);
     return AcademyState(academyId: academyId, data: academy);

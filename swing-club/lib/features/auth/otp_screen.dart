@@ -194,7 +194,9 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
+            Center(child: Image.asset('asset/logolight.png', height: 76)),
+            const SizedBox(height: 24),
             const Text(
               'Enter OTP',
               style: TextStyle(

@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants.dart';
-import '../../core/secure_storage.dart';
+import '../../providers/auth_provider.dart';
 import '../../shared/onboarding_widgets.dart';
 import '../../shared/widgets.dart';
 
@@ -16,30 +16,48 @@ class AcademyRegistrationScreen extends ConsumerStatefulWidget {
 }
 
 class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationScreen> {
-  final _formKey  = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
   final _name        = TextEditingController();
+  final _tagline     = TextEditingController();
+  final _description = TextEditingController();
+  final _address     = TextEditingController();
   final _city        = TextEditingController();
   final _stateCtrl   = TextEditingController();
-  final _description = TextEditingController();
-  final _tagline     = TextEditingController();
-  final _address     = TextEditingController();
   final _pincode     = TextEditingController();
   final _phone       = TextEditingController();
   final _email       = TextEditingController();
   final _website     = TextEditingController();
   final _foundedYear = TextEditingController();
 
+  double? _lat;
+  double? _lng;
+
   @override
   void dispose() {
-    for (final c in [
-      _name, _city, _stateCtrl, _description, _tagline,
-      _address, _pincode, _phone, _email, _website, _foundedYear,
-    ]) {
+    for (final c in [_name, _tagline, _description, _address, _city, _stateCtrl, _pincode, _phone, _email, _website, _foundedYear]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _onPlaceSelected({
+    required String address,
+    required String city,
+    required String state,
+    required String pincode,
+    double? lat,
+    double? lng,
+  }) {
+    setState(() {
+      _address.text  = address;
+      _city.text     = city;
+      _stateCtrl.text = state;
+      _pincode.text  = pincode;
+      _lat = lat;
+      _lng = lng;
+    });
   }
 
   Future<void> _handleCreate() async {
@@ -54,9 +72,10 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
         'city':  _city.text.trim(),
         'state': _stateCtrl.text.trim(),
       };
+
       void addOpt(String k, String v) { if (v.isNotEmpty) body[k] = v; }
-      addOpt('description', _description.text.trim());
       addOpt('tagline',     _tagline.text.trim());
+      addOpt('description', _description.text.trim());
       addOpt('address',     _address.text.trim());
       addOpt('pincode',     _pincode.text.trim());
       addOpt('phone',       _phone.text.trim());
@@ -65,6 +84,8 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
       if (_foundedYear.text.trim().isNotEmpty) {
         body['foundedYear'] = int.tryParse(_foundedYear.text.trim());
       }
+      if (_lat != null) body['latitude']  = _lat;
+      if (_lng != null) body['longitude'] = _lng;
 
       final res = await dio.post('$kBackendBaseUrl/biz/academy', data: body);
       if (!mounted) return;
@@ -75,16 +96,22 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
         if (academyId != null) {
           await ref.read(secureStorageProvider).saveAcademyId(academyId);
         }
+        if (!mounted) return;
+        // ignore: use_build_context_synchronously
         context.go('/home');
       }
     } on DioException catch (e) {
       if (!mounted) return;
-      final code = e.response?.data?['code'] as String?;
+      final code    = e.response?.data?['code'] as String?;
+      final message = e.response?.data?['message'] as String? ?? 'Failed to create academy. Try again.';
       if (code == 'BUSINESS_DETAILS_REQUIRED') {
+        // ignore: use_build_context_synchronously
         showSnack(context, 'Please complete business details first');
+        // ignore: use_build_context_synchronously
         context.go('/business-details');
       } else {
-        showSnack(context, e.response?.data?['message'] ?? 'Failed to create academy. Try again.');
+        // ignore: use_build_context_synchronously
+        showSnack(context, message);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -94,13 +121,7 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F2EB),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF4F2EB),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: const Text('Academy Setup', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-      ),
+      appBar: AppBar(title: const Text('Academy Setup')),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -108,6 +129,8 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
           children: [
             const OnboardingProgressBar(step: 2),
             const SizedBox(height: 32),
+
+            // ── Academy Info ──────────────────────────────────────────────────
             const OnboardingSectionLabel(label: 'Academy Information', required: true),
             const SizedBox(height: 16),
             OnboardingField(
@@ -115,6 +138,32 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
               label: 'Academy Name',
               icon: Icons.sports_cricket_rounded,
               validator: (v) => (v == null || v.trim().length < 2) ? 'Required (min 2 chars)' : null,
+            ),
+            OnboardingField(
+              controller: _tagline,
+              label: 'Tagline',
+              icon: Icons.format_quote_rounded,
+            ),
+            OnboardingField(
+              controller: _description,
+              label: 'About Academy',
+              icon: Icons.description_outlined,
+              maxLines: 3,
+            ),
+
+            const SizedBox(height: 8),
+
+            // ── Contact & Location ────────────────────────────────────────────
+            const OnboardingSectionLabel(label: 'Contact & Location'),
+            const SizedBox(height: 16),
+
+            PlacesSearchField(onPlaceSelected: _onPlaceSelected),
+
+            OnboardingField(
+              controller: _address,
+              label: 'Address',
+              icon: Icons.location_on_outlined,
+              maxLines: 2,
             ),
             Row(children: [
               Expanded(
@@ -135,12 +184,6 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
                 ),
               ),
             ]),
-            OnboardingField(controller: _tagline, label: 'Tagline', icon: Icons.format_quote_rounded),
-            OnboardingField(controller: _description, label: 'About Academy', icon: Icons.description_outlined, maxLines: 3),
-            const SizedBox(height: 8),
-            const OnboardingSectionLabel(label: 'Contact & Location'),
-            const SizedBox(height: 16),
-            OnboardingField(controller: _address, label: 'Address', icon: Icons.location_on_outlined, maxLines: 2),
             Row(children: [
               Expanded(
                 child: OnboardingField(
@@ -168,24 +211,31 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
                 ),
               ),
             ]),
-            OnboardingField(controller: _phone, label: 'Academy Phone', icon: Icons.phone_outlined, keyboardType: TextInputType.phone),
-            OnboardingField(controller: _email, label: 'Academy Email', icon: Icons.email_outlined, keyboardType: TextInputType.emailAddress),
-            OnboardingField(controller: _website, label: 'Website URL', icon: Icons.language_rounded, keyboardType: TextInputType.url),
+            OnboardingField(
+              controller: _phone,
+              label: 'Academy Phone',
+              icon: Icons.phone_outlined,
+              keyboardType: TextInputType.phone,
+            ),
+            OnboardingField(
+              controller: _email,
+              label: 'Academy Email',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+            ),
+            OnboardingField(
+              controller: _website,
+              label: 'Website URL',
+              icon: Icons.language_rounded,
+              keyboardType: TextInputType.url,
+            ),
+
             const SizedBox(height: 40),
-            SizedBox(
-              height: 58,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _handleCreate,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF071B3D),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 0,
-                ),
-                child: _isLoading
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                    : const Text('Create Academy', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-              ),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _handleCreate,
+              child: _isLoading
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                  : const Text('Create Academy'),
             ),
             const SizedBox(height: 32),
           ],

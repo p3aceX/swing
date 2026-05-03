@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../shared/widgets.dart';
+import '../../features/settings/settings_provider.dart';
 import 'home_provider.dart';
 
 
@@ -10,13 +11,24 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(homeProvider);
+    final state    = ref.watch(homeProvider);
+    final bizState = ref.watch(settingsProvider);
+
+    final userName = bizState.maybeWhen(
+      data: (d) => (d['user'] as Map<String, dynamic>?)?['name'] as String? ?? '',
+      orElse: () => '',
+    );
+    final initial = userName.isNotEmpty ? userName[0].toUpperCase() : '?';
 
     return Scaffold(
       body: state.when(
         loading: loadingBody,
         error: (e, _) => errorBody(e, () => ref.invalidate(homeProvider)),
-        data: (data) => _HomeBody(data: data, onRefresh: () => ref.read(homeProvider.notifier).refresh()),
+        data: (data) => _HomeBody(
+          data: data,
+          userInitial: initial,
+          onRefresh: () => ref.read(homeProvider.notifier).refresh(),
+        ),
       ),
     );
   }
@@ -24,9 +36,10 @@ class HomeScreen extends ConsumerWidget {
 
 class _HomeBody extends StatelessWidget {
   final HomeData data;
+  final String userInitial;
   final Future<void> Function() onRefresh;
 
-  const _HomeBody({required this.data, required this.onRefresh});
+  const _HomeBody({required this.data, required this.userInitial, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +101,17 @@ class _HomeBody extends StatelessWidget {
                               ],
                             ),
                           ],
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => context.push('/profile'),
+                        child: CircleAvatar(
+                          radius: 22,
+                          backgroundColor: const Color(0xFF071B3D),
+                          child: Text(
+                            userInitial,
+                            style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800),
+                          ),
                         ),
                       ),
                     ],

@@ -10,23 +10,23 @@ class AppTheme {
   static final ThemeData light = ThemeData(
     useMaterial3: true,
     scaffoldBackgroundColor: ivory,
-    textTheme: GoogleFonts.outfitTextTheme(),
+    textTheme: GoogleFonts.plusJakartaSansTextTheme(),
     colorScheme: const ColorScheme.light(
       primary: deepBlue,
       onPrimary: white,
       surface: ivory,
       onSurface: deepNavy,
     ),
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       backgroundColor: ivory,
       elevation: 0,
       scrolledUnderElevation: 0,
       foregroundColor: Colors.black,
       centerTitle: false,
-      titleTextStyle: TextStyle(
+      titleTextStyle: GoogleFonts.plusJakartaSans(
         color: Colors.black,
         fontSize: 20,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w800,
         letterSpacing: -0.5,
       ),
     ),

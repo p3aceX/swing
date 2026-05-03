@@ -16,15 +16,15 @@ class PhoneScreen extends ConsumerStatefulWidget {
 class _PhoneScreenState extends ConsumerState<PhoneScreen>
     with SingleTickerProviderStateMixin {
   final _phoneController = TextEditingController();
-  final _dio = Dio();
-  bool _isLoading = false;
+  final _dio             = Dio();
+  bool _isLoading        = false;
   late AnimationController _fadeCtrl;
-  late Animation<double> _fadeAnim;
+  late Animation<double>   _fadeAnim;
 
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
   }
@@ -58,17 +58,17 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
         final normalizedPhone = data['normalizedPhone'] as String? ?? phone;
 
         if (exists) {
-          // Existing user → go straight to OTP
           final sessionId = await _sendOtp(normalizedPhone);
           if (sessionId != null && mounted) {
+            // ignore: use_build_context_synchronously
             context.push('/otp', extra: {
-              'phone':      normalizedPhone,
-              'sessionId':  sessionId,
-              'isNewUser':  false,
+              'phone':     normalizedPhone,
+              'sessionId': sessionId,
+              'isNewUser': false,
             });
           }
         } else {
-          // New user → collect name first
+          // ignore: use_build_context_synchronously
           context.push('/name', extra: {'phone': normalizedPhone});
         }
       }
@@ -99,34 +99,50 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
         opacity: _fadeAnim,
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 48),
-                Image.asset('asset/logodark.png', height: 56),
-                const Spacer(flex: 1),
+                const SizedBox(height: 72),
+
+                // ── Logo ──────────────────────────────────────────────────────
+                Center(child: Image.asset('asset/logolight.png', height: 120)),
+
+                const Spacer(),
+
+                // ── Headline ──────────────────────────────────────────────────
                 const Text(
-                  'Welcome',
+                  'Welcome to',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const Text(
+                  'Swing Academy',
                   style: TextStyle(
                     fontSize: 40,
                     fontWeight: FontWeight.w900,
                     color: Color(0xFF071B3D),
                     letterSpacing: -1.5,
-                    height: 1,
+                    height: 1.05,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 const Text(
-                  'Enter your mobile number to continue',
+                  'Enter your mobile number to get started',
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     color: Colors.grey,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 48),
-                // Phone field
+
+                const SizedBox(height: 36),
+
+                // ── Phone field ───────────────────────────────────────────────
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -136,7 +152,7 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
                         decoration: const BoxDecoration(
                           border: Border(right: BorderSide(color: Color(0xFFE0DED6))),
                         ),
@@ -144,7 +160,7 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
                           '+91',
                           style: TextStyle(
                             fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                             color: Color(0xFF071B3D),
                           ),
                         ),
@@ -155,15 +171,23 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
                           keyboardType: TextInputType.phone,
                           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                           maxLength: 10,
+                          autofocus: false,
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
                             color: Color(0xFF071B3D),
-                            letterSpacing: 1,
+                            letterSpacing: 1.5,
                           ),
                           decoration: const InputDecoration(
-                            hintText: '9876543210',
+                            hintText: '98765 43210',
+                            hintStyle: TextStyle(
+                              color: Color(0xFFBBBBBB),
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 1,
+                            ),
                             border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
                             filled: false,
                             counterText: '',
                             contentPadding: EdgeInsets.symmetric(horizontal: 16),
@@ -174,18 +198,15 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
+
+                const SizedBox(height: 16),
+
+                // ── Continue button ───────────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   height: 58,
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : _handleContinue,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF071B3D),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 0,
-                    ),
                     child: _isLoading
                         ? const SizedBox(
                             width: 22, height: 22,
@@ -197,17 +218,42 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
                           ),
                   ),
                 ),
-                const Spacer(flex: 2),
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 24),
-                  child: Center(
-                    child: Text(
-                      'By continuing, you agree to our Terms & Privacy Policy',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
+
+                const SizedBox(height: 20),
+
+                // ── Terms ─────────────────────────────────────────────────────
+                Center(
+                  child: Text.rich(
+                    TextSpan(
+                      style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500),
+                      children: [
+                        const TextSpan(text: 'By continuing, you accept our '),
+                        TextSpan(
+                          text: 'Terms & Conditions',
+                          style: TextStyle(
+                            color: const Color(0xFF071B3D),
+                            fontWeight: FontWeight.w700,
+                            decoration: TextDecoration.underline,
+                            decorationColor: const Color(0xFF071B3D).withValues(alpha: 0.4),
+                          ),
+                        ),
+                        const TextSpan(text: ' and '),
+                        TextSpan(
+                          text: 'Privacy Policy',
+                          style: TextStyle(
+                            color: const Color(0xFF071B3D),
+                            fontWeight: FontWeight.w700,
+                            decoration: TextDecoration.underline,
+                            decorationColor: const Color(0xFF071B3D).withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
+
+                const Spacer(),
               ],
             ),
           ),
