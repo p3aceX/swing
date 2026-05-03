@@ -83,12 +83,22 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       format: formatSchema.optional(),
       ageGroup: z.string().optional(),
+      arenaId: z.string().optional(),
     }).parse(request.query)
     const data = await svc.listOpenLobbies(user.userId, {
       date: q.date,
       format: q.format as MatchmakingFormat | undefined,
       ageGroup: q.ageGroup,
+      arenaId: q.arenaId,
     })
+    return reply.send({ success: true, data })
+  })
+
+  app.post('/lobbies/:lobbyId/accept', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    const body = z.object({ arenaId: z.string() }).parse(request.body)
+    const data = await svc.acceptLobbyAsOwner(user.userId, lobbyId, body.arenaId)
     return reply.send({ success: true, data })
   })
 

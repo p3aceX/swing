@@ -293,7 +293,13 @@ export class MatchmakingService {
     date?: string
     format?: MatchmakingFormat
     ageGroup?: string
+    arenaId?: string
   }) {
+    // Arena owner path: return lobbies for this arena without player-specific filters
+    if (input.arenaId) {
+      return this.listLobbiesForArena(userId, input.arenaId, input)
+    }
+
     const player = await this.getPlayerProfile(userId)
     const myTeamIds = await prisma.team.findMany({
       where: { OR: [{ captainId: player.id }, { createdByUserId: userId }] },
@@ -317,7 +323,7 @@ export class MatchmakingService {
       orderBy: { createdAt: 'asc' },
     })
 
-    const teamIds = lobbies.map((l) => l.teamId)
+    const teamIds = lobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
     const callerAge = input.ageGroup ?? this.deriveAgeGroup(player.dateOfBirth)
     const groundIds = lobbies.flatMap((l) => l.picks.map((p) => p.groundId))
@@ -330,14 +336,14 @@ export class MatchmakingService {
     const unitsById = new Map(units.map((u) => [u.id, u]))
 
     const out = lobbies
-      .filter((l) => (callerAge ?? null) === ((ages.get(l.teamId) ?? null)))
+      .filter((l) => l.teamId == null || (callerAge ?? null) === ((ages.get(l.teamId) ?? null)))
       .map((l) => {
         const pick = l.picks[0]
         const unit = pick ? unitsById.get(pick.groundId) : null
         return {
           lobbyId: l.id,
-          teamName: l.team.name,
-          ageGroup: ages.get(l.teamId) ?? null,
+          teamName: l.team?.name ?? 'TBD',
+          ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
           format: l.format,
           groundName: unit?.name ?? null,
           slotTime: pick?.slotTime ?? null,
@@ -347,6 +353,113 @@ export class MatchmakingService {
       })
     return { lobbies: out }
   }
+
+  private async listLobbiesForArena(userId: string, arenaId: string, input: {
+    date?: string
+    format?: MatchmakingFormat
+  }) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+    const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
+    if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    // Player-created lobbies that have picks on this arena's units
+    const playerLobbies = await prisma.matchmakingLobby.findMany({
+      where: {
+        status: 'searching',
+        expiresAt: { gt: new Date() },
+        ...(input.date ? { date: this.startOfDay(input.date) } : {}),
+        ...(input.format ? { format: input.format } : {}),
+        picks: { some: { ground: { arenaId } } },
+      },
+      include: {
+        team: true,
+        picks: { where: { ground: { arenaId } }, orderBy: { preferenceOrder: 'asc' }, take: 1 },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const teamIds = playerLobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
+    const ages = await this.getTeamAgeGroupsMap(teamIds)
+    const groundIds = playerLobbies.flatMap((l) => l.picks.map((p) => p.groundId))
+    const units = groundIds.length
+      ? await prisma.arenaUnit.findMany({ where: { id: { in: groundIds } } })
+      : []
+    const unitsById = new Map(units.map((u) => [u.id, u]))
+
+    const out = playerLobbies.map((l) => {
+      const pick = l.picks[0]
+      const unit = pick ? unitsById.get(pick.groundId) : null
+      return {
+        lobbyId: l.id,
+        teamName: l.team?.name ?? 'TBD',
+        ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
+        format: l.format,
+        groundName: unit?.name ?? null,
+        slotTime: pick?.slotTime ?? null,
+        date: this.toDateOnly(l.date),
+        daysFromNow: this.daysFromNow(l.date),
+      }
+    })
+    return { lobbies: out }
+  }
+
+  async acceptLobbyAsOwner(userId: string, lobbyId: string, arenaId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+    const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
+    if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+      include: { picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 } },
+    })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.status !== 'searching') throw new AppError('INVALID_STATE', 'Lobby is no longer searching', 400)
+
+    const pick = lobby.picks[0]
+    if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+
+    // Verify the pick's ground belongs to this arena
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: pick.groundId } })
+    if (!unit || unit.arenaId !== arenaId) throw new AppError('GROUND_MISMATCH', 'Pick does not belong to this arena', 400)
+
+    // Soft-block the slot
+    const date = lobby.date
+    const endMins = this.timeToMinutes(pick.slotTime) + 120
+    const endTime = this.minutesToTime(endMins)
+
+    const booking = await prisma.slotBooking.create({
+      data: {
+        arenaId,
+        unitId: unit.id,
+        bookedById: owner.id,
+        date,
+        startTime: pick.slotTime,
+        endTime,
+        durationMins: 120,
+        format: lobby.format as any,
+        totalAmountPaise: Math.floor(unit.pricePerHourPaise * 2 / 2),
+        totalPricePaise: Math.floor(unit.pricePerHourPaise * 2 / 2),
+        status: 'HELD',
+        isOfflineBooking: true,
+        createdByOwnerId: owner.id,
+        bookingSource: 'SPLIT',
+        matchmakingId: lobbyId,
+      } as any,
+    })
+
+    await prisma.matchmakingLobby.update({
+      where: { id: lobbyId },
+      data: {
+        arenaId,
+        splitBookingId: booking.id,
+      } as any,
+    })
+
+    return { bookingId: booking.id, lobbyId }
+  }
+
 
   async confirmMatchLobby(userId: string, matchId: string, lobbyId: string) {
     const player = await this.getPlayerProfile(userId)

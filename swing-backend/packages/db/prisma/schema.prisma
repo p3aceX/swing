@@ -2589,23 +2589,27 @@ model MatchmakingRequest {
 }
 
 model MatchmakingLobby {
-  id        String   @id @default(cuid())
-  teamId    String
-  playerId  String
-  format    String
-  date      DateTime @db.Date
-  status    String   @default("searching")
-  matchId   String?
-  createdAt DateTime @default(now())
-  expiresAt DateTime
+  id             String   @id @default(cuid())
+  teamId         String?
+  playerId       String?
+  arenaId        String?
+  splitBookingId String?  @unique
+  format         String
+  date           DateTime @db.Date
+  status         String   @default("searching")
+  matchId        String?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
 
-  team   Team                @relation(fields: [teamId], references: [id])
-  player PlayerProfile       @relation(fields: [playerId], references: [id])
+  team   Team?                @relation(fields: [teamId], references: [id])
+  player PlayerProfile?       @relation(fields: [playerId], references: [id])
+  arena  Arena?               @relation(fields: [arenaId], references: [id])
   picks  MatchmakingLobbyPick[]
 
   @@index([status, date, format])
   @@index([teamId, status])
   @@index([matchId])
+  @@index([arenaId, status])
 }
 
 model MatchmakingLobbyPick {

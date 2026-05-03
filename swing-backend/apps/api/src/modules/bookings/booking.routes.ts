@@ -194,6 +194,21 @@ export async function bookingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data: await svc.createManualBooking(user.userId, arenaId, body) })
   })
 
+  // ─── Owner: create split booking (soft-block slot + create lobby) ─────────
+  app.post('/arena/:arenaId/split', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { arenaId } = request.params as { arenaId: string }
+    const body = z.object({
+      unitId: z.string(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      slotTime: z.string().regex(/^\d{2}:\d{2}$/),
+      format: z.enum(['T10', 'T20', 'ODI', 'Test', 'Custom']),
+      teamId: z.string().optional(),
+      teamName: z.string().optional(),
+    }).parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.createSplitBooking(user.userId, arenaId, body) })
+  })
+
   // ─── Owner: mark booking as paid ────────────────────────────────────────
   app.post('/:id/mark-paid', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }

@@ -1350,4 +1350,91 @@ export class BookingService {
     const day = value.getUTCDay()
     return day === 0 ? 7 : day
   }
+
+  async createSplitBooking(userId: string, arenaId: string, data: {
+    unitId: string
+    date: string
+    slotTime: string
+    format: string
+    teamId?: string
+    teamName?: string
+  }) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
+    if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: data.unitId } })
+    if (!unit || unit.arenaId !== arenaId) throw Errors.notFound('Arena unit')
+
+    const bookingDate = this.startOfDay(data.date)
+    const durationMins = 120
+    const endMins = this.timeToMinutes(data.slotTime) + durationMins
+    const endTime = this.minutesToTime(endMins)
+    const pricePerTeamPaise = Math.floor(unit.pricePerHourPaise * (durationMins / 60) / 2)
+
+    // Verify team if provided
+    const team = data.teamId
+      ? await prisma.team.findUnique({ where: { id: data.teamId } })
+      : null
+
+    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000)
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Soft-block the slot
+      const booking = await tx.slotBooking.create({
+        data: {
+          arenaId,
+          unitId: unit.id,
+          bookedById: owner.id,
+          date: bookingDate,
+          startTime: data.slotTime,
+          endTime,
+          durationMins,
+          format: data.format as any,
+          totalAmountPaise: pricePerTeamPaise * 2,
+          totalPricePaise: pricePerTeamPaise * 2,
+          status: 'HELD',
+          isOfflineBooking: true,
+          createdByOwnerId: owner.id,
+          bookingSource: 'SPLIT',
+        } as any,
+      })
+
+      // Create matchmaking lobby visible to players
+      const lobby = await tx.matchmakingLobby.create({
+        data: {
+          arenaId,
+          teamId: team?.id ?? null,
+          playerId: null,
+          format: data.format,
+          date: bookingDate,
+          status: 'searching',
+          splitBookingId: booking.id,
+          expiresAt,
+        } as any,
+      })
+
+      // Attach the specific ground pick
+      await tx.matchmakingLobbyPick.create({
+        data: {
+          lobbyId: lobby.id,
+          groundId: unit.id,
+          slotTime: data.slotTime,
+          preferenceOrder: 1,
+        },
+      })
+
+      return { booking, lobby }
+    })
+
+    return {
+      bookingId: result.booking.id,
+      lobbyId: result.lobby.id,
+      pricePerTeamPaise,
+      teamName: team?.name ?? data.teamName ?? null,
+    }
+  }
+
 }
