@@ -1547,16 +1547,13 @@ class _NetsPackageSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final netsSlots = apiUnitGroups.where((g) => g.isNetGroup).toList();
-    final enabled = netsSlots.any((g) => g.monthlyPassEnabled);
-    if (!enabled) return const SizedBox.shrink();
-
     final ratePaise = netsSlots
         .where((g) => g.monthlyPassRatePaise != null)
         .map((g) => g.monthlyPassRatePaise!)
         .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
     final subtitle = ratePaise != null
         ? 'From ₹${(ratePaise / 100).toStringAsFixed(0)}/month\nUnlimited net sessions'
-        : 'Unlimited net sessions\nfor a full month';
+        : 'Unlimited access\nfor a full month';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1593,9 +1590,6 @@ class _GroundsPackageSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final groundKeys = groundGroups.map((g) => g.key).toSet();
     final groundSlots = apiUnitGroups.where((g) => groundKeys.contains(g.groupKey)).toList();
-    final hasAny = groundSlots.any((g) => g.bulkDayRatePaise != null && g.bulkDayRatePaise! > 0);
-    if (!hasAny) return const SizedBox.shrink();
-
     final minDays = groundSlots
         .where((g) => g.minBulkDays != null)
         .map((g) => g.minBulkDays!)
