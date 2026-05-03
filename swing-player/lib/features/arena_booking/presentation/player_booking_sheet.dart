@@ -1551,9 +1551,6 @@ class _NetsPackageSection extends StatelessWidget {
         .where((g) => g.monthlyPassRatePaise != null)
         .map((g) => g.monthlyPassRatePaise!)
         .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
-    final subtitle = ratePaise != null
-        ? 'From ₹${(ratePaise / 100).toStringAsFixed(0)}/month\nUnlimited net sessions'
-        : 'Unlimited access\nfor a full month';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1564,8 +1561,10 @@ class _NetsPackageSection extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: _PackageCard(
             icon: Icons.workspace_premium_rounded,
-            title: 'Monthly\nPass',
-            subtitle: subtitle,
+            title: 'Monthly Pass',
+            description: 'Unlimited net sessions for a full month',
+            ratePaise: ratePaise,
+            rateLabel: '/month',
             phone: phone,
           ),
         ),
@@ -1598,9 +1597,9 @@ class _GroundsPackageSection extends StatelessWidget {
         .where((g) => g.bulkDayRatePaise != null)
         .map((g) => g.bulkDayRatePaise!)
         .fold<int?>(null, (best, v) => best == null ? v : (v < best ? v : best));
-    final subtitle = (ratePaise != null && minDays != null)
-        ? 'Book $minDays+ days · ₹${(ratePaise / 100).toStringAsFixed(0)}/day'
-        : (minDays != null ? 'Book $minDays+ days at discounted rates' : 'Book multiple days\nat discounted rates');
+    final description = minDays != null
+        ? 'Book $minDays+ days at discounted rates'
+        : 'Book multiple days at discounted rates';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1611,8 +1610,10 @@ class _GroundsPackageSection extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: _PackageCard(
             icon: Icons.calendar_month_rounded,
-            title: 'Bulk\nBooking',
-            subtitle: subtitle,
+            title: 'Bulk Booking',
+            description: description,
+            ratePaise: ratePaise,
+            rateLabel: '/day',
             phone: phone,
           ),
         ),
@@ -1628,16 +1629,22 @@ class _PackageCard extends StatelessWidget {
   const _PackageCard({
     required this.icon,
     required this.title,
-    required this.subtitle,
+    required this.description,
+    this.ratePaise,
+    this.rateLabel,
     this.phone,
   });
 
   final IconData icon;
   final String title;
-  final String subtitle;
+  final String description;
+  final int? ratePaise;
+  final String? rateLabel; // e.g. '/month' or '/day'
   final String? phone;
 
-  void _enquire(BuildContext context) async {
+  bool get _hasPricing => ratePaise != null && ratePaise! > 0;
+
+  void _contact(BuildContext context) async {
     final p = phone;
     if (p == null || p.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1646,70 +1653,98 @@ class _PackageCard extends StatelessWidget {
       return;
     }
     final digits = p.replaceAll(RegExp(r'\D'), '');
-    final wa = Uri.parse('https://wa.me/91$digits?text=${Uri.encodeComponent('Hi, I\'d like to enquire about ${title.replaceAll('\n', ' ')}.')}');
+    final wa = Uri.parse('https://wa.me/91$digits?text=${Uri.encodeComponent('Hi, I\'d like to know more about ${title.replaceAll('\n', ' ')}.')}');
     if (await canLaunchUrl(wa)) {
       await launchUrl(wa, mode: LaunchMode.externalApplication);
     } else {
-      final tel = Uri.parse('tel:$digits');
-      await launchUrl(tel);
+      await launchUrl(Uri.parse('tel:$digits'));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDark;
-    return GestureDetector(
-      onTap: () => _enquire(context),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF0D0D0D) : const Color(0xFFF8F8F8),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: context.stroke.withValues(alpha: 0.1)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: context.accent, size: 22),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              style: TextStyle(
-                color: context.fg,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-                height: 1.2,
-              ),
+    final priceText = _hasPricing
+        ? '₹${(ratePaise! / 100).toStringAsFixed(0)}${rateLabel ?? ''}'
+        : null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0D0D0D) : const Color(0xFFF8F8F8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.stroke.withValues(alpha: 0.1)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: context.accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
             ),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              style: TextStyle(
-                color: context.fgSub.withValues(alpha: 0.55),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                height: 1.4,
-              ),
+            child: Icon(icon, color: context.accent, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    color: context.fgSub.withValues(alpha: 0.6),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    height: 1.4,
+                  ),
+                ),
+                if (priceText != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    priceText,
+                    style: TextStyle(
+                      color: context.accent,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: context.accent,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                'ENQUIRE',
-                style: TextStyle(
-                  color: isDark ? Colors.black : Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.5,
+          ),
+          if (!_hasPricing)
+            GestureDetector(
+              onTap: () => _contact(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: context.accent,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'ENQUIRE',
+                  style: TextStyle(
+                    color: isDark ? Colors.black : Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
