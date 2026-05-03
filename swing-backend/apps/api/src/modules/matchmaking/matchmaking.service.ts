@@ -323,10 +323,11 @@ export class MatchmakingService {
       orderBy: { createdAt: 'asc' },
     })
 
-    const teamIds: string[] = lobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
+    const lobbiesAny = lobbies as any[]
+    const teamIds: string[] = lobbiesAny.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
     const callerAge = input.ageGroup ?? this.deriveAgeGroup(player.dateOfBirth)
-    const groundIds = lobbies.flatMap((l) => l.picks.map((p) => p.groundId))
+    const groundIds = lobbiesAny.flatMap((l) => l.picks.map((p: any) => p.groundId))
     const units = groundIds.length
       ? await prisma.arenaUnit.findMany({
           where: { id: { in: groundIds } },
@@ -335,14 +336,25 @@ export class MatchmakingService {
       : []
     const unitsById = new Map(units.map((u) => [u.id, u]))
 
-    const out = lobbies
-      .filter((l) => l.teamId == null || (callerAge ?? null) === ((ages.get(l.teamId) ?? null)))
+    // Fetch arena names for owner-created lobbies
+    const arenaIds = [...new Set(lobbiesAny.flatMap((l) => l.arenaId ? [l.arenaId] : [] as string[]))]
+    const arenas = arenaIds.length
+      ? await prisma.arena.findMany({ where: { id: { in: arenaIds } }, select: { id: true, name: true } })
+      : []
+    const arenasById = new Map(arenas.map((a) => [a.id, a]))
+
+    const out = lobbiesAny
+      // owner-created lobbies (arenaId set) are visible to all players regardless of age
+      .filter((l) => l.arenaId != null || l.teamId == null || (callerAge ?? null) === ((ages.get(l.teamId) ?? null)))
       .map((l) => {
         const pick = l.picks[0]
         const unit = pick ? unitsById.get(pick.groundId) : null
+        const arena = l.arenaId ? arenasById.get(l.arenaId) : null
         return {
           lobbyId: l.id,
-          teamName: l.team?.name ?? 'TBD',
+          teamName: l.team?.name ?? (arena ? arena.name : 'TBD'),
+          isArenaLobby: l.arenaId != null,
+          arenaName: arena?.name ?? null,
           ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
           format: l.format,
           groundName: unit?.name ?? null,
@@ -363,25 +375,37 @@ export class MatchmakingService {
     const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
     if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
 
-    // Player-created lobbies that have picks on this arena's units
-    const playerLobbies = await prisma.matchmakingLobby.findMany({
+    // Filter lobbies that belong to THIS arena:
+    // - owner-created: arenaId field is set directly
+    // - player-created: at least one pick's ground belongs to this arena
+    const playerLobbies: any[] = await prisma.matchmakingLobby.findMany({
       where: {
         status: 'searching',
         expiresAt: { gt: new Date() },
         ...(input.date ? { date: this.startOfDay(input.date) } : {}),
         ...(input.format ? { format: input.format } : {}),
-        picks: { some: { ground: { arenaId } } },
-      },
+        OR: [
+          { arenaId } as any,
+          { picks: { some: { ground: { arenaId } } } },
+        ],
+      } as any,
       include: {
         team: true,
-        picks: { where: { ground: { arenaId } }, orderBy: { preferenceOrder: 'asc' }, take: 1 },
+        picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 },
       },
       orderBy: { createdAt: 'asc' },
     })
 
+    // eslint-disable-next-line no-console
+    console.log(`[listLobbiesForArena] arenaId=${arenaId} found=${playerLobbies.length} lobbies`)
+    for (const l of playerLobbies) {
+      // eslint-disable-next-line no-console
+      console.log(`  lobby=${l.id} lobbyArenaId=${l.arenaId} teamId=${l.teamId} picks=${l.picks.length} pick0groundId=${l.picks[0]?.groundId}`)
+    }
+
     const teamIds: string[] = playerLobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
-    const groundIds = playerLobbies.flatMap((l) => l.picks.map((p) => p.groundId))
+    const groundIds = playerLobbies.flatMap((l) => l.picks.map((p: any) => p.groundId))
     const units = groundIds.length
       ? await prisma.arenaUnit.findMany({ where: { id: { in: groundIds } } })
       : []

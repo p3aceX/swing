@@ -1379,15 +1379,27 @@ export class BookingService {
       ? await prisma.team.findUnique({ where: { id: data.teamId } })
       : null
 
+    // bookedById FK points to PlayerProfile — look up by the owner's userId
+    const ownerUser = await prisma.arenaOwnerProfile.findUnique({
+      where: { id: owner.id },
+      select: { userId: true },
+    })
+    const ownerPlayerProfile = ownerUser
+      ? await prisma.playerProfile.findUnique({ where: { userId: ownerUser.userId } })
+      : null
+
+    // eslint-disable-next-line no-console
+    console.log(`[createSplitBooking] arenaId=${arenaId} unitId=${unit.id} ownerPlayerProfile=${ownerPlayerProfile?.id ?? 'none'}`)
+
     const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000)
 
     const result = await prisma.$transaction(async (tx) => {
-      // Soft-block the slot
-      const booking = await tx.slotBooking.create({
+      // Soft-block the slot only if owner has a linked PlayerProfile (bookedById FK requires one)
+      const booking = ownerPlayerProfile ? await tx.slotBooking.create({
         data: {
           arenaId,
           unitId: unit.id,
-          bookedById: owner.id,
+          bookedById: ownerPlayerProfile.id,
           date: bookingDate,
           startTime: data.slotTime,
           endTime,
@@ -1400,7 +1412,7 @@ export class BookingService {
           createdByOwnerId: owner.id,
           bookingSource: 'SPLIT',
         } as any,
-      })
+      }) : null
 
       // Create matchmaking lobby visible to players
       const lobby = await tx.matchmakingLobby.create({
@@ -1411,7 +1423,7 @@ export class BookingService {
           format: data.format,
           date: bookingDate,
           status: 'searching',
-          splitBookingId: booking.id,
+          ...(booking ? { splitBookingId: booking.id } : {}),
           expiresAt,
         } as any,
       })
@@ -1430,7 +1442,7 @@ export class BookingService {
     })
 
     return {
-      bookingId: result.booking.id,
+      bookingId: result.booking?.id ?? null,
       lobbyId: result.lobby.id,
       pricePerTeamPaise,
       teamName: team?.name ?? data.teamName ?? null,
