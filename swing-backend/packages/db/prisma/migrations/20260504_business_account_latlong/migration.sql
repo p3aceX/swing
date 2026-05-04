@@ -1,0 +1,2 @@
+ALTER TABLE "business_accounts" ADD COLUMN IF NOT EXISTS "latitude" DOUBLE PRECISION;
+ALTER TABLE "business_accounts" ADD COLUMN IF NOT EXISTS "longitude" DOUBLE PRECISION;

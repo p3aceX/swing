@@ -505,6 +505,8 @@ model BusinessAccount {
   state              String?
   address            String?
   pincode            String?
+  latitude           Float?
+  longitude          Float?
   gstNumber          String?
   panNumber          String?
   beneficiaryName    String?
