@@ -362,13 +362,14 @@ export class MatchmakingService {
 
     const out = lobbiesAny
       .filter((l) => {
+        const pick = l.picks[0]
+        if (this.isSlotPast(l.date, pick?.slotTime ?? null)) return false
         // Arena-owner lobbies are always visible
         if (l.arenaId != null || l.teamId == null) return true
         const lobbyAge = ages.get(l.teamId) ?? null
         // Only filter by age group when both sides have an explicit group
         if (callerAge == null || lobbyAge == null) return true
-        const pass = callerAge === lobbyAge
-        return pass
+        return callerAge === lobbyAge
       })
       .map((l) => {
         const pick = l.picks[0]
@@ -435,7 +436,12 @@ export class MatchmakingService {
       : []
     const unitsById = new Map(units.map((u) => [u.id, u]))
 
-    const out = playerLobbies.map((l) => {
+    const out = playerLobbies
+      .filter((l) => {
+        const pick = l.picks[0]
+        return !this.isSlotPast(l.date, pick?.slotTime ?? null)
+      })
+      .map((l) => {
       const pick = l.picks[0]
       const unit = pick ? unitsById.get(pick.groundId) : null
       return {
@@ -1263,6 +1269,17 @@ export class MatchmakingService {
   private timeToMinutes(time: string) {
     const [h, m] = time.split(':').map(Number)
     return (h || 0) * 60 + (m || 0)
+  }
+
+  // Returns true when a lobby's slot time is in the past for today (IST).
+  private isSlotPast(lobbyDate: Date, slotTime: string | null): boolean {
+    if (!slotTime) return false
+    const now = new Date()
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    const lobbyDayUTC = new Date(Date.UTC(lobbyDate.getUTCFullYear(), lobbyDate.getUTCMonth(), lobbyDate.getUTCDate()))
+    if (lobbyDayUTC.getTime() !== todayUTC.getTime()) return false
+    const nowIstMins = (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440
+    return this.timeToMinutes(slotTime) <= nowIstMins
   }
 
   private minutesToTime(total: number) {
