@@ -55,3 +55,32 @@ class FeeStructuresNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
 final feeStructuresProvider =
     AsyncNotifierProvider<FeeStructuresNotifier, List<Map<String, dynamic>>>(FeeStructuresNotifier.new);
+
+class BatchPaymentsNotifier
+    extends AutoDisposeFamilyAsyncNotifier<List<Map<String, dynamic>>, String> {
+  @override
+  Future<List<Map<String, dynamic>>> build(String batchId) async {
+    final s = await ref.watch(academyProvider.future);
+    final res = await ref.read(apiClientProvider).get(
+      '/academy/${s.academyId}/fee-payments',
+      params: {'batchId': batchId, 'limit': 200},
+    );
+    final data = res.data['data'];
+    if (data is List) return data.cast<Map<String, dynamic>>();
+    if (data is Map && data['items'] != null) {
+      return (data['items'] as List).cast<Map<String, dynamic>>();
+    }
+    return [];
+  }
+
+  Future<void> recordPayment(Map<String, dynamic> payload) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider).post('/academy/${s.academyId}/fee-payments', data: payload);
+    ref.invalidateSelf();
+  }
+}
+
+final batchPaymentsProvider = AsyncNotifierProvider.autoDispose
+    .family<BatchPaymentsNotifier, List<Map<String, dynamic>>, String>(
+  BatchPaymentsNotifier.new,
+);

@@ -358,6 +358,9 @@ export async function playerRoutes(app: FastifyInstance) {
       city: z.string().max(60).optional(),
       teamType: z.enum(['FRIENDLY', 'CLUB', 'ACADEMY', 'CORPORATE']).optional(),
       iAmCaptain: z.boolean().optional(),
+      academyId: z.string().optional(),
+      coachId: z.string().optional(),
+      arenaId: z.string().optional(),
     }).parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.createTeam(user.userId, body) })
   })
@@ -593,6 +596,8 @@ export async function playerRoutes(app: FastifyInstance) {
       entryFee: z.number().int().optional(),
       prizePool: z.string().optional(),
       isPublic: z.boolean().optional(),
+      logoUrl: z.string().url().nullable().optional(),
+      coverUrl: z.string().url().nullable().optional(),
     }).parse(request.body)
     return reply.send({ success: true, data: await tournamentSvc.updateTournament(user.userId, id, body) })
   })

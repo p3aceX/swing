@@ -81,6 +81,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       // ── Batch / student detail (pushed, no shell) ────────────────────────────
       GoRoute(path: '/batches/new', builder: (_, _) => const BatchCreateWizard()),
       GoRoute(
+        path: '/batches/:batchId/edit',
+        builder: (_, state) => BatchCreateWizard(
+          batchId:  state.pathParameters['batchId'],
+          existing: state.extra as Map<String, dynamic>?,
+        ),
+      ),
+      GoRoute(
         path: '/batches/:batchId',
         builder: (_, state) => BatchDetailScreen(batchId: state.pathParameters['batchId']!),
       ),

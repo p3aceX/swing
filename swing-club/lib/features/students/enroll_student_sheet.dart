@@ -57,6 +57,11 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
   final _feeCtrl      = TextEditingController();
   String _frequency   = 'MONTHLY';
   bool   _feeSeeded   = false;
+  // Registration fee
+  bool   _showRegFee  = false;
+  final _regFeeCtrl   = TextEditingController();
+  String _regFeeMode  = 'CASH';
+  // First month advance payment
   bool   _showInitPay = false;
   final _initPayCtrl  = TextEditingController();
   String _payMode     = 'CASH';
@@ -84,7 +89,7 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
     _pageCtrl.dispose();
     for (final c in [
       _phoneCtrl, _nameCtrl, _cityCtrl, _feeCtrl,
-      _initPayCtrl, _aadhaarCtrl,
+      _regFeeCtrl, _initPayCtrl, _aadhaarCtrl,
       _parentNameCtrl, _parentPhoneCtrl,
       _emergNameCtrl, _emergPhoneCtrl,
     ]) { c.dispose(); }
@@ -103,22 +108,36 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
   }
 
   void _seedFeeFromBatch() {
-    final batchAsync = ref.read(batchDetailProvider(_batchId!));
-    batchAsync.whenData((batch) {
-      final fees = (batch['feeStructures'] as List?)
-          ?.cast<Map<String, dynamic>>();
-      if (fees == null || fees.isEmpty) return;
-      final fee          = fees.first;
-      final amountPaise  = fee['amountPaise'] as int?;
-      final frequency    = fee['frequency'] as String?;
-      if (amountPaise != null) {
-        _feeCtrl.text = (amountPaise / 100).toStringAsFixed(0);
-        _feeSeeded = true;
-      }
-      if (frequency != null && kFeeFrequencies.contains(frequency)) {
-        _frequency = frequency;
-      }
+    // Try batch detail cache first (available when sheet opened from batch detail screen)
+    final batchDetailAsync = ref.read(batchDetailProvider(_batchId!));
+    if (batchDetailAsync is AsyncData<Map<String, dynamic>>) {
+      if (_tryApplyFees((batchDetailAsync.value['feeStructures'] as List?)
+          ?.cast<Map<String, dynamic>>())) return;
+    }
+    // Fall back to batches list (always loaded in the app)
+    ref.read(batchesProvider).whenData((batches) {
+      try {
+        final batch = batches.firstWhere((b) => b['id'] == _batchId);
+        _tryApplyFees((batch['feeStructures'] as List?)?.cast<Map<String, dynamic>>());
+      } catch (_) {}
     });
+  }
+
+  bool _tryApplyFees(List<Map<String, dynamic>>? fees) {
+    if (fees == null || fees.isEmpty) return false;
+    final fee = fees.first;
+    final amountPaise = (fee['amountPaise'] as num?)?.toInt();
+    final frequency   = fee['frequency'] as String?;
+    bool applied = false;
+    if (amountPaise != null && amountPaise > 0) {
+      _feeCtrl.text = (amountPaise / 100).toStringAsFixed(0);
+      _feeSeeded = true;
+      applied = true;
+    }
+    if (frequency != null && kFeeFrequencies.contains(frequency)) {
+      setState(() => _frequency = frequency);
+    }
+    return applied;
   }
 
   // ── API calls ─────────────────────────────────────────────────────────────────
@@ -148,34 +167,52 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
 
   Future<void> _submit() async {
     if (_batchId == null) { showSnack(context, 'Select a batch'); return; }
-    if (_aadhaarCtrl.text.trim().length != 12) {
-      showSnack(context, 'Enter a valid 12-digit Aadhaar number');
-      return;
-    }
+
     final phone      = _phoneCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
     final feeRupees  = double.tryParse(_feeCtrl.text.trim()) ?? 0;
     final initRupees = double.tryParse(_initPayCtrl.text.trim()) ?? 0;
+    final regRupees  = _showRegFee ? (double.tryParse(_regFeeCtrl.text.trim()) ?? 0) : 0;
+    final aadhaar    = _aadhaarCtrl.text.trim();
+
+    // Validate aadhaar only if entered
+    if (aadhaar.isNotEmpty && aadhaar.length != 12) {
+      showSnack(context, 'Aadhaar must be 12 digits (or leave blank)');
+      return;
+    }
+
+    final name = _userFound == true
+        ? (_existingUser?['name'] as String? ?? _nameCtrl.text.trim())
+        : _nameCtrl.text.trim();
+    if (name.trim().length < 2) {
+      showSnack(context, 'Student name is required (min 2 chars)');
+      return;
+    }
 
     final payload = <String, dynamic>{
       'phone':          phone,
+      'name':           name,
       'isTrial':        _isTrial,
       'feeAmountPaise': (feeRupees * 100).toInt(),
       'feeFrequency':   _frequency,
       if (_isTrial && _trialEndsAt != null)
         'trialEndsAt': _trialEndsAt!.toIso8601String(),
-      'name': _userFound == true
-          ? (_existingUser?['name'] as String? ?? '')
-          : _nameCtrl.text.trim(),
       if (_dob != null)
         'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2,'0')}-${_dob!.day.toString().padLeft(2,'0')}',
       if (_cityCtrl.text.trim().isNotEmpty) 'city': _cityCtrl.text.trim(),
       if (_bloodGroup != null) 'bloodGroup': _bloodGroup,
-      'aadhaarNumber': _aadhaarCtrl.text.trim(),
+      // Send last 4 digits only (backend expects aadhaarLast4)
+      if (aadhaar.length == 12) 'aadhaarLast4': aadhaar.substring(8),
       if (_parentNameCtrl.text.trim().isNotEmpty)
         'parentName': _parentNameCtrl.text.trim(),
       if (_parentPhoneCtrl.text.trim().isNotEmpty)
         'parentPhone': _parentPhoneCtrl.text.trim(),
       if (_parentRelation != null) 'parentRelation': _parentRelation,
+      // Registration / admission fee
+      if (_showRegFee && regRupees > 0) ...<String, dynamic>{
+        'registrationFeePaise':   (regRupees * 100).toInt(),
+        'registrationPaymentMode': _regFeeMode,
+      },
+      // First month / advance payment
       if (_showInitPay && initRupees > 0) ...<String, dynamic>{
         'initialPaymentPaise': (initRupees * 100).toInt(),
         'initialPaymentMode':  _payMode,
@@ -189,6 +226,9 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
     setState(() => _loading = true);
     try {
       await ref.read(studentsProvider.notifier).enroll(_batchId!, payload);
+      // Refresh batch data so the new student appears everywhere immediately
+      ref.invalidate(batchDetailProvider(_batchId!));
+      ref.invalidate(batchesProvider);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -596,17 +636,71 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
   Widget _buildStep3() => ListView(
     padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
     children: [
-      _SectionLabel('FEE AMOUNT'),
+
+      // ── Registration Fee ──────────────────────────────────────────────────
+      _SectionLabel('REGISTRATION / ADMISSION FEE'),
+      const SizedBox(height: 4),
+      const Text('One-time fee charged on admission',
+          style: TextStyle(fontSize: 12, color: Colors.grey)),
+      const SizedBox(height: 10),
+      GestureDetector(
+        onTap: () => setState(() => _showRegFee = !_showRegFee),
+        child: Row(children: [
+          _Checkbox(checked: _showRegFee),
+          const SizedBox(width: 10),
+          const Text('Collect registration fee now',
+              style: TextStyle(fontWeight: FontWeight.w600, color: _kNavy, fontSize: 14)),
+        ]),
+      ),
+      if (_showRegFee) ...[
+        const SizedBox(height: 12),
+        TextField(
+          controller: _regFeeCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _kNavy),
+          decoration: _inputDec('0').copyWith(
+            prefixText: '₹  ',
+            prefixStyle: const TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w600),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _SectionLabel('PAYMENT MODE'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8, runSpacing: 8,
+          children: kPaymentModes.map((m) {
+            final sel = _regFeeMode == m;
+            return GestureDetector(
+              onTap: () => setState(() => _regFeeMode = m),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: sel ? _kBlue : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: sel ? _kBlue : _kBorder),
+                ),
+                child: Text(m,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                        color: sel ? Colors.white : Colors.grey)),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+
+      const SizedBox(height: 20),
+      const Divider(color: Color(0xFFE0DED6)),
+      const SizedBox(height: 20),
+
+      // ── Monthly / recurring fee ───────────────────────────────────────────
+      _SectionLabel('RECURRING FEE AMOUNT'),
       const SizedBox(height: 6),
       TextField(
         controller: _feeCtrl,
-        keyboardType:
-            const TextInputType.numberWithOptions(decimal: true),
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-        ],
-        style: const TextStyle(
-            fontSize: 22, fontWeight: FontWeight.w800, color: _kNavy),
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _kNavy),
         decoration: _inputDec('0').copyWith(
           prefixText: '₹  ',
           prefixStyle: const TextStyle(
@@ -625,8 +719,7 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
           return GestureDetector(
             onTap: () => setState(() => _frequency = f),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
                 color: sel ? _kNavy : Colors.white,
                 borderRadius: BorderRadius.circular(20),
@@ -634,8 +727,7 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
               ),
               child: Text(label,
                   style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 13, fontWeight: FontWeight.w700,
                       color: sel ? Colors.white : Colors.grey)),
             ),
           );
@@ -643,15 +735,14 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
       ),
 
       const SizedBox(height: 20),
-      // Initial payment checkbox row
+      // First month payment checkbox
       GestureDetector(
         onTap: () => setState(() => _showInitPay = !_showInitPay),
         child: Row(children: [
           _Checkbox(checked: _showInitPay),
           const SizedBox(width: 10),
-          const Text('Record advance payment',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, color: _kNavy, fontSize: 14)),
+          const Text('Collect first month fee now',
+              style: TextStyle(fontWeight: FontWeight.w600, color: _kNavy, fontSize: 14)),
         ]),
       ),
 
@@ -659,15 +750,11 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
         const SizedBox(height: 14),
         TextField(
           controller: _initPayCtrl,
-          keyboardType:
-              const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-          ],
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
           decoration: _inputDec('Amount paid').copyWith(
             prefixText: '₹  ',
-            prefixStyle:
-                const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600),
+            prefixStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600),
           ),
         ),
         const SizedBox(height: 12),
@@ -680,17 +767,14 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
             return GestureDetector(
               onTap: () => setState(() => _payMode = m),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 9),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                 decoration: BoxDecoration(
                   color: sel ? _kBlue : Colors.white,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: sel ? _kBlue : _kBorder),
                 ),
                 child: Text(m,
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: sel ? Colors.white : Colors.grey)),
               ),
             );
@@ -761,7 +845,7 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
 
       const SizedBox(height: 20),
       // ── Aadhaar ────────────────────────────────────────────────────────────
-      _SectionLabel('AADHAAR NUMBER *'),
+      _SectionLabel('AADHAAR NUMBER (optional)'),
       const SizedBox(height: 6),
       TextField(
         controller: _aadhaarCtrl,
@@ -770,7 +854,7 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
           FilteringTextInputFormatter.digitsOnly,
           LengthLimitingTextInputFormatter(12),
         ],
-        decoration: _inputDec('12-digit Aadhaar number'),
+        decoration: _inputDec('12-digit Aadhaar (optional)'),
       ),
 
       const SizedBox(height: 20),

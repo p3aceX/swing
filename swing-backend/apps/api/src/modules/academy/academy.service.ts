@@ -343,7 +343,23 @@ export class AcademyService {
       update: { isActive: true, batchId, isTrial: isTrial || false },
     })
     await prisma.academy.update({ where: { id: academyId }, data: { totalStudents: { increment: 1 } } })
-    // Record initial payment if provided
+    // Record registration fee if provided
+    if (extra?.registrationFeePaise && extra.registrationFeePaise > 0) {
+      await prisma.feePayment.create({
+        data: {
+          academyId,
+          playerProfileId: enrollment.playerProfileId,
+          enrollmentId: enrollment.id,
+          amountPaise: extra.registrationFeePaise,
+          dueDate: new Date(),
+          paidAt: new Date(),
+          status: 'COMPLETED',
+          paymentMode: extra.registrationPaymentMode || 'CASH',
+          notes: 'Registration / Admission fee',
+        },
+      })
+    }
+    // Record initial monthly payment if provided
     if (extra?.initialPaymentPaise && extra.initialPaymentPaise > 0) {
       await prisma.feePayment.create({
         data: {
@@ -354,13 +370,19 @@ export class AcademyService {
           dueDate: new Date(),
           paidAt: new Date(),
           status: 'COMPLETED',
-          paymentMode: extra.initialPaymentMode,
-          notes: 'Initial / registration fee',
+          paymentMode: extra.initialPaymentMode || 'CASH',
+          notes: 'First month fee',
         },
       })
+      const totalPaid = (extra.registrationFeePaise || 0) + extra.initialPaymentPaise
       await prisma.academyEnrollment.update({
         where: { id: enrollment.id },
-        data: { feeStatus: 'PAID', feePaidPaise: extra.initialPaymentPaise },
+        data: { feeStatus: 'PAID', feePaidPaise: totalPaid },
+      })
+    } else if (extra?.registrationFeePaise && extra.registrationFeePaise > 0) {
+      await prisma.academyEnrollment.update({
+        where: { id: enrollment.id },
+        data: { feePaidPaise: extra.registrationFeePaise },
       })
     }
     return enrollment

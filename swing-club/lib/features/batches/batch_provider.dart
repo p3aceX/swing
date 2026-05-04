@@ -70,6 +70,12 @@ class BatchesNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     );
   }
 
+  Future<void> removeCoachFromBatch(String batchId, String coachProfileId) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider)
+        .delete('/academy/${s.academyId}/batches/$batchId/coaches/$coachProfileId');
+  }
+
   Future<Map<String, dynamic>?> lookupCoach(String phone) async {
     final s = await ref.read(academyProvider.future);
     try {

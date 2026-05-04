@@ -951,6 +951,7 @@ model CoachProfile {
 
   user               User                  @relation(fields: [userId], references: [id])
   businessAccount    BusinessAccount?      @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  teams              Team[]
   academies          AcademyCoach[]
   sessions           PracticeSession[]
   sessionSchedules   SessionSchedule[]
@@ -1011,6 +1012,7 @@ model Academy {
 
   owner                AcademyOwnerProfile   @relation(fields: [ownerId], references: [id])
   businessAccount      BusinessAccount?      @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  teams                Team[]
   coaches              AcademyCoach[]
   batches              Batch[]
   enrollments          AcademyEnrollment[]
@@ -2175,15 +2177,24 @@ model Team {
   powerScore          Float     @default(0) // weighted avg IP of players — used for matchmaking
   powerScoreUpdatedAt DateTime?
   createdByUserId     String
+  academyId           String?
+  coachId             String?
+  arenaId             String?
   isActive            Boolean   @default(true)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  academy            Academy?         @relation(fields: [academyId], references: [id])
+  coach              CoachProfile?    @relation(fields: [coachId], references: [id])
+  arena              Arena?           @relation(fields: [arenaId], references: [id])
   tournamentTeams    TournamentTeam[]
   matchmakingLobbies MatchmakingLobby[]
 
   @@index([city])
   @@index([powerScore])
+  @@index([academyId])
+  @@index([coachId])
+  @@index([arenaId])
 }
 
 model TournamentGroup {
@@ -2305,6 +2316,7 @@ model Arena {
   managers           ArenaManager[]
   monthlyPasses      MonthlyPass[]
   matchmakingLobbies MatchmakingLobby[]
+  teams              Team[]
 
   citySlug     String?
   arenaSlug    String?

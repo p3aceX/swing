@@ -300,6 +300,7 @@ class TournamentMatchModel {
     this.groupName,
     this.result,
     this.format,
+    this.winner,
   });
   final String id;
   final String teamAName;
@@ -307,10 +308,11 @@ class TournamentMatchModel {
   final String status;
   final List<TournamentMatchInnings> innings;
   final DateTime? scheduledAt;
-  final int? round;
+  final String? round;
   final String? groupName;
   final String? result;
   final String? format;
+  final String? winner;
 
   factory TournamentMatchModel.fromJson(Map<String, dynamic> j) {
     final List inningsJson = j['innings'] is List ? j['innings'] as List : [];
@@ -326,10 +328,11 @@ class TournamentMatchModel {
       scheduledAt: j['scheduledAt'] != null
           ? DateTime.tryParse('${j['scheduledAt']}')
           : null,
-      round: _toInt(j['round']),
+      round: j['round'] != null ? '${j['round']}' : null,
       groupName: j['groupName'] != null ? '${j['groupName']}' : null,
       result: j['result'] != null ? '${j['result']}' : null,
       format: j['format'] != null ? '${j['format']}' : null,
+      winner: j['winnerId'] != null ? '${j['winnerId']}' : null,
     );
   }
 }

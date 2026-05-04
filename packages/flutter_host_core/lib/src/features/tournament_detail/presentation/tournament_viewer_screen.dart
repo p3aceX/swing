@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -66,6 +69,18 @@ class _HostTournamentViewerScreenState
     super.dispose();
   }
 
+  void _showEditSheet(BuildContext context, TournamentDetailModel tournament) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _EditTournamentScreen(
+          tournament: tournament,
+          onSaved: () => ref.invalidate(hostTournamentDetailProvider(widget.slug)),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(hostTournamentDetailProvider(widget.slug));
@@ -84,6 +99,9 @@ class _HostTournamentViewerScreenState
           tabs: _tabs,
           isHost: widget.isHost,
           callbacks: widget.callbacks,
+          onEdit: widget.isHost
+              ? () => _showEditSheet(context, tournament)
+              : null,
         ),
       ),
       bottomNavigationBar: widget.isHost
@@ -102,12 +120,14 @@ class _DetailBody extends StatelessWidget {
     required this.tabs,
     required this.isHost,
     required this.callbacks,
+    this.onEdit,
   });
   final TournamentDetailModel tournament;
   final String slug;
   final TabController tabs;
   final bool isHost;
   final TournamentViewerCallbacks callbacks;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +137,8 @@ class _DetailBody extends StatelessWidget {
           child: _TournamentHeader(
             tournament: tournament,
             onBack: callbacks.onBack ?? () => Navigator.of(context).maybePop(),
+            isHost: isHost,
+            onEdit: onEdit,
           ),
         ),
         SliverPersistentHeader(
@@ -192,31 +214,31 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(
-      decoration: BoxDecoration(
-        color: bg,
-        border: Border(bottom: BorderSide(color: context.stroke)),
-      ),
-      child: TabBar(
-        controller: controller,
-        isScrollable: true,
-        tabAlignment: TabAlignment.start,
-        indicatorColor: context.accent,
-        indicatorWeight: 2.5,
-        indicatorSize: TabBarIndicatorSize.label,
-        dividerColor: Colors.transparent,
-        labelColor: context.accent,
-        unselectedLabelColor: context.fgSub,
-        labelPadding: const EdgeInsets.only(right: 24, left: 4),
-        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-        unselectedLabelStyle:
-            const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-        tabs: const [
-          Tab(text: 'Overview'),
-          Tab(text: 'Matches'),
-          Tab(text: 'Standings'),
-          Tab(text: 'Leaderboard'),
-          Tab(text: 'Teams'),
-        ],
+      color: bg,
+      child: SizedBox(
+        height: 48,
+        child: TabBar(
+          controller: controller,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          indicatorColor: context.accent,
+          indicatorWeight: 2.5,
+          indicatorSize: TabBarIndicatorSize.label,
+          dividerColor: context.stroke,
+          labelColor: context.accent,
+          unselectedLabelColor: context.fgSub,
+          labelPadding: const EdgeInsets.only(right: 24, left: 12),
+          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          unselectedLabelStyle:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          tabs: const [
+            Tab(text: 'Overview'),
+            Tab(text: 'Matches'),
+            Tab(text: 'Standings'),
+            Tab(text: 'Leaderboard'),
+            Tab(text: 'Teams'),
+          ],
+        ),
       ),
     );
   }
@@ -232,15 +254,19 @@ class _TournamentHeader extends StatelessWidget {
   const _TournamentHeader({
     required this.tournament,
     required this.onBack,
+    this.isHost = false,
+    this.onEdit,
   });
   final TournamentDetailModel tournament;
   final VoidCallback onBack;
+  final bool isHost;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
     final t = tournament;
     final topPad = MediaQuery.of(context).padding.top;
-    const coverH = 180.0;
+    const coverH = 220.0;
     const logoSize = 72.0;
 
     return Column(
@@ -294,22 +320,43 @@ class _TournamentHeader extends StatelessWidget {
                             color: Colors.white, size: 18),
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () {
-                        final shareText =
-                            '🏆 ${t.name}\n📍 ${t.city ?? ''}\n📅 ${DateFormat('d MMM yyyy').format(t.startDate)}\n\nJoin on Swing!';
-                        Share.share(shareText.trim());
-                      },
-                      child: Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(10),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isHost && onEdit != null) ...[
+                          GestureDetector(
+                            onTap: onEdit,
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.35),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.edit_rounded,
+                                  color: Colors.white, size: 18),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        GestureDetector(
+                          onTap: () {
+                            final shareText =
+                                '🏆 ${t.name}\n📍 ${t.city ?? ''}\n📅 ${DateFormat('d MMM yyyy').format(t.startDate)}\n\nJoin on Swing!';
+                            Share.share(shareText.trim());
+                          },
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.ios_share_rounded,
+                                color: Colors.white, size: 18),
+                          ),
                         ),
-                        child: const Icon(Icons.ios_share_rounded,
-                            color: Colors.white, size: 18),
-                      ),
+                      ],
                     ),
                   ],
                 ),
@@ -575,10 +622,39 @@ class _OverviewTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = tournament;
     final fmt = DateFormat('EEE, d MMM yyyy');
+    final confirmed = t.confirmedTeamCount;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
       children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          child: Row(
+            children: [
+              Expanded(
+                child: _OverviewMetric(
+                  label: 'Teams',
+                  value: '$confirmed/${t.maxTeams}',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _OverviewMetric(
+                  label: 'Groups',
+                  value: '${t.groups.length}',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _OverviewMetric(
+                  label: 'Status',
+                  value: t.status.toUpperCase(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
         if (t.status == 'UPCOMING' &&
             (t.entryFee != null || t.earlyBirdFee != null))
           _EntryFeeCard(tournament: t),
@@ -947,8 +1023,7 @@ class _MatchesTabState extends ConsumerState<_MatchesTab> {
       List<TournamentMatchModel> matches) {
     final grouped = <String, List<TournamentMatchModel>>{};
     for (final m in matches) {
-      final key =
-          m.groupName ?? (m.round != null ? 'Round ${m.round}' : 'Matches');
+      final key = m.round ?? m.groupName ?? 'Matches';
       grouped.putIfAbsent(key, () => []).add(m);
     }
     return grouped;
@@ -1227,8 +1302,8 @@ class _MatchCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                if (m.groupName != null || m.round != null)
-                  Text(m.groupName ?? 'Round ${m.round}',
+                if (m.round != null || m.groupName != null)
+                  Text(m.round ?? m.groupName ?? 'Match',
                       style: TextStyle(
                           color: context.fgSub,
                           fontSize: 10,
@@ -1371,6 +1446,8 @@ class _StandingsTabState extends ConsumerState<_StandingsTab> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(hostTournamentStandingsProvider(widget.slug));
+    final matchesAsync = ref.watch(hostTournamentMatchesProvider(widget.slug));
+    final allMatches = matchesAsync.valueOrNull ?? [];
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (_, __) => const _EmptyTab(
@@ -1462,7 +1539,7 @@ class _StandingsTabState extends ConsumerState<_StandingsTab> {
                 const SizedBox(height: 16),
               ],
             ] else
-              _StandingsBracketView(standings: ranked),
+              _StandingsBracketView(standings: ranked, matches: allMatches),
           ],
         );
       },
@@ -1577,7 +1654,265 @@ class _StandingsTable extends StatelessWidget {
 }
 
 class _StandingsBracketView extends StatelessWidget {
-  const _StandingsBracketView({required this.standings});
+  const _StandingsBracketView({
+    required this.standings,
+    required this.matches,
+  });
+
+  final List<TournamentStandingModel> standings;
+  final List<TournamentMatchModel> matches;
+
+  static const _knockoutOrder = [
+    'quarterfinal', 'quarter final', 'qf',
+    'semifinal', 'semi final', 'sf',
+    'third place', '3rd place',
+    'final', 'grand final',
+  ];
+
+  bool _isKnockout(String round) {
+    final r = round.toLowerCase();
+    return _knockoutOrder.any((k) => r.contains(k));
+  }
+
+  int _roundOrder(String round) {
+    final r = round.toLowerCase();
+    if (r.contains('quarter')) return 0;
+    if (r.contains('semi')) return 1;
+    if (r.contains('third') || r.contains('3rd')) return 2;
+    return 3; // Final
+  }
+
+  String? _resolveWinner(TournamentMatchModel m) {
+    final w = m.winner;
+    if (w == null || w.isEmpty) return null;
+    if (w == 'A') return m.teamAName;
+    if (w == 'B') return m.teamBName;
+    final wl = w.toLowerCase();
+    if (wl == 'no_result' || wl == 'abandoned' || wl == 'draw' || wl == 'tie') return null;
+    if (wl == m.teamAName.toLowerCase()) return m.teamAName;
+    if (wl == m.teamBName.toLowerCase()) return m.teamBName;
+    return w;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final knockoutMatches = matches
+        .where((m) => m.round != null && _isKnockout(m.round!))
+        .toList()
+      ..sort((a, b) => _roundOrder(a.round!).compareTo(_roundOrder(b.round!)));
+
+    // Fall back to seeded bracket if no real knockout data
+    if (knockoutMatches.isEmpty) {
+      return _SeededBracket(standings: standings);
+    }
+
+    // Group by round
+    final byRound = <String, List<TournamentMatchModel>>{};
+    for (final m in knockoutMatches) {
+      byRound.putIfAbsent(m.round!, () => []).add(m);
+    }
+    final rounds = byRound.keys.toList()
+      ..sort((a, b) => _roundOrder(a).compareTo(_roundOrder(b)));
+
+    // Find champion
+    final finalMatches = knockoutMatches
+        .where((m) => _roundOrder(m.round!) == 3 && m.status == 'COMPLETED')
+        .toList();
+    final champion = finalMatches.isNotEmpty ? _resolveWinner(finalMatches.last) : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Champion banner
+        if (champion != null) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  context.gold.withValues(alpha: 0.18),
+                  context.gold.withValues(alpha: 0.06),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: context.gold.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: context.gold.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.emoji_events_rounded,
+                      color: context.gold, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Champion',
+                          style: TextStyle(
+                              color: context.gold,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.8)),
+                      const SizedBox(height: 2),
+                      Text(champion,
+                          style: TextStyle(
+                              color: context.fg,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.3)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Bracket columns
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (int i = 0; i < rounds.length; i++) ...[
+                if (i > 0) const SizedBox(width: 12),
+                _RealBracketColumn(
+                  title: rounds[i],
+                  matches: byRound[rounds[i]]!,
+                  resolveWinner: _resolveWinner,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RealBracketColumn extends StatelessWidget {
+  const _RealBracketColumn({
+    required this.title,
+    required this.matches,
+    required this.resolveWinner,
+  });
+
+  final String title;
+  final List<TournamentMatchModel> matches;
+  final String? Function(TournamentMatchModel) resolveWinner;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 200,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5)),
+          const SizedBox(height: 8),
+          for (final m in matches) ...[
+            _BracketMatchCard(match: m, winner: resolveWinner(m)),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BracketMatchCard extends StatelessWidget {
+  const _BracketMatchCard({required this.match, this.winner});
+  final TournamentMatchModel match;
+  final String? winner;
+
+  @override
+  Widget build(BuildContext context) {
+    final isComplete = match.status == 'COMPLETED';
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: context.stroke),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _TeamRow(
+            name: match.teamAName,
+            isWinner: winner == match.teamAName,
+            isComplete: isComplete,
+          ),
+          Divider(height: 10, color: context.stroke),
+          _TeamRow(
+            name: match.teamBName,
+            isWinner: winner == match.teamBName,
+            isComplete: isComplete,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TeamRow extends StatelessWidget {
+  const _TeamRow({
+    required this.name,
+    required this.isWinner,
+    required this.isComplete,
+  });
+
+  final String name;
+  final bool isWinner;
+  final bool isComplete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        if (isComplete)
+          Icon(
+            isWinner ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            size: 13,
+            color: isWinner ? context.success : context.stroke,
+          )
+        else
+          Icon(Icons.circle_outlined, size: 13, color: context.stroke),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            name,
+            style: TextStyle(
+              color: isWinner ? context.fg : context.fgSub,
+              fontSize: 12,
+              fontWeight: isWinner ? FontWeight.w800 : FontWeight.w500,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Fallback for pure KNOCKOUT or LEAGUE where no real bracket data
+class _SeededBracket extends StatelessWidget {
+  const _SeededBracket({required this.standings});
   final List<TournamentStandingModel> standings;
 
   @override
@@ -1587,7 +1922,6 @@ class _StandingsBracketView extends StatelessWidget {
           icon: Icons.account_tree_rounded,
           message: 'Bracket view appears once at least 4 teams are ranked.');
     }
-
     final seeds = standings.take(8).toList();
     final quarterPairs = <(TournamentStandingModel, TournamentStandingModel)>[];
     if (seeds.length >= 8) {
@@ -1599,7 +1933,6 @@ class _StandingsBracketView extends StatelessWidget {
       quarterPairs.add((seeds[0], seeds[3]));
       quarterPairs.add((seeds[1], seeds[2]));
     }
-
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -3704,6 +4037,82 @@ class _OverviewFact {
   final String value;
 }
 
+class _OverviewMetric extends StatelessWidget {
+  const _OverviewMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _OverviewFactLine extends StatelessWidget {
+  const _OverviewFactLine({required this.item});
+  final _OverviewFact item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(item.icon, size: 15, color: context.fgSub),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 72,
+            child: Text(
+              item.label,
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              item.value,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OverviewFactsCard extends StatelessWidget {
   const _OverviewFactsCard({required this.items});
   final List<_OverviewFact> items;
@@ -3711,71 +4120,14 @@ class _OverviewFactsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: context.cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.stroke),
-      ),
-      child: Wrap(
-        spacing: 10,
-        runSpacing: 10,
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      child: Column(
         children: [
-          for (final item in items) _OverviewFactTile(item: item),
-        ],
-      ),
-    );
-  }
-}
-
-class _OverviewFactTile extends StatelessWidget {
-  const _OverviewFactTile({required this.item});
-  final _OverviewFact item;
-
-  @override
-  Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final tileWidth = ((width - 64) / 2).clamp(140.0, 260.0);
-
-    return Container(
-      width: tileWidth,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      decoration: BoxDecoration(
-        color: context.bg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.stroke),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(item.icon, size: 14, color: context.fgSub),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.label,
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  item.value,
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
+          for (var i = 0; i < items.length; i++) ...[
+            _OverviewFactLine(item: items[i]),
+            if (i != items.length - 1)
+              Divider(height: 1, thickness: 1, color: context.stroke),
+          ],
         ],
       ),
     );
@@ -4885,6 +5237,888 @@ class _TopCategoryCard extends StatelessWidget {
               fontSize: 10,
               fontWeight: FontWeight.w700,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Edit Tournament Screen ────────────────────────────────────────────────────
+
+class _EditTournamentScreen extends ConsumerStatefulWidget {
+  const _EditTournamentScreen({
+    required this.tournament,
+    required this.onSaved,
+  });
+
+  final TournamentDetailModel tournament;
+  final VoidCallback onSaved;
+
+  @override
+  ConsumerState<_EditTournamentScreen> createState() =>
+      _EditTournamentScreenState();
+}
+
+class _EditTournamentScreenState
+    extends ConsumerState<_EditTournamentScreen> {
+  late final TextEditingController _name;
+  late final TextEditingController _venue;
+  late final TextEditingController _city;
+  late final TextEditingController _entryFee;
+  late final TextEditingController _prizePool;
+  late final TextEditingController _description;
+
+  late String _status;
+  late String _format;
+  late DateTime _startDate;
+  DateTime? _endDate;
+  bool _isPublic = true;
+
+  // Image state
+  XFile? _coverFile;
+  XFile? _logoFile;
+  String? _coverPreviewUrl;
+  String? _logoPreviewUrl;
+
+  bool _saving = false;
+  String? _uploadingLabel;
+  bool _pickingImage = false;
+
+  static const _statusOptions = [
+    'UPCOMING', 'ONGOING', 'COMPLETED', 'CANCELLED'
+  ];
+  static const _statusLabels = [
+    'Upcoming', 'Ongoing', 'Completed', 'Cancelled'
+  ];
+  static const _formatOptions = [
+    'T10', 'T20', 'ONE_DAY', 'TWO_INNINGS', 'BOX_CRICKET', 'CUSTOM'
+  ];
+  static const _formatLabels = [
+    'T10', 'T20', 'ODI', 'Test', 'Box', 'Custom'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final t = widget.tournament;
+    _name = TextEditingController(text: t.name);
+    _venue = TextEditingController(text: t.venueName ?? '');
+    _city = TextEditingController(text: t.city ?? '');
+    _entryFee = TextEditingController(
+        text: t.entryFee != null && t.entryFee! > 0 ? '${t.entryFee}' : '');
+    _prizePool = TextEditingController(text: t.prizePool ?? '');
+    _description = TextEditingController(text: t.description ?? '');
+    _status = _statusOptions.contains(t.status.toUpperCase())
+        ? t.status.toUpperCase()
+        : 'UPCOMING';
+    _format = _formatOptions.contains(t.format.toUpperCase())
+        ? t.format.toUpperCase()
+        : 'T20';
+    _startDate = t.startDate;
+    _endDate = t.endDate;
+    _coverPreviewUrl = t.coverUrl;
+    _logoPreviewUrl = t.logoUrl;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _venue.dispose();
+    _city.dispose();
+    _entryFee.dispose();
+    _prizePool.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage({required bool isCover}) async {
+    if (_pickingImage || _saving || _uploadingLabel != null) return;
+    setState(() => _pickingImage = true);
+    final picker = ImagePicker();
+    try {
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: isCover ? 1920 : 800,
+        maxHeight: isCover ? 1080 : 800,
+      );
+      if (!mounted || file == null) return;
+      setState(() {
+        if (isCover) {
+          _coverFile = file;
+          _coverPreviewUrl = null;
+        } else {
+          _logoFile = file;
+          _logoPreviewUrl = null;
+        }
+      });
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      final message = e.code == 'channel-error'
+          ? 'Image picker is not available right now. Please restart the app and try again.'
+          : 'Could not open gallery (${e.code}).';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open gallery right now. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _pickingImage = false);
+    }
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: isStart ? _startDate : (_endDate ?? _startDate),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: ColorScheme.dark(
+            primary: ctx.accent,
+            onPrimary: ctx.ctaFg,
+            surface: ctx.cardBg,
+            onSurface: ctx.fg,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isStart) {
+        _startDate = picked;
+      } else {
+        _endDate = picked;
+      }
+    });
+  }
+
+  Future<String?> _maybeUpload(XFile? file, String label, String folder) async {
+    if (file == null) return null;
+    setState(() => _uploadingLabel = label);
+    try {
+      return await ref
+          .read(hostTournamentDetailRepositoryProvider)
+          .uploadImage(file, folder);
+    } finally {
+      if (mounted) setState(() => _uploadingLabel = null);
+    }
+  }
+
+  Future<void> _save() async {
+    final name = _name.text.trim();
+    if (name.length < 2) return;
+
+    setState(() => _saving = true);
+    try {
+      final folder = 'tournaments/${widget.tournament.id}';
+      final logoUrl = await _maybeUpload(_logoFile, 'Uploading logo…', folder);
+      final coverUrl = await _maybeUpload(_coverFile, 'Uploading cover…', folder);
+
+      final data = <String, dynamic>{
+        'name': name,
+        'status': _status,
+        'format': _format,
+        'startDate': _startDate.toIso8601String(),
+        'isPublic': _isPublic,
+        if (_endDate != null) 'endDate': _endDate!.toIso8601String(),
+        if (_venue.text.trim().isNotEmpty) 'venueName': _venue.text.trim(),
+        if (_city.text.trim().isNotEmpty) 'city': _city.text.trim(),
+        if (_entryFee.text.trim().isNotEmpty)
+          'entryFee': int.tryParse(_entryFee.text.trim()) ?? 0,
+        if (_prizePool.text.trim().isNotEmpty) 'prizePool': _prizePool.text.trim(),
+        if (_description.text.trim().isNotEmpty)
+          'description': _description.text.trim(),
+        if (logoUrl != null) 'logoUrl': logoUrl,
+        if (coverUrl != null) 'coverUrl': coverUrl,
+      };
+
+      await ref
+          .read(hostTournamentDetailRepositoryProvider)
+          .updateTournament(widget.tournament.id, data);
+
+      if (mounted) {
+        Navigator.of(context).pop();
+        widget.onSaved();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save: ${e.toString().split(':').first}'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.tournament;
+    return Scaffold(
+      backgroundColor: context.bg,
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              // ── Image header ─────────────────────────────────────────────
+              SliverToBoxAdapter(child: _ImageHeader(
+                tournament: t,
+                coverFile: _coverFile,
+                logoFile: _logoFile,
+                coverPreviewUrl: _coverPreviewUrl,
+                logoPreviewUrl: _logoPreviewUrl,
+                onPickCover: () => _pickImage(isCover: true),
+                onPickLogo: () => _pickImage(isCover: false),
+              )),
+
+              // ── Form fields ──────────────────────────────────────────────
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    _Section(label: 'TOURNAMENT NAME'),
+                    _TF(controller: _name, hint: 'e.g. Vidhayak Cup 2026'),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'STATUS'),
+                    _ChipRow(
+                      options: _statusOptions,
+                      labels: _statusLabels,
+                      selected: _status,
+                      onSelect: (v) => setState(() => _status = v),
+                    ),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'FORMAT'),
+                    _ChipRow(
+                      options: _formatOptions,
+                      labels: _formatLabels,
+                      selected: _format,
+                      onSelect: (v) => setState(() => _format = v),
+                    ),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'SCHEDULE'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _DateCell(
+                            label: 'Start',
+                            date: _startDate,
+                            onTap: () => _pickDate(isStart: true),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _DateCell(
+                            label: 'End',
+                            date: _endDate,
+                            placeholder: 'Not set',
+                            onTap: () => _pickDate(isStart: false),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'VENUE'),
+                    _TF(controller: _venue, hint: 'Stadium / Ground name'),
+                    const SizedBox(height: 12),
+                    _TF(controller: _city, hint: 'City'),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'PRIZE & ENTRY'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _TF(
+                            controller: _entryFee,
+                            hint: 'Entry fee (₹)',
+                            inputType: TextInputType.number,
+                            prefix: '₹',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _TF(
+                            controller: _prizePool,
+                            hint: 'Prize pool',
+                            prefix: '🏆',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'VISIBILITY'),
+                    _ToggleRow(
+                      label: 'Public tournament',
+                      subtitle: 'Visible to all players in Explore',
+                      value: _isPublic,
+                      onChanged: (v) => setState(() => _isPublic = v),
+                    ),
+                    const SizedBox(height: 24),
+
+                    _Section(label: 'DESCRIPTION'),
+                    _TF(
+                      controller: _description,
+                      hint: 'Rules, format, notes…',
+                      maxLines: 4,
+                    ),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+
+          // ── Upload progress overlay ──────────────────────────────────────
+          if (_uploadingLabel != null)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: Colors.white),
+                      const SizedBox(height: 16),
+                      Text(_uploadingLabel!,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // ── Top bar (close + save) ───────────────────────────────────────
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _TopBar(
+              saving: _saving || _uploadingLabel != null,
+              onClose: () => Navigator.of(context).pop(),
+              onSave: _save,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Image header ──────────────────────────────────────────────────────────────
+
+class _ImageHeader extends StatelessWidget {
+  const _ImageHeader({
+    required this.tournament,
+    required this.coverFile,
+    required this.logoFile,
+    required this.coverPreviewUrl,
+    required this.logoPreviewUrl,
+    required this.onPickCover,
+    required this.onPickLogo,
+  });
+
+  final TournamentDetailModel tournament;
+  final XFile? coverFile;
+  final XFile? logoFile;
+  final String? coverPreviewUrl;
+  final String? logoPreviewUrl;
+  final VoidCallback onPickCover;
+  final VoidCallback onPickLogo;
+
+  @override
+  Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+    return SizedBox(
+      height: 220 + topPad,
+      child: Stack(
+        children: [
+          // Cover
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: onPickCover,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _CoverImage(file: coverFile, url: coverPreviewUrl),
+                  // Dark scrim at bottom
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.55),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.65),
+                        ],
+                        stops: const [0, 0.4, 1],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    right: 16,
+                    bottom: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.add_a_photo_rounded,
+                              color: Colors.white, size: 14),
+                          const SizedBox(width: 6),
+                          Text(
+                            coverFile != null || coverPreviewUrl != null
+                                ? 'Change cover'
+                                : 'Add cover',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.95),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Logo picker (bottom-left)
+          Positioned(
+            bottom: 16,
+            left: 20,
+            child: GestureDetector(
+              onTap: onPickLogo,
+              child: Stack(
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: context.cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white, width: 2.5),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: _LogoImage(file: logoFile, url: logoPreviewUrl),
+                  ),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: context.accent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      child: const Icon(Icons.edit_rounded,
+                          size: 12, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoverImage extends StatelessWidget {
+  const _CoverImage({this.file, this.url});
+  final XFile? file;
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    if (file != null) {
+      return Image.file(
+        File(file!.path),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(context),
+      );
+    }
+    if (url != null) {
+      return CachedNetworkImage(
+        imageUrl: url!,
+        fit: BoxFit.cover,
+        errorWidget: (_, __, ___) => _placeholder(context),
+      );
+    }
+    return _placeholder(context);
+  }
+
+  Widget _placeholder(BuildContext context) => Container(
+        color: context.accent.withValues(alpha: 0.15),
+        child: Icon(Icons.emoji_events_rounded,
+            color: context.accent.withValues(alpha: 0.4), size: 60),
+      );
+}
+
+class _LogoImage extends StatelessWidget {
+  const _LogoImage({this.file, this.url});
+  final XFile? file;
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    if (file != null) {
+      return Image.file(File(file!.path),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _placeholder(context));
+    }
+    if (url != null) {
+      return CachedNetworkImage(
+        imageUrl: url!,
+        fit: BoxFit.cover,
+        errorWidget: (_, __, ___) => _placeholder(context),
+      );
+    }
+    return _placeholder(context);
+  }
+
+  Widget _placeholder(BuildContext context) => Center(
+        child: Icon(Icons.emoji_events_rounded,
+            color: context.accent, size: 32),
+      );
+}
+
+// ── Top bar ───────────────────────────────────────────────────────────────────
+
+class _TopBar extends StatelessWidget {
+  const _TopBar({
+    required this.saving,
+    required this.onClose,
+    required this.onSave,
+  });
+  final bool saving;
+  final VoidCallback onClose;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+    return Container(
+      padding: EdgeInsets.fromLTRB(8, topPad + 4, 12, 4),
+      child: Row(
+        children: [
+          // Close
+          GestureDetector(
+            onTap: onClose,
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.45),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close_rounded,
+                  color: Colors.white, size: 20),
+            ),
+          ),
+          const Spacer(),
+          // Save
+          GestureDetector(
+            onTap: saving ? null : onSave,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+              decoration: BoxDecoration(
+                color: saving
+                    ? Colors.black.withValues(alpha: 0.35)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text(
+                      'Save',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Form helpers ──────────────────────────────────────────────────────────────
+
+class _Section extends StatelessWidget {
+  const _Section({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: context.fgSub,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+class _TF extends StatelessWidget {
+  const _TF({
+    required this.controller,
+    required this.hint,
+    this.inputType,
+    this.maxLines = 1,
+    this.prefix,
+  });
+
+  final TextEditingController controller;
+  final String hint;
+  final TextInputType? inputType;
+  final int maxLines;
+  final String? prefix;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.panel.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.stroke),
+      ),
+      child: Row(
+        crossAxisAlignment: maxLines > 1
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.center,
+        children: [
+          if (prefix != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 14),
+              child: Text(prefix!,
+                  style: TextStyle(fontSize: 15, color: context.fgSub)),
+            ),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              keyboardType: inputType,
+              maxLines: maxLines,
+              style: TextStyle(
+                  color: context.fg,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: TextStyle(color: context.fgSub, fontSize: 15),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipRow extends StatelessWidget {
+  const _ChipRow({
+    required this.options,
+    required this.labels,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final List<String> options;
+  final List<String> labels;
+  final String selected;
+  final void Function(String) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: List.generate(options.length, (i) {
+        final active = options[i] == selected;
+        return GestureDetector(
+          onTap: () => onSelect(options[i]),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            decoration: BoxDecoration(
+              color: active ? context.accent.withValues(alpha: 0.14) : context.panel.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: active ? context.accent.withValues(alpha: 0.35) : context.stroke,
+              ),
+            ),
+            child: Text(
+              labels[i],
+              style: TextStyle(
+                color: active ? context.accent : context.fgSub,
+                fontSize: 13,
+                fontWeight:
+                    active ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _DateCell extends StatelessWidget {
+  const _DateCell({
+    required this.label,
+    required this.onTap,
+    this.date,
+    this.placeholder,
+  });
+
+  final String label;
+  final DateTime? date;
+  final VoidCallback onTap;
+  final String? placeholder;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: context.panel.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.stroke),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.calendar_today_rounded,
+                    size: 13, color: context.accent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    date != null
+                        ? DateFormat('d MMM yyyy').format(date!)
+                        : (placeholder ?? 'Pick date'),
+                    style: TextStyle(
+                      color: date != null ? context.fg : context.fgSub,
+                      fontSize: 14,
+                      fontWeight: date != null
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToggleRow extends StatelessWidget {
+  const _ToggleRow({
+    required this.label,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String subtitle;
+  final bool value;
+  final void Function(bool) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: context.panel.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.stroke),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        color: context.fg,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style:
+                        TextStyle(color: context.fgSub, fontSize: 12)),
+              ],
+            ),
+          ),
+          Switch.adaptive(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: context.accent,
+            activeTrackColor: context.accent.withValues(alpha: 0.35),
           ),
         ],
       ),

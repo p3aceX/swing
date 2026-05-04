@@ -335,36 +335,45 @@ class _TournamentDetailScreenState
           ),
         ),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: ColoredBox(
-            color: context.bg,
-            child: TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              indicatorColor: context.accent,
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicatorWeight: 2,
-              labelColor: context.accent,
-              unselectedLabelColor: context.fgSub,
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
+          preferredSize: const Size.fromHeight(56),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: context.panel.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: context.stroke),
               ),
-              unselectedLabelStyle: const TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 13,
+              child: TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicator: BoxDecoration(
+                  color: context.accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                labelColor: context.accent,
+                unselectedLabelColor: context.fgSub,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                ),
+                dividerColor: Colors.transparent,
+                tabs: const [
+                  Tab(text: 'Overview'),
+                  Tab(text: 'Teams'),
+                  Tab(text: 'Groups'),
+                  Tab(text: 'Fixtures'),
+                  Tab(text: 'Schedule'),
+                  Tab(text: 'Points Table'),
+                  Tab(text: 'Settings'),
+                ],
               ),
-              dividerColor: context.stroke,
-              tabs: const [
-                Tab(text: 'Overview'),
-                Tab(text: 'Teams'),
-                Tab(text: 'Groups'),
-                Tab(text: 'Fixtures'),
-                Tab(text: 'Schedule'),
-                Tab(text: 'Points Table'),
-                Tab(text: 'Settings'),
-              ],
             ),
           ),
         ),
@@ -656,26 +665,82 @@ class _OverviewTab extends StatelessWidget {
     final allRounds = _orderedRounds(schedule);
     final activeRound = _activeRound(schedule);
 
-    final isOngoing = status == 'ONGOING' || status == 'IN_PROGRESS' || status == 'LIVE';
+    final isOngoing =
+        status == 'ONGOING' || status == 'IN_PROGRESS' || status == 'LIVE';
+    final title = '${tournament['name'] ?? 'Tournament'}';
 
     return RefreshIndicator(
       onRefresh: onRefresh,
       child: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
-          // ── Status banner ─────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    context.accent.withValues(alpha: 0.16),
+                    context.panel,
+                  ],
+                ),
+                border: Border.all(color: context.stroke),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _StatusPill(status: status),
+                      if (canManage) ..._statusCta(context, status),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Row(
               children: [
-                _StatusPill(status: status),
-                const SizedBox(width: 12),
-                if (canManage) ..._statusCta(context, status),
+                Icon(Icons.info_outline_rounded, color: context.fgSub, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isOngoing
+                        ? 'Tournament is live. Track progress and update fixtures in real time.'
+                        : 'Use this dashboard to manage teams, fixtures, and settings.',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           // ── 4 stat tiles ──────────────────────────────────────────────────
           Padding(
@@ -949,11 +1014,13 @@ class _TournamentDetailsSection extends StatelessWidget {
     final locationParts = [if (venue.isNotEmpty) venue, if (city.isNotEmpty) city];
     final dateText = _dateRange(startDate, endDate);
 
-    return Column(
+    return _SurfaceCard(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
           child: Text(
             'TOURNAMENT DETAILS',
             style: TextStyle(
@@ -1020,7 +1087,7 @@ class _TournamentDetailsSection extends StatelessWidget {
         if (description.isNotEmpty) ...[
           const SizedBox(height: 4),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1042,6 +1109,7 @@ class _TournamentDetailsSection extends StatelessWidget {
           ),
         ],
       ],
+      ),
     );
   }
 
@@ -1084,7 +1152,7 @@ class _DetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.fromLTRB(2, 0, 2, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -4822,11 +4890,15 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: context.panel,
+    return Container(
+      decoration: BoxDecoration(
+        color: context.panel,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.stroke.withValues(alpha: 0.8)),
+      ),
       child: Padding(
         padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -4850,6 +4922,30 @@ class _StatTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SurfaceCard extends StatelessWidget {
+  const _SurfaceCard({
+    required this.child,
+    this.margin,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry? margin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: margin,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: context.stroke),
+      ),
+      child: child,
     );
   }
 }

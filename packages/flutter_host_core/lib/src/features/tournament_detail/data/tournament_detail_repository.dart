@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../providers/host_dio_provider.dart';
 import '../domain/tournament_detail_models.dart';
@@ -87,6 +88,25 @@ class HostTournamentDetailRepository {
 
   Future<void> unfollowTournament(String tournamentId) async {
     await _dio.delete('/player/follow/tournament/$tournamentId');
+  }
+
+  Future<void> updateTournament(String id, Map<String, dynamic> data) async {
+    await _dio.patch('/player/tournaments/$id', data: data);
+  }
+
+  Future<String> uploadImage(XFile file, String folder) async {
+    final bytes = await file.readAsBytes();
+    final ext = file.name.contains('.') ? file.name.split('.').last.toLowerCase() : 'jpg';
+    final form = FormData.fromMap({
+      'file': MultipartFile.fromBytes(bytes, filename: 'image.$ext',
+          contentType: DioMediaType('image', ext == 'png' ? 'png' : 'jpeg')),
+      'folder': folder,
+    });
+    final res = await _dio.post('/media/upload', data: form,
+        options: Options(contentType: 'multipart/form-data'));
+    final data = res.data is Map ? res.data as Map<String, dynamic> : <String, dynamic>{};
+    final inner = data['data'] is Map ? data['data'] as Map<String, dynamic> : data;
+    return inner['publicUrl'] as String;
   }
 }
 

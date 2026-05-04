@@ -2042,14 +2042,36 @@ export class PlayerService {
   }
 
   private async getTeamById(teamId: string, userId: string) {
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-    });
+    const team = await prisma.team.findUnique({ where: { id: teamId } });
     if (!team) throw Errors.notFound("Team");
-    if (team.createdByUserId !== userId) {
-      throw Errors.forbidden();
+    if (team.createdByUserId === userId) return team;
+
+    // Also allow if user owns the academy / coach profile / arena linked to the team
+    if ((team as any).academyId || (team as any).coachId || (team as any).arenaId) {
+      const [academy, coach, arena] = await Promise.all([
+        (team as any).academyId
+          ? prisma.academy.findFirst({
+              where: { id: (team as any).academyId, owner: { userId } },
+              select: { id: true },
+            })
+          : null,
+        (team as any).coachId
+          ? prisma.coachProfile.findFirst({
+              where: { id: (team as any).coachId, userId },
+              select: { id: true },
+            })
+          : null,
+        (team as any).arenaId
+          ? prisma.arena.findFirst({
+              where: { id: (team as any).arenaId, owner: { userId } },
+              select: { id: true },
+            })
+          : null,
+      ]);
+      if (academy || coach || arena) return team;
     }
-    return team;
+
+    throw Errors.forbidden();
   }
 
   private async resolvePlayerProfileId(idOrUserId: string): Promise<string> {
@@ -2225,6 +2247,9 @@ export class PlayerService {
       city?: string;
       teamType?: string;
       iAmCaptain?: boolean;
+      academyId?: string;
+      coachId?: string;
+      arenaId?: string;
     },
   ) {
     const profile = await this.getOrCreateProfile(userId);
@@ -2238,6 +2263,9 @@ export class PlayerService {
         captainId,
         playerIds: [profile.id],
         createdByUserId: userId,
+        academyId: data.academyId || null,
+        coachId: data.coachId || null,
+        arenaId: data.arenaId || null,
       },
     });
     await this.performanceService.eliteAnalytics.recalculateTeamPowerScore(
@@ -2247,19 +2275,40 @@ export class PlayerService {
   }
 
   async getMyTeams(userId: string) {
-    const profile = await prisma.playerProfile.findUnique({
-      where: { userId },
-    });
-    if (!profile) return { teams: [] };
+    const profile = await prisma.playerProfile.findUnique({ where: { userId } });
+
+    // Collect IDs of entities this user owns
+    const [academies, coachProfile, arenas] = await Promise.all([
+      prisma.academy.findMany({
+        where: { owner: { userId }, isActive: true },
+        select: { id: true },
+      }),
+      prisma.coachProfile.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.arena.findMany({
+        where: { owner: { userId }, isActive: true },
+        select: { id: true },
+      }),
+    ]);
+
+    const academyIds = academies.map((a) => a.id);
+    const arenaIds   = arenas.map((a) => a.id);
+
+    const orClauses: any[] = [
+      { createdByUserId: userId },
+      ...(academyIds.length ? [{ academyId: { in: academyIds } }] : []),
+      ...(coachProfile     ? [{ coachId: coachProfile.id }]        : []),
+      ...(arenaIds.length  ? [{ arenaId: { in: arenaIds } }]       : []),
+      ...(profile          ? [{ playerIds: { has: profile.id } }]  : []),
+    ];
 
     const teams = await prisma.team.findMany({
-      where: { playerIds: { has: profile.id }, isActive: true },
+      where: { OR: orClauses, isActive: true },
       orderBy: { createdAt: "desc" },
     });
 
     if (teams.length === 0) return { teams: [] };
 
-    const allPlayerIds = Array.from(new Set(teams.flatMap((t) => t.playerIds)));
+    const allPlayerIds = Array.from(new Set(teams.flatMap((t) => t.playerIds as string[])));
     const players = await prisma.playerProfile.findMany({
       where: { id: { in: allPlayerIds } },
       include: {

@@ -355,11 +355,11 @@ export async function publicRoutes(app: FastifyInstance) {
       }
     }
 
-    const enriched = matches.map((m) => ({
-      ...m,
-      groupName:
-        teamGroupMap.get(m.teamAName) ?? teamGroupMap.get(m.teamBName) ?? null,
-    }));
+    const enriched = matches.map((m) => {
+      const resolvedGroup = teamGroupMap.get(m.teamAName) ?? teamGroupMap.get(m.teamBName) ?? null;
+      const groupName = resolvedGroup && m.round === resolvedGroup ? resolvedGroup : null;
+      return { ...m, groupName };
+    });
 
     return reply.send({ data: enriched });
   });

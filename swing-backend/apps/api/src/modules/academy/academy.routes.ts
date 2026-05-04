@@ -107,6 +107,8 @@ export async function academyRoutes(app: FastifyInstance) {
       feeFrequency: z.enum(['MONTHLY', 'QUARTERLY', 'YEARLY', 'ONE_TIME']).optional(),
       initialPaymentPaise: z.number().optional(),
       initialPaymentMode: z.enum(['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']).optional(),
+      registrationFeePaise: z.number().optional(),
+      registrationPaymentMode: z.enum(['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']).optional(),
       bloodGroup: z.string().optional(),
       aadhaarLast4: z.string().length(4).optional(),
       emergencyContactName: z.string().optional(),
