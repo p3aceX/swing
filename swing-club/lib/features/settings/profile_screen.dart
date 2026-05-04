@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/academy_provider.dart';
+import '../../core/theme_mode_provider.dart';
 import '../../shared/onboarding_widgets.dart';
 import '../../shared/widgets.dart';
 import 'settings_provider.dart';
@@ -34,6 +35,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   @override
   Widget build(BuildContext context) {
     final bizState = ref.watch(settingsProvider);
+    final themeMode = ref.watch(themeModeProvider);
+    final isDark = themeMode == ThemeMode.dark;
 
     return Scaffold(
       appBar: AppBar(
@@ -73,6 +76,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _UserHeader(user: user, biz: biz),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SwitchListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                    title: const Text('Dark Mode'),
+                    subtitle: const Text('Apply dark theme across the app'),
+                    value: isDark,
+                    onChanged: (value) => ref.read(themeModeProvider.notifier).setDarkMode(value),
+                  ),
+                ),
+              ),
               TabBar(
                 controller: _tabs,
                 tabs: const [Tab(text: 'Business'), Tab(text: 'Academy')],
@@ -203,7 +222,7 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
     // Contact: fall back to registered user info if biz fields are blank
     _contactName = TextEditingController(text: _b('contactName').isNotEmpty ? _b('contactName') : _u('name'));
     _phone       = TextEditingController(text: _b('phone').isNotEmpty       ? _b('phone')       : _u('phone'));
-    _email       = TextEditingController(text: _b('email').isNotEmpty       ? _b('email')       : _u('email') ?? '');
+    _email       = TextEditingController(text: _b('email').isNotEmpty       ? _b('email')       : _u('email'));
     _gst         = TextEditingController(text: _b('gstNumber'));
     _pan         = TextEditingController(text: _b('panNumber'));
     _beneName    = TextEditingController(text: _b('beneficiaryName'));

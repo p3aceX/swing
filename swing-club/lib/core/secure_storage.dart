@@ -5,6 +5,7 @@ class SecureStorage {
   static const _refreshKey = 'refresh_token';
   static const _academyKey = 'academy_id';
   static const _userIdKey  = 'user_id';
+  static const _themeModeKey = 'theme_mode';
 
   final FlutterSecureStorage _storage;
 
@@ -46,6 +47,9 @@ class SecureStorage {
     _cachedUserId = id;
     await _storage.write(key: _userIdKey, value: id);
   }
+
+  Future<String?> get themeMode => _storage.read(key: _themeModeKey);
+  Future<void> saveThemeMode(String mode) => _storage.write(key: _themeModeKey, value: mode);
 
   // ── Clear ──────────────────────────────────────────────────────────────────
   Future<void> clear() async {

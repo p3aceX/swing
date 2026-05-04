@@ -2,8 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:async';
 import 'features/home/home_provider.dart';
 import 'features/settings/settings_provider.dart';
+import 'core/theme_mode_provider.dart';
+
+final _clockProvider = StreamProvider<DateTime>((ref) {
+  return (() async* {
+    yield DateTime.now();
+    while (true) {
+      await Future<void>.delayed(const Duration(minutes: 1));
+      yield DateTime.now();
+    }
+  })();
+});
 
 class AppShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
@@ -19,6 +31,7 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(_clockProvider);
     final idx = navigationShell.currentIndex;
     final scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -29,6 +42,17 @@ class AppShell extends ConsumerWidget {
       data: (d) => d.academy['name'] as String? ?? 'Swing Academy',
       orElse: () => 'Swing Academy',
     );
+    final h = DateTime.now().hour;
+    final greeting = h < 5
+        ? 'Good night'
+        : h < 12
+            ? 'Good morning'
+            : h < 17
+                ? 'Good afternoon'
+                : h < 21
+                    ? 'Good evening'
+                    : 'Good night';
+    final homeNavTitle = '$greeting, $academyName';
     final userName = settingsAsync.maybeWhen(
       data: (d) => ((d['user'] as Map?)?.cast<String, dynamic>() ?? {})['name'] as String? ?? '',
       orElse: () => '',
@@ -43,14 +67,15 @@ class AppShell extends ConsumerWidget {
     );
     final userInitial = userName.isNotEmpty ? userName[0].toUpperCase() : '?';
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
         key: scaffoldKey,
-        backgroundColor: const Color(0xFFF4F2EB),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: _AppBar(
           currentIndex: idx,
-          academyName: academyName,
+          homeNavTitle: homeNavTitle,
           userInitial: userInitial,
           onMenuTap: () => scaffoldKey.currentState?.openEndDrawer(),
         ),
@@ -75,13 +100,13 @@ class AppShell extends ConsumerWidget {
 
 class _AppBar extends StatelessWidget implements PreferredSizeWidget {
   final int currentIndex;
-  final String academyName;
+  final String homeNavTitle;
   final String userInitial;
   final VoidCallback onMenuTap;
 
   const _AppBar({
     required this.currentIndex,
-    required this.academyName,
+    required this.homeNavTitle,
     required this.userInitial,
     required this.onMenuTap,
   });
@@ -93,13 +118,14 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = currentIndex == 0 ? academyName : _titles[currentIndex];
+    final title = currentIndex == 0 ? homeNavTitle : _titles[currentIndex];
+    final cs = Theme.of(context).colorScheme;
     return Container(
       height: preferredSize.height + MediaQuery.of(context).padding.top,
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF4F2EB),
-        border: Border(bottom: BorderSide(color: Color(0xFFE0DED6), width: 0.5)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: Border(bottom: BorderSide(color: cs.outlineVariant, width: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -107,19 +133,25 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
-              child: Text(title,
-                  style: const TextStyle(
-                    color: Color(0xFF071B3D), fontSize: 22,
-                    fontWeight: FontWeight.w900, letterSpacing: -0.5,
-                  )),
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: cs.onSurface,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.2,
+                ),
+              ),
             ),
             GestureDetector(
               onTap: onMenuTap,
               child: CircleAvatar(
                 radius: 18,
-                backgroundColor: const Color(0xFF071B3D),
+                backgroundColor: cs.primary,
                 child: Text(userInitial,
-                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800)),
+                    style: TextStyle(color: cs.onPrimary, fontSize: 14, fontWeight: FontWeight.w800)),
               ),
             ),
           ],
@@ -146,8 +178,11 @@ class _SideDrawer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
+    final isDarkMode = themeMode == ThemeMode.dark;
+    final cs = Theme.of(context).colorScheme;
     return Drawer(
-      backgroundColor: const Color(0xFFF4F2EB),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,9 +194,9 @@ class _SideDrawer extends ConsumerWidget {
                 children: [
                   CircleAvatar(
                     radius: 26,
-                    backgroundColor: const Color(0xFF071B3D),
+                    backgroundColor: cs.primary,
                     child: Text(userInitial,
-                        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                        style: TextStyle(color: cs.onPrimary, fontSize: 20, fontWeight: FontWeight.w800)),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -169,10 +204,10 @@ class _SideDrawer extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(userName.isNotEmpty ? userName : 'User',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF071B3D))),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: cs.onSurface)),
                         if (userPhone.isNotEmpty)
                           Text(userPhone,
-                              style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500)),
+                              style: TextStyle(fontSize: 12, color: cs.onSurface.withValues(alpha: 0.65), fontWeight: FontWeight.w500)),
                         if (bizName.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Container(
@@ -205,6 +240,17 @@ class _SideDrawer extends ConsumerWidget {
                 onTap: () { Navigator.pop(context); context.push('/inventory'); }),
             _DrawerItem(icon: Icons.settings_outlined, label: 'Settings',
                 onTap: () { Navigator.pop(context); context.push('/settings'); }),
+            ListTile(
+              leading: Icon(Icons.dark_mode_outlined, size: 22, color: cs.onSurface),
+              title: Text(
+                'Dark Mode',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: cs.onSurface),
+              ),
+              trailing: Switch(
+                value: isDarkMode,
+                onChanged: (value) => ref.read(themeModeProvider.notifier).setDarkMode(value),
+              ),
+            ),
 
             const Spacer(),
             const Divider(height: 1),
@@ -254,7 +300,7 @@ class _DrawerItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? const Color(0xFF071B3D);
+    final c = color ?? Theme.of(context).colorScheme.onSurface;
     return ListTile(
       leading: Icon(icon, color: c, size: 22),
       title: Text(label, style: TextStyle(fontWeight: FontWeight.w600, color: c, fontSize: 15)),
@@ -283,10 +329,11 @@ class _BottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF4F2EB),
-        border: Border(top: BorderSide(color: Color(0xFFE0DED6), width: 0.5)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: Border(top: BorderSide(color: cs.outlineVariant, width: 0.5)),
       ),
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
       child: SizedBox(
@@ -305,7 +352,7 @@ class _BottomNav extends StatelessWidget {
                     Icon(
                       selected ? tab.activeIcon : tab.icon,
                       size: 22,
-                      color: selected ? const Color(0xFF071B3D) : const Color(0xFFAAAAAA),
+                      color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -313,7 +360,7 @@ class _BottomNav extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: selected ? const Color(0xFF071B3D) : const Color(0xFFAAAAAA),
+                        color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.5),
                       ),
                     ),
                   ],
