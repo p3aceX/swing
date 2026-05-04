@@ -666,30 +666,36 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
 
             // ── Lobby list ──────────────────────────────────────────────────
             Expanded(
-              child: (widget.ownLobby == null && filtered.isEmpty)
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+              child: RefreshIndicator(
+                color: context.accent,
+                onRefresh: () async => ref.invalidate(mmOpenLobbiesProvider(widget.query)),
+                child: (widget.ownLobby == null && filtered.isEmpty)
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
                         children: [
-                          Icon(Icons.sports_cricket_rounded,
-                              color: context.fgSub.withValues(alpha: 0.3), size: 44),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No open games on this day',
-                            style: TextStyle(color: context.fgSub, fontSize: 14, fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Try another date',
-                            style: TextStyle(color: context.fgSub.withValues(alpha: 0.5), fontSize: 12),
+                          SizedBox(
+                            height: 260,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.sports_cricket_rounded,
+                                    color: context.fgSub.withValues(alpha: 0.3), size: 44),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No open games on this day',
+                                  style: TextStyle(color: context.fgSub, fontSize: 14, fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Try another date',
+                                  style: TextStyle(color: context.fgSub.withValues(alpha: 0.5), fontSize: 12),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
-                      ),
-                    )
-                  : RefreshIndicator(
-                      color: context.accent,
-                      onRefresh: () async => ref.invalidate(mmOpenLobbiesProvider(widget.query)),
-                      child: ListView(
+                      )
+                    : ListView(
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                         children: [
                           if (widget.ownLobby != null) ...[
@@ -709,7 +715,7 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
                           ],
                         ],
                       ),
-                    ),
+              ),
             ),
           ],
         );

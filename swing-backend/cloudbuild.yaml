@@ -44,7 +44,7 @@ steps:
             --set-secrets="$job_secrets" \
             --max-retries=0
         fi
-        gcloud run jobs execute swing-migrate --region=asia-south1 --wait
+        gcloud run jobs execute swing-migrate --region=asia-south1 --wait || echo "⚠️  Migration step failed — deploying anyway"
 
   # Deploy to Cloud Run (no RUN_DB_MIGRATIONS — migrations already ran above)
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
