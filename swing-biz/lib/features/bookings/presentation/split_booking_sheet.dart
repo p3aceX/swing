@@ -98,6 +98,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
 
   // Step 1
   String _format = 'T20';
+  String? _ballType;
   late DateTime _date;
   _AvailableSlot? _slot;
   List<_AvailableSlot> _slots = [];
@@ -230,15 +231,14 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         'date': DateFormat('yyyy-MM-dd').format(_date),
         'slotTime': _slot!.startTime,
         'format': _format,
+        if (_ballType != null) 'ballType': _ballType,
         'teamId': _team!.id,
         'teamName': _team!.name,
       };
-      debugPrint('[SplitBooking] submit POST /bookings/arena/${widget.arena.id}/split payload=$payload');
-      final resp = await dio.post(
+      await dio.post(
         '/bookings/arena/${widget.arena.id}/split',
         data: payload,
       );
-      debugPrint('[SplitBooking] submit response: ${resp.data}');
       if (mounted) Navigator.pop(context, true);
     } catch (e, stack) {
       debugPrint('[SplitBooking] submit ERROR: $e');
@@ -409,6 +409,37 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 20),
+        _SectionLabel(label: 'Ball Type'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
+            final sel = _ballType == bt;
+            return GestureDetector(
+              onTap: () => setState(() => _ballType = sel ? null : bt),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: sel ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: sel ? const Color(0xFF111827) : const Color(0xFFE5E7EB),
+                  ),
+                ),
+                child: Text(
+                  _ballTypeLabel(bt),
+                  style: TextStyle(
+                    color: sel ? Colors.white : const Color(0xFF374151),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             );

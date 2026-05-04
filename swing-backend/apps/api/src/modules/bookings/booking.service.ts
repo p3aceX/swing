@@ -1356,6 +1356,7 @@ export class BookingService {
     date: string
     slotTime: string
     format: string
+    ballType?: string
     teamId?: string
     teamName?: string
   }) {
@@ -1421,6 +1422,7 @@ export class BookingService {
           teamId: team?.id ?? null,
           playerId: null,
           format: data.format,
+          ballType: data.ballType ?? null,
           date: bookingDate,
           status: 'searching',
           ...(booking ? { splitBookingId: booking.id } : {}),

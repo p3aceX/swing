@@ -29,9 +29,11 @@ export async function matchmakingRoutes(app: FastifyInstance) {
 
   app.post('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
+    const ballTypeSchema = z.enum(['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']).optional()
     const body = z.object({
       teamId: z.string(),
       format: formatSchema,
+      ballType: ballTypeSchema,
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       picks: z.array(z.object({
         groundId: z.string(),
@@ -41,6 +43,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const data = await svc.createLobby(user.userId, {
       teamId: body.teamId,
       format: body.format as MatchmakingFormat,
+      ballType: body.ballType ?? null,
       date: body.date,
       picks: body.picks,
     })

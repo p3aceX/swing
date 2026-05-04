@@ -2596,6 +2596,7 @@ model MatchmakingLobby {
   arenaId        String?
   splitBookingId String?  @unique
   format         String
+  ballType       String?
   date           DateTime @db.Date
   status         String   @default("searching")
   matchId        String?

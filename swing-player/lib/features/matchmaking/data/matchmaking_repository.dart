@@ -65,12 +65,14 @@ class MatchmakingRepository {
     required String format,
     required String date,
     required List<({String groundId, String slotTime})> picks,
+    String? ballType,
   }) async {
     final resp = await _dio.post(
       ApiEndpoints.matchmakingLobbies,
       data: {
         'teamId': teamId,
         'format': format,
+        if (ballType != null) 'ballType': ballType,
         'date': date,
         'picks': picks
             .map((p) => {'groundId': p.groundId, 'slotTime': p.slotTime})

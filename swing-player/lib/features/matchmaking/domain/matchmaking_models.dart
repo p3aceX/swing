@@ -145,6 +145,7 @@ class MmOpenLobby {
     required this.daysFromNow,
     this.isArenaLobby = false,
     this.arenaName = '',
+    this.ballType,
   });
 
   final String lobbyId;
@@ -157,6 +158,7 @@ class MmOpenLobby {
   final int daysFromNow;
   final bool isArenaLobby;
   final String arenaName;
+  final String? ballType;
 
   String get displaySlot {
     try {
@@ -207,6 +209,7 @@ class MmOpenLobby {
       daysFromNow: daysFromNow,
       isArenaLobby: (j['isArenaLobby'] as bool?) ?? false,
       arenaName: (j['arenaName'] as String?) ?? '',
+      ballType: j['ballType'] as String?,
     );
   }
 }

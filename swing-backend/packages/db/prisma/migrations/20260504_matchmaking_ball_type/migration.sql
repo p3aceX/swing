@@ -1,0 +1,1 @@
+ALTER TABLE "MatchmakingLobby" ADD COLUMN IF NOT EXISTS "ballType" TEXT;

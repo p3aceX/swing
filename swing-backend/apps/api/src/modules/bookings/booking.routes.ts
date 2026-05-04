@@ -203,6 +203,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       slotTime: z.string().regex(/^\d{2}:\d{2}$/),
       format: z.enum(['T10', 'T20', 'ODI', 'Test', 'Custom']),
+      ballType: z.enum(['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']).optional(),
       teamId: z.string().optional(),
       teamName: z.string().optional(),
     }).parse(request.body)

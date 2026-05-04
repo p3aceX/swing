@@ -3,6 +3,16 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+String _ballTypeLabel(String bt) => switch (bt) {
+      'LEATHER' => 'Leather',
+      'TENNIS' => 'Tennis',
+      'TAPE' => 'Tape Ball',
+      'RUBBER' => 'Rubber',
+      _ => bt,
+    };
+
 // ─── Model ───────────────────────────────────────────────────────────────────
 
 class ArenaLobby {
@@ -11,6 +21,7 @@ class ArenaLobby {
     required this.teamName,
     required this.ageGroup,
     required this.format,
+    this.ballType,
     required this.groundName,
     required this.slotTime,
     required this.date,
@@ -21,6 +32,7 @@ class ArenaLobby {
   final String teamName;
   final String ageGroup;
   final String format;
+  final String? ballType;
   final String groundName;
   final String slotTime;
   final String date;
@@ -64,6 +76,7 @@ class ArenaLobby {
       teamName: (j['teamName'] as String?) ?? 'Unknown Team',
       ageGroup: (j['ageGroup'] as String?) ?? 'Open',
       format: (j['format'] as String?) ?? 'T20',
+      ballType: j['ballType'] as String?,
       groundName: (j['groundName'] as String?) ?? '',
       slotTime: (j['slotTime'] as String?) ?? '',
       date: date,
@@ -235,12 +248,27 @@ class _LobbyCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            '${lobby.dateLabel}  ·  ${lobby.displaySlot}',
-            style: const TextStyle(
-              color: Color(0xFF6B7280),
-              fontSize: 11,
-            ),
+          Row(
+            children: [
+              Text(
+                '${lobby.dateLabel}  ·  ${lobby.displaySlot}',
+                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+              ),
+              if (lobby.ballType != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    _ballTypeLabel(lobby.ballType!),
+                    style: const TextStyle(color: Color(0xFF374151), fontSize: 9, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ],
           ),
           const Spacer(),
           GestureDetector(

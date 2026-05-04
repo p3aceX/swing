@@ -155,6 +155,7 @@ export class MatchmakingService {
   async createLobby(userId: string, input: {
     teamId: string
     format: MatchmakingFormat
+    ballType?: string | null
     date: string
     picks: Array<{ groundId: string; slotTime: string }>
   }) {
@@ -181,6 +182,7 @@ export class MatchmakingService {
           teamId: team.id,
           playerId: player.id,
           format: input.format,
+          ballType: input.ballType ?? null,
           date,
           status: 'searching',
           expiresAt,
@@ -203,7 +205,9 @@ export class MatchmakingService {
           date,
           status: 'searching',
           expiresAt: { gt: new Date() },
-        },
+          // Match ball type: null = any; only filter when both sides specify
+          ...(input.ballType ? { OR: [{ ballType: null }, { ballType: input.ballType }] } : {}),
+        } as any,
         include: { picks: true },
         orderBy: { createdAt: 'asc' },
       })
@@ -379,6 +383,7 @@ export class MatchmakingService {
           arenaName,
           ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
           format: l.format,
+          ballType: (l as any).ballType ?? null,
           groundName: unit?.name ?? null,
           slotTime: pick?.slotTime ?? null,
           date: this.toDateOnly(l.date),
@@ -436,6 +441,7 @@ export class MatchmakingService {
         teamName: l.team?.name ?? 'TBD',
         ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
         format: l.format,
+        ballType: (l as any).ballType ?? null,
         groundName: unit?.name ?? null,
         slotTime: pick?.slotTime ?? null,
         date: this.toDateOnly(l.date),

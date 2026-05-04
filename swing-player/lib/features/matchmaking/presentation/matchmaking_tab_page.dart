@@ -11,6 +11,16 @@ import '../domain/matchmaking_models.dart';
 import 'matchmaking_page.dart' show MatchFormat;
 import 'matchmaking_providers.dart';
 
+// ── Ball type helpers ─────────────────────────────────────────────────────────
+
+String _ballTypeLabel(String bt) => switch (bt) {
+      'LEATHER' => 'Leather',
+      'TENNIS' => 'Tennis',
+      'TAPE' => 'Tape Ball',
+      'RUBBER' => 'Rubber',
+      _ => bt,
+    };
+
 // ── Format helpers ────────────────────────────────────────────────────────────
 
 extension _FormatApi on MatchFormat {
@@ -84,6 +94,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   _LobbyState _lobbyState = _LobbyState.idle;
   MmTeam? _team;
   MatchFormat _format = MatchFormat.t20;
+  String? _ballType;
   DateTime _date = DateTime.now();
   List<MmGroundSlotPick> _picks = [];
 
@@ -141,6 +152,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       final result = await repo.createLobby(
         teamId: _team!.id,
         format: _format.apiValue,
+        ballType: _ballType,
         date: _dateStr,
         picks: _picks
             .map((p) => (groundId: p.slot.unitId, slotTime: p.slot.time))
@@ -391,6 +403,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                       teamName: _team!.name,
                       ageGroup: _team!.ageGroupLabel,
                       format: _format.apiValue,
+                      ballType: _ballType,
                       groundName: _picks.isNotEmpty
                           ? _picks.first.ground.name
                           : '',
@@ -424,6 +437,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                   lobbyState: _lobbyState,
                   team: _team,
                   format: _format,
+                  ballType: _ballType,
                   date: _date,
                   picks: _picks,
                   matchSummary: _matchSummary,
@@ -433,6 +447,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                     _format = f;
                     _picks = []; // slot availability changes with format duration
                   }),
+                  onBallType: (bt) => setState(() => _ballType = bt),
                   onDate: (d) => setState(() {
                     _date = d;
                     _picks = []; // slots are date-specific — clear stale picks
@@ -507,6 +522,7 @@ class _OpenTab extends ConsumerStatefulWidget {
 
 class _OpenTabState extends ConsumerState<_OpenTab> {
   String? _selectedDate;
+  String? _ballTypeFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -539,7 +555,9 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
         final selected = (_selectedDate != null && sortedDates.contains(_selectedDate))
             ? _selectedDate!
             : autoDate;
-        final filtered = byDate[selected] ?? [];
+        final filtered = (byDate[selected] ?? [])
+            .where((l) => _ballTypeFilter == null || l.ballType == null || l.ballType == _ballTypeFilter)
+            .toList();
 
         final totalCount = others.length;
 
@@ -579,6 +597,39 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
                           ),
                         ],
                       ],
+                    ),
+                  ),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: Row(
+                      children: ['ALL', 'LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
+                        final isAll = bt == 'ALL';
+                        final sel = isAll ? _ballTypeFilter == null : _ballTypeFilter == bt;
+                        return GestureDetector(
+                          onTap: () => setState(() => _ballTypeFilter = isAll ? null : bt),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: sel ? context.accent : context.surf,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: sel ? context.accent : context.stroke,
+                              ),
+                            ),
+                            child: Text(
+                              isAll ? 'All' : _ballTypeLabel(bt),
+                              style: TextStyle(
+                                color: sel ? Colors.white : context.fgSub,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ),
                   if (sortedDates.isNotEmpty) ...[
@@ -909,6 +960,20 @@ class _OpenLobbyRow extends StatelessWidget {
                     ],
                   ),
                 ],
+                if (lobby.ballType != null) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: context.panel,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      _ballTypeLabel(lobby.ballType!),
+                      style: TextStyle(color: context.fgSub, fontSize: 10, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -959,12 +1024,14 @@ class _FindTab extends StatelessWidget {
   final _LobbyState lobbyState;
   final MmTeam? team;
   final MatchFormat format;
+  final String? ballType;
   final DateTime date;
   final List<MmGroundSlotPick> picks;
   final MmMatchSummary? matchSummary;
   final String? error;
   final ValueChanged<MmTeam> onTeam;
   final ValueChanged<MatchFormat> onFormat;
+  final ValueChanged<String?> onBallType;
   final ValueChanged<DateTime> onDate;
   final ValueChanged<MmGroundSlotPick> onAddPick;
   final ValueChanged<MmGroundSlotPick> onRemovePick;
@@ -985,12 +1052,14 @@ class _FindTab extends StatelessWidget {
             key: const ValueKey('idle'),
             team: team,
             format: format,
+            ballType: ballType,
             date: date,
             picks: picks,
             error: error,
             loading: lobbyState == _LobbyState.entering,
             onTeam: onTeam,
             onFormat: onFormat,
+            onBallType: onBallType,
             onDate: onDate,
             onAddPick: onAddPick,
             onRemovePick: onRemovePick,
@@ -1040,12 +1109,14 @@ class _IdleFind extends ConsumerStatefulWidget {
 
   final MmTeam? team;
   final MatchFormat format;
+  final String? ballType;
   final DateTime date;
   final List<MmGroundSlotPick> picks;
   final String? error;
   final bool loading;
   final ValueChanged<MmTeam> onTeam;
   final ValueChanged<MatchFormat> onFormat;
+  final ValueChanged<String?> onBallType;
   final ValueChanged<DateTime> onDate;
   final ValueChanged<MmGroundSlotPick> onAddPick;
   final ValueChanged<MmGroundSlotPick> onRemovePick;
@@ -1137,9 +1208,12 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   title: 'Format',
                   activeStep: _activeStep,
                   locked: widget.team == null,
-                  summary: widget.format == MatchFormat.custom
-                      ? 'Custom · $_customOvers overs'
-                      : widget.format.label,
+                  summary: [
+                    widget.format == MatchFormat.custom
+                        ? 'Custom · $_customOvers overs'
+                        : widget.format.label,
+                    if (widget.ballType != null) _ballTypeLabel(widget.ballType!),
+                  ].join(' · '),
                   summaryIcon: Icons.sports_cricket_rounded,
                   onEdit: () => _goTo(2),
                   child: Padding(
@@ -1172,6 +1246,43 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                                     color: sel ? context.ctaFg : context.fg,
                                     fontSize: 14,
                                     fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Ball Type',
+                          style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
+                            final sel = widget.ballType == bt;
+                            return GestureDetector(
+                              onTap: () => widget.onBallType(sel ? null : bt),
+                              behavior: HitTestBehavior.opaque,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 140),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: sel ? context.ctaBg : context.panel,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  _ballTypeLabel(bt),
+                                  style: TextStyle(
+                                    color: sel ? context.ctaFg : context.fg,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
