@@ -1299,7 +1299,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 20),
 
                 // ── Step 2: Format ────────────────────────────────────
                 _StepCard(
@@ -1328,7 +1328,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                             return GestureDetector(
                               onTap: () {
                                 widget.onFormat(f);
-                                if (f != MatchFormat.custom) _goTo(3);
+                                // Stay on step 2 — user must still pick ball type
                               },
                               behavior: HitTestBehavior.opaque,
                               child: AnimatedContainer(
@@ -1367,7 +1367,10 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                           children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
                             final sel = widget.ballType == bt;
                             return GestureDetector(
-                              onTap: () => widget.onBallType(bt),
+                              onTap: () {
+                                widget.onBallType(bt);
+                                if (widget.format != MatchFormat.custom) _goTo(3);
+                              },
                               behavior: HitTestBehavior.opaque,
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 140),
@@ -1461,7 +1464,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 20),
 
                 // ── Step 3: Date ──────────────────────────────────────
                 _StepCard(
@@ -1474,7 +1477,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   onEdit: () => _goTo(3),
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 16),
-                    child: _CalendarPicker(
+                    child: _DateStrip(
                       selected: widget.date,
                       onSelect: (d) {
                         widget.onDate(d);
@@ -1483,7 +1486,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 20),
 
                 // ── Step 4: Grounds ───────────────────────────────────
                 _StepCard(
@@ -1621,7 +1624,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   }
 }
 
-// ── Step card ─────────────────────────────────────────────────────────────────
+// ── Step card (flat, no container) ───────────────────────────────────────────
 
 class _StepCard extends StatelessWidget {
   const _StepCard({
@@ -1649,123 +1652,99 @@ class _StepCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      decoration: BoxDecoration(
-        color: context.panel,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _isActive
-              ? context.ctaBg.withValues(alpha: 0.5)
-              : Colors.transparent,
-          width: 1.5,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header row
-          GestureDetector(
-            onTap: (!locked && _isDone) ? onEdit : null,
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-              child: Row(
-                children: [
-                  // Step indicator
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _isDone
-                          ? context.success
-                          : _isActive
-                              ? context.ctaBg
-                              : context.stroke.withValues(alpha: 0.4),
-                    ),
-                    alignment: Alignment.center,
-                    child: _isDone
-                        ? Icon(Icons.check_rounded,
-                            color: Colors.white, size: 14)
-                        : Text(
-                            '$step',
-                            style: TextStyle(
-                              color: _isActive
-                                  ? context.ctaFg
-                                  : context.fgSub,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            color: locked
-                                ? context.fgSub.withValues(alpha: 0.4)
-                                : context.fg,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
-                          ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header row
+        GestureDetector(
+          onTap: (!locked && _isDone) ? onEdit : null,
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            children: [
+              // Step indicator
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _isDone
+                      ? context.success
+                      : _isActive
+                          ? context.ctaBg
+                          : context.stroke.withValues(alpha: 0.35),
+                ),
+                alignment: Alignment.center,
+                child: _isDone
+                    ? const Icon(Icons.check_rounded, color: Colors.white, size: 13)
+                    : Text(
+                        '$step',
+                        style: TextStyle(
+                          color: _isActive ? context.ctaFg : context.fgSub,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
                         ),
-                        if (_isDone && summary != null) ...[
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              if (summaryIcon != null) ...[
-                                Icon(summaryIcon,
-                                    color: context.accent, size: 11),
-                                const SizedBox(width: 4),
-                              ],
-                              Text(
-                                summary!,
-                                style: TextStyle(
-                                  color: context.accent,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (_isDone)
+                      ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: [
                     Text(
-                      'Edit',
+                      title,
                       style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        color: locked
+                            ? context.fgSub.withValues(alpha: 0.35)
+                            : _isDone
+                                ? context.fgSub
+                                : context.fg,
+                        fontSize: 14,
+                        fontWeight: _isActive ? FontWeight.w800 : FontWeight.w600,
+                        letterSpacing: -0.2,
                       ),
                     ),
-                ],
+                    if (_isDone && summary != null) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          summary!,
+                          style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ),
+              if (_isDone)
+                Text(
+                  'Edit',
+                  style: TextStyle(
+                    color: context.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
           ),
-          // Expanded content
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 220),
-            crossFadeState: _isActive
-                ? CrossFadeState.showFirst
-                : CrossFadeState.showSecond,
-            firstChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-              child: child,
-            ),
-            secondChild: const SizedBox.shrink(),
+        ),
+        // Expanded content
+        AnimatedCrossFade(
+          duration: const Duration(milliseconds: 200),
+          crossFadeState: _isActive
+              ? CrossFadeState.showFirst
+              : CrossFadeState.showSecond,
+          firstChild: Padding(
+            padding: const EdgeInsets.only(left: 34, top: 14),
+            child: child,
           ),
-        ],
-      ),
+          secondChild: const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 }
@@ -3304,6 +3283,67 @@ class _Pill extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
+      ),
+    );
+  }
+}
+
+// ── Date strip (horizontal scrollable 14-day picker) ─────────────────────────
+
+class _DateStrip extends StatelessWidget {
+  const _DateStrip({required this.selected, required this.onSelect});
+  final DateTime selected;
+  final ValueChanged<DateTime> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final days = List.generate(
+        14, (i) => DateTime(today.year, today.month, today.day + i));
+    return SizedBox(
+      height: 68,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: days.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final d = days[i];
+          final isSel = DateUtils.isSameDay(d, selected);
+          final isToday = i == 0;
+          return GestureDetector(
+            onTap: () => onSelect(d),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              width: 54,
+              decoration: BoxDecoration(
+                color: isSel ? context.ctaBg : context.panel,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    isToday ? 'Today' : DateFormat('EEE').format(d),
+                    style: TextStyle(
+                      color: isSel ? context.ctaFg.withValues(alpha: 0.7) : context.fgSub,
+                      fontSize: isToday ? 9 : 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${d.day}',
+                    style: TextStyle(
+                      color: isSel ? context.ctaFg : context.fg,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
