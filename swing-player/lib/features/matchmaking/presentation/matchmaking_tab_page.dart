@@ -364,6 +364,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                   label: 'Open',
                   active: _tab == 0,
                   onTap: () => setState(() => _tab = 0),
+                  badge: ref.watch(mmOpenLobbiesProvider((date: null, format: null))).valueOrNull?.length,
                 ),
                 const SizedBox(width: 24),
                 _TabLabel(
@@ -477,10 +478,12 @@ class _TabLabel extends StatelessWidget {
     required this.label,
     required this.active,
     required this.onTap,
+    this.badge,
   });
   final String label;
   final bool active;
   final VoidCallback onTap;
+  final int? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -489,13 +492,36 @@ class _TabLabel extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 10),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? context.fg : context.fgSub,
-            fontSize: 15,
-            fontWeight: active ? FontWeight.w800 : FontWeight.w500,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? context.fg : context.fgSub,
+                fontSize: 15,
+                fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+              ),
+            ),
+            if (badge != null && badge! > 0) ...[
+              const SizedBox(width: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: active ? context.accent : context.fgSub.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$badge',
+                  style: TextStyle(
+                    color: active ? Colors.white : context.fgSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -569,36 +595,7 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
-                    child: Row(
-                      children: [
-                        Text(
-                          'Open Games',
-                          style: TextStyle(
-                            color: context.fg,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                        if (totalCount > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: context.accent,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              '$totalCount',
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                  const SizedBox(height: 12),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
@@ -747,7 +744,7 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
                         ],
                       )
                     : ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                         children: [
                           if (widget.ownLobby != null) ...[
                             _OpenSectionLabel(label: 'YOU'),
@@ -755,14 +752,13 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
                           ],
                           if (filtered.isNotEmpty) ...[
                             if (widget.ownLobby != null) const SizedBox(height: 16),
-                            _OpenSectionLabel(label: 'OTHERS · ${filtered.length}'),
-                            for (var i = 0; i < filtered.length; i++) ...[
-                              if (i > 0) Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
-                              _OpenLobbyRow(
-                                lobby: filtered[i],
-                                onCounter: () => widget.onCounter(filtered[i]),
+                            if (widget.ownLobby != null)
+                              _OpenSectionLabel(label: 'OTHERS · ${filtered.length}'),
+                            for (final lobby in filtered)
+                              _OpenLobbyCard(
+                                lobby: lobby,
+                                onCounter: () => widget.onCounter(lobby),
                               ),
-                            ],
                           ],
                         ],
                       ),
@@ -900,100 +896,181 @@ class _OwnLobbyRowState extends State<_OwnLobbyRow>
   }
 }
 
-class _OpenLobbyRow extends StatelessWidget {
-  const _OpenLobbyRow({required this.lobby, required this.onCounter});
+class _OpenLobbyCard extends StatelessWidget {
+  const _OpenLobbyCard({required this.lobby, required this.onCounter});
   final MmOpenLobby lobby;
   final VoidCallback onCounter;
 
+  String get _initials {
+    final words = lobby.teamName.trim().split(RegExp(r'\s+'));
+    if (words.length >= 2) return '${words[0][0]}${words[1][0]}'.toUpperCase();
+    return lobby.teamName.isNotEmpty ? lobby.teamName[0].toUpperCase() : '?';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Row(
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.surf,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.stroke),
+      ),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          // ── Team row ──────────────────────────────────────────────────
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: context.panel,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _initials,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        lobby.teamName,
-                        style: TextStyle(
-                          color: context.fg,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.2,
-                        ),
+                    Text(
+                      lobby.teamName,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: context.panel,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        lobby.format,
-                        style: TextStyle(color: context.fg, fontSize: 10, fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${lobby.displaySlot}${lobby.groundName.isNotEmpty ? '  ·  ${lobby.groundName}' : ''}',
-                  style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
-                ),
-                if (lobby.arenaName.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(Icons.stadium_rounded, size: 11, color: context.accent),
-                      const SizedBox(width: 3),
+                    if (lobby.ageGroup.isNotEmpty && lobby.ageGroup != 'Open') ...[
+                      const SizedBox(height: 1),
                       Text(
-                        lobby.arenaName,
-                        style: TextStyle(color: context.accent, fontSize: 11, fontWeight: FontWeight.w600),
+                        lobby.ageGroup,
+                        style: TextStyle(color: context.fgSub, fontSize: 11),
                       ),
                     ],
-                  ),
+                  ],
+                ),
+              ),
+              // Format + ball type chips
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _MiniChip(label: lobby.format, context: context),
+                  if (lobby.ballType != null) ...[
+                    const SizedBox(width: 6),
+                    _MiniChip(label: _ballTypeLabel(lobby.ballType!), context: context),
+                  ],
                 ],
-                if (lobby.ballType != null) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: context.panel,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      _ballTypeLabel(lobby.ballType!),
-                      style: TextStyle(color: context.fgSub, fontSize: 10, fontWeight: FontWeight.w600),
-                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // ── Info row ──────────────────────────────────────────────────
+          Row(
+            children: [
+              Icon(Icons.access_time_rounded, size: 13, color: context.fgSub),
+              const SizedBox(width: 4),
+              Text(
+                lobby.displaySlot,
+                style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+              if (lobby.groundName.isNotEmpty) ...[
+                Text('  ·  ', style: TextStyle(color: context.fgSub.withValues(alpha: 0.4), fontSize: 12)),
+                Expanded(
+                  child: Text(
+                    lobby.groundName,
+                    style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
+                ),
+              ] else
+                const Spacer(),
+            ],
+          ),
+          if (lobby.arenaName.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.stadium_rounded, size: 13, color: context.accent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    lobby.arenaName,
+                    style: TextStyle(color: context.accent, fontSize: 12, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
-          ),
-          const SizedBox(width: 16),
-          GestureDetector(
-            onTap: onCounter,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: context.accent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                lobby.isArenaLobby ? 'Book' : 'Counter',
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+          ],
+          const SizedBox(height: 14),
+          // ── CTA ───────────────────────────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: GestureDetector(
+              onTap: onCounter,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: context.accent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  lobby.isArenaLobby ? 'Book' : 'Counter',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MiniChip extends StatelessWidget {
+  const _MiniChip({required this.label, required this.context});
+  final String label;
+  final BuildContext context;
+
+  @override
+  Widget build(BuildContext ctx) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: context.panel,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: context.fgSub,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
