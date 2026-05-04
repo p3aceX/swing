@@ -725,6 +725,14 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                           );
                         }
                       : null,
+                  onNavigateToPlaying11: widget.onNavigateToPlaying11 != null
+                      ? () => widget.onNavigateToPlaying11!(
+                            context,
+                            widget.matchId,
+                            match.teamAName,
+                            match.teamBName,
+                          )
+                      : null,
                   onDeleteMatch: widget.onMatchDeleted != null
                       ? () async {
                           await ref
@@ -799,6 +807,7 @@ class _ScoringBody extends StatelessWidget {
     required this.onStartMatch,
     required this.onContinueInnings,
     this.onNavigateToToss,
+    this.onNavigateToPlaying11,
     this.onDeleteMatch,
     required this.onDot,
     required this.onOverthrow,
@@ -825,6 +834,7 @@ class _ScoringBody extends StatelessWidget {
   final Future<bool> Function() onStartMatch;
   final Future<bool> Function() onContinueInnings;
   final VoidCallback? onNavigateToToss;
+  final VoidCallback? onNavigateToPlaying11;
   final Future<void> Function()? onDeleteMatch;
   final VoidCallback onDot;
   final VoidCallback onOverthrow;
@@ -919,6 +929,7 @@ class _ScoringBody extends StatelessWidget {
             onStart: onStartMatch,
             onContinue: onContinueInnings,
             onNavigateToToss: onNavigateToToss,
+            onNavigateToPlaying11: onNavigateToPlaying11,
             onDelete: onDeleteMatch,
           ),
           const SizedBox(height: 32),
@@ -1921,6 +1932,7 @@ class _InactiveInningsSection extends StatefulWidget {
     required this.onStart,
     required this.onContinue,
     this.onNavigateToToss,
+    this.onNavigateToPlaying11,
     this.onDelete,
   });
 
@@ -1929,6 +1941,7 @@ class _InactiveInningsSection extends StatefulWidget {
   final Future<bool> Function() onStart;
   final Future<bool> Function() onContinue;
   final VoidCallback? onNavigateToToss;
+  final VoidCallback? onNavigateToPlaying11;
   final Future<void> Function()? onDelete;
 
   @override
@@ -1938,6 +1951,10 @@ class _InactiveInningsSection extends StatefulWidget {
 
 class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
   bool _deleting = false;
+
+  bool get _needsPlayingXI =>
+      widget.match.teamAPlayerIds.length < 11 ||
+      widget.match.teamBPlayerIds.length < 11;
 
   bool get _needsToss => (widget.match.tossWonBy ?? '').isEmpty;
 
@@ -2189,7 +2206,24 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
           const SizedBox(height: 8),
 
           // ── Primary CTA ───────────────────────────────────────────────────
-          if (_needsToss) ...[
+          if (_needsPlayingXI && widget.onNavigateToPlaying11 != null) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: FilledButton.icon(
+                onPressed: busy ? null : widget.onNavigateToPlaying11,
+                icon: const Icon(Icons.groups_rounded, size: 20),
+                label: const Text(
+                  'Select Playing 11',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ),
+          ] else if (_needsToss) ...[
             SizedBox(
               width: double.infinity,
               height: 52,

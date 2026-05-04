@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../contracts/host_path_config.dart';
@@ -48,13 +49,23 @@ class HostMatchRepository {
     required String tossWonBy,
     required String tossDecision,
   }) async {
-    await _dio.post(
-      _paths.matchToss(matchId),
-      data: {
-        'tossWonBy': tossWonBy,
-        'tossDecision': tossDecision,
-      },
-    );
+    final url = _paths.matchToss(matchId);
+    debugPrint('[recordToss] POST $url  tossWonBy=$tossWonBy tossDecision=$tossDecision');
+    try {
+      final resp = await _dio.post(
+        url,
+        data: {
+          'tossWonBy': tossWonBy,
+          'tossDecision': tossDecision,
+        },
+      );
+      debugPrint('[recordToss] ✓ status=${resp.statusCode}');
+    } on DioException catch (e) {
+      debugPrint('[recordToss] ✗ status=${e.response?.statusCode} '
+          'body=${e.response?.data} '
+          'headers=${e.response?.headers.map}');
+      rethrow;
+    }
   }
 
   Future<({String liveCode, String livePin, String teamAName, String teamBName})>

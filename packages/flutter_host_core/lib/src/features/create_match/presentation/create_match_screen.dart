@@ -575,6 +575,8 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
         .createMatch(
           teamAName: teamA.name,
           teamBName: teamB.name,
+          teamAId: teamA.id,
+          teamBId: teamB.id,
           venueName: _venue?.name ?? '',
           venueCity: _venue?.city ?? '',
           scheduledAt: _scheduledAt,

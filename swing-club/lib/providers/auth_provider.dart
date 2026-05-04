@@ -66,8 +66,14 @@ class AuthNotifier extends Notifier<AuthState> {
     final storage = ref.read(secureStorageProvider);
     final access  = storage.cachedAccessToken;
     final refresh = storage.cachedRefreshToken;
+    final userId  = storage.cachedUserId;
     if (access != null && refresh != null) {
-      return AuthState(accessToken: access, refreshToken: refresh, isAuthenticated: true);
+      return AuthState(
+        accessToken:     access,
+        refreshToken:    refresh,
+        isAuthenticated: true,
+        userId:          userId,
+      );
     }
     return const AuthState();
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../repositories/host_match_repository.dart';
 import '../../../theme/host_colors.dart';
 import '../../match_detail/domain/match_models.dart';
 import '../../match_detail/presentation/match_card.dart';
@@ -44,11 +45,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
-        setState(() {
-          _activeTabIndex = _tabController.index;
-          // Reset hosting filter if new tab has no hosted matches
-          if (_selectedFilter == 99) _selectedFilter = -1;
-        });
+        setState(() => _activeTabIndex = _tabController.index);
       }
     });
   }
@@ -111,20 +108,18 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
     final ctrl = ref.read(playMatchesControllerProvider.notifier);
     final all = state.matches;
 
-    // Counts for the currently visible tab section
-    final sectionAll = _activeTabIndex == 0
-        ? all.where((m) => m.sectionType == MatchSectionType.individual).toList()
-        : all.where((m) => m.sectionType == MatchSectionType.tournament && m.involvesPlayerTeam).toList();
+    final individualMatches = all
+        .where((m) => m.sectionType == MatchSectionType.individual)
+        .toList();
+    final teamMatches = all
+        .where((m) => m.sectionType == MatchSectionType.tournament &&
+            (m.involvesPlayerTeam || m.canScore))
+        .toList();
 
-    final liveCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.live).length;
+    final sectionAll = _activeTabIndex == 0 ? individualMatches : teamMatches;
+    final liveCount     = sectionAll.where((m) => m.lifecycle == MatchLifecycle.live).length;
     final upcomingCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.upcoming).length;
-    final pastCount = sectionAll.where((m) => m.lifecycle == MatchLifecycle.past).length;
-    final hostingCount = sectionAll.where((m) => m.canScore && m.lifecycle != MatchLifecycle.past).length;
-
-    final individualCount =
-        all.where((m) => m.sectionType == MatchSectionType.individual).length;
-    final tournamentCount =
-        all.where((m) => m.sectionType == MatchSectionType.tournament && m.involvesPlayerTeam).length;
+    final pastCount     = sectionAll.where((m) => m.lifecycle == MatchLifecycle.past).length;
 
     final hasFilters = _activeFilterCount > 0;
 
@@ -259,18 +254,11 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                   ),
                 );
               }),
-              if (hostingCount > 0)
-                _FilterChip(
-                  label: '$hostingCount Hosting',
-                  selected: _selectedFilter == 99,
-                  isLive: false,
-                  onTap: () => setState(() => _selectedFilter = 99),
-                ),
             ],
           ),
         ),
 
-        // ── Individual / Tournament segment ──────────────────────────────────
+        // ── Individual / Team segment ────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
           child: Container(
@@ -291,14 +279,12 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
               labelColor: context.accent,
               unselectedLabelColor: context.fgSub,
               labelStyle: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2),
+                  fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: -0.2),
               unselectedLabelStyle:
                   const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
               tabs: [
-                Tab(text: '$individualCount Individual'),
-                Tab(text: '$tournamentCount Tournament'),
+                Tab(text: '${individualMatches.length} Individual'),
+                Tab(text: '${teamMatches.length} Tournament'),
               ],
             ),
           ),
@@ -313,6 +299,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                 children: [
                   _MatchList(
                     section: MatchSectionType.individual,
+                    teamOnly: false,
                     filter: _selectedFilter,
                     searchQuery: _searchQuery,
                     venueFilter: _venueFilter,
@@ -322,7 +309,8 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                     onRefresh: ctrl.refresh,
                   ),
                   _MatchList(
-                    section: MatchSectionType.tournament,
+                    section: MatchSectionType.individual,
+                    teamOnly: true,
                     filter: _selectedFilter,
                     searchQuery: _searchQuery,
                     venueFilter: _venueFilter,
@@ -368,6 +356,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
 class _MatchList extends ConsumerWidget {
   const _MatchList({
     required this.section,
+    required this.teamOnly,
     required this.filter,
     required this.searchQuery,
     required this.venueFilter,
@@ -378,7 +367,8 @@ class _MatchList extends ConsumerWidget {
   });
 
   final MatchSectionType section;
-  final int filter; // -1=all, 0=live, 1=upcoming, 2=past, 99=hosting
+  final bool teamOnly; // true = team matches, false = individual (non-team) matches
+  final int filter; // -1=all, 0=live, 1=upcoming, 2=past
   final String searchQuery;
   final String? venueFilter;
   final String? opponentFilter;
@@ -428,43 +418,71 @@ class _MatchList extends ConsumerWidget {
       );
     }
 
-    if (filter == 99) {
-      return RefreshIndicator(
-        onRefresh: onRefresh,
-        child: ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(0, 6, 0, 110),
-          itemCount: visible.length,
-          itemBuilder: (_, i) => _HostedMatchItem(
-            match: visible[i],
-            callbacks: callbacks,
-          ),
-        ),
-      );
-    }
-
     return RefreshIndicator(
       onRefresh: onRefresh,
       child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(0, 6, 0, 110),
         itemCount: visible.length,
-        itemBuilder: (_, i) => HostMatchCard(
-          match: visible[i],
-          showHostingTag: visible[i].canScore,
-          onTap: callbacks.onNavigateToMatch != null && visible[i].id.isNotEmpty
-              ? () => callbacks.onNavigateToMatch!(context, visible[i].id)
-              : null,
-        ),
+        itemBuilder: (_, i) {
+          final m = visible[i];
+          if (m.canScore && m.lifecycle != MatchLifecycle.past) {
+            final canDelete = m.lifecycle != MatchLifecycle.live;
+            return _HostedMatchItem(
+              match: m,
+              callbacks: callbacks,
+              onDelete: canDelete
+                  ? () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Delete match?'),
+                          content: const Text(
+                              'This will permanently delete the match and cannot be undone.'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: Text(
+                                'Delete',
+                                style: TextStyle(color: context.danger),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed != true) return;
+                      await ref
+                          .read(hostMatchRepositoryProvider)
+                          .deleteMatch(m.id);
+                      await onRefresh();
+                    }
+                  : null,
+            );
+          }
+          return HostMatchCard(
+            match: m,
+            onTap: callbacks.onNavigateToMatch != null && m.id.isNotEmpty
+                ? () => callbacks.onNavigateToMatch!(context, m.id)
+                : null,
+          );
+        },
       ),
     );
   }
 
   List<PlayerMatch> _filtered(List<PlayerMatch> all) {
     return all.where((m) {
-      if (m.sectionType != section) return false;
-      if (section == MatchSectionType.tournament && !m.involvesPlayerTeam) {
-        return false;
+      if (teamOnly) {
+        // Tournament tab: tournament matches where user's team is involved OR user is scorer
+        if (m.sectionType != MatchSectionType.tournament) return false;
+        if (!m.involvesPlayerTeam && !m.canScore) return false;
+      } else {
+        // Individual tab: non-tournament matches only
+        if (m.sectionType != MatchSectionType.individual) return false;
       }
 
       final lifecycleOk = switch (filter) {
@@ -472,8 +490,6 @@ class _MatchList extends ConsumerWidget {
         0 => m.lifecycle == MatchLifecycle.live,
         1 => m.lifecycle == MatchLifecycle.upcoming,
         2 => m.lifecycle == MatchLifecycle.past,
-        // Hosting tab: owned + not yet completed (live or upcoming only)
-        99 => m.canScore && m.lifecycle != MatchLifecycle.past,
         _ => true,
       };
       if (!lifecycleOk) return false;
@@ -514,11 +530,17 @@ class _MatchList extends ConsumerWidget {
 
 /// Match card variant for hosted matches — shows the normal card plus a
 /// contextual resume CTA based on where the match is in its lifecycle.
+/// [onDelete] is provided only for non-live matches.
 class _HostedMatchItem extends StatelessWidget {
-  const _HostedMatchItem({required this.match, required this.callbacks});
+  const _HostedMatchItem({
+    required this.match,
+    required this.callbacks,
+    this.onDelete,
+  });
 
   final PlayerMatch match;
   final PlayTabCallbacks callbacks;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -547,34 +569,63 @@ class _HostedMatchItem extends StatelessWidget {
           HostMatchCard(match: match),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-            child: GestureDetector(
-              onTap: () => _onResume(context),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                decoration: BoxDecoration(
-                  color: phaseColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: phaseColor.withValues(alpha: 0.35),
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(phaseIcon, color: phaseColor, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      phaseLabel,
-                      style: TextStyle(
-                        color: phaseColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.8,
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _onResume(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        color: phaseColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: phaseColor.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(phaseIcon, color: phaseColor, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            phaseLabel,
+                            style: TextStyle(
+                              color: phaseColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                if (onDelete != null) ...[
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: onDelete,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: context.danger.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: context.danger.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        color: context.danger,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -583,9 +634,18 @@ class _HostedMatchItem extends StatelessWidget {
   }
 
   void _onResume(BuildContext context) {
-    // Scoring screen is the single entry point for all non-completed hosted
-    // matches — it handles toss recording, match review, and live scoring.
-    callbacks.onScoreMatch?.call(context, match.id);
+    final hasToss = (match.tossWinner ?? '').isNotEmpty;
+    final isLive = match.lifecycle == MatchLifecycle.live;
+    if (!hasToss && !isLive && callbacks.onSetPlayingXI != null) {
+      callbacks.onSetPlayingXI!(
+        context,
+        match.id,
+        match.playerTeamName,
+        match.opponentTeamName,
+      );
+    } else {
+      callbacks.onScoreMatch?.call(context, match.id);
+    }
   }
 }
 

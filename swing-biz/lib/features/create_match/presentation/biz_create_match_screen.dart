@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart' as host;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,9 +39,32 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
       final summary = await ref
           .read(host.hostCreateMatchRepositoryProvider)
           .getMatch(matchId);
+
+      var teamAId = summary.teamAId;
+      var teamBId = summary.teamBId;
+
+      // Legacy matches don't have team IDs stored — resolve by name search.
+      if (teamAId.isEmpty || teamBId.isEmpty) {
+        final dio = ref.read(host.hostDioProvider);
+        teamAId = teamAId.isNotEmpty
+            ? teamAId
+            : await _resolveTeamId(dio, summary.teamAName);
+        teamBId = teamBId.isNotEmpty
+            ? teamBId
+            : await _resolveTeamId(dio, summary.teamBName);
+      }
+
       if (!mounted) return;
       setState(() {
-        _resumeMatch = summary;
+        _resumeMatch = teamAId == summary.teamAId && teamBId == summary.teamBId
+            ? summary
+            : host.HostMatchSummary(
+                id: summary.id,
+                teamAId: teamAId,
+                teamBId: teamBId,
+                teamAName: summary.teamAName,
+                teamBName: summary.teamBName,
+              );
         _resumeLoaded = true;
       });
     } catch (error) {
@@ -49,6 +73,26 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
         _resumeError = error.toString();
         _resumeLoaded = true;
       });
+    }
+  }
+
+  Future<String> _resolveTeamId(Dio dio, String teamName) async {
+    if (teamName.trim().isEmpty) return '';
+    try {
+      final resp = await dio.get<Map<String, dynamic>>(
+        '/player/teams/search',
+        queryParameters: {'q': teamName.trim(), 'limit': 10},
+      );
+      final body = resp.data ?? {};
+      final data = body['data'];
+      final teams = (data is Map ? data['teams'] : null) as List? ?? [];
+      final match = teams.whereType<Map>().firstWhere(
+            (t) => '${t['name'] ?? t['teamName'] ?? ''}' == teamName.trim(),
+            orElse: () => <String, dynamic>{},
+          );
+      return '${match['id'] ?? match['teamId'] ?? ''}'.trim();
+    } catch (_) {
+      return '';
     }
   }
 

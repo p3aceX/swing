@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_host_core/flutter_host_core.dart' as host;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'providers/auth_provider.dart';
@@ -15,9 +16,6 @@ import 'features/batches/batch_detail_screen.dart';
 import 'features/batches/batch_wizard.dart';
 import 'features/students/student_list_screen.dart';
 import 'features/students/student_detail_screen.dart';
-import 'features/sessions/session_list_screen.dart';
-import 'features/sessions/session_detail_screen.dart';
-import 'features/sessions/attendance_report_screen.dart';
 import 'features/fees/fee_overview_screen.dart';
 import 'features/coaches/coach_list_screen.dart';
 import 'features/coaches/coach_detail_screen.dart';
@@ -27,6 +25,8 @@ import 'features/inventory/inventory_list_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/academy_profile_screen.dart';
 import 'features/settings/profile_screen.dart';
+import 'features/play/presentation/club_play_tab.dart';
+import 'features/play/presentation/club_create_match_screen.dart';
 
 const _authPaths = {'/splash', '/phone', '/name', '/otp', '/business-details', '/academy-setup'};
 
@@ -78,11 +78,79 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
 
-      // ── Batch detail / wizard (pushed, no shell) ─────────────────────────────
+      // ── Batch / student detail (pushed, no shell) ────────────────────────────
       GoRoute(path: '/batches/new', builder: (_, _) => const BatchCreateWizard()),
       GoRoute(
         path: '/batches/:batchId',
         builder: (_, state) => BatchDetailScreen(batchId: state.pathParameters['batchId']!),
+      ),
+      GoRoute(
+        path: '/students/:enrollmentId',
+        builder: (_, state) => StudentDetailScreen(
+          enrollmentId: state.pathParameters['enrollmentId']!,
+        ),
+      ),
+
+      // ── Play routes (pushed, no shell) ───────────────────────────────────────
+      GoRoute(
+        path: '/play/create-match',
+        builder: (_, state) => ClubCreateMatchScreen(
+          existingMatchId: state.uri.queryParameters['matchId'],
+        ),
+      ),
+      GoRoute(
+        path: '/play/score/:matchId',
+        builder: (_, state) => host.ScoringScreen(
+          matchId: state.pathParameters['matchId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/play/matches/:matchId',
+        builder: (_, state) => host.HostMatchDetailScreen(
+          matchId: state.pathParameters['matchId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/play/create-team',
+        builder: (_, _) => const host.HostCreateTeamScreen(),
+      ),
+      GoRoute(
+        path: '/play/teams/:teamId',
+        builder: (ctx, state) => host.HostTeamDetailScreen(
+          teamId: state.pathParameters['teamId']!,
+          currentUserId:
+              ProviderScope.containerOf(ctx).read(authProvider).userId,
+        ),
+      ),
+      GoRoute(
+        path: '/play/create-tournament',
+        builder: (_, _) => host.HostCreateTournamentScreen(
+          onTournamentCreated: (ctx, tournament) {
+            final id = '${tournament['id'] ?? ''}'.trim();
+            if (id.isEmpty) {
+              ctx.pop();
+              return;
+            }
+            ctx.push('/play/host-tournament/$id', extra: tournament);
+          },
+        ),
+      ),
+      GoRoute(
+        path: '/play/tournaments/:slug',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return host.HostTournamentViewerScreen(
+            slug: state.pathParameters['slug']!,
+            isHost: extra?['isHost'] as bool? ?? false,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/play/host-tournament/:tournamentId',
+        builder: (_, state) => host.HostTournamentDetailScreen(
+          tournamentId: state.pathParameters['tournamentId']!,
+          initialData: state.extra as Map<String, dynamic>?,
+        ),
       ),
 
       // ── Drawer routes (pushed, no shell) ─────────────────────────────────────
@@ -126,34 +194,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           ]),
           // 2 — Students
           StatefulShellBranch(routes: [
-            GoRoute(
-              path: '/students',
-              builder: (_, _) => const StudentListScreen(),
-              routes: [
-                GoRoute(
-                  path: ':enrollmentId',
-                  builder: (_, state) => StudentDetailScreen(
-                    enrollmentId: state.pathParameters['enrollmentId']!,
-                  ),
-                ),
-              ],
-            ),
+            GoRoute(path: '/students', builder: (_, _) => const StudentListScreen()),
           ]),
-          // 3 — Sessions
+          // 3 — Play
           StatefulShellBranch(routes: [
-            GoRoute(
-              path: '/sessions',
-              builder: (_, _) => const SessionListScreen(),
-              routes: [
-                GoRoute(path: 'report', builder: (_, _) => const AttendanceReportScreen()),
-                GoRoute(
-                  path: ':sessionId',
-                  builder: (_, state) => SessionDetailScreen(
-                    sessionId: state.pathParameters['sessionId']!,
-                  ),
-                ),
-              ],
-            ),
+            GoRoute(path: '/play', builder: (_, _) => const ClubPlayTab()),
           ]),
           // 4 — Payments
           StatefulShellBranch(routes: [

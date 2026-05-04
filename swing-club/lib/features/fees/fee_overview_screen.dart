@@ -46,6 +46,7 @@ class _FeeOverviewScreenState extends ConsumerState<FeeOverviewScreen>
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: null,
         onPressed: () => showModalBottomSheet(
           context: context,
           isScrollControlled: true,
@@ -127,6 +128,7 @@ class _StructuresTab extends ConsumerWidget {
               ),
       ),
       floatingActionButton: FloatingActionButton.small(
+        heroTag: null,
         onPressed: () => showModalBottomSheet(
           context: context,
           isScrollControlled: true,

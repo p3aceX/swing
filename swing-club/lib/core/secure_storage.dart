@@ -19,12 +19,15 @@ class SecureStorage {
   // Sync cache — populated once on app start so ApiClient can read synchronously
   String? _cachedAccessToken;
   String? _cachedRefreshToken;
+  String? _cachedUserId;
   String? get cachedAccessToken  => _cachedAccessToken;
   String? get cachedRefreshToken => _cachedRefreshToken;
+  String? get cachedUserId       => _cachedUserId;
 
   Future<void> load() async {
     _cachedAccessToken  = await accessToken;
     _cachedRefreshToken = await refreshToken;
+    _cachedUserId       = await userId;
   }
 
   // ── Writes ─────────────────────────────────────────────────────────────────
@@ -39,12 +42,16 @@ class SecureStorage {
 
 
   Future<void> saveAcademyId(String id) => _storage.write(key: _academyKey, value: id);
-  Future<void> saveUserId(String id)    => _storage.write(key: _userIdKey,  value: id);
+  Future<void> saveUserId(String id) async {
+    _cachedUserId = id;
+    await _storage.write(key: _userIdKey, value: id);
+  }
 
   // ── Clear ──────────────────────────────────────────────────────────────────
   Future<void> clear() async {
     _cachedAccessToken  = null;
     _cachedRefreshToken = null;
+    _cachedUserId       = null;
     await _storage.deleteAll();
   }
 }

@@ -19,8 +19,13 @@ class ApiClient {
     ));
 
     _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) {
-        final token = _storage.cachedAccessToken;
+      onRequest: (options, handler) async {
+        var token = _storage.cachedAccessToken;
+        if (token == null) {
+          // Cache cleared (e.g. hot reload) — repopulate from persistent storage
+          await _storage.load();
+          token = _storage.cachedAccessToken;
+        }
         if (token != null) options.headers['Authorization'] = 'Bearer $token';
         handler.next(options);
       },
@@ -70,6 +75,8 @@ class ApiClient {
       _dio.patch(path, data: data);
 
   Future<Response> delete(String path) => _dio.delete(path);
+
+  Dio get dio => _dio;
 }
 
 final apiClientProvider = Provider<ApiClient>((ref) {

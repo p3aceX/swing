@@ -146,6 +146,8 @@ class MmOpenLobby {
     this.isArenaLobby = false,
     this.arenaName = '',
     this.ballType,
+    this.unitId,
+    this.pricePerTeamPaise = 90000,
   });
 
   final String lobbyId;
@@ -159,6 +161,8 @@ class MmOpenLobby {
   final bool isArenaLobby;
   final String arenaName;
   final String? ballType;
+  final String? unitId;
+  final int pricePerTeamPaise;
 
   String get displaySlot {
     try {
@@ -210,6 +214,8 @@ class MmOpenLobby {
       isArenaLobby: (j['isArenaLobby'] as bool?) ?? false,
       arenaName: (j['arenaName'] as String?) ?? '',
       ballType: j['ballType'] as String?,
+      unitId: j['unitId'] as String?,
+      pricePerTeamPaise: (j['pricePerTeam'] as num?)?.toInt() ?? 90000,
     );
   }
 }

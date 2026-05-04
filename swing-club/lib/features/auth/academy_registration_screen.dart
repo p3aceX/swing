@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/constants.dart';
+import '../../core/api_client.dart';
 import '../../providers/auth_provider.dart';
 import '../../shared/onboarding_widgets.dart';
 import '../../shared/widgets.dart';
@@ -64,8 +64,7 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
-      final token = ref.read(secureStorageProvider).cachedAccessToken;
-      final dio   = Dio(BaseOptions(headers: {'Authorization': 'Bearer $token'}));
+      final api = ref.read(apiClientProvider);
 
       final body = <String, dynamic>{
         'name':  _name.text.trim(),
@@ -80,30 +79,33 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
       addOpt('pincode',     _pincode.text.trim());
       addOpt('phone',       _phone.text.trim());
       addOpt('email',       _email.text.trim());
-      addOpt('websiteUrl',  _website.text.trim());
+      final website = _website.text.trim();
+      if (website.isNotEmpty) {
+        body['websiteUrl'] = website.startsWith('http') ? website : 'https://$website';
+      }
       if (_foundedYear.text.trim().isNotEmpty) {
         body['foundedYear'] = int.tryParse(_foundedYear.text.trim());
       }
       if (_lat != null) body['latitude']  = _lat;
       if (_lng != null) body['longitude'] = _lng;
 
-      final res = await dio.post('$kBackendBaseUrl/biz/academy', data: body);
+      final res = await api.post('/biz/academy', data: body);
       if (!mounted) return;
 
-      if ((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300) {
-        final data      = res.data['data'] as Map<String, dynamic>;
-        final academyId = data['id'] as String?;
-        if (academyId != null) {
-          await ref.read(secureStorageProvider).saveAcademyId(academyId);
-        }
-        if (!mounted) return;
-        // ignore: use_build_context_synchronously
-        context.go('/home');
+      final data      = (res.data['data'] as Map<String, dynamic>?);
+      final academyId = data?['id'] as String?;
+      if (academyId != null) {
+        await ref.read(secureStorageProvider).saveAcademyId(academyId);
       }
+      if (!mounted) return;
+      // ignore: use_build_context_synchronously
+      context.go('/home');
     } on DioException catch (e) {
       if (!mounted) return;
-      final code    = e.response?.data?['code'] as String?;
-      final message = e.response?.data?['message'] as String? ?? 'Failed to create academy. Try again.';
+      final body    = e.response?.data as Map?;
+      final errObj  = body?['error'] as Map?;
+      final code    = (body?['code'] ?? errObj?['code']) as String?;
+      final message = (body?['message'] ?? errObj?['message'] ?? 'Failed to create academy. Try again.') as String;
       if (code == 'BUSINESS_DETAILS_REQUIRED') {
         // ignore: use_build_context_synchronously
         showSnack(context, 'Please complete business details first');
@@ -113,6 +115,10 @@ class _AcademyRegistrationScreenState extends ConsumerState<AcademyRegistrationS
         // ignore: use_build_context_synchronously
         showSnack(context, message);
       }
+    } catch (e) {
+      if (!mounted) return;
+      // ignore: use_build_context_synchronously
+      showSnack(context, 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

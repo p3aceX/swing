@@ -80,14 +80,28 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen>
   }
 
   Future<String?> _sendOtp(String phone) async {
-    final rawPhone = phone.replaceAll('+91', '');
     try {
-      final res = await _dio.get(
-        'https://2factor.in/API/V1/$kTwoFactorKey/SMS/$rawPhone/AUTOGEN',
+      final res = await _dio.post(
+        '$kBackendBaseUrl/auth/biz/send-otp',
+        data: {'phone': phone},
       );
-      if (res.data['Status'] == 'Success') return res.data['Details'] as String;
-    } catch (_) {}
-    if (mounted) showSnack(context, 'Failed to send OTP. Please try again.');
+      if (res.data['success'] == true) {
+        return res.data['data']['sessionId'] as String;
+      }
+      final msg = res.data['message'] as String? ?? 'Failed to send OTP';
+      if (mounted) showSnack(context, msg);
+    } on DioException catch (e) {
+      if (!mounted) return null;
+      final raw    = e.response?.data;
+      final body   = raw is Map ? raw : null;
+      final errObj = body?['error'];
+      final errMap = errObj is Map ? errObj : null;
+      final msg    = (body?['message'] ?? errMap?['message']
+                      ?? 'Failed to send OTP (${e.response?.statusCode})').toString();
+      showSnack(context, msg);
+    } catch (e) {
+      if (mounted) showSnack(context, 'Network error: $e');
+    }
     return null;
   }
 

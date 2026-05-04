@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app.dart';
+import 'core/providers.dart';
 import 'core/secure_storage.dart';
 import 'providers/auth_provider.dart';
 
@@ -19,6 +20,7 @@ void main() async {
     ProviderScope(
       overrides: [
         secureStorageProvider.overrideWithValue(storage),
+        hostDioOverride,
       ],
       child: const SwingClubApp(),
     ),

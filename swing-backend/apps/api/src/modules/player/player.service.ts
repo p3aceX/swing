@@ -910,7 +910,6 @@ export class PlayerService {
     const profile = await prisma.playerProfile.findUnique({
       where: { userId },
     });
-    if (!profile) return { tournaments: [] };
 
     const tournamentSelect = {
       id: true,
@@ -938,10 +937,12 @@ export class PlayerService {
     });
 
     // Tournaments where user is a participant via TournamentTeam.playerIds
-    const participatedTeams = await prisma.tournamentTeam.findMany({
-      where: { playerIds: { has: profile.id } },
-      select: { tournamentId: true },
-    });
+    const participatedTeams = profile
+      ? await prisma.tournamentTeam.findMany({
+          where: { playerIds: { has: profile.id } },
+          select: { tournamentId: true },
+        })
+      : [];
     const hostedIds = new Set(hosted.map((t) => t.id));
     const participatedIds = participatedTeams
       .map((tt) => tt.tournamentId)

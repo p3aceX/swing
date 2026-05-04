@@ -1,7 +1,10 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../contracts/host_path_config.dart';
+import '../../../providers/host_dio_provider.dart';
 import '../../../repositories/host_team_repository.dart';
 import '../../../theme/host_colors.dart';
 import '../../create_match/data/create_match_repository.dart';
@@ -86,6 +89,17 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
     final teamId = isA ? widget.teamAId : widget.teamBId;
     final side = isA ? 'A' : 'B';
     debugPrint('[PlayingEleven] _loadSide $side teamId=$teamId');
+    if (teamId.isEmpty) {
+      setState(() {
+        final empty = _RosterState.ready(players: const [], selected: const {});
+        if (isA) {
+          _teamA = empty;
+        } else {
+          _teamB = empty;
+        }
+      });
+      return;
+    }
     setState(() {
       if (isA) {
         _teamA = const _RosterState.loading();
@@ -182,6 +196,61 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
     );
   }
 
+  // ── Add player ──────────────────────────────────────────────────────────
+
+  Future<void> _addPlayer(bool isA) async {
+    final teamId = isA ? widget.teamAId : widget.teamBId;
+    final result = await showModalBottomSheet<_RosterPlayer>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AddPlayerSheet(),
+    );
+    if (result == null || !mounted) return;
+
+    // Quick-add to team if we have a teamId so the roster persists
+    if (teamId.isNotEmpty) {
+      try {
+        final added = await ref.read(hostTeamRepositoryProvider).quickAddPlayer(
+              teamId,
+              profileId: result.profileId.isNotEmpty ? result.profileId : null,
+              name: result.name,
+            );
+        final profileId = '${added['data']?['profileId'] ?? added['profileId'] ?? result.profileId}'.trim();
+        _appendPlayer(isA, _RosterPlayer(
+          profileId: profileId.isNotEmpty ? profileId : result.profileId,
+          userId: result.userId,
+          name: result.name,
+          avatarUrl: result.avatarUrl,
+          swingId: result.swingId,
+        ));
+        return;
+      } catch (_) {
+        // fall through — still add locally even if team persistence fails
+      }
+    }
+    _appendPlayer(isA, result);
+  }
+
+  void _appendPlayer(bool isA, _RosterPlayer player) {
+    if (player.profileId.isEmpty) return;
+    _updateLoaded(
+      isA: isA,
+      transform: (loaded) {
+        if (loaded.players.any((p) => p.profileId == player.profileId)) {
+          // Already in roster — just select them
+          final sel = {...loaded.selected};
+          if (sel.length < _squadSize) sel.add(player.profileId);
+          return loaded.rebuild(selected: sel);
+        }
+        final players = [...loaded.players, player];
+        final sel = {...loaded.selected};
+        if (sel.length < _squadSize) sel.add(player.profileId);
+        return loaded.rebuild(players: players, selected: sel);
+      },
+    );
+  }
+
   void _setRole(bool isA, String profileId, _Role role) {
     _updateLoaded(
       isA: isA,
@@ -254,16 +323,21 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
         ),
       );
     } catch (error) {
-      debugPrint('[PlayingEleven] setPlayingEleven ERROR: $error');
-      if (error is Exception) {
-        // ignore: avoid_dynamic_calls
-        final resp = (error as dynamic).response;
-        if (resp != null) {
-          debugPrint('[PlayingEleven] status=${resp.statusCode} body=${resp.data}');
-        }
-      }
+      // ignore: avoid_dynamic_calls
+      final resp = (error as dynamic).response;
+      final status = resp?.statusCode;
+      final body = resp?.data;
+      debugPrint('[PlayingEleven] setPlayingEleven ERROR status=$status body=$body');
       if (!mounted) return;
-      setState(() => _submitError = error.toString());
+      String msg;
+      if (body is Map) {
+        final err = body['error'];
+        msg = (err is Map ? err['message'] : null) ??
+            '${body['message'] ?? body['error'] ?? error}';
+      } else {
+        msg = 'Could not save playing XI. Please try again.';
+      }
+      setState(() => _submitError = msg);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -366,12 +440,14 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
             onRetry: () => _loadSide(isA: true),
             onToggleSelect: (id) => _toggleSelect(true, id),
             onSetRole: (id, role) => _setRole(true, id, role),
+            onAddPlayer: () => _addPlayer(true),
           ),
           _RosterPane(
             state: _teamB,
             onRetry: () => _loadSide(isA: false),
             onToggleSelect: (id) => _toggleSelect(false, id),
             onSetRole: (id, role) => _setRole(false, id, role),
+            onAddPlayer: () => _addPlayer(false),
           ),
         ],
       ),
@@ -431,12 +507,14 @@ class _RosterPane extends StatelessWidget {
     required this.onRetry,
     required this.onToggleSelect,
     required this.onSetRole,
+    this.onAddPlayer,
   });
 
   final _RosterState state;
   final VoidCallback onRetry;
   final ValueChanged<String> onToggleSelect;
   final void Function(String profileId, _Role role) onSetRole;
+  final VoidCallback? onAddPlayer;
 
   @override
   Widget build(BuildContext context) {
@@ -448,68 +526,88 @@ class _RosterPane extends StatelessWidget {
     }
     final loaded = state.asLoaded;
     if (loaded == null || loaded.players.isEmpty) {
-      return _EmptyState(onRetry: onRetry);
+      return _EmptyState(onRetry: onRetry, onAddPlayer: onAddPlayer);
     }
 
+    // rows: [0] = status strip, [1..n] = players, [n+1] = add player button
+    final playerCount = loaded.players.length;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
-      itemCount: loaded.players.length + 1,
-      separatorBuilder: (_, i) => i == 0
-          ? const SizedBox(height: 14)
-          : const SizedBox(height: 10),
+      itemCount: playerCount + 2,
+      separatorBuilder: (_, i) =>
+          i == 0 ? const SizedBox(height: 14) : const SizedBox(height: 10),
       itemBuilder: (_, i) {
-        if (i == 0) return _RoleLegend(loaded: loaded);
-        final player = loaded.players[i - 1];
-        final isSelected = loaded.selected.contains(player.profileId);
-        return _PlayerRow(
-          player: player,
-          isSelected: isSelected,
-          canPick: isSelected || loaded.selected.length < 11,
-          roles: loaded.rolesFor(player.profileId),
-          onToggleSelect: () => onToggleSelect(player.profileId),
-          onSetRole: (role) => onSetRole(player.profileId, role),
+        if (i == 0) return _StatusStrip(loaded: loaded);
+        if (i <= playerCount) {
+          final player = loaded.players[i - 1];
+          final isSelected = loaded.selected.contains(player.profileId);
+          return _PlayerRow(
+            player: player,
+            isSelected: isSelected,
+            canPick: isSelected || loaded.selected.length < 11,
+            roles: loaded.rolesFor(player.profileId),
+            onToggleSelect: () => onToggleSelect(player.profileId),
+            onSetRole: (role) => onSetRole(player.profileId, role),
+          );
+        }
+        // Last item: "Add Player" button
+        if (onAddPlayer == null) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: OutlinedButton.icon(
+            onPressed: onAddPlayer,
+            icon: const Icon(Icons.person_add_rounded, size: 16),
+            label: const Text('Add Player'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
         );
       },
     );
   }
 }
 
-class _RoleLegend extends StatelessWidget {
-  const _RoleLegend({required this.loaded});
+class _StatusStrip extends StatelessWidget {
+  const _StatusStrip({required this.loaded});
   final _LoadedRoster loaded;
 
   @override
   Widget build(BuildContext context) {
-    Widget chip({required String label, required bool filled, IconData? icon}) {
-      final color = filled ? context.accent : context.fgSub;
-      final bg = filled
-          ? context.accent.withValues(alpha: 0.12)
-          : Colors.transparent;
+    final count = loaded.selected.length;
+    final accent = context.accent;
+
+    Widget pill({
+      required String label,
+      required bool filled,
+      required IconData icon,
+    }) {
+      final fg = filled ? accent : context.fgSub;
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
         decoration: BoxDecoration(
-          color: bg,
+          color: filled ? accent.withValues(alpha: 0.12) : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: filled
-                ? context.accent.withValues(alpha: 0.35)
+                ? accent.withValues(alpha: 0.35)
                 : context.fgSub.withValues(alpha: 0.2),
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null) ...[
-              Icon(icon, color: color, size: 12),
-              const SizedBox(width: 6),
-            ],
+            Icon(icon, color: fg, size: 11),
+            const SizedBox(width: 4),
             Text(
               label,
               style: TextStyle(
-                color: color,
+                color: fg,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 0.4,
+                letterSpacing: 0.3,
               ),
             ),
           ],
@@ -517,26 +615,28 @@ class _RoleLegend extends StatelessWidget {
       );
     }
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    return Row(
       children: [
-        chip(
-          label: '${loaded.selected.length}/11 SELECTED',
-          filled: loaded.selected.length == 11,
+        pill(
+          label: '$count/11',
+          filled: count == 11,
+          icon: count == 11 ? Icons.check_circle_rounded : Icons.people_rounded,
         ),
-        chip(
-          label: 'CAPTAIN',
+        const SizedBox(width: 6),
+        pill(
+          label: 'C',
           filled: loaded.captainId != null,
           icon: Icons.star_rounded,
         ),
-        chip(
-          label: 'VICE',
+        const SizedBox(width: 6),
+        pill(
+          label: 'VC',
           filled: loaded.viceCaptainId != null,
           icon: Icons.star_half_rounded,
         ),
-        chip(
-          label: 'KEEPER',
+        const SizedBox(width: 6),
+        pill(
+          label: 'WK',
           filled: loaded.wicketKeeperId != null,
           icon: Icons.sports_handball_rounded,
         ),
@@ -993,8 +1093,9 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onRetry});
+  const _EmptyState({required this.onRetry, this.onAddPlayer});
   final VoidCallback onRetry;
+  final VoidCallback? onAddPlayer;
 
   @override
   Widget build(BuildContext context) {
@@ -1017,14 +1118,219 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Add players from the Teams tab first.',
+              'Search and add players directly below.',
               style: TextStyle(color: context.fgSub, fontSize: 12),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
+            if (onAddPlayer != null)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: onAddPlayer,
+                  icon: const Icon(Icons.person_add_rounded, size: 16),
+                  label: const Text('Add Player'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 10),
             OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADD PLAYER SHEET
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _AddPlayerSheet extends ConsumerStatefulWidget {
+  const _AddPlayerSheet();
+
+  @override
+  ConsumerState<_AddPlayerSheet> createState() => _AddPlayerSheetState();
+}
+
+class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
+  final _ctrl = TextEditingController();
+  List<_RosterPlayer> _results = [];
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search(String q) async {
+    if (q.trim().length < 2) {
+      setState(() {
+        _results = [];
+        _loading = false;
+      });
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final dio = ref.read(hostDioProvider);
+      final paths = ref.read(hostPathConfigProvider);
+      final resp = await dio.get<Map<String, dynamic>>(
+        paths.playerSearch,
+        queryParameters: {'q': q.trim(), 'type': 'players', 'limit': 20},
+      );
+      final body = resp.data ?? {};
+      final data = body['data'];
+      final raw = (data is Map ? data['players'] : null) as List? ?? [];
+      if (!mounted) return;
+      setState(() {
+        _results = raw
+            .whereType<Map>()
+            .map((p) => _RosterPlayer.fromJson(Map<String, dynamic>.from(p)))
+            .toList();
+        _loading = false;
+      });
+    } on DioException catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final maxH = MediaQuery.of(context).size.height * 0.82;
+    final accent = context.accent;
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxH),
+      decoration: BoxDecoration(
+        color: context.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 4),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: context.fgSub.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+            child: Text(
+              'Add Player',
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: TextField(
+              controller: _ctrl,
+              autofocus: true,
+              onChanged: _search,
+              style: TextStyle(color: context.fg, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Search by name or Swing ID…',
+                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
+                prefixIcon: Icon(Icons.search_rounded, color: context.fgSub, size: 20),
+                filled: true,
+                fillColor: context.surf,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          Flexible(
+            child: _loading
+                ? const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : _results.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        child: Text(
+                          _ctrl.text.trim().length < 2
+                              ? 'Type at least 2 characters to search'
+                              : 'No players found',
+                          style: TextStyle(color: context.fgSub, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                        shrinkWrap: true,
+                        itemCount: _results.length,
+                        itemBuilder: (_, i) {
+                          final p = _results[i];
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => Navigator.of(context).pop(p),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              child: Row(
+                                children: [
+                                  _Avatar(
+                                    name: p.name,
+                                    url: p.avatarUrl,
+                                    size: 38,
+                                    accent: accent,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          p.name,
+                                          style: TextStyle(
+                                            color: context.fg,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        if (p.swingId.isNotEmpty)
+                                          Text(
+                                            p.swingId,
+                                            style: TextStyle(
+                                              color: context.fgSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(Icons.add_circle_outline_rounded,
+                                      color: accent, size: 20),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
       ),
     );
   }

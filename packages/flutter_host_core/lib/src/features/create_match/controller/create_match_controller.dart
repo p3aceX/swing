@@ -41,6 +41,8 @@ class HostCreateMatchController extends StateNotifier<HostCreateMatchState> {
     required DateTime scheduledAt,
     required String format,
     required String matchType,
+    String? teamAId,
+    String? teamBId,
     int? customOvers,
     bool hasImpactPlayer = false,
     String? ballType,
@@ -54,6 +56,8 @@ class HostCreateMatchController extends StateNotifier<HostCreateMatchState> {
       final matchId = await _repository.createMatch(
         teamAName: teamAName,
         teamBName: teamBName,
+        teamAId: teamAId,
+        teamBId: teamBId,
         venueName: venueName,
         venueCity: venueCity,
         scheduledAt: scheduledAt,

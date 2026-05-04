@@ -78,7 +78,28 @@
       "Bash(adb devices *)",
       "Bash(adb logcat *)",
       "Bash(grep -E \"\\\\.\\(dart|ts|js\\)$\")",
-      "Bash(wait 45831)"
+      "Bash(wait 45831)",
+      "Bash(curl -s -X POST https://swing-backend-1007730655118.asia-south1.run.app/auth/check-phone -H 'Content-Type: application/json' -d '{\"phone\": \"7977690545\"}')",
+      "Bash(curl -s -X POST https://swing-backend-1007730655118.asia-south1.run.app/biz/phone-login -H 'Content-Type: application/json' -d '{\"phone\":\"+917977690545\",\"sessionId\":\"dummy\",\"otp\":\"000000\"}')",
+      "Bash(curl -s https://swing-backend-1007730655118.asia-south1.run.app/auth/check-phone -H 'Content-Type: application/json')",
+      "Bash(curl -s -X POST https://swing-backend-1007730655118.asia-south1.run.app/auth/biz/phone-login -H 'Content-Type: application/json' -d '{\"phone\":\"+917977690545\",\"sessionId\":\"dummy\",\"otp\":\"000000\"}')",
+      "Bash(curl -s -X POST https://swing-backend-1007730655118.asia-south1.run.app/auth/check-phone -H 'Content-Type: application/json' -d '{\"phone\": \"+917977690545\"}')",
+      "Bash(npx tsx -e ' *)",
+      "Bash(psql 'postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:6543/postgres?sslmode=require' -c ' *)",
+      "Bash(psql 'postgresql://postgres:Usangwan%23123@db.thhuiiasnvsoczeoidsd.supabase.co:5432/postgres?sslmode=require' -c ' *)",
+      "Bash(psql *)",
+      "Bash(gcloud artifacts *)",
+      "Bash(grep -n \"console.log\\\\\\(\\\\`\\\\[createLobby\\\\]\\\\|console.log\\\\\\(\\\\`\\\\[listOpenLobbies\\\\]\" /Users/sangwanhq/dhandha/swing/swing-backend/apps/api/src/modules/matchmaking/matchmaking.service.ts)",
+      "Bash(gcloud container images list-tags *)",
+      "Bash(echo \"Build PID: $!\")",
+      "Bash(npx prisma *)",
+      "Bash(grep -E \"\\\\.dart$\")",
+      "Bash(xargs find *)",
+      "Bash(grep -v \".js$\")",
+      "Bash(curl *)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.pdlqotoyxpzrylxvrmdm.supabase.co:6543/postgres?sslmode=require&pgbouncer=true&connection_limit=10\" npx prisma *)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.pdlqotoyxpzrylxvrmdm.supabase.co:6543/postgres?sslmode=require&pgbouncer=true&connection_limit=10\" node *)",
+      "Bash(grep \"\\\\.ts$\")"
     ]
   }
 }

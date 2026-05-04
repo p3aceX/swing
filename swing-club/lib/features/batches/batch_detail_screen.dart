@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants.dart';
 import '../../shared/widgets.dart';
 import 'batch_provider.dart';
 import 'batch_form_sheet.dart';
+import '../students/enroll_student_sheet.dart';
 
 class BatchDetailScreen extends ConsumerStatefulWidget {
   final String batchId;
@@ -62,7 +64,7 @@ class _BatchDetailScreenState extends ConsumerState<BatchDetailScreen>
           children: [
             _InfoTab(batch: batch),
             _ScheduleTab(batchId: widget.batchId),
-            _StudentsTab(batch: batch),
+            _StudentsTab(batch: batch, batchId: widget.batchId),
             _CoachesTab(batch: batch, batchId: widget.batchId),
           ],
         ),
@@ -164,6 +166,7 @@ class _ScheduleTabState extends ConsumerState<_ScheduleTab> {
               ),
       ),
       floatingActionButton: FloatingActionButton.small(
+        heroTag: null,
         onPressed: _showAddSheet,
         child: const Icon(Icons.add),
       ),
@@ -220,7 +223,7 @@ class _AddScheduleSheet extends ConsumerStatefulWidget {
 }
 
 class _AddScheduleSheetState extends ConsumerState<_AddScheduleSheet> {
-  int _day = 1;
+  final Set<int> _selectedDays = {1};
   final _startCtrl = TextEditingController(text: '08:00');
   final _endCtrl = TextEditingController(text: '10:00');
   final _noteCtrl = TextEditingController();
@@ -235,14 +238,20 @@ class _AddScheduleSheetState extends ConsumerState<_AddScheduleSheet> {
   }
 
   Future<void> _save() async {
+    if (_selectedDays.isEmpty) {
+      showSnack(context, 'Select at least one day');
+      return;
+    }
     setState(() => _isLoading = true);
     try {
-      await ref.read(batchSchedulesProvider(widget.batchId).notifier).add({
-        'dayOfWeek': _day,
-        'startTime': _startCtrl.text.trim(),
-        'endTime': _endCtrl.text.trim(),
-        if (_noteCtrl.text.isNotEmpty) 'groundNote': _noteCtrl.text.trim(),
-      });
+      for (final day in _selectedDays) {
+        await ref.read(batchSchedulesProvider(widget.batchId).notifier).add({
+          'dayOfWeek': day,
+          'startTime': _startCtrl.text.trim(),
+          'endTime': _endCtrl.text.trim(),
+          if (_noteCtrl.text.isNotEmpty) 'groundNote': _noteCtrl.text.trim(),
+        });
+      }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) showSnack(context, e.toString());
@@ -264,11 +273,30 @@ class _AddScheduleSheetState extends ConsumerState<_AddScheduleSheet> {
         children: [
           const Text('Add Schedule', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          DropdownButtonFormField<int>(
-            value: _day,
-            decoration: const InputDecoration(labelText: 'Day of Week'),
-            items: List.generate(7, (i) => DropdownMenuItem(value: i, child: Text(kDayLabels[i]))),
-            onChanged: (v) => setState(() => _day = v!),
+          const Text('Days', style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            children: List.generate(7, (i) {
+              final selected = _selectedDays.contains(i);
+              return GestureDetector(
+                onTap: () => setState(() =>
+                    selected ? _selectedDays.remove(i) : _selectedDays.add(i)),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected ? const Color(0xFF071B3D) : const Color(0xFFECEAE3),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(kDayLabels[i],
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? Colors.white : Colors.grey,
+                      )),
+                ),
+              );
+            }),
           ),
           const SizedBox(height: 12),
           Row(children: [
@@ -302,30 +330,207 @@ class _AddScheduleSheetState extends ConsumerState<_AddScheduleSheet> {
   }
 }
 
-class _StudentsTab extends StatelessWidget {
+class _StudentsTab extends ConsumerStatefulWidget {
   final Map<String, dynamic> batch;
+  final String batchId;
 
-  const _StudentsTab({required this.batch});
+  const _StudentsTab({required this.batch, required this.batchId});
+
+  @override
+  ConsumerState<_StudentsTab> createState() => _StudentsTabState();
+}
+
+class _StudentsTabState extends ConsumerState<_StudentsTab> {
+  final _searchCtrl = TextEditingController();
+  String _query     = '';
+  int    _shown     = 20;
+
+  static const _pageSize = 20;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _enrollments =>
+      (widget.batch['enrollments'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+
+  List<Map<String, dynamic>> get _filtered {
+    if (_query.isEmpty) return _enrollments;
+    final q = _query.toLowerCase();
+    return _enrollments.where((e) {
+      final user  = e['user'] as Map<String, dynamic>? ?? {};
+      final name  = (user['name']  as String? ?? '').toLowerCase();
+      final phone = (user['phone'] as String? ?? '').toLowerCase();
+      return name.contains(q) || phone.contains(q);
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final enrollments =
-        (batch['enrollments'] as List? ?? []).cast<Map<String, dynamic>>();
-    if (enrollments.isEmpty) return emptyBody('No students in this batch');
-    return ListView.separated(
-      itemCount: enrollments.length,
-      separatorBuilder: (_, __) => const Divider(),
-      itemBuilder: (_, i) {
-        final e = enrollments[i];
-        final user = e['user'] as Map<String, dynamic>? ?? {};
-        return ListTile(
-          title: Text(user['name'] as String? ?? '—',
-              style: const TextStyle(fontWeight: FontWeight.w500)),
-          trailing: statusBadge(e['enrollmentStatus'] as String? ?? ''),
-        );
-      },
+    final filtered = _filtered;
+    final visible  = filtered.take(_shown).toList();
+    final total    = _enrollments.length;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Column(
+        children: [
+          // ── search + count bar ──────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (v) => setState(() { _query = v; _shown = _pageSize; }),
+                  style: const TextStyle(fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Search by name or phone…',
+                    hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20, color: Colors.grey),
+                    suffixIcon: _query.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () => setState(() {
+                              _searchCtrl.clear();
+                              _query = '';
+                              _shown = _pageSize;
+                            }),
+                            child: const Icon(Icons.close_rounded, size: 18, color: Colors.grey),
+                          )
+                        : null,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFFE0DED6))),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFFE0DED6))),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFF071B3D))),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF071B3D),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _query.isEmpty
+                      ? '$total'
+                      : '${filtered.length}/$total',
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                ),
+              ),
+            ]),
+          ),
+          // ── list ───────────────────────────────────────────────────────
+          Expanded(
+            child: filtered.isEmpty
+                ? emptyBody(_query.isEmpty ? 'No students in this batch' : 'No results for "$_query"')
+                : ListView.separated(
+                    padding: const EdgeInsets.only(bottom: 100),
+                    itemCount: visible.length + (visible.length < filtered.length ? 1 : 0),
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      if (i == visible.length) {
+                        return TextButton(
+                          onPressed: () => setState(() => _shown += _pageSize),
+                          child: Text(
+                            'Load more (${filtered.length - visible.length} remaining)',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        );
+                      }
+                      final e    = visible[i];
+                      final user = e['user'] as Map<String, dynamic>? ?? {};
+                      final name  = user['name']  as String? ?? '—';
+                      final phone = user['phone'] as String? ?? '';
+                      final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                      final color   = _avatarColor(name);
+
+                      return ListTile(
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        leading: CircleAvatar(
+                          radius: 20,
+                          backgroundColor: color.withOpacity(0.15),
+                          child: Text(initial,
+                              style: TextStyle(
+                                  color: color,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15)),
+                        ),
+                        title: Text(name,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 14)),
+                        subtitle: phone.isNotEmpty
+                            ? Text(phone,
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.grey))
+                            : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            statusBadge(e['enrollmentStatus'] as String? ?? ''),
+                            if (phone.isNotEmpty) ...[
+                              const SizedBox(width: 4),
+                              IconButton(
+                                icon: const Icon(Icons.call_rounded,
+                                    size: 20, color: Color(0xFF2E7D32)),
+                                onPressed: () => launchUrl(
+                                    Uri.parse('tel:$phone'),
+                                    mode: LaunchMode.externalApplication),
+                                tooltip: 'Call $phone',
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.small(
+        heroTag: null,
+        onPressed: () => showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+          builder: (_) => EnrollStudentSheet(
+              batchId: widget.batchId,
+              batchName: widget.batch['name'] as String?),
+        ).then((enrolled) {
+          if (enrolled == true) ref.invalidate(batchDetailProvider(widget.batchId));
+        }),
+        child: const Icon(Icons.person_add_outlined),
+      ),
     );
   }
+}
+
+Color _avatarColor(String name) {
+  const colors = [
+    Color(0xFF1565C0), Color(0xFF6A1B9A), Color(0xFF00695C),
+    Color(0xFFE65100), Color(0xFF4527A0), Color(0xFF283593),
+    Color(0xFF558B2F), Color(0xFFC62828),
+  ];
+  return colors[name.codeUnits.fold(0, (a, b) => a + b) % colors.length];
 }
 
 class _CoachesTab extends ConsumerWidget {

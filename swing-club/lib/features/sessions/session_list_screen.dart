@@ -59,6 +59,7 @@ class _SessionListScreenState extends ConsumerState<SessionListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: null,
         onPressed: () => context.push('/sessions/report'),
         child: const Icon(Icons.assessment_outlined),
       ),

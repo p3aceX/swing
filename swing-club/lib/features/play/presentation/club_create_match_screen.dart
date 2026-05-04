@@ -1,40 +1,23 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_host_core/flutter_host_core.dart' as fhc;
+import 'package:flutter_host_core/flutter_host_core.dart' as host;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/auth/token_storage.dart';
+import '../../../providers/auth_provider.dart';
 
-/// Player-side wrapper around the shared [fhc.CreateMatchScreen].
-///
-/// Handles three concerns the shared package can't:
-///   1. Pulling the current user id from `TokenStorage` so "my squads" can
-///      be split from "playing for" in the picker.
-///   2. Wiring `go_router` navigation for back + post-toss routing.
-///   3. Honouring the legacy `?matchId=...` Resume entry — we load the
-///      match's team ids and hand off to [fhc.PlayingElevenScreen] directly.
-class CreateMatchScreen extends ConsumerStatefulWidget {
-  const CreateMatchScreen({
-    super.key,
-    this.existingMatchId,
-    this.existingTeamAName,
-    this.existingTeamBName,
-  });
+class ClubCreateMatchScreen extends ConsumerStatefulWidget {
+  const ClubCreateMatchScreen({super.key, this.existingMatchId});
 
   final String? existingMatchId;
-  final String? existingTeamAName;
-  final String? existingTeamBName;
 
   @override
-  ConsumerState<CreateMatchScreen> createState() => _CreateMatchScreenState();
+  ConsumerState<ClubCreateMatchScreen> createState() =>
+      _ClubCreateMatchScreenState();
 }
 
-class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
-  String? _userId;
-  bool _userIdLoaded = false;
-
-  fhc.HostMatchSummary? _resumeMatch;
+class _ClubCreateMatchScreenState extends ConsumerState<ClubCreateMatchScreen> {
+  host.HostMatchSummary? _resumeMatch;
   String? _resumeError;
   bool _resumeLoaded = false;
 
@@ -43,32 +26,21 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserId();
     if (_isResume) _loadResumeMatch();
-  }
-
-  Future<void> _loadUserId() async {
-    final id = await TokenStorage.getUserId();
-    if (!mounted) return;
-    setState(() {
-      _userId = id;
-      _userIdLoaded = true;
-    });
   }
 
   Future<void> _loadResumeMatch() async {
     final matchId = widget.existingMatchId!.trim();
     try {
       final summary = await ref
-          .read(fhc.hostCreateMatchRepositoryProvider)
+          .read(host.hostCreateMatchRepositoryProvider)
           .getMatch(matchId);
 
       var teamAId = summary.teamAId;
       var teamBId = summary.teamBId;
 
-      // Legacy matches don't have team IDs stored — resolve by name search.
       if (teamAId.isEmpty || teamBId.isEmpty) {
-        final dio = ref.read(fhc.hostDioProvider);
+        final dio = ref.read(host.hostDioProvider);
         teamAId = teamAId.isNotEmpty
             ? teamAId
             : await _resolveTeamId(dio, summary.teamAName);
@@ -81,7 +53,7 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
       setState(() {
         _resumeMatch = teamAId == summary.teamAId && teamBId == summary.teamBId
             ? summary
-            : fhc.HostMatchSummary(
+            : host.HostMatchSummary(
                 id: summary.id,
                 teamAId: teamAId,
                 teamBId: teamBId,
@@ -120,16 +92,14 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   }
 
   void _onTossCompleted(BuildContext ctx, String matchId) {
-    ctx.go('/score-match/${Uri.encodeComponent(matchId)}');
+    ctx.push('/play/score/${Uri.encodeComponent(matchId)}');
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isResume) {
       if (!_resumeLoaded) {
-        return const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        );
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
       }
       final summary = _resumeMatch;
       if (summary == null) {
@@ -146,7 +116,7 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
           ),
         );
       }
-      return fhc.PlayingElevenScreen(
+      return host.PlayingElevenScreen(
         matchId: summary.id,
         teamAId: summary.teamAId,
         teamAName: summary.teamAName,
@@ -157,16 +127,9 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
       );
     }
 
-    // Fresh-create flow. Wait for the user id once so the picker can show
-    // the OWNER badge from the very first build.
-    if (!_userIdLoaded) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return fhc.CreateMatchScreen(
-      currentUserId: _userId,
+    final currentUserId = ref.watch(authProvider).userId;
+    return host.CreateMatchScreen(
+      currentUserId: currentUserId,
       onTossCompleted: _onTossCompleted,
       onBack: () => context.pop(),
     );

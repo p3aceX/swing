@@ -31,6 +31,7 @@ class BatchListScreen extends ConsumerWidget {
               ),
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: null,
         backgroundColor: _kNavy,
         onPressed: () => context.push('/batches/new'),
         child: const Icon(Icons.add, color: Colors.white),

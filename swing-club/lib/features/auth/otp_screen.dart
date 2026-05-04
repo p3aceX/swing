@@ -32,10 +32,12 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   bool _canResend   = false;
   int  _countdown   = 30;
   Timer? _timer;
+  late String _sessionId;
 
   @override
   void initState() {
     super.initState();
+    _sessionId = widget.sessionId;
     _startCountdown();
   }
 
@@ -65,16 +67,29 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     if (!_canResend) return;
     setState(() => _canResend = false);
     try {
-      final rawPhone = widget.phone.replaceAll('+91', '');
-      final res = await _dio.get(
-        'https://2factor.in/API/V1/$kTwoFactorKey/SMS/$rawPhone/AUTOGEN',
+      final res = await _dio.post(
+        '$kBackendBaseUrl/auth/biz/send-otp',
+        data: {'phone': widget.phone},
       );
-      if (res.data['Status'] == 'Success') {
+      if (res.data['success'] == true) {
+        setState(() => _sessionId = res.data['data']['sessionId'] as String);
         _startCountdown();
         if (mounted) showSnack(context, 'OTP resent successfully');
+      } else {
+        final msg = res.data['message'] as String? ?? 'Failed to resend OTP';
+        if (mounted) showSnack(context, msg);
       }
-    } catch (_) {
-      if (mounted) showSnack(context, 'Failed to resend OTP');
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final raw    = e.response?.data;
+      final body   = raw is Map ? raw : null;
+      final errObj = body?['error'];
+      final errMap = errObj is Map ? errObj : null;
+      final msg    = (body?['message'] ?? errMap?['message']
+                      ?? 'Failed to resend OTP (${e.response?.statusCode})').toString();
+      showSnack(context, msg);
+    } catch (e) {
+      if (mounted) showSnack(context, 'Network error: $e');
     }
   }
 
@@ -83,7 +98,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     try {
       final body = <String, dynamic>{
         'phone':     widget.phone,
-        'sessionId': widget.sessionId,
+        'sessionId': _sessionId,
         'otp':       otp,
       };
       if (widget.isNewUser && widget.name != null) {

@@ -29,6 +29,13 @@ String _ballTypeLabel(String bt) => switch (bt) {
       _ => bt,
     };
 
+String? _formatOversHint(MatchFormat f) => switch (f) {
+      MatchFormat.t10 => '10 overs',
+      MatchFormat.t20 => '20 overs',
+      MatchFormat.odi => '50 overs',
+      _ => null,
+    };
+
 // ── Format helpers ────────────────────────────────────────────────────────────
 
 extension _FormatApi on MatchFormat {
@@ -207,6 +214,26 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         setState(() => _lobbyState = _LobbyState.idle);
       }
     } catch (_) {}
+  }
+
+  Future<void> _instantChallenge(MmOpenLobby lobby) async {
+    if (lobby.unitId == null || _team == null) return;
+    final pick = MmGroundSlotPick(
+      ground: MmGround(
+        id: lobby.unitId!,
+        name: lobby.groundName.isNotEmpty ? lobby.groundName : (lobby.arenaName.isNotEmpty ? lobby.arenaName : 'Ground'),
+        area: lobby.arenaName,
+        slots: [],
+      ),
+      slot: MmSlot(
+        time: lobby.slotTime,
+        unitId: lobby.unitId!,
+        hasOpponent: true,
+        pricePerTeamPaise: lobby.pricePerTeamPaise,
+      ),
+    );
+    setState(() => _picks = [pick]);
+    await _enterLobby();
   }
 
   Future<void> _leaveLobby() async {
@@ -464,6 +491,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                   onAddPick: _addPick,
                   onRemovePick: _removePick,
                   onEnter: _enterLobby,
+                  onInstantChallenge: _instantChallenge,
                   onLeave: _leaveLobby,
                   onConfirm: _confirmMatch,
                   onDecline: _declineMatch,
@@ -1113,6 +1141,7 @@ class _FindTab extends StatelessWidget {
     required this.onAddPick,
     required this.onRemovePick,
     required this.onEnter,
+    required this.onInstantChallenge,
     required this.onLeave,
     required this.onConfirm,
     required this.onDecline,
@@ -1133,6 +1162,7 @@ class _FindTab extends StatelessWidget {
   final ValueChanged<MmGroundSlotPick> onAddPick;
   final ValueChanged<MmGroundSlotPick> onRemovePick;
   final VoidCallback onEnter;
+  final ValueChanged<MmOpenLobby> onInstantChallenge;
   final VoidCallback onLeave;
   final VoidCallback onConfirm;
   final VoidCallback onDecline;
@@ -1161,6 +1191,7 @@ class _FindTab extends StatelessWidget {
             onAddPick: onAddPick,
             onRemovePick: onRemovePick,
             onEnter: onEnter,
+            onInstantChallenge: onInstantChallenge,
           ),
         _LobbyState.searching => _SearchingFind(
             key: const ValueKey('searching'),
@@ -1204,6 +1235,7 @@ class _IdleFind extends ConsumerStatefulWidget {
     required this.onAddPick,
     required this.onRemovePick,
     required this.onEnter,
+    required this.onInstantChallenge,
   });
 
   final MmTeam? team;
@@ -1220,6 +1252,7 @@ class _IdleFind extends ConsumerStatefulWidget {
   final ValueChanged<MmGroundSlotPick> onAddPick;
   final ValueChanged<MmGroundSlotPick> onRemovePick;
   final VoidCallback onEnter;
+  final ValueChanged<MmOpenLobby> onInstantChallenge;
 
   @override
   ConsumerState<_IdleFind> createState() => _IdleFindState();
@@ -1274,7 +1307,6 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   title: 'Your Team',
                   activeStep: _activeStep,
                   summary: widget.team?.name,
-                  summaryIcon: Icons.groups_rounded,
                   onEdit: () => _goTo(1),
                   child: teamsAsync.when(
                     loading: () => const Padding(
@@ -1299,7 +1331,6 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
 
                 // ── Step 2: Format ────────────────────────────────────
                 _StepCard(
@@ -1307,13 +1338,9 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   title: 'Format',
                   activeStep: _activeStep,
                   locked: widget.team == null,
-                  summary: [
-                    widget.format == MatchFormat.custom
-                        ? 'Custom · $_customOvers overs'
-                        : widget.format.label,
-                    if (widget.ballType != null) _ballTypeLabel(widget.ballType!),
-                  ].join(' · '),
-                  summaryIcon: Icons.sports_cricket_rounded,
+                  summary: widget.format == MatchFormat.custom
+                      ? 'Custom · $_customOvers ov'
+                      : widget.format.label,
                   onEdit: () => _goTo(2),
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 16),
@@ -1325,10 +1352,11 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                           runSpacing: 8,
                           children: MatchFormat.values.map((f) {
                             final sel = widget.format == f;
+                            final hint = _formatOversHint(f);
                             return GestureDetector(
                               onTap: () {
                                 widget.onFormat(f);
-                                // Stay on step 2 — user must still pick ball type
+                                if (f != MatchFormat.custom) _goTo(3);
                               },
                               behavior: HitTestBehavior.opaque,
                               child: AnimatedContainer(
@@ -1339,53 +1367,31 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                                   color: sel ? context.ctaBg : context.panel,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: Text(
-                                  f.label,
-                                  style: TextStyle(
-                                    color: sel ? context.ctaFg : context.fg,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Ball Type',
-                          style: TextStyle(
-                            color: context.fgSub,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
-                            final sel = widget.ballType == bt;
-                            return GestureDetector(
-                              onTap: () {
-                                widget.onBallType(bt);
-                                if (widget.format != MatchFormat.custom) _goTo(3);
-                              },
-                              behavior: HitTestBehavior.opaque,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 140),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: sel ? context.ctaBg : context.panel,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  _ballTypeLabel(bt),
-                                  style: TextStyle(
-                                    color: sel ? context.ctaFg : context.fg,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      f.label,
+                                      style: TextStyle(
+                                        color: sel ? context.ctaFg : context.fg,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    if (hint != null) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        hint,
+                                        style: TextStyle(
+                                          color: sel
+                                              ? context.ctaFg.withValues(alpha: 0.65)
+                                              : context.fgSub,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             );
@@ -1448,7 +1454,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
-                                    'Confirm',
+                                    'Next',
                                     style: TextStyle(
                                       color: context.ctaFg,
                                       fontSize: 13,
@@ -1464,103 +1470,118 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
 
-                // ── Step 3: Date ──────────────────────────────────────
+                // ── Step 3: Ball Type ─────────────────────────────────
                 _StepCard(
                   step: 3,
+                  title: 'Ball Type',
+                  activeStep: _activeStep,
+                  locked: widget.team == null,
+                  summary: widget.ballType != null
+                      ? _ballTypeLabel(widget.ballType!)
+                      : null,
+                  onEdit: () => _goTo(3),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']
+                          .map((bt) {
+                        final sel = widget.ballType == bt;
+                        final ballColor = _ballTypeColor(bt);
+                        return GestureDetector(
+                          onTap: () {
+                            widget.onBallType(bt);
+                            _goTo(4);
+                          },
+                          behavior: HitTestBehavior.opaque,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            padding:
+                                const EdgeInsets.fromLTRB(10, 10, 14, 10),
+                            decoration: BoxDecoration(
+                              color: sel
+                                  ? ballColor.withValues(alpha: 0.1)
+                                  : context.panel,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: sel ? ballColor : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 9,
+                                  height: 9,
+                                  decoration: BoxDecoration(
+                                    color: ballColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 7),
+                                Text(
+                                  _ballTypeLabel(bt),
+                                  style: TextStyle(
+                                    color: sel ? ballColor : context.fg,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+
+                // ── Step 4: Date ──────────────────────────────────────
+                _StepCard(
+                  step: 4,
                   title: 'Date',
                   activeStep: _activeStep,
                   locked: widget.team == null,
                   summary: _dateLabel(widget.date),
-                  summaryIcon: Icons.calendar_today_rounded,
-                  onEdit: () => _goTo(3),
+                  onEdit: () => _goTo(4),
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: _DateStrip(
                       selected: widget.date,
                       onSelect: (d) {
                         widget.onDate(d);
-                        _goTo(4);
+                        _goTo(5);
                       },
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
 
-                // ── Step 4: Grounds ───────────────────────────────────
+                // ── Step 5: Grounds ───────────────────────────────────
                 _StepCard(
-                  step: 4,
+                  step: 5,
                   title: 'Ground & Slot',
                   activeStep: _activeStep,
                   locked: widget.team == null,
+                  isLast: true,
                   summary: widget.picks.isEmpty
                       ? null
-                      : '${widget.picks.length} preference${widget.picks.length > 1 ? 's' : ''}',
-                  summaryIcon: Icons.location_on_rounded,
-                  onEdit: () => _goTo(4),
+                      : '${widget.picks.length} pick${widget.picks.length > 1 ? 's' : ''}',
+                  onEdit: () => _goTo(5),
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (widget.picks.isEmpty)
-                          GestureDetector(
-                            onTap: _openGroundSheet,
-                            behavior: HitTestBehavior.opaque,
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              decoration: BoxDecoration(
-                                color: context.panel,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: context.stroke.withValues(alpha: 0.5)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.add_rounded,
-                                      color: context.fgSub, size: 16),
-                                  const SizedBox(width: 6),
-                                  Text('Add ground & slot',
-                                      style: TextStyle(
-                                          color: context.fgSub,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600)),
-                                ],
-                              ),
-                            ),
-                          )
-                        else ...[
-                          ...widget.picks.map((p) => _PickRow(
-                                pick: p,
-                                onRemove: () => widget.onRemovePick(p),
-                              )),
-                          if (widget.picks.length < 3)
-                            GestureDetector(
-                              onTap: _openGroundSheet,
-                              behavior: HitTestBehavior.opaque,
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 2, bottom: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.add_rounded,
-                                        color: context.fgSub, size: 14),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Add another  ${widget.picks.length}/3',
-                                      style: TextStyle(
-                                          color: context.fgSub,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                        ],
-                      ],
+                    child: _Step4Content(
+                      date: widget.date,
+                      format: widget.format,
+                      ballType: widget.ballType,
+                      ownTeam: widget.team,
+                      picks: widget.picks,
+                      onAddPick: widget.onAddPick,
+                      onRemovePick: widget.onRemovePick,
+                      onInstantChallenge: widget.onInstantChallenge,
+                      onOpenGroundSheet: _openGroundSheet,
                     ),
                   ),
                 ),
@@ -1579,41 +1600,51 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         ),
         Padding(
           padding: EdgeInsets.fromLTRB(
-              20, 10, 20, 16 + MediaQuery.of(context).padding.bottom),
+              20, 12, 20, 16 + MediaQuery.of(context).padding.bottom),
           child: GestureDetector(
             onTap: canEnter ? widget.onEnter : null,
             behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
-              height: 52,
+              height: 56,
               decoration: BoxDecoration(
                 color: canEnter ? context.ctaBg : context.panel,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
               ),
               alignment: Alignment.center,
               child: widget.loading
                   ? SizedBox(
-                      width: 18,
-                      height: 18,
+                      width: 20,
+                      height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: context.ctaFg),
+                          strokeWidth: 2.2, color: context.ctaFg),
                     )
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.radar_rounded,
-                            color: canEnter ? context.ctaFg : context.fgSub,
-                            size: 17),
-                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.radar_rounded,
+                          color: canEnter ? context.ctaFg : context.fgSub,
+                          size: 19,
+                        ),
+                        const SizedBox(width: 9),
                         Text(
-                          canEnter ? 'Find Rivals' : 'Complete setup to continue',
+                          canEnter ? 'Find Rivals' : 'Complete all steps',
                           style: TextStyle(
                             color: canEnter ? context.ctaFg : context.fgSub,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
                           ),
                         ),
+                        if (canEnter) ...[
+                          const SizedBox(width: 8),
+                          Icon(
+                            Icons.arrow_forward_rounded,
+                            color: context.ctaFg.withValues(alpha: 0.7),
+                            size: 16,
+                          ),
+                        ],
                       ],
                     ),
             ),
@@ -1624,7 +1655,225 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   }
 }
 
-// ── Step card (flat, no container) ───────────────────────────────────────────
+// ── Step 4 content: instant lobbies + manual ground picker ───────────────────
+
+class _Step4Content extends ConsumerWidget {
+  const _Step4Content({
+    required this.date,
+    required this.format,
+    required this.ballType,
+    required this.ownTeam,
+    required this.picks,
+    required this.onAddPick,
+    required this.onRemovePick,
+    required this.onInstantChallenge,
+    required this.onOpenGroundSheet,
+  });
+
+  final DateTime date;
+  final MatchFormat format;
+  final String? ballType;
+  final MmTeam? ownTeam;
+  final List<MmGroundSlotPick> picks;
+  final ValueChanged<MmGroundSlotPick> onAddPick;
+  final ValueChanged<MmGroundSlotPick> onRemovePick;
+  final ValueChanged<MmOpenLobby> onInstantChallenge;
+  final VoidCallback onOpenGroundSheet;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final lobbiesAsync = ref.watch(
+      mmOpenLobbiesProvider((date: dateStr, format: format.apiValue)),
+    );
+
+    final matchingLobbies = lobbiesAsync.valueOrNull
+            ?.where((l) =>
+                (ownTeam == null || l.teamName != ownTeam!.name) &&
+                (ballType == null || l.ballType == null || l.ballType == ballType))
+            .toList() ??
+        [];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Instant challenge section ──────────────────────────────────
+        if (matchingLobbies.isNotEmpty) ...[
+          Row(
+            children: [
+              const Text('⚡', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+              Text(
+                'Teams already waiting',
+                style: TextStyle(
+                  color: context.accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...matchingLobbies.map((lobby) => _InstantLobbyRow(
+                lobby: lobby,
+                onChallenge: () => onInstantChallenge(lobby),
+              )),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: Divider(color: context.stroke.withValues(alpha: 0.5))),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or add your own',
+                  style: TextStyle(color: context.fgSub, fontSize: 11, fontWeight: FontWeight.w500),
+                ),
+              ),
+              Expanded(child: Divider(color: context.stroke.withValues(alpha: 0.5))),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // ── Manual ground picks ────────────────────────────────────────
+        if (picks.isEmpty)
+          GestureDetector(
+            onTap: onOpenGroundSheet,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: context.panel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: context.stroke.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_rounded, color: context.fgSub, size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Add ground & slot',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else ...[
+          ...picks.map((p) => _PickRow(
+                pick: p,
+                onRemove: () => onRemovePick(p),
+              )),
+          if (picks.length < 3)
+            GestureDetector(
+              onTap: onOpenGroundSheet,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.add_rounded, color: context.fgSub, size: 14),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Add another  ${picks.length}/3',
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _InstantLobbyRow extends StatelessWidget {
+  const _InstantLobbyRow({required this.lobby, required this.onChallenge});
+  final MmOpenLobby lobby;
+  final VoidCallback onChallenge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: context.accent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: context.accent.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  lobby.teamName,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (lobby.groundName.isNotEmpty) lobby.groundName
+                    else if (lobby.arenaName.isNotEmpty) lobby.arenaName,
+                    lobby.displaySlot,
+                  ].where((s) => s.isNotEmpty).join('  ·  '),
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: onChallenge,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: context.accent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Challenge',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Step card (timeline stepper) ─────────────────────────────────────────────
 
 class _StepCard extends StatelessWidget {
   const _StepCard({
@@ -1634,8 +1883,8 @@ class _StepCard extends StatelessWidget {
     required this.child,
     required this.onEdit,
     this.summary,
-    this.summaryIcon,
     this.locked = false,
+    this.isLast = false,
   });
 
   final int step;
@@ -1644,49 +1893,63 @@ class _StepCard extends StatelessWidget {
   final Widget child;
   final VoidCallback onEdit;
   final String? summary;
-  final IconData? summaryIcon;
   final bool locked;
+  final bool isLast;
 
   bool get _isActive => activeStep == step;
   bool get _isDone => summary != null && activeStep > step;
 
   @override
   Widget build(BuildContext context) {
+    final lineColor = _isDone
+        ? context.success.withValues(alpha: 0.4)
+        : context.stroke.withValues(alpha: 0.25);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header row
+        // ── Header row ─────────────────────────────────────────────
         GestureDetector(
           onTap: (!locked && _isDone) ? onEdit : null,
           behavior: HitTestBehavior.opaque,
           child: Row(
             children: [
-              // Step indicator
+              // Circle
               AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 24,
-                height: 24,
+                duration: const Duration(milliseconds: 220),
+                width: 26,
+                height: 26,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: _isDone
                       ? context.success
                       : _isActive
                           ? context.ctaBg
-                          : context.stroke.withValues(alpha: 0.35),
+                          : context.stroke.withValues(alpha: 0.2),
+                  border: _isActive
+                      ? Border.all(
+                          color: context.accent.withValues(alpha: 0.35),
+                          width: 2,
+                        )
+                      : null,
                 ),
                 alignment: Alignment.center,
                 child: _isDone
-                    ? const Icon(Icons.check_rounded, color: Colors.white, size: 13)
+                    ? const Icon(Icons.check_rounded,
+                        color: Colors.white, size: 13)
                     : Text(
                         '$step',
                         style: TextStyle(
-                          color: _isActive ? context.ctaFg : context.fgSub,
+                          color: _isActive
+                              ? context.ctaFg
+                              : context.fgSub.withValues(alpha: 0.4),
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 14),
+              // Title
               Expanded(
                 child: Row(
                   children: [
@@ -1694,12 +1957,15 @@ class _StepCard extends StatelessWidget {
                       title,
                       style: TextStyle(
                         color: locked
-                            ? context.fgSub.withValues(alpha: 0.35)
-                            : _isDone
-                                ? context.fgSub
-                                : context.fg,
-                        fontSize: 14,
-                        fontWeight: _isActive ? FontWeight.w800 : FontWeight.w600,
+                            ? context.fgSub.withValues(alpha: 0.28)
+                            : _isActive
+                                ? context.fg
+                                : _isDone
+                                    ? context.fgSub
+                                    : context.fgSub.withValues(alpha: 0.4),
+                        fontSize: _isActive ? 15 : 14,
+                        fontWeight:
+                            _isActive ? FontWeight.w800 : FontWeight.w600,
                         letterSpacing: -0.2,
                       ),
                     ),
@@ -1710,40 +1976,53 @@ class _StepCard extends StatelessWidget {
                           summary!,
                           style: TextStyle(
                             color: context.fgSub,
-                            fontSize: 13,
+                            fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
                           overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ] else
+                      const Spacer(),
+                    if (_isDone) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        'Edit',
+                        style: TextStyle(
+                          color: context.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
                   ],
                 ),
               ),
-              if (_isDone)
-                Text(
-                  'Edit',
-                  style: TextStyle(
-                    color: context.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
             ],
           ),
         ),
-        // Expanded content
+        // ── Content (indented to align with title) ────────────────
         AnimatedCrossFade(
-          duration: const Duration(milliseconds: 200),
-          crossFadeState: _isActive
-              ? CrossFadeState.showFirst
-              : CrossFadeState.showSecond,
+          duration: const Duration(milliseconds: 220),
+          crossFadeState:
+              _isActive ? CrossFadeState.showFirst : CrossFadeState.showSecond,
           firstChild: Padding(
-            padding: const EdgeInsets.only(left: 34, top: 14),
+            padding: const EdgeInsets.only(left: 40, top: 14),
             child: child,
           ),
           secondChild: const SizedBox.shrink(),
         ),
+        // ── Connector stub to next step ───────────────────────────
+        if (!isLast)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, top: 5),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 260),
+              width: 1.5,
+              height: 18,
+              color: lineColor,
+            ),
+          ),
       ],
     );
   }
@@ -3299,44 +3578,68 @@ class _DateStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final today = DateTime.now();
     final days = List.generate(
-        14, (i) => DateTime(today.year, today.month, today.day + i));
+        21, (i) => DateTime(today.year, today.month, today.day + i));
+
     return SizedBox(
-      height: 68,
+      height: 72,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: days.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (_, i) {
           final d = days[i];
           final isSel = DateUtils.isSameDay(d, selected);
           final isToday = i == 0;
+          final dayOfWeek = d.weekday; // 1=Mon … 7=Sun
+          final isWeekend = dayOfWeek == 6 || dayOfWeek == 7;
+          final isNewMonth = !isToday && d.month != today.month && d.day == 1;
+
           return GestureDetector(
             onTap: () => onSelect(d),
+            behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              width: 54,
+              duration: const Duration(milliseconds: 150),
+              width: isToday ? 62 : 52,
               decoration: BoxDecoration(
-                color: isSel ? context.ctaBg : context.panel,
-                borderRadius: BorderRadius.circular(12),
+                color: isSel
+                    ? context.ctaBg
+                    : isWeekend && !isSel
+                        ? context.panel.withValues(alpha: 0.7)
+                        : context.panel,
+                borderRadius: BorderRadius.circular(14),
+                border: isSel
+                    ? null
+                    : isWeekend
+                        ? Border.all(
+                            color: context.stroke.withValues(alpha: 0.5))
+                        : null,
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    isToday ? 'Today' : DateFormat('EEE').format(d),
+                    isToday
+                        ? 'Today'
+                        : isNewMonth
+                            ? DateFormat('MMM').format(d)
+                            : DateFormat('EEE').format(d),
                     style: TextStyle(
-                      color: isSel ? context.ctaFg.withValues(alpha: 0.7) : context.fgSub,
+                      color: isSel
+                          ? context.ctaFg.withValues(alpha: 0.75)
+                          : context.fgSub,
                       fontSize: isToday ? 9 : 10,
                       fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     '${d.day}',
                     style: TextStyle(
                       color: isSel ? context.ctaFg : context.fg,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
                     ),
                   ),
                 ],

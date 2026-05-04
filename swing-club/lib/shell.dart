@@ -10,11 +10,11 @@ class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.navigationShell});
 
   static const _tabs = [
-    _Tab(Icons.home_outlined,         Icons.home_rounded,          'Home'),
-    _Tab(Icons.groups_outlined,       Icons.groups_rounded,        'Batches'),
-    _Tab(Icons.people_outline_rounded,Icons.people_rounded,        'Students'),
-    _Tab(Icons.calendar_today_outlined,Icons.today_rounded,        'Sessions'),
-    _Tab(Icons.payments_outlined,     Icons.payments_rounded,      'Payments'),
+    _Tab(Icons.home_outlined,           Icons.home_rounded,            'Home'),
+    _Tab(Icons.groups_outlined,         Icons.groups_rounded,          'Batches'),
+    _Tab(Icons.people_outline_rounded,  Icons.people_rounded,          'Students'),
+    _Tab(Icons.sports_cricket_outlined, Icons.sports_cricket_rounded,  'Play'),
+    _Tab(Icons.payments_outlined,       Icons.payments_rounded,        'Payments'),
   ];
 
   @override
@@ -86,7 +86,7 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.onMenuTap,
   });
 
-  static const _titles = ['', 'Batches', 'Students', 'Sessions', 'Payments'];
+  static const _titles = ['', 'Batches', 'Students', 'Play', 'Payments'];
 
   @override
   Size get preferredSize => const Size.fromHeight(56);

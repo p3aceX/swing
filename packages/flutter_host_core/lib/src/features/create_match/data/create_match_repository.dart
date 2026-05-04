@@ -73,6 +73,8 @@ class HostCreateMatchRepository {
     required DateTime scheduledAt,
     required String format,
     required String matchType,
+    String? teamAId,
+    String? teamBId,
     int? customOvers,
     bool hasImpactPlayer = false,
     String? ballType,
@@ -86,6 +88,8 @@ class HostCreateMatchRepository {
       data: {
         'teamAName': teamAName.trim(),
         'teamBName': teamBName.trim(),
+        if ((teamAId ?? '').isNotEmpty) 'teamAId': teamAId,
+        if ((teamBId ?? '').isNotEmpty) 'teamBId': teamBId,
         if (venueName.trim().isNotEmpty) 'venueName': venueName.trim(),
         if (venueCity.trim().isNotEmpty) 'venueCity': venueCity.trim(),
         'scheduledAt': scheduledAt.toUtc().toIso8601String(),
