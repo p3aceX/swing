@@ -241,7 +241,9 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _lobbyState = _LobbyState.idle; _error = _parseError(e); });
+      final msg = _parseError(e);
+      setState(() { _lobbyState = _LobbyState.idle; _error = msg; _tab = 1; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -1194,6 +1196,12 @@ class _PlayConfirmSheetState extends ConsumerState<_PlayConfirmSheet> {
   Widget build(BuildContext context) {
     final teamsAsync = ref.watch(mmTeamsProvider);
     final teams = teamsAsync.valueOrNull ?? [];
+    // Auto-select first team once loaded if nothing was pre-selected
+    if (_selected == null && teams.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _selected == null) setState(() => _selected = teams.first);
+      });
+    }
     final canConfirm = _selected != null;
 
     return Container(
