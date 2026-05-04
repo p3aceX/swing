@@ -123,14 +123,9 @@ export class MatchmakingService {
       }
     }
 
-    // eslint-disable-next-line no-console
-    console.log(`[MM] searchGrounds format=${input.format} duration=${duration}min date=${input.date} units=${units.length}`)
-
     const grounds = [] as any[]
     for (const unit of units) {
       const freeSlots = availableSlotsByUnit.get(unit.id) ?? []
-      // eslint-disable-next-line no-console
-      console.log(`[MM]   unit=${unit.id} arena="${unit.arena.name}" freeSlots=${freeSlots.length} slots=[${freeSlots.map(s => s.startTime).slice(0, 8).join(',')}${freeSlots.length > 8 ? '...' : ''}]`)
       const slots: Array<{ time: string; endTime: string; unitId: string; pricePerTeam: number; hasOpponent: boolean }> = []
 
       for (const s of freeSlots) {
@@ -173,20 +168,18 @@ export class MatchmakingService {
       seen.add(key)
     }
 
-    console.log(`[createLobby] userId=${userId} teamId=${input.teamId} format=${input.format} date=${input.date} picks=${JSON.stringify(input.picks)}`)
+    const player = await this.getPlayerProfile(userId)
     const team = await this.resolveCallerTeam(userId, input.teamId)
-    console.log(`[createLobby] resolved team=${team?.id} captainId=${team?.captainId}`)
     if (!team || team.id !== input.teamId) throw Errors.forbidden()
     const callerAge = await this.getTeamAgeGroup(team.id)
     const date = this.startOfDay(input.date)
     const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
-    console.log(`[createLobby] callerAge=${callerAge} date=${date.toISOString()} expiresAt=${expiresAt.toISOString()}`)
 
     const result = await prisma.$transaction(async (tx) => {
       const lobby = await tx.matchmakingLobby.create({
         data: {
           teamId: team.id,
-          playerId: team.captainId || '',
+          playerId: player.id,
           format: input.format,
           date,
           status: 'searching',
@@ -326,8 +319,6 @@ export class MatchmakingService {
     })
     const mySet = new Set(myTeamIds.map((t) => t.id))
     const today = this.startOfDay(new Date().toISOString().slice(0, 10))
-    console.log(`[listOpenLobbies] userId=${userId} playerId=${player.id} myTeams=[${[...mySet].join(',')}] today=${today.toISOString()}`)
-
     const lobbies = await prisma.matchmakingLobby.findMany({
       where: {
         status: 'searching',
@@ -345,15 +336,9 @@ export class MatchmakingService {
     })
 
     const lobbiesAny = lobbies as any[]
-    console.log(`[listOpenLobbies] raw DB rows=${lobbiesAny.length}`)
-    for (const l of lobbiesAny) {
-      console.log(`  lobby=${l.id} status=${l.status} teamId=${l.teamId} arenaId=${l.arenaId} date=${l.date?.toISOString()} expiresAt=${l.expiresAt?.toISOString()} picks=${l.picks.length}`)
-    }
-
     const teamIds: string[] = lobbiesAny.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
     const callerAge = input.ageGroup ?? this.deriveAgeGroup(player.dateOfBirth)
-    console.log(`[listOpenLobbies] callerAge=${callerAge} callerDob=${player.dateOfBirth}`)
 
     const groundIds = lobbiesAny.flatMap((l) => l.picks.map((p: any) => p.groundId))
     const units = groundIds.length
@@ -379,7 +364,6 @@ export class MatchmakingService {
         // Only filter by age group when both sides have an explicit group
         if (callerAge == null || lobbyAge == null) return true
         const pass = callerAge === lobbyAge
-        if (!pass) console.log(`[listOpenLobbies] FILTERED OUT lobby=${l.id} callerAge=${callerAge} lobbyAge=${lobbyAge}`)
         return pass
       })
       .map((l) => {
@@ -401,7 +385,6 @@ export class MatchmakingService {
           daysFromNow: this.daysFromNow(l.date),
         }
       })
-    console.log(`[listOpenLobbies] out=${out.length}`)
     return { lobbies: out }
   }
 
@@ -436,11 +419,6 @@ export class MatchmakingService {
     })
 
     // eslint-disable-next-line no-console
-    console.log(`[listLobbiesForArena] arenaId=${arenaId} found=${playerLobbies.length} lobbies`)
-    for (const l of playerLobbies) {
-      // eslint-disable-next-line no-console
-      console.log(`  lobby=${l.id} lobbyArenaId=${l.arenaId} teamId=${l.teamId} picks=${l.picks.length} pick0groundId=${l.picks[0]?.groundId}`)
-    }
 
     const teamIds: string[] = playerLobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)

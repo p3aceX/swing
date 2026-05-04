@@ -28,9 +28,9 @@ final mmGroundsProvider =
 
 typedef MmLobbiesQuery = ({String? date, String? format});
 
-/// Open lobbies for the Lobbies tab.
+/// Open lobbies for the Lobbies tab. autoDispose so it re-fetches on every visit.
 final mmOpenLobbiesProvider =
-    FutureProvider.family<List<MmOpenLobby>, MmLobbiesQuery>((ref, q) async {
+    FutureProvider.autoDispose.family<List<MmOpenLobby>, MmLobbiesQuery>((ref, q) async {
   final repo = ref.read(matchmakingRepositoryProvider);
   return repo.listOpenLobbies(date: q.date, format: q.format);
 });

@@ -29,14 +29,6 @@ class MatchmakingRepository {
     );
     final data = _unwrap(resp.data);
     final rawList = (data['grounds'] as List?) ?? [];
-    debugPrint('[MM] ── searchGrounds: format=$format date=$date ──');
-    debugPrint('[MM] raw unit entries: ${rawList.length}');
-    for (final g in rawList.whereType<Map<String, dynamic>>()) {
-      final slots = (g['slots'] as List?) ?? [];
-      final slotInfo = slots.whereType<Map<String, dynamic>>()
-          .map((s) => '${s['time']}→${s['endTime'] ?? '?'}').toList();
-      debugPrint('[MM] unit=${g['unitId']} arena="${g['name']}" slots(${slotInfo.length}): $slotInfo');
-    }
     final raw = rawList
         .whereType<Map<String, dynamic>>()
         .map(MmGround.fromJson)
@@ -104,7 +96,6 @@ class MatchmakingRepository {
     String? date,
     String? format,
   }) async {
-    debugPrint('[OpenLobbies] GET ${ApiEndpoints.matchmakingLobbies} date=$date format=$format');
     final resp = await _dio.get(
       ApiEndpoints.matchmakingLobbies,
       queryParameters: {
@@ -114,16 +105,10 @@ class MatchmakingRepository {
     );
     final data = _unwrap(resp.data);
     final rawList = (data['lobbies'] as List?) ?? [];
-    debugPrint('[OpenLobbies] raw lobbies count=${rawList.length}');
-    for (final l in rawList.whereType<Map<String, dynamic>>()) {
-      debugPrint('[OpenLobbies]   lobbyId=${l['lobbyId']} team=${l['teamName']} isArena=${l['isArenaLobby']} format=${l['format']} date=${l['date']} slot=${l['slotTime']}');
-    }
-    final lobbies = rawList
+    return rawList
         .whereType<Map<String, dynamic>>()
         .map(MmOpenLobby.fromJson)
         .toList();
-    debugPrint('[OpenLobbies] parsed=${lobbies.length}');
-    return lobbies;
   }
 
   Future<({String status, String? bookingId})> confirmMatch(

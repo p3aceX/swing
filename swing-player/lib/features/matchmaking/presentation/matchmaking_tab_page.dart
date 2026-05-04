@@ -109,7 +109,6 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       final repo = ref.read(matchmakingRepositoryProvider);
       final active = await repo.getActiveLobby();
       if (active == null || !mounted) return;
-      debugPrint('[MM] restored lobby=${active.lobbyId} status=${active.status}');
       setState(() {
         _lobbyId = active.lobbyId;
         if (active.status == 'matched' && active.match != null) {
@@ -120,9 +119,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         }
       });
       if (_lobbyState == _LobbyState.searching) _startPolling();
-    } catch (e) {
-      debugPrint('[MM] restoreActiveLobby error: $e');
-    }
+    } catch (_) {}
   }
 
   @override
@@ -162,7 +159,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     } catch (e) {
       setState(() {
         _lobbyState = _LobbyState.idle;
-        _error = _parseError(e);
+        _error = _parseError(e, isCreate: true);
       });
     }
   }
@@ -269,11 +266,11 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         (p) => p.slot.unitId == pick.slot.unitId && p.slot.time == pick.slot.time));
   }
 
-  String _parseError(Object e) {
+  String _parseError(Object e, {bool isCreate = false}) {
     final msg = e.toString();
     if (msg.contains('401')) return 'Session expired. Please log in again.';
-    if (msg.contains('400')) return 'Invalid request. Check your picks.';
-    if (msg.contains('404')) return 'Lobby not found.';
+    if (msg.contains('400')) return 'Invalid picks. Please try again.';
+    if (msg.contains('404')) return isCreate ? 'Could not create request. Try again.' : 'Request expired or not found.';
     return 'Something went wrong. Try again.';
   }
 
@@ -520,15 +517,9 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
         child: Text('Could not load open games', style: TextStyle(color: context.fgSub, fontSize: 13)),
       ),
       data: (lobbies) {
-        debugPrint('[OpenTab] total=${lobbies.length} ownLobby=${widget.ownLobby?.lobbyId}');
-        for (final l in lobbies) {
-          debugPrint('[OpenTab]   ${l.lobbyId} team=${l.teamName} isArena=${l.isArenaLobby} arena=${l.arenaName} date=${l.date} slot=${l.slotTime}');
-        }
-
         final others = widget.ownLobby != null
             ? lobbies.where((l) => l.lobbyId != widget.ownLobby!.lobbyId).toList()
             : lobbies;
-        debugPrint('[OpenTab] others=${others.length}');
 
         // Group by date
         final Map<String, List<MmOpenLobby>> byDate = {};
@@ -695,25 +686,29 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
                         ],
                       ),
                     )
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                      children: [
-                        if (widget.ownLobby != null) ...[
-                          _OpenSectionLabel(label: 'YOU'),
-                          _OwnLobbyRow(lobby: widget.ownLobby!, onLeave: widget.onLeave),
-                        ],
-                        if (filtered.isNotEmpty) ...[
-                          if (widget.ownLobby != null) const SizedBox(height: 16),
-                          _OpenSectionLabel(label: 'OTHERS · ${filtered.length}'),
-                          for (var i = 0; i < filtered.length; i++) ...[
-                            if (i > 0) Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
-                            _OpenLobbyRow(
-                              lobby: filtered[i],
-                              onCounter: () => widget.onCounter(filtered[i]),
-                            ),
+                  : RefreshIndicator(
+                      color: context.accent,
+                      onRefresh: () async => ref.invalidate(mmOpenLobbiesProvider(widget.query)),
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        children: [
+                          if (widget.ownLobby != null) ...[
+                            _OpenSectionLabel(label: 'YOU'),
+                            _OwnLobbyRow(lobby: widget.ownLobby!, onLeave: widget.onLeave),
+                          ],
+                          if (filtered.isNotEmpty) ...[
+                            if (widget.ownLobby != null) const SizedBox(height: 16),
+                            _OpenSectionLabel(label: 'OTHERS · ${filtered.length}'),
+                            for (var i = 0; i < filtered.length; i++) ...[
+                              if (i > 0) Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
+                              _OpenLobbyRow(
+                                lobby: filtered[i],
+                                onCounter: () => widget.onCounter(filtered[i]),
+                              ),
+                            ],
                           ],
                         ],
-                      ],
+                      ),
                     ),
             ),
           ],
@@ -895,7 +890,7 @@ class _OpenLobbyRow extends StatelessWidget {
                   '${lobby.displaySlot}${lobby.groundName.isNotEmpty ? '  ·  ${lobby.groundName}' : ''}',
                   style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
                 ),
-                if (lobby.isArenaLobby && lobby.arenaName.isNotEmpty) ...[
+                if (lobby.arenaName.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -1798,8 +1793,25 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
               child: groundsAsync.when(
                 loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 1.5)),
                 error: (_, __) => Center(
-                  child: Text('Could not load grounds',
-                      style: TextStyle(color: context.fgSub, fontSize: 13))),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.sports_cricket_rounded,
+                          size: 40, color: context.fgSub.withValues(alpha: 0.3)),
+                      const SizedBox(height: 12),
+                      Text('No slots available on this day',
+                          style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text('Try a different date',
+                          style: TextStyle(
+                              color: context.fgSub.withValues(alpha: 0.5),
+                              fontSize: 12)),
+                    ],
+                  ),
+                ),
                 data: (grounds) {
                   final filtered = _filterQuery.isEmpty
                       ? grounds
@@ -1807,8 +1819,26 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                           g.name.toLowerCase().contains(_filterQuery.toLowerCase()) ||
                           g.area.toLowerCase().contains(_filterQuery.toLowerCase())).toList();
                   if (filtered.isEmpty) {
-                    return Center(child: Text('No grounds found',
-                        style: TextStyle(color: context.fgSub, fontSize: 13)));
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.sports_cricket_rounded,
+                              size: 40, color: context.fgSub.withValues(alpha: 0.3)),
+                          const SizedBox(height: 12),
+                          Text('No slots available on this day',
+                              style: TextStyle(
+                                  color: context.fgSub,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text('Try a different date',
+                              style: TextStyle(
+                                  color: context.fgSub.withValues(alpha: 0.5),
+                                  fontSize: 12)),
+                        ],
+                      ),
+                    );
                   }
                   return ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),

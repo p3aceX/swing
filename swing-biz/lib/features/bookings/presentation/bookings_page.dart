@@ -706,7 +706,6 @@ class _InvitationsTab extends ConsumerWidget {
           child: CircularProgressIndicator(strokeWidth: 1.5, color: _accent));
     }
     if (allErrored) {
-      debugPrint('[InvitationsTab] ERROR all arenas failed');
       return Center(
         child: Text('Could not load invitations',
             style: TextStyle(color: _muted, fontSize: 13)),
@@ -721,11 +720,6 @@ class _InvitationsTab extends ConsumerWidget {
           for (final lobby in async.value!)
             if (seen.add(lobby.lobbyId)) (lobby, arena.id, arena.name),
     ];
-
-    debugPrint('[InvitationsTab] total lobbies=${combined.length}');
-    for (final (l, aId, _) in combined) {
-      debugPrint('[InvitationsTab]   arenaId=$aId lobby=${l.lobbyId} team=${l.teamName}');
-    }
 
     if (combined.isEmpty) {
       return Center(
