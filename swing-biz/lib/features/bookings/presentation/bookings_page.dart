@@ -375,12 +375,10 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   }
 
   void _showSplitBookingSheet(BuildContext context, DateTime date) {
-    final arena = widget.arena ?? widget.arenas.first;
     Navigator.of(context, rootNavigator: true)
         .push(MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) =>
-              SplitBookingSheet(arena: arena, initialDate: date),
+          builder: (_) => SplitBookingSheet(initialDate: date),
         ))
         .then((created) {
       if (created == true) {

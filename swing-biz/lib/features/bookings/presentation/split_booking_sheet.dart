@@ -3,6 +3,16 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../arena/services/arena_profile_providers.dart';
+
+String _ballTypeLabel(String bt) => switch (bt) {
+      'LEATHER' => 'Leather',
+      'TENNIS' => 'Tennis',
+      'TAPE' => 'Tape Ball',
+      'RUBBER' => 'Rubber',
+      _ => bt,
+    };
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 class _Team {
@@ -82,11 +92,11 @@ int _durationForFormat(String format) {
 class SplitBookingSheet extends ConsumerStatefulWidget {
   const SplitBookingSheet({
     super.key,
-    required this.arena,
+    this.arena,
     required this.initialDate,
   });
 
-  final ArenaListing arena;
+  final ArenaListing? arena;
   final DateTime initialDate;
 
   @override
@@ -95,6 +105,9 @@ class SplitBookingSheet extends ConsumerStatefulWidget {
 
 class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
   int _step = 0;
+
+  // Step 0
+  ArenaListing? _arena;
 
   // Step 1
   String _format = 'T20';
@@ -121,7 +134,11 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
   void initState() {
     super.initState();
     _date = widget.initialDate;
-    _fetchSlots();
+    if (widget.arena != null) {
+      _arena = widget.arena;
+      _step = 1;
+      _fetchSlots();
+    }
   }
 
   @override
@@ -142,20 +159,13 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
       final dio = ref.read(hostDioProvider);
       final dateStr = DateFormat('yyyy-MM-dd').format(_date);
       final duration = _durationForFormat(_format);
-      debugPrint('[SplitBooking] fetchSlots arenaId=${widget.arena.id} date=$dateStr durationMins=$duration');
       final resp = await dio.get(
-        '/arenas/${widget.arena.id}/slots',
+        '/arenas/${_arena!.id}/slots',
         queryParameters: {'date': dateStr, 'durationMins': duration},
       );
       final body = resp.data;
-      debugPrint('[SplitBooking] slots raw response: $body');
       final data = (body is Map) ? (body['data'] ?? body) : body;
       final groups = (data is Map) ? (data['unitGroups'] as List?) ?? [] : [];
-      debugPrint('[SplitBooking] unitGroups count: ${groups.length}');
-      for (final g in groups.whereType<Map>()) {
-        debugPrint('[SplitBooking]   group unitType=${g['unitType']} unitId=${g['unitId']} slots=${(g['availableSlots'] as List?)?.length ?? 0}');
-      }
-
       final slots = <_AvailableSlot>[];
       for (final g in groups.whereType<Map>()) {
         final unitType = g['unitType'] as String? ?? '';
@@ -173,14 +183,11 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
           ));
         }
       }
-      debugPrint('[SplitBooking] ground slots found: ${slots.length}');
       setState(() {
         _slots = slots;
         _loadingSlots = false;
       });
-    } catch (e, stack) {
-      debugPrint('[SplitBooking] fetchSlots ERROR: $e');
-      debugPrint('[SplitBooking] $stack');
+    } catch (e) {
       setState(() {
         _slotsError = 'Could not load slots';
         _loadingSlots = false;
@@ -236,13 +243,11 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         'teamName': _team!.name,
       };
       await dio.post(
-        '/bookings/arena/${widget.arena.id}/split',
+        '/bookings/arena/${_arena!.id}/split',
         data: payload,
       );
       if (mounted) Navigator.pop(context, true);
-    } catch (e, stack) {
-      debugPrint('[SplitBooking] submit ERROR: $e');
-      debugPrint('[SplitBooking] $stack');
+    } catch (e) {
       setState(() {
         _error = 'Something went wrong. Please try again.';
         _loading = false;
@@ -252,18 +257,23 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
 
   // ── navigation ────────────────────────────────────────────────────────────
 
+  bool get _step0Valid => _arena != null;
   bool get _step1Valid => _slot != null;
   bool get _step2Valid => _team != null;
 
   bool get _canProceed {
     if (_loading) return false;
-    if (_step == 0) return _step1Valid;
-    if (_step == 1) return _step2Valid;
+    if (_step == 0) return _step0Valid;
+    if (_step == 1) return _step1Valid;
+    if (_step == 2) return _step2Valid;
     return true;
   }
 
   void _proceed() {
-    if (_step < 2) {
+    if (_step == 0) {
+      setState(() => _step = 1);
+      _fetchSlots();
+    } else if (_step < 3) {
       setState(() => _step++);
     } else {
       _submit();
@@ -294,16 +304,18 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         centerTitle: false,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(2),
-          child: _StepBar(step: _step, total: 3),
+          child: _StepBar(step: _step, total: 4),
         ),
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 220),
         child: _step == 0
-            ? _buildStep1()
+            ? _buildStep0()
             : _step == 1
-                ? _buildStep2()
-                : _buildStep3(),
+                ? _buildStep1()
+                : _step == 2
+                    ? _buildStep2()
+                    : _buildStep3(),
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -337,7 +349,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
                               strokeWidth: 2, color: Colors.white),
                         )
                       : Text(
-                          _step < 2 ? 'Continue' : 'Create Invitation',
+                          _step < 3 ? 'Continue' : 'Create Invitation',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -352,11 +364,89 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
     );
   }
 
+  // ── Step 0: Select Arena ──────────────────────────────────────────────────
+
+  Widget _buildStep0() {
+    final arenasAsync = ref.watch(ownedArenasProvider);
+    return arenasAsync.when(
+      loading: () => const Center(
+        child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF111827)),
+      ),
+      error: (_, __) => const Center(
+        child: Text('Could not load arenas', style: TextStyle(color: Color(0xFF9CA3AF))),
+      ),
+      data: (arenas) => ListView(
+        key: const ValueKey(0),
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+        children: [
+          _SectionLabel(label: 'Select Arena'),
+          const SizedBox(height: 4),
+          const Text(
+            'Choose which arena this invitation is for.',
+            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          ...arenas.map((a) {
+            final selected = _arena?.id == a.id;
+            return GestureDetector(
+              onTap: () => setState(() => _arena = a),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                decoration: BoxDecoration(
+                  color: selected ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: selected ? const Color(0xFF111827) : const Color(0xFFE5E7EB),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            a.name,
+                            style: TextStyle(
+                              color: selected ? Colors.white : const Color(0xFF111827),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (a.address.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              a.address,
+                              style: TextStyle(
+                                color: selected ? Colors.white60 : const Color(0xFF9CA3AF),
+                                fontSize: 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (selected)
+                      const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   // ── Step 1: Format + Date + Slot (from API) ────────────────────────────────
 
   Widget _buildStep1() {
     return ListView(
-      key: const ValueKey(0),
+      key: const ValueKey(1),
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
       children: [
         _SectionLabel(label: 'Format'),
@@ -579,7 +669,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
 
   Widget _buildStep2() {
     return ListView(
-      key: const ValueKey(1),
+      key: const ValueKey(2),
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
       children: [
         _SectionLabel(label: 'Team'),
@@ -707,7 +797,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
     final s = _slot!;
     final dateStr = DateFormat('EEE, MMM d').format(_date);
     return ListView(
-      key: const ValueKey(2),
+      key: const ValueKey(3),
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
       children: [
         const Text(
@@ -733,7 +823,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
           ),
           child: Column(
             children: [
-              _ConfirmRow(label: 'Arena', value: widget.arena.name),
+              _ConfirmRow(label: 'Arena', value: _arena!.name),
               const SizedBox(height: 10),
               _ConfirmRow(label: 'Court', value: s.unitName),
               const SizedBox(height: 10),
