@@ -322,7 +322,8 @@ export class MatchmakingService {
       where: {
         status: 'searching',
         expiresAt: { gt: new Date() },
-        playerId: { not: player.id }, // never show the caller's own lobbies
+        // never show the caller's own lobbies; arena lobbies have playerId=null (always visible)
+        OR: [{ playerId: null }, { playerId: { not: player.id } }],
         // if date given → exact match; otherwise show all upcoming lobbies from today
         ...(input.date ? { date: this.startOfDay(input.date) } : { date: { gte: today } }),
         ...(input.format ? { format: input.format } : {}),
