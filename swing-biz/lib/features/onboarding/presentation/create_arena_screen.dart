@@ -324,6 +324,18 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
       }
       _log('submit: navigating to dashboard');
       if (mounted) context.go(AppRoutes.dashboard);
+    } on DioException catch (e) {
+      _log('submit: error $e');
+      if (!mounted) return;
+      final body = e.response?.data as Map?;
+      final code = (body?['code'] ?? (body?['error'] as Map?)?['code']) as String?;
+      final message = (body?['message'] ?? (body?['error'] as Map?)?['message'] ?? 'Could not create arena') as String;
+      if (code == 'BUSINESS_DETAILS_REQUIRED') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please complete business details first')));
+        context.go(AppRoutes.businessDetails);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     } catch (error) {
       _log('submit: error $error');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create arena: $error')));
