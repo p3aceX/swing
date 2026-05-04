@@ -144,11 +144,26 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/play/tournaments/:slug',
-        builder: (_, state) {
+        builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
+          final slug = state.pathParameters['slug']!;
+          final isHost = extra?['isHost'] as bool? ?? false;
+          final tournamentId = extra?['tournamentId'] as String? ?? slug;
           return host.HostTournamentViewerScreen(
-            slug: state.pathParameters['slug']!,
-            isHost: extra?['isHost'] as bool? ?? false,
+            slug: slug,
+            isHost: isHost,
+            callbacks: host.TournamentViewerCallbacks(
+              onBack: () => GoRouter.of(context).pop(),
+              onNavigateToMatch: (matchId) =>
+                  context.push('/play/matches/${Uri.encodeComponent(matchId)}'),
+              onNavigateToTeam: (teamId) =>
+                  context.push('/play/teams/${Uri.encodeComponent(teamId)}'),
+              onManage: isHost
+                  ? () => context.push(
+                      '/play/host-tournament/${Uri.encodeComponent(tournamentId)}',
+                      extra: extra)
+                  : null,
+            ),
           );
         },
       ),
