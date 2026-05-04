@@ -13,6 +13,14 @@ import 'matchmaking_providers.dart';
 
 // ── Ball type helpers ─────────────────────────────────────────────────────────
 
+Color _ballTypeColor(String bt) => switch (bt) {
+      'LEATHER' => const Color(0xFFB91C1C),
+      'TENNIS'  => const Color(0xFF65A30D),
+      'TAPE'    => const Color(0xFF374151),
+      'RUBBER'  => const Color(0xFFEA580C),
+      _         => const Color(0xFF6B7280),
+    };
+
 String _ballTypeLabel(String bt) => switch (bt) {
       'LEATHER' => 'Leather',
       'TENNIS' => 'Tennis',
@@ -967,21 +975,11 @@ class _OpenLobbyCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Format + ball type chips
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _MiniChip(label: lobby.format, context: context),
-                  if (lobby.ballType != null) ...[
-                    const SizedBox(width: 6),
-                    _MiniChip(label: _ballTypeLabel(lobby.ballType!), context: context),
-                  ],
-                ],
-              ),
+              _MiniChip(label: lobby.format, context: context),
             ],
           ),
-          const SizedBox(height: 12),
-          // ── Info row ──────────────────────────────────────────────────
+          const SizedBox(height: 10),
+          // ── Info rows ─────────────────────────────────────────────────
           Row(
             children: [
               Icon(Icons.access_time_rounded, size: 13, color: context.fgSub),
@@ -1004,6 +1002,26 @@ class _OpenLobbyCard extends StatelessWidget {
                 const Spacer(),
             ],
           ),
+          if (lobby.ballType != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(
+                  width: 11,
+                  height: 11,
+                  decoration: BoxDecoration(
+                    color: _ballTypeColor(lobby.ballType!),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  _ballTypeLabel(lobby.ballType!),
+                  style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ],
           if (lobby.arenaName.isNotEmpty) ...[
             const SizedBox(height: 6),
             Row(
@@ -1034,9 +1052,9 @@ class _OpenLobbyCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  lobby.isArenaLobby ? 'Book' : 'Counter',
-                  style: const TextStyle(
+                child: const Text(
+                  'Challenge',
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
