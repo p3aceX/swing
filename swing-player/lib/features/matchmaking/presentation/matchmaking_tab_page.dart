@@ -239,6 +239,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _lobbyState = _LobbyState.matched;
         _tab = 1; // reveal My Matchup in Find tab
       });
+      ref.invalidate(mmOpenLobbiesProvider((date: null, format: null)));
     } catch (e) {
       if (!mounted) return;
       final msg = _parseError(e);
@@ -466,30 +467,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                 // Tab 0: Open — no date filter so all upcoming lobbies show
                 _OpenTab(
                   query: (date: null, format: null),
-                  ownLobby: () {
-                    if (_lobbyState != _LobbyState.searching ||
-                        _lobbyId == null ||
-                        _team == null) return null;
-                    final now = DateTime.now();
-                    final today = DateTime(now.year, now.month, now.day);
-                    return MmOpenLobby(
-                      lobbyId: _lobbyId!,
-                      teamName: _team!.name,
-                      ageGroup: _team!.ageGroupLabel,
-                      format: _format.apiValue,
-                      ballType: _ballType,
-                      groundName: _picks.isNotEmpty
-                          ? _picks.first.ground.name
-                          : '',
-                      slotTime: _picks.isNotEmpty
-                          ? _picks.first.slot.time
-                          : '',
-                      date: _dateStr,
-                      daysFromNow:
-                          _date.difference(today).inDays,
-                    );
-                  }(),
-                  onLeave: _leaveLobby,
+                  ownLobbyId: _lobbyId,
                   onCounter: (lobby) {
                     showModalBottomSheet(
                       context: context,
@@ -608,13 +586,11 @@ class _OpenTab extends ConsumerStatefulWidget {
   const _OpenTab({
     required this.query,
     required this.onCounter,
-    this.ownLobby,
-    this.onLeave,
+    this.ownLobbyId,
   });
   final MmLobbiesQuery query;
   final ValueChanged<MmOpenLobby> onCounter;
-  final MmOpenLobby? ownLobby;
-  final VoidCallback? onLeave;
+  final String? ownLobbyId;
 
   @override
   ConsumerState<_OpenTab> createState() => _OpenTabState();
@@ -633,8 +609,8 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
         child: Text('Could not load open games', style: TextStyle(color: context.fgSub, fontSize: 13)),
       ),
       data: (lobbies) {
-        final others = widget.ownLobby != null
-            ? lobbies.where((l) => l.lobbyId != widget.ownLobby!.lobbyId).toList()
+        final others = widget.ownLobbyId != null
+            ? lobbies.where((l) => l.lobbyId != widget.ownLobbyId).toList()
             : lobbies;
 
         // Group by date
@@ -789,7 +765,7 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
               child: RefreshIndicator(
                 color: context.accent,
                 onRefresh: () async => ref.invalidate(mmOpenLobbiesProvider(widget.query)),
-                child: (widget.ownLobby == null && filtered.isEmpty)
+                child: filtered.isEmpty
                     ? ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         children: [
@@ -818,20 +794,11 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
                     : ListView(
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                         children: [
-                          if (widget.ownLobby != null) ...[
-                            _OpenSectionLabel(label: 'YOU'),
-                            _OwnLobbyRow(lobby: widget.ownLobby!, onLeave: widget.onLeave),
-                          ],
-                          if (filtered.isNotEmpty) ...[
-                            if (widget.ownLobby != null) const SizedBox(height: 16),
-                            if (widget.ownLobby != null)
-                              _OpenSectionLabel(label: 'OTHERS · ${filtered.length}'),
-                            for (final lobby in filtered)
-                              _OpenLobbyCard(
-                                lobby: lobby,
-                                onCounter: () => widget.onCounter(lobby),
-                              ),
-                          ],
+                          for (final lobby in filtered)
+                            _OpenLobbyCard(
+                              lobby: lobby,
+                              onCounter: () => widget.onCounter(lobby),
+                            ),
                         ],
                       ),
               ),
@@ -839,131 +806,6 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
           ],
         );
       },
-    );
-  }
-}
-
-class _OpenSectionLabel extends StatelessWidget {
-  const _OpenSectionLabel({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: context.fgSub.withValues(alpha: 0.5),
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.2,
-        ),
-      ),
-    );
-  }
-}
-
-class _OwnLobbyRow extends StatefulWidget {
-  const _OwnLobbyRow({required this.lobby, this.onLeave});
-  final MmOpenLobby lobby;
-  final VoidCallback? onLeave;
-
-  @override
-  State<_OwnLobbyRow> createState() => _OwnLobbyRowState();
-}
-
-class _OwnLobbyRowState extends State<_OwnLobbyRow>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      widget.lobby.teamName,
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    AnimatedBuilder(
-                      animation: _pulse,
-                      builder: (_, __) => Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(
-                              alpha: 0.4 + 0.6 * _pulse.value),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${widget.lobby.ageGroup}  ·  ${widget.lobby.format}  ·  ${widget.lobby.groundName}  ·  ${widget.lobby.displaySlot}  ·  ${widget.lobby.dateLabel}',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          GestureDetector(
-            onTap: widget.onLeave,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: context.panel,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'Leave',
-                style: TextStyle(
-                  color: context.fgSub,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
