@@ -216,12 +216,28 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     } catch (_) {}
   }
 
-  Future<void> _instantChallenge(MmOpenLobby lobby) async {
-    if (lobby.unitId == null || _team == null) return;
+  Future<void> _instantChallenge(MmOpenLobby lobby, {MmTeam? withTeam}) async {
+    if (lobby.unitId == null) return;
+    final team = withTeam ?? _team;
+    if (team == null) return;
+
+    final fmt = MatchFormat.values.firstWhere(
+      (f) => f.apiValue == lobby.format,
+      orElse: () => MatchFormat.t20,
+    );
+    DateTime date;
+    try {
+      date = DateTime.parse(lobby.date);
+    } catch (_) {
+      date = DateTime.now();
+    }
+
     final pick = MmGroundSlotPick(
       ground: MmGround(
         id: lobby.unitId!,
-        name: lobby.groundName.isNotEmpty ? lobby.groundName : (lobby.arenaName.isNotEmpty ? lobby.arenaName : 'Ground'),
+        name: lobby.groundName.isNotEmpty
+            ? lobby.groundName
+            : (lobby.arenaName.isNotEmpty ? lobby.arenaName : 'Ground'),
         area: lobby.arenaName,
         slots: [],
       ),
@@ -232,7 +248,13 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         pricePerTeamPaise: lobby.pricePerTeamPaise,
       ),
     );
-    setState(() => _picks = [pick]);
+    setState(() {
+      _team = team;
+      _format = fmt;
+      _ballType = lobby.ballType ?? _ballType;
+      _date = date;
+      _picks = [pick];
+    });
     await _enterLobby();
   }
 
@@ -342,7 +364,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
               children: [
                 Expanded(
                   child: Text(
-                    'Rivals',
+                    'Matchup',
                     style: TextStyle(
                       color: context.fg,
                       fontSize: 26,
@@ -453,19 +475,19 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                   }(),
                   onLeave: _leaveLobby,
                   onCounter: (lobby) {
-                    try {
-                      final fmt = MatchFormat.values.firstWhere(
-                        (f) => f.apiValue == lobby.format,
-                        orElse: () => MatchFormat.t20,
-                      );
-                      setState(() {
-                        _format = fmt;
-                        _date = DateTime.parse(lobby.date);
-                        _tab = 1;
-                      });
-                    } catch (_) {
-                      setState(() => _tab = 1);
-                    }
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => _PlayConfirmSheet(
+                        lobby: lobby,
+                        initialTeam: _team,
+                        onConfirm: (team) {
+                          Navigator.pop(context);
+                          _instantChallenge(lobby, withTeam: team);
+                        },
+                      ),
+                    );
                   },
                 ),
                 // Tab 1: Find
@@ -620,8 +642,6 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
         final filtered = (byDate[selected] ?? [])
             .where((l) => _ballTypeFilter == null || l.ballType == null || l.ballType == _ballTypeFilter)
             .toList();
-
-        final totalCount = others.length;
 
         return Column(
           children: [
@@ -1081,7 +1101,7 @@ class _OpenLobbyCard extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: const Text(
-                  'Challenge',
+                  'Play',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 13,
@@ -1117,6 +1137,444 @@ class _MiniChip extends StatelessWidget {
           fontSize: 10,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+}
+
+// ── Play confirmation sheet ───────────────────────────────────────────────────
+
+class _PlayConfirmSheet extends ConsumerStatefulWidget {
+  const _PlayConfirmSheet({
+    required this.lobby,
+    required this.initialTeam,
+    required this.onConfirm,
+  });
+
+  final MmOpenLobby lobby;
+  final MmTeam? initialTeam;
+  final ValueChanged<MmTeam> onConfirm;
+
+  @override
+  ConsumerState<_PlayConfirmSheet> createState() => _PlayConfirmSheetState();
+}
+
+class _PlayConfirmSheetState extends ConsumerState<_PlayConfirmSheet> {
+  MmTeam? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.initialTeam;
+  }
+
+  String get _initials {
+    final words = widget.lobby.teamName.trim().split(RegExp(r'\s+'));
+    if (words.length >= 2) return '${words[0][0]}${words[1][0]}'.toUpperCase();
+    return widget.lobby.teamName.isNotEmpty
+        ? widget.lobby.teamName[0].toUpperCase()
+        : '?';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final teamsAsync = ref.watch(mmTeamsProvider);
+    final teams = teamsAsync.valueOrNull ?? [];
+    final canConfirm = _selected != null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              MediaQuery.of(context).padding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+
+          // Title
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            child: Row(
+              children: [
+                Text(
+                  'Confirm Matchup',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Opponent details ─────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: context.surf,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: context.stroke),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Team row
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: context.panel,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          _initials,
+                          style: TextStyle(
+                            color: context.fg,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.lobby.teamName,
+                              style: TextStyle(
+                                color: context.fg,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                            if (widget.lobby.ageGroup.isNotEmpty &&
+                                widget.lobby.ageGroup != 'Open')
+                              Text(
+                                widget.lobby.ageGroup,
+                                style: TextStyle(
+                                    color: context.fgSub, fontSize: 11),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // Format chip
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: context.panel,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          widget.lobby.format,
+                          style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // Ball type
+                  if (widget.lobby.ballType != null) ...[
+                    Row(
+                      children: [
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: _ballTypeColor(widget.lobby.ballType!),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _ballTypeLabel(widget.lobby.ballType!),
+                          style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  // Time + ground
+                  Row(
+                    children: [
+                      Icon(Icons.access_time_rounded,
+                          size: 13, color: context.fgSub),
+                      const SizedBox(width: 4),
+                      Text(
+                        widget.lobby.displaySlot,
+                        style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500),
+                      ),
+                      if (widget.lobby.groundName.isNotEmpty) ...[
+                        Text('  ·  ',
+                            style: TextStyle(
+                                color: context.fgSub.withValues(alpha: 0.4),
+                                fontSize: 12)),
+                        Expanded(
+                          child: Text(
+                            widget.lobby.groundName,
+                            style: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (widget.lobby.arenaName.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.stadium_rounded,
+                            size: 13, color: context.accent),
+                        const SizedBox(width: 4),
+                        Text(
+                          widget.lobby.arenaName,
+                          style: TextStyle(
+                              color: context.accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Divider(
+                      height: 1,
+                      color: context.stroke.withValues(alpha: 0.5)),
+                  const SizedBox(height: 8),
+                  // Price
+                  Row(
+                    children: [
+                      Text(
+                        '₹${widget.lobby.pricePerTeamPaise ~/ 100}',
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'per team',
+                        style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500),
+                      ),
+                      const Spacer(),
+                      Text(
+                        widget.lobby.dateLabel,
+                        style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Team selector ─────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Row(
+              children: [
+                Text(
+                  'Playing as',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          if (teamsAsync.isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: LinearProgressIndicator(minHeight: 1),
+            )
+          else if (teams.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Text(
+                'No teams found. Create a team first.',
+                style: TextStyle(color: context.fgSub, fontSize: 13),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+              itemCount: teams.length,
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
+              itemBuilder: (_, i) {
+                final team = teams[i];
+                final sel = _selected?.id == team.id;
+                return GestureDetector(
+                  onTap: () => setState(() => _selected = team),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      children: [
+                        // Avatar
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: context.panel,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: team.logoUrl != null &&
+                                  team.logoUrl!.isNotEmpty
+                              ? Image.network(team.logoUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      _TeamInitials(team.name))
+                              : _TeamInitials(team.name),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                team.name,
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              Text(
+                                '${team.ageGroupLabel}  ·  ${team.memberCount} members',
+                                style: TextStyle(
+                                    color: context.fgSub, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: sel ? context.accent : Colors.transparent,
+                            border: Border.all(
+                              color: sel
+                                  ? context.accent
+                                  : context.stroke,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: sel
+                              ? const Icon(Icons.check_rounded,
+                                  color: Colors.white, size: 13)
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
+          // ── CTA ───────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: GestureDetector(
+              onTap: canConfirm ? () => widget.onConfirm(_selected!) : null,
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                height: 56,
+                decoration: BoxDecoration(
+                  color: canConfirm ? context.ctaBg : context.panel,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.sports_cricket_rounded,
+                      color: canConfirm ? context.ctaFg : context.fgSub,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      canConfirm ? 'Play Now' : 'Select your team',
+                      style: TextStyle(
+                        color: canConfirm ? context.ctaFg : context.fgSub,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    if (canConfirm) ...[
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.arrow_forward_rounded,
+                        color: context.ctaFg.withValues(alpha: 0.7),
+                        size: 16,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1629,7 +2087,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                         ),
                         const SizedBox(width: 9),
                         Text(
-                          canEnter ? 'Find Rivals' : 'Complete all steps',
+                          canEnter ? 'Find Match' : 'Complete all steps',
                           style: TextStyle(
                             color: canEnter ? context.ctaFg : context.fgSub,
                             fontSize: 16,
