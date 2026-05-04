@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/academy_provider.dart';
+import '../../shared/onboarding_widgets.dart';
 import '../../shared/widgets.dart';
 import 'settings_provider.dart';
 
@@ -80,7 +81,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 child: TabBarView(
                   controller: _tabs,
                   children: [
-                    _BusinessTab(biz: biz),
+                    _BusinessTab(biz: biz, user: user),
                     const _AcademyTab(),
                   ],
                 ),
@@ -158,55 +159,105 @@ class _UserHeader extends StatelessWidget {
 
 class _BusinessTab extends ConsumerStatefulWidget {
   final Map<String, dynamic> biz;
-  const _BusinessTab({required this.biz});
+  final Map<String, dynamic> user;
+  const _BusinessTab({required this.biz, required this.user});
 
   @override
   ConsumerState<_BusinessTab> createState() => _BusinessTabState();
 }
 
 class _BusinessTabState extends ConsumerState<_BusinessTab> {
-  late final TextEditingController _bizName     = TextEditingController(text: _s('businessName'));
-  late final TextEditingController _contactName = TextEditingController(text: _s('contactName'));
-  late final TextEditingController _phone       = TextEditingController(text: _s('phone'));
-  late final TextEditingController _email       = TextEditingController(text: _s('email'));
-  late final TextEditingController _city        = TextEditingController(text: _s('city'));
-  late final TextEditingController _state       = TextEditingController(text: _s('state'));
-  late final TextEditingController _address     = TextEditingController(text: _s('address'));
-  late final TextEditingController _pincode     = TextEditingController(text: _s('pincode'));
-  late final TextEditingController _gst         = TextEditingController(text: _s('gstNumber'));
-  late final TextEditingController _pan         = TextEditingController(text: _s('panNumber'));
-  late final TextEditingController _beneName    = TextEditingController(text: _s('beneficiaryName'));
-  late final TextEditingController _accNum      = TextEditingController(text: _s('accountNumber'));
-  late final TextEditingController _ifsc        = TextEditingController(text: _s('ifscCode'));
-  late final TextEditingController _upi         = TextEditingController(text: _s('upiId'));
+  int _subTab = 0;
+
+  // Details
+  late TextEditingController _bizName;
+  late TextEditingController _pincode;
+  late TextEditingController _city;
+  late TextEditingController _state;
+  late TextEditingController _address;
+
+  // Contact
+  late TextEditingController _contactName;
+  late TextEditingController _phone;
+  late TextEditingController _email;
+
+  // Banking
+  late TextEditingController _gst;
+  late TextEditingController _pan;
+  late TextEditingController _beneName;
+  late TextEditingController _accNum;
+  late TextEditingController _ifsc;
+  late TextEditingController _upi;
 
   bool _saving = false;
 
-  String _s(String key) => widget.biz[key] as String? ?? '';
+  String _b(String key) => widget.biz[key]  as String? ?? '';
+  String _u(String key) => widget.user[key] as String? ?? '';
+
+  void _initFromData() {
+    _bizName     = TextEditingController(text: _b('businessName'));
+    _pincode     = TextEditingController(text: _b('pincode'));
+    _city        = TextEditingController(text: _b('city'));
+    _state       = TextEditingController(text: _b('state'));
+    _address     = TextEditingController(text: _b('address'));
+    // Contact: fall back to registered user info if biz fields are blank
+    _contactName = TextEditingController(text: _b('contactName').isNotEmpty ? _b('contactName') : _u('name'));
+    _phone       = TextEditingController(text: _b('phone').isNotEmpty       ? _b('phone')       : _u('phone'));
+    _email       = TextEditingController(text: _b('email').isNotEmpty       ? _b('email')       : _u('email') ?? '');
+    _gst         = TextEditingController(text: _b('gstNumber'));
+    _pan         = TextEditingController(text: _b('panNumber'));
+    _beneName    = TextEditingController(text: _b('beneficiaryName'));
+    _accNum      = TextEditingController(text: _b('accountNumber'));
+    _ifsc        = TextEditingController(text: _b('ifscCode'));
+    _upi         = TextEditingController(text: _b('upiId'));
+  }
+
+  void _disposeControllers() {
+    for (final c in [_bizName, _pincode, _city, _state, _address,
+        _contactName, _phone, _email, _gst, _pan, _beneName, _accNum, _ifsc, _upi]) {
+      c.dispose();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initFromData();
+  }
+
+  @override
+  void didUpdateWidget(_BusinessTab old) {
+    super.didUpdateWidget(old);
+    if (old.biz != widget.biz) {
+      _disposeControllers();
+      _initFromData();
+    }
+  }
 
   @override
   void dispose() {
-    for (final c in [_bizName, _contactName, _phone, _email, _city, _state,
-        _address, _pincode, _gst, _pan, _beneName, _accNum, _ifsc, _upi]) {
-      c.dispose();
-    }
+    _disposeControllers();
     super.dispose();
   }
 
   Future<void> _save() async {
     final name = _bizName.text.trim();
-    if (name.length < 2) { showSnack(context, 'Business name required (min 2 chars)'); return; }
+    if (name.length < 2) { showSnack(context, 'Business name required'); return; }
+    if (_city.text.trim().length < 2 || _state.text.trim().length < 2) {
+      showSnack(context, 'City and state are required');
+      return;
+    }
     setState(() => _saving = true);
     try {
       await ref.read(settingsProvider.notifier).updateBusinessDetails({
         'businessName': name,
-        if (_contactName.text.trim().isNotEmpty) 'contactName': _contactName.text.trim(),
+        'city':  _city.text.trim(),
+        'state': _state.text.trim(),
+        if (_pincode.text.trim().isNotEmpty)      'pincode':     _pincode.text.trim(),
+        if (_address.text.trim().isNotEmpty)      'address':     _address.text.trim(),
+        if (_contactName.text.trim().isNotEmpty)  'contactName': _contactName.text.trim(),
         if (_phone.text.trim().isNotEmpty)        'phone':       _phone.text.trim(),
         if (_email.text.trim().isNotEmpty)        'email':       _email.text.trim(),
-        if (_city.text.trim().isNotEmpty)         'city':        _city.text.trim(),
-        if (_state.text.trim().isNotEmpty)        'state':       _state.text.trim(),
-        if (_address.text.trim().isNotEmpty)      'address':     _address.text.trim(),
-        if (_pincode.text.trim().isNotEmpty)      'pincode':     _pincode.text.trim(),
         if (_gst.text.trim().isNotEmpty)          'gstNumber':   _gst.text.trim(),
         if (_pan.text.trim().isNotEmpty)          'panNumber':   _pan.text.trim(),
         if (_beneName.text.trim().isNotEmpty)     'beneficiaryName': _beneName.text.trim(),
@@ -222,44 +273,131 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
     }
   }
 
+  Widget _chip(int index, String label) {
+    final active = _subTab == index;
+    return GestureDetector(
+      onTap: () => setState(() => _subTab = index),
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF071B3D) : const Color(0xFFF0EFE9),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : const Color(0xFF071B3D),
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+    return Column(
       children: [
-        _label('Basic Info'),
-        _field(_bizName,     'Business Name',   required: true),
-        _field(_contactName, 'Contact Person'),
-        _field(_phone,       'Contact Phone',   type: TextInputType.phone),
-        _field(_email,       'Contact Email',   type: TextInputType.emailAddress),
-        _label('Location'),
-        Row(children: [
-          Expanded(child: _field(_city,  'City')),
-          const SizedBox(width: 12),
-          Expanded(child: _field(_state, 'State')),
-        ]),
-        _field(_address, 'Address', maxLines: 2),
-        _field(_pincode, 'Pincode', type: TextInputType.number,
-               formatters: [FilteringTextInputFormatter.digitsOnly]),
-        _label('Tax'),
-        _field(_gst, 'GST Number', uppercase: true),
-        _field(_pan, 'PAN Number', uppercase: true),
-        _label('Banking'),
-        _field(_beneName, 'Account Holder Name'),
-        _field(_accNum,   'Account Number', type: TextInputType.number,
-               formatters: [FilteringTextInputFormatter.digitsOnly]),
-        _field(_ifsc, 'IFSC Code', uppercase: true),
-        _field(_upi,  'UPI ID'),
-        const SizedBox(height: 8),
-        ElevatedButton(
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-              : const Text('Save Business Details'),
+        // Sub-tab chips
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              _chip(0, 'Details'),
+              _chip(1, 'Contact'),
+              _chip(2, 'Banking'),
+            ],
+          ),
+        ),
+
+        // Content
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            children: [
+              if (_subTab == 0) ..._detailsFields(),
+              if (_subTab == 1) ..._contactFields(),
+              if (_subTab == 2) ..._bankingFields(),
+            ],
+          ),
+        ),
+
+        // Save button
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _saving ? null : _save,
+              child: _saving
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
         ),
       ],
     );
   }
+
+  List<Widget> _detailsFields() => [
+    _label('Business'),
+    _field(_bizName, 'Business Name *'),
+    _label('Location'),
+    PincodeLocationField(
+      controller: _pincode,
+      onResolved: (city, state) => setState(() {
+        _city.text  = city;
+        _state.text = state;
+      }),
+    ),
+    Row(children: [
+      Expanded(child: _field(_city,  'City *')),
+      const SizedBox(width: 12),
+      Expanded(child: _field(_state, 'State *')),
+    ]),
+    _field(_address, 'Address', maxLines: 2),
+  ];
+
+  List<Widget> _contactFields() => [
+    Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0057C8).withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFF0057C8)),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Pre-filled from your registered account. Edit to set a different business contact.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF0057C8), fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    ),
+    _field(_contactName, 'Contact Person'),
+    _field(_phone,       'Contact Phone',   type: TextInputType.phone),
+    _field(_email,       'Contact Email',   type: TextInputType.emailAddress),
+  ];
+
+  List<Widget> _bankingFields() => [
+    _label('Tax'),
+    _field(_gst, 'GST Number', uppercase: true),
+    _field(_pan, 'PAN Number', uppercase: true),
+    _label('Bank Account'),
+    _field(_beneName, 'Account Holder Name'),
+    _field(_accNum,   'Account Number', type: TextInputType.number,
+           formatters: [FilteringTextInputFormatter.digitsOnly]),
+    _field(_ifsc, 'IFSC Code', uppercase: true),
+    _field(_upi,  'UPI ID'),
+  ];
 }
 
 // ── Academy tab ───────────────────────────────────────────────────────────────
@@ -285,6 +423,26 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
 
   String? _loadedAcademyId;
   bool _saving = false;
+  double? _lat;
+  double? _lng;
+
+  void _onPlaceSelected({
+    required String address,
+    required String city,
+    required String state,
+    required String pincode,
+    double? lat,
+    double? lng,
+  }) {
+    setState(() {
+      _address?.text = address;
+      _city?.text    = city;
+      _state?.text   = state;
+      _pincode?.text = pincode;
+      _lat = lat;
+      _lng = lng;
+    });
+  }
 
   void _initControllers(AcademyState academy) {
     if (_loadedAcademyId == academy.academyId) return;
@@ -331,6 +489,8 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
         if ((_website?.text.trim() ?? '').isNotEmpty) 'websiteUrl':  _website!.text.trim(),
         if ((_address?.text.trim() ?? '').isNotEmpty) 'address':     _address!.text.trim(),
         if ((_pincode?.text.trim() ?? '').isNotEmpty) 'pincode':     _pincode!.text.trim(),
+        if (_lat != null) 'latitude':  _lat,
+        if (_lng != null) 'longitude': _lng,
       });
       if (mounted) showSnack(context, 'Saved');
     } catch (_) {
@@ -396,6 +556,7 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
             _field(_email!,   'Email',   type: TextInputType.emailAddress),
             _field(_website!, 'Website', type: TextInputType.url),
             _label('Location'),
+            PlacesSearchField(onPlaceSelected: _onPlaceSelected),
             _field(_address!, 'Address', maxLines: 2),
             Row(children: [
               Expanded(child: _field(_city!,  'City')),

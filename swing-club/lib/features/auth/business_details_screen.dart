@@ -21,17 +21,15 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
   bool _isLoading   = false;
   bool _showBanking = false;
 
-  // Section A
   final _businessName = TextEditingController();
   final _contactName  = TextEditingController();
   final _phone        = TextEditingController();
   final _email        = TextEditingController();
+  final _pincode      = TextEditingController();
   final _city         = TextEditingController();
   final _stateCtrl    = TextEditingController();
   final _address      = TextEditingController();
-  final _pincode      = TextEditingController();
 
-  // Section B
   final _gstNumber       = TextEditingController();
   final _panNumber       = TextEditingController();
   final _beneficiaryName = TextEditingController();
@@ -42,9 +40,8 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
   @override
   void dispose() {
     for (final c in [
-      _businessName, _contactName, _phone, _email, _city, _stateCtrl,
-      _address, _pincode, _gstNumber, _panNumber, _beneficiaryName,
-      _accountNumber, _ifscCode, _upiId,
+      _businessName, _contactName, _phone, _email, _pincode, _city, _stateCtrl,
+      _address, _gstNumber, _panNumber, _beneficiaryName, _accountNumber, _ifscCode, _upiId,
     ]) {
       c.dispose();
     }
@@ -53,20 +50,26 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
 
   Future<void> _handleSubmit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_city.text.trim().length < 2 || _stateCtrl.text.trim().length < 2) {
+      showSnack(context, 'Enter a valid pincode to auto-fill city and state');
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final token = ref.read(secureStorageProvider).cachedAccessToken;
       final dio   = Dio(BaseOptions(headers: {'Authorization': 'Bearer $token'}));
 
-      final body = <String, dynamic>{'businessName': _businessName.text.trim()};
+      final body = <String, dynamic>{
+        'businessName': _businessName.text.trim(),
+        'city':         _city.text.trim(),
+        'state':        _stateCtrl.text.trim(),
+      };
       void addOpt(String k, String v) { if (v.isNotEmpty) body[k] = v; }
       addOpt('contactName', _contactName.text.trim());
       addOpt('phone',       _phone.text.trim());
       addOpt('email',       _email.text.trim());
-      addOpt('city',        _city.text.trim());
-      addOpt('state',       _stateCtrl.text.trim());
-      addOpt('address',     _address.text.trim());
       addOpt('pincode',     _pincode.text.trim());
+      addOpt('address',     _address.text.trim());
       addOpt('gstNumber',   _gstNumber.text.trim().toUpperCase());
       addOpt('panNumber',   _panNumber.text.trim().toUpperCase());
       addOpt('beneficiaryName', _beneficiaryName.text.trim());
@@ -101,6 +104,8 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
           children: [
             const OnboardingProgressBar(step: 1),
             const SizedBox(height: 32),
+
+            // ── Business info ─────────────────────────────────────────────────
             const OnboardingSectionLabel(label: 'Basic Information', required: true),
             const SizedBox(height: 16),
             OnboardingField(
@@ -109,24 +114,61 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
               icon: Icons.business_rounded,
               validator: (v) => (v == null || v.trim().length < 2) ? 'Required (min 2 chars)' : null,
             ),
-            OnboardingField(controller: _contactName, label: 'Contact Person Name', icon: Icons.person_outline_rounded),
-            OnboardingField(controller: _phone, label: 'Contact Phone', icon: Icons.phone_outlined, keyboardType: TextInputType.phone),
-            OnboardingField(controller: _email, label: 'Contact Email', icon: Icons.email_outlined, keyboardType: TextInputType.emailAddress),
-            Row(children: [
-              Expanded(child: OnboardingField(controller: _city, label: 'City', icon: Icons.location_city_rounded)),
-              const SizedBox(width: 12),
-              Expanded(child: OnboardingField(controller: _stateCtrl, label: 'State', icon: Icons.map_outlined)),
-            ]),
-            OnboardingField(controller: _address, label: 'Address', icon: Icons.location_on_outlined, maxLines: 2),
             OnboardingField(
-              controller: _pincode,
-              label: 'Pincode',
-              icon: Icons.pin_drop_outlined,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              controller: _contactName,
+              label: 'Contact Person Name',
+              icon: Icons.person_outline_rounded,
             ),
+            OnboardingField(
+              controller: _phone,
+              label: 'Contact Phone',
+              icon: Icons.phone_outlined,
+              keyboardType: TextInputType.phone,
+            ),
+            OnboardingField(
+              controller: _email,
+              label: 'Contact Email',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+            ),
+
+            const SizedBox(height: 8),
+
+            // ── Location ──────────────────────────────────────────────────────
+            const OnboardingSectionLabel(label: 'Location', required: true),
             const SizedBox(height: 16),
-            // Banking collapsible
+            PincodeLocationField(
+              controller: _pincode,
+              onResolved: (city, state) => setState(() {
+                _city.text      = city;
+                _stateCtrl.text = state;
+              }),
+            ),
+            Row(children: [
+              Expanded(child: OnboardingField(
+                controller: _city,
+                label: 'City',
+                icon: Icons.location_city_rounded,
+                validator: (v) => (v == null || v.trim().length < 2) ? 'Required' : null,
+              )),
+              const SizedBox(width: 12),
+              Expanded(child: OnboardingField(
+                controller: _stateCtrl,
+                label: 'State',
+                icon: Icons.map_outlined,
+                validator: (v) => (v == null || v.trim().length < 2) ? 'Required' : null,
+              )),
+            ]),
+            OnboardingField(
+              controller: _address,
+              label: 'Street Address',
+              icon: Icons.location_on_outlined,
+              maxLines: 2,
+            ),
+
+            const SizedBox(height: 16),
+
+            // ── Tax & Banking (collapsible) ───────────────────────────────────
             GestureDetector(
               onTap: () => setState(() => _showBanking = !_showBanking),
               child: Container(
@@ -179,6 +221,7 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
               OnboardingField(controller: _ifscCode, label: 'IFSC Code', icon: Icons.code_rounded, uppercase: true),
               OnboardingField(controller: _upiId, label: 'UPI ID', icon: Icons.payments_outlined),
             ],
+
             const SizedBox(height: 40),
             SizedBox(
               height: 58,

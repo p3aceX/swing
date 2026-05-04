@@ -179,11 +179,15 @@ class _PlacesSearchFieldState extends State<PlacesSearchField> {
           'input': input,
           'key': kGooglePlacesKey,
           'components': 'country:in',
-          'types': 'geocode',
+          'language': 'en',
         },
       );
-      if (mounted && res.data['status'] == 'OK') {
-        setState(() => _suggestions = List<Map<String, dynamic>>.from(res.data['predictions']));
+      if (mounted) {
+        if (res.data['status'] == 'OK') {
+          setState(() => _suggestions = List<Map<String, dynamic>>.from(res.data['predictions']));
+        } else {
+          setState(() => _suggestions = []);
+        }
       }
     } catch (_) {}
     if (mounted) setState(() => _searching = false);
@@ -314,6 +318,127 @@ class _PlacesSearchFieldState extends State<PlacesSearchField> {
             ),
           ),
       ],
+    );
+  }
+}
+
+// ── Pincode → city/state auto-lookup ─────────────────────────────────────────
+class PincodeLocationField extends StatefulWidget {
+  final TextEditingController controller;
+  final void Function(String city, String state) onResolved;
+
+  const PincodeLocationField({
+    super.key,
+    required this.controller,
+    required this.onResolved,
+  });
+
+  @override
+  State<PincodeLocationField> createState() => _PincodeLocationFieldState();
+}
+
+class _PincodeLocationFieldState extends State<PincodeLocationField> {
+  final _dio = Dio();
+  bool _loading = false;
+  String? _info;
+  bool _success = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+    if (widget.controller.text.trim().length == 6) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _lookup(widget.controller.text.trim()));
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    _dio.close();
+    super.dispose();
+  }
+
+  void _onChanged() {
+    final val = widget.controller.text.trim();
+    if (val.length == 6) {
+      _lookup(val);
+    } else if (_info != null) {
+      setState(() { _info = null; _success = false; });
+    }
+  }
+
+  Future<void> _lookup(String pincode) async {
+    if (!mounted) return;
+    setState(() { _loading = true; _info = null; _success = false; });
+    try {
+      final res = await _dio.get('https://api.postalpincode.in/pincode/$pincode');
+      if (!mounted) return;
+      final list = res.data as List;
+      if (list.isNotEmpty && list[0]['Status'] == 'Success') {
+        final offices = list[0]['PostOffice'] as List? ?? [];
+        if (offices.isNotEmpty) {
+          final o     = offices[0] as Map;
+          final city  = o['District'] as String? ?? '';
+          final state = o['State']    as String? ?? '';
+          setState(() { _info = '$city, $state'; _success = true; });
+          widget.onResolved(city, state);
+          return;
+        }
+      }
+      setState(() => _info = 'Pincode not found');
+    } catch (_) {
+      if (mounted) setState(() => _info = 'Lookup failed');
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextFormField(
+            controller: widget.controller,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Color(0xFF071B3D)),
+            decoration: InputDecoration(
+              labelText: 'Pincode',
+              prefixIcon: const Icon(Icons.pin_drop_outlined, size: 20),
+              suffixIcon: _loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
+                  : _success
+                      ? const Icon(Icons.check_circle_rounded, color: Color(0xFF22C55E), size: 20)
+                      : null,
+              fillColor: Colors.white,
+              filled: true,
+              counterText: '',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE0DED6))),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE0DED6))),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF071B3D), width: 1.5)),
+            ),
+          ),
+          if (_info != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 2, bottom: 4),
+              child: Text(
+                _info!,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _success ? const Color(0xFF22C55E) : Colors.red,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

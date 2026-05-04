@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/academy_provider.dart';
+import '../../shared/onboarding_widgets.dart';
 import '../../shared/widgets.dart';
 import 'settings_provider.dart';
 
@@ -24,6 +25,8 @@ class _AcademyProfileScreenState extends ConsumerState<AcademyProfileScreen> {
   final _pincodeCtrl = TextEditingController();
   bool _isLoading = false;
   bool _populated = false;
+  double? _lat;
+  double? _lng;
 
   @override
   void dispose() {
@@ -32,6 +35,24 @@ class _AcademyProfileScreenState extends ConsumerState<AcademyProfileScreen> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _onPlaceSelected({
+    required String address,
+    required String city,
+    required String state,
+    required String pincode,
+    double? lat,
+    double? lng,
+  }) {
+    setState(() {
+      _addressCtrl.text = address;
+      _cityCtrl.text    = city;
+      _stateCtrl.text   = state;
+      _pincodeCtrl.text = pincode;
+      _lat = lat;
+      _lng = lng;
+    });
   }
 
   void _populate(Map<String, dynamic> academy) {
@@ -66,6 +87,8 @@ class _AcademyProfileScreenState extends ConsumerState<AcademyProfileScreen> {
           'city': _cityCtrl.text.trim(),
           'state': _stateCtrl.text.trim(),
           'pincode': _pincodeCtrl.text.trim(),
+          if (_lat != null) 'latitude': _lat,
+          if (_lng != null) 'longitude': _lng,
         },
       );
       if (mounted) showSnack(context, 'Academy profile updated');
@@ -114,6 +137,7 @@ class _AcademyProfileScreenState extends ConsumerState<AcademyProfileScreen> {
               const Divider(height: 32),
               const Text('Address', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 12),
+              PlacesSearchField(onPlaceSelected: _onPlaceSelected),
               _field(_addressCtrl, 'Street Address'),
               const SizedBox(height: 12),
               Row(children: [
