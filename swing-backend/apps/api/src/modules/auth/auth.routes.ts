@@ -57,6 +57,14 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  app.post('/biz/send-otp', {
+    schema: { tags: ['auth'], summary: 'Send OTP via 2Factor (logs to console for support)' },
+  }, async (request, reply) => {
+    const body = z.object({ phone: z.string().min(10) }).parse(request.body)
+    const data = await svc.sendOtp(body.phone)
+    return reply.send({ success: true, data })
+  })
+
   app.post('/biz/phone-login', {
     schema: { tags: ['auth'], summary: 'Swing-Biz login with 2Factor OTP' },
   }, async (request, reply) => {

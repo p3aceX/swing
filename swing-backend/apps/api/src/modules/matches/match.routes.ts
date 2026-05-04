@@ -242,6 +242,7 @@ export async function matchRoutes(app: FastifyInstance) {
         teamAName: z.string(),
         teamBName: z.string(),
         teamAId: z.string().optional(),
+        teamBId: z.string().optional(),
         teamA: teamSchema.optional(),
         teamB: teamSchema.optional(),
       })

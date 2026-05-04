@@ -1322,6 +1322,31 @@ export class MatchService {
       match.livePin = livePin
     }
 
+    // Back-fill team IDs for legacy matches that predate the teamAId/teamBId columns.
+    // Persists them so subsequent loads are instant.
+    if (!match.teamAId || !match.teamBId) {
+      const namesToLookup = [
+        ...(!match.teamAId ? [match.teamAName] : []),
+        ...(!match.teamBId ? [match.teamBName] : []),
+      ]
+      const found = await prisma.team.findMany({
+        where: { name: { in: namesToLookup } },
+        select: { id: true, name: true },
+        orderBy: { createdAt: 'desc' },
+      })
+      const byName = new Map(found.map((t) => [t.name, t.id]))
+      const resolvedAId = match.teamAId ?? byName.get(match.teamAName) ?? null
+      const resolvedBId = match.teamBId ?? byName.get(match.teamBName) ?? null
+      if (resolvedAId !== match.teamAId || resolvedBId !== match.teamBId) {
+        await prisma.match.update({
+          where: { id: matchId },
+          data: { teamAId: resolvedAId, teamBId: resolvedBId },
+        })
+        ;(match as any).teamAId = resolvedAId
+        ;(match as any).teamBId = resolvedBId
+      }
+    }
+
     return this.enrichMatchReadModel(match)
   }
 
@@ -2242,6 +2267,8 @@ export class MatchService {
         status: 'SCHEDULED',
         teamAName: data.teamAName,
         teamBName: data.teamBName,
+        teamAId: data.teamAId || null,
+        teamBId: data.teamBId || null,
         teamAPlayerIds,
         teamBPlayerIds,
         teamACaptainId: data.teamA?.captainId || null,

@@ -199,6 +199,26 @@ export class AuthService {
     }
   }
 
+  async sendOtp(phone: string) {
+    const apiKey = process.env.TWOFACTOR_API_KEY
+    if (!apiKey) throw new AppError('CONFIG_ERROR', 'OTP service not configured', 500)
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000))
+    const normalizedPhone = normalizePhone(phone)
+    const rawPhone = normalizedPhone.replace(/^\+/, '').replace(/^91/, '')
+
+    console.log(`[OTP] ${normalizedPhone}  →  ${otp}`)
+
+    const url = `https://2factor.in/API/V1/${apiKey}/SMS/${rawPhone}/${otp}`
+    const resp = await fetch(url)
+    const data = await resp.json() as any
+    if (data.Status !== 'Success') {
+      throw new AppError('OTP_SEND_FAILED', 'Failed to send OTP', 500)
+    }
+
+    return { sessionId: data.Details as string }
+  }
+
   async loginWithPhone(phone: string, sessionId: string, otp: string, name?: string, language?: string) {
     const apiKey = process.env.TWOFACTOR_API_KEY
     if (!apiKey) throw new AppError('CONFIG_ERROR', 'OTP service not configured', 500)
@@ -346,6 +366,41 @@ export class AuthService {
   async logout(rawRefreshToken: string) {
     const hashed = hashToken(rawRefreshToken)
     await prisma.refreshToken.updateMany({ where: { token: hashed }, data: { revokedAt: new Date() } })
+  }
+
+  async impersonate(by: string, opts: { phone?: string; userId?: string }) {
+    if (!opts.phone && !opts.userId) {
+      throw new AppError('VALIDATION_ERROR', 'Provide phone or userId', 400)
+    }
+
+    let user
+    if (opts.userId) {
+      user = await prisma.user.findUnique({ where: { id: opts.userId } })
+    } else {
+      const normalized = normalizePhone(opts.phone!)
+      user = await prisma.user.findUnique({ where: { phone: normalized } })
+    }
+
+    if (!user) throw new AppError('USER_NOT_FOUND', 'User not found', 404)
+
+    console.log(`[impersonate] admin=${by} → user=${user.id} (${user.name}, ${user.phone})`)
+
+    const { businessAccount, businessStatus } = await this.getBusinessStatus(user.id)
+    const tokens = await this.issueTokens(user)
+
+    return {
+      ...tokens,
+      isNewUser: false,
+      user: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        activeRole: user.activeRole,
+        roles: user.roles,
+      },
+      businessAccount,
+      businessStatus,
+    }
   }
 
   async switchRole(userId: string, newRole: string) {

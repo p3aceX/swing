@@ -1275,6 +1275,8 @@ model Match {
   status              MatchStatus       @default(SCHEDULED)
   teamAName           String
   teamBName           String
+  teamAId             String?
+  teamBId             String?
   teamAPlayerIds      String[]
   teamBPlayerIds      String[]
   teamACaptainId      String?

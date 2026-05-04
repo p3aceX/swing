@@ -8,6 +8,7 @@ import {
 } from "@swing/contracts";
 import { AdminService } from "./admin.service";
 import { AdminAuthService } from "./admin.auth";
+import { AuthService } from "../auth/auth.service";
 import { DevelopmentService } from "../development/development.service";
 import { StudioService } from "../studio/studio.service";
 import { OverlayPackService } from "../overlays/overlay-pack.service";
@@ -656,6 +657,25 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ── Admin Auth ──────────────────────────────────────────────────────────
+  app.post(
+    "/auth/impersonate",
+    {
+      onRequest: [(app as any).authenticate],
+      schema: { tags: ["admin"], summary: "Issue tokens for any user (admin impersonation)" },
+    },
+    async (request, reply) => {
+      const admin = (request as any).user as { userId: string }
+      const body = z
+        .object({
+          phone: z.string().optional(),
+          userId: z.string().optional(),
+        })
+        .parse(request.body)
+      const data = await new AuthService().impersonate(admin.userId, body)
+      return reply.send({ success: true, data })
+    },
+  )
+
   app.post(
     "/auth/login",
     {
