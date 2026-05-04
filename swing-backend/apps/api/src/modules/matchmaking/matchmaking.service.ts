@@ -326,7 +326,7 @@ export class MatchmakingService {
         // if date given → exact match; otherwise show all upcoming lobbies from today
         ...(input.date ? { date: this.startOfDay(input.date) } : { date: { gte: today } }),
         ...(input.format ? { format: input.format } : {}),
-        ...(mySet.size > 0 ? { OR: [{ teamId: null }, { teamId: { notIn: Array.from(mySet) } }] } as any : {}),
+        ...(mySet.size > 0 ? { OR: [{ arenaId: { not: null } }, { teamId: null }, { teamId: { notIn: Array.from(mySet) } }] } as any : {}),
       },
       include: {
         team: true,
