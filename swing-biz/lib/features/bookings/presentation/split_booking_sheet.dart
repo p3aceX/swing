@@ -258,7 +258,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
   // ── navigation ────────────────────────────────────────────────────────────
 
   bool get _step0Valid => _arena != null;
-  bool get _step1Valid => _slot != null;
+  bool get _step1Valid => _slot != null && _ballType != null;
   bool get _step2Valid => _team != null;
 
   bool get _canProceed {
@@ -513,7 +513,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
           children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
             final sel = _ballType == bt;
             return GestureDetector(
-              onTap: () => setState(() => _ballType = sel ? null : bt),
+              onTap: () => setState(() => _ballType = bt),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(

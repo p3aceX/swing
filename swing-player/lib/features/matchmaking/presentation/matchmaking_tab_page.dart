@@ -1160,7 +1160,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   @override
   Widget build(BuildContext context) {
     final teamsAsync = ref.watch(mmTeamsProvider);
-    final canEnter = widget.picks.isNotEmpty && widget.team != null && !widget.loading;
+    final canEnter = widget.picks.isNotEmpty && widget.team != null && widget.ballType != null && !widget.loading;
 
     return Column(
       children: [
@@ -1268,7 +1268,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                           children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
                             final sel = widget.ballType == bt;
                             return GestureDetector(
-                              onTap: () => widget.onBallType(sel ? null : bt),
+                              onTap: () => widget.onBallType(bt),
                               behavior: HitTestBehavior.opaque,
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 140),
