@@ -103,6 +103,14 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  app.post('/lobbies/:lobbyId/join', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    const body = z.object({ teamId: z.string() }).parse(request.body)
+    const data = await svc.joinOpenLobby(user.userId, lobbyId, body.teamId)
+    return reply.code(201).send({ success: true, data })
+  })
+
   app.post('/lobbies/:lobbyId/accept', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }

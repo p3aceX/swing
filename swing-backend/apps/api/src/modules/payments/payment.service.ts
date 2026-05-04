@@ -15,7 +15,7 @@ function getRazorpay() {
   return _razorpay
 }
 
-type EntityType = 'SLOT_BOOKING' | 'GIG_BOOKING' | 'ACADEMY_FEE' | 'STORE_ORDER'
+type EntityType = 'SLOT_BOOKING' | 'GIG_BOOKING' | 'ACADEMY_FEE' | 'STORE_ORDER' | 'MATCHMAKING_MATCH'
 
 export class PaymentService {
   async createOrder(userId: string, data: { entityType: EntityType; entityId: string }) {
@@ -188,6 +188,11 @@ export class PaymentService {
         if (!order) throw Errors.notFound('Store order')
         return { amountPaise: order.finalAmountPaise, description: `Store order ${entityId}` }
       }
+      case 'MATCHMAKING_MATCH': {
+        const match = await prisma.matchmakingMatch.findUnique({ where: { id: entityId } })
+        if (!match) throw Errors.notFound('Match')
+        return { amountPaise: match.paymentAmountPerTeam, description: `Matchup slot booking ${entityId}` }
+      }
       default:
         throw new AppError('INVALID_ENTITY', 'Unknown entity type', 400)
     }
@@ -211,6 +216,59 @@ export class PaymentService {
         })
         const storeSvc = new StoreService()
         await storeSvc.generateInvoice(entityId)
+        break
+      }
+      case 'MATCHMAKING_MATCH': {
+        await prisma.$transaction(async (tx) => {
+          const match = await tx.matchmakingMatch.findUnique({ where: { id: entityId } })
+          if (!match || match.status === 'confirmed') return
+
+          const unit = await tx.arenaUnit.findUnique({ where: { id: match.groundId } })
+          if (!unit) throw Errors.notFound('Arena unit')
+
+          const [aLobby, bLobby] = await Promise.all([
+            tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } }),
+            tx.matchmakingLobby.findUnique({ where: { id: match.lobbyBId } }),
+          ])
+          if (!aLobby || !bLobby) throw new AppError('INVALID_MATCH', 'Lobby not found', 400)
+
+          const durations: Record<string, number> = { T10: 90, T20: 240, ODI: 480, Test: 2400, Custom: 240 }
+          const durationMins = durations[match.format as string] ?? 240
+          const [sh, sm] = match.slotTime.split(':').map(Number)
+          const endMins = sh * 60 + sm + durationMins
+          const endTime = `${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}`
+          const totalAmount = match.paymentAmountPerTeam * 2
+
+          await tx.slotBooking.create({
+            data: {
+              arenaId: unit.arenaId,
+              unitId: unit.id,
+              bookedById: aLobby.playerId,
+              date: match.date,
+              startTime: match.slotTime,
+              endTime,
+              durationMins,
+              baseAmountPaise: totalAmount,
+              totalAmountPaise: totalAmount,
+              totalPricePaise: totalAmount,
+              advancePaise: totalAmount,
+              status: 'CONFIRMED',
+              paymentMode: 'ONLINE',
+              bookingSource: 'MATCHMAKING',
+              notes: `matchmaking:${match.id};teamA:${aLobby.teamId};teamB:${bLobby.teamId}`,
+              paidAt: new Date(),
+            } as any,
+          })
+
+          await tx.matchmakingMatch.update({
+            where: { id: entityId },
+            data: { status: 'confirmed', teamAConfirmed: true, teamBConfirmed: true },
+          })
+          await tx.matchmakingLobby.updateMany({
+            where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
+            data: { status: 'confirmed' },
+          })
+        })
         break
       }
     }

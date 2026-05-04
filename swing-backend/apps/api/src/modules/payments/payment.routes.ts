@@ -35,7 +35,7 @@ export async function paymentRoutes(app: FastifyInstance) {
 
     // Legacy Razorpay path
     const body = z.object({
-      entityType: z.enum(['SLOT_BOOKING', 'GIG_BOOKING', 'ACADEMY_FEE', 'STORE_ORDER']),
+      entityType: z.enum(['SLOT_BOOKING', 'GIG_BOOKING', 'ACADEMY_FEE', 'STORE_ORDER', 'MATCHMAKING_MATCH']),
       entityId: z.string(),
     }).parse(raw)
     return reply.code(201).send({ success: true, data: await svc.createOrder(user.userId, body) })

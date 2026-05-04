@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';
@@ -119,6 +120,9 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   String? _error;
   Timer? _pollTimer;
 
+  // Payment
+  late final Razorpay _razorpay;
+
   bool get _isActive =>
       _lobbyState != _LobbyState.idle && _lobbyState != _LobbyState.entering;
 
@@ -127,6 +131,9 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   @override
   void initState() {
     super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreActiveLobby());
   }
 
@@ -151,6 +158,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _razorpay.clear();
     super.dispose();
   }
 
@@ -217,45 +225,24 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   }
 
   Future<void> _instantChallenge(MmOpenLobby lobby, {MmTeam? withTeam}) async {
-    if (lobby.unitId == null) return;
     final team = withTeam ?? _team;
     if (team == null) return;
-
-    final fmt = MatchFormat.values.firstWhere(
-      (f) => f.apiValue == lobby.format,
-      orElse: () => MatchFormat.t20,
-    );
-    DateTime date;
+    setState(() { _lobbyState = _LobbyState.entering; _error = null; });
     try {
-      date = DateTime.parse(lobby.date);
-    } catch (_) {
-      date = DateTime.now();
+      final repo = ref.read(matchmakingRepositoryProvider);
+      final result = await repo.joinLobby(lobby.lobbyId, team.id);
+      if (!mounted) return;
+      setState(() {
+        _lobbyId = result.lobbyId;
+        _team = team;
+        _matchSummary = result.match;
+        _lobbyState = _LobbyState.matched;
+        _tab = 1; // reveal My Matchup in Find tab
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _lobbyState = _LobbyState.idle; _error = _parseError(e); });
     }
-
-    final pick = MmGroundSlotPick(
-      ground: MmGround(
-        id: lobby.unitId!,
-        name: lobby.groundName.isNotEmpty
-            ? lobby.groundName
-            : (lobby.arenaName.isNotEmpty ? lobby.arenaName : 'Ground'),
-        area: lobby.arenaName,
-        slots: [],
-      ),
-      slot: MmSlot(
-        time: lobby.slotTime,
-        unitId: lobby.unitId!,
-        hasOpponent: true,
-        pricePerTeamPaise: lobby.pricePerTeamPaise,
-      ),
-    );
-    setState(() {
-      _team = team;
-      _format = fmt;
-      _ballType = lobby.ballType ?? _ballType;
-      _date = date;
-      _picks = [pick];
-    });
-    await _enterLobby();
   }
 
   Future<void> _leaveLobby() async {
@@ -275,25 +262,52 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
 
   Future<void> _confirmMatch() async {
     final matchId = _matchSummary?.matchId;
-    final lobbyId = _lobbyId;
-    if (matchId == null || lobbyId == null) return;
-    setState(() => _lobbyState = _LobbyState.confirming);
+    if (matchId == null) return;
+    setState(() { _lobbyState = _LobbyState.confirming; _error = null; });
     try {
-      final result =
-          await ref.read(matchmakingRepositoryProvider).confirmMatch(matchId, lobbyId);
+      final repo = ref.read(matchmakingRepositoryProvider);
+      final order = await repo.createMatchPaymentOrder(matchId);
       if (!mounted) return;
-      if (result.status == 'confirmed') {
-        _resetToIdle();
-      } else {
-        setState(() => _lobbyState = _LobbyState.matched);
+      if (order.orderId.isEmpty) {
+        setState(() { _lobbyState = _LobbyState.matched; _error = 'Could not create payment. Try again.'; });
+        return;
       }
+      _razorpay.open({
+        'key': order.key,
+        'amount': order.amountPaise,
+        'currency': order.currency,
+        'name': 'Swing Matchup',
+        'description': 'Your share · ${_matchSummary?.groundName ?? "Ground"}',
+        'order_id': order.orderId,
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _lobbyState = _LobbyState.matched;
-        _error = _parseError(e);
-      });
+      setState(() { _lobbyState = _LobbyState.matched; _error = _parseError(e); });
     }
+  }
+
+  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
+    try {
+      final repo = ref.read(matchmakingRepositoryProvider);
+      await repo.verifyMatchPayment(
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpayOrderId: response.orderId ?? '',
+        razorpaySignature: response.signature ?? '',
+      );
+      if (!mounted) return;
+      _resetToIdle();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Matchup confirmed! Check upcoming matches.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _lobbyState = _LobbyState.matched; _error = 'Payment done but confirmation failed. Contact support.'; });
+    }
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    if (!mounted) return;
+    setState(() { _lobbyState = _LobbyState.matched; _error = response.message ?? 'Payment was not completed.'; });
   }
 
   Future<void> _declineMatch() async {
@@ -394,7 +408,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                         Text(
                           _lobbyState == _LobbyState.matched ||
                                   _lobbyState == _LobbyState.confirming
-                              ? 'Match found'
+                              ? 'My Matchup'
                               : 'Searching',
                           style: TextStyle(
                             color: context.accent,
@@ -3137,7 +3151,7 @@ class _MatchedFind extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'RIVAL FOUND',
+            'MATCHUP FOUND',
             style: TextStyle(
               color: context.accent,
               fontSize: 11,
@@ -3224,7 +3238,7 @@ class _MatchedFind extends StatelessWidget {
                             strokeWidth: 2, color: context.ctaFg),
                       )
                     : Text(
-                        'Lock it in  ₹$price',
+                        'Pay ₹$price  →  Lock Slot',
                         style: TextStyle(
                           color: context.ctaFg,
                           fontSize: 15,
@@ -3238,7 +3252,7 @@ class _MatchedFind extends StatelessWidget {
           const SizedBox(height: 10),
           Center(
             child: Text(
-              'Rival has 15 min to confirm',
+              'Payment confirms the slot for both teams',
               style: TextStyle(
                   color: context.fgSub,
                   fontSize: 12,

@@ -60,6 +60,42 @@ class MatchmakingRepository {
     return byArena.values.toList();
   }
 
+  Future<MmCreateLobbyResult> joinLobby(String lobbyId, String teamId) async {
+    final resp = await _dio.post(
+      '${ApiEndpoints.matchmakingLobby(lobbyId)}/join',
+      data: {'teamId': teamId},
+    );
+    return MmCreateLobbyResult.fromJson(_unwrap(resp.data));
+  }
+
+  Future<({String orderId, String key, int amountPaise, String currency})>
+      createMatchPaymentOrder(String matchId) async {
+    final resp = await _dio.post(
+      '/payments/orders',
+      data: {'entityType': 'MATCHMAKING_MATCH', 'entityId': matchId},
+    );
+    final data = _unwrap(resp.data);
+    final order = data['razorpayOrder'] as Map<String, dynamic>? ?? {};
+    return (
+      orderId: order['id'] as String? ?? '',
+      key: order['key'] as String? ?? '',
+      amountPaise: (order['amount'] as num?)?.toInt() ?? 0,
+      currency: (order['currency'] as String?) ?? 'INR',
+    );
+  }
+
+  Future<void> verifyMatchPayment({
+    required String razorpayPaymentId,
+    required String razorpayOrderId,
+    required String razorpaySignature,
+  }) async {
+    await _dio.post('/payments/verify', data: {
+      'razorpayPaymentId': razorpayPaymentId,
+      'razorpayOrderId': razorpayOrderId,
+      'razorpaySignature': razorpaySignature,
+    });
+  }
+
   Future<MmCreateLobbyResult> createLobby({
     required String teamId,
     required String format,
