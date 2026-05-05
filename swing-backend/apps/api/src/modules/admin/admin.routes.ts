@@ -18,6 +18,7 @@ import { MatchService } from "../matches/match.service";
 import { EventService } from "../events/event.service";
 import { AppError } from "../../lib/errors";
 import { applySeasonReset, applyRankDecay } from "../performance/ip-engine";
+import { MatchmakingService } from "../matchmaking/matchmaking.service";
 import axios from "axios";
 
 const STUDIO_SERVICE_URL = process.env.STUDIO_SERVICE_URL || "http://localhost:4000";
@@ -2565,6 +2566,14 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/season/decay', { onRequest: [(app as any).authenticate] }, async (_request, reply) => {
     await applyRankDecay()
     return reply.send({ success: true, data: { message: 'Rank decay applied' } })
+  })
+
+  // POST /admin/matchmaking/backfill-linked-matches
+  // One-shot: creates Match records for confirmed matchmaking matches that don't have one yet.
+  app.post('/matchmaking/backfill-linked-matches', auth, async (_request, reply) => {
+    const mmSvc = new MatchmakingService()
+    const result = await mmSvc.backfillLinkedMatches()
+    return reply.send({ success: true, data: result })
   })
 
 }

@@ -2136,4 +2136,69 @@ export class MatchmakingService {
       createdAt: queue.createdAt,
     }
   }
+
+  async backfillLinkedMatches(): Promise<{ processed: number; skipped: number; errors: string[] }> {
+    const unlinked = await prisma.matchmakingMatch.findMany({
+      where: { status: 'confirmed', linkedMatchId: null },
+    })
+
+    let processed = 0
+    let skipped = 0
+    const errors: string[] = []
+
+    for (const match of unlinked) {
+      try {
+        const [lobbyA, lobbyB, unit] = await Promise.all([
+          prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
+          prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
+          prisma.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: true } }),
+        ])
+
+        const teamAName = (lobbyA as any)?.team?.name
+        const teamBName = (lobbyB as any)?.team?.name
+        if (!teamAName || !teamBName) {
+          skipped++
+          errors.push(`match ${match.id}: missing team name (lobbyA=${match.lobbyAId}, lobbyB=${match.lobbyBId})`)
+          continue
+        }
+
+        const formatMap: Record<string, string> = {
+          T10: 'T10', T20: 'T20', ODI: 'ONE_DAY', Test: 'TWO_INNINGS', Custom: 'CUSTOM',
+        }
+        const matchFormat = formatMap[match.format] ?? 'T20'
+        const [hh, mm] = match.slotTime.split(':').map(Number)
+        const scheduledAt = new Date(match.date)
+        scheduledAt.setUTCHours(hh, mm, 0, 0)
+
+        const linkedMatch = await prisma.match.create({
+          data: {
+            matchType: 'FRIENDLY' as any,
+            format: matchFormat as any,
+            status: 'SCHEDULED' as any,
+            teamAName,
+            teamBName,
+            teamAId: (lobbyA as any)?.teamId ?? null,
+            teamBId: (lobbyB as any)?.teamId ?? null,
+            teamACaptainId: (lobbyA as any)?.playerId ?? null,
+            teamBCaptainId: (lobbyB as any)?.playerId ?? null,
+            scheduledAt,
+            scorerId: (lobbyA as any)?.playerId ?? null,
+            venueName: (unit as any)?.arena?.name ?? (unit as any)?.name ?? null,
+            ballType: (lobbyA as any)?.ballType ?? null,
+            matchmakingId: match.id,
+          },
+        })
+
+        await prisma.matchmakingMatch.update({
+          where: { id: match.id },
+          data: { linkedMatchId: linkedMatch.id },
+        })
+        processed++
+      } catch (err: any) {
+        errors.push(`match ${match.id}: ${err.message}`)
+      }
+    }
+
+    return { processed, skipped, errors }
+  }
 }
