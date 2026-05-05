@@ -177,6 +177,7 @@ class _MatchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPending = !match.isConfirmed;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => showModalBottomSheet(
@@ -186,9 +187,37 @@ class _MatchRow extends StatelessWidget {
         builder: (_) => _MatchDetailSheet(match: match, arenaId: arenaId),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Left: date column
+            SizedBox(
+              width: 44,
+              child: Column(
+                children: [
+                  Text(
+                    match.dateLabel,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  Text(
+                    match.displaySlot,
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 10,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Center: teams + meta
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,10 +235,22 @@ class _MatchRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('vs',
-                            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'VS',
+                          style: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
                       ),
                       Flexible(
                         child: Text(
@@ -224,43 +265,68 @@ class _MatchRow extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    [
-                      match.format,
-                      match.dateLabel,
-                      match.displaySlot,
-                      if (match.groundName.isNotEmpty) match.groundName,
-                    ].join('  ·  '),
-                    style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      if (match.format.isNotEmpty) ...[
+                        Text(
+                          match.format,
+                          style: const TextStyle(
+                              color: Color(0xFF6B7280), fontSize: 11),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text('·',
+                            style: TextStyle(
+                                color: Color(0xFFD1D5DB), fontSize: 11)),
+                        const SizedBox(width: 6),
+                      ],
+                      if (match.groundName.isNotEmpty)
+                        Flexible(
+                          child: Text(
+                            match.groundName,
+                            style: const TextStyle(
+                                color: Color(0xFF6B7280), fontSize: 11),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      _PayDot(paid: match.teamAConfirmed, label: match.teamAName),
+                      const SizedBox(width: 8),
+                      _PayDot(paid: match.teamBConfirmed, label: match.teamBName),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
+            // Right: status + chevron
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
-                    color: match.isConfirmed
-                        ? const Color(0xFFDCFCE7)
-                        : const Color(0xFFFEF3C7),
+                    color: isPending
+                        ? const Color(0xFFFEF3C7)
+                        : const Color(0xFFDCFCE7),
                     borderRadius: BorderRadius.circular(5),
                   ),
                   child: Text(
-                    match.isConfirmed ? 'Confirmed' : 'Pending',
+                    isPending ? 'Pending' : 'Confirmed',
                     style: TextStyle(
-                      color: match.isConfirmed
-                          ? const Color(0xFF059669)
-                          : const Color(0xFFD97706),
+                      color: isPending
+                          ? const Color(0xFFD97706)
+                          : const Color(0xFF059669),
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 const Icon(Icons.chevron_right_rounded,
                     size: 16, color: Color(0xFFD1D5DB)),
               ],
@@ -268,6 +334,42 @@ class _MatchRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PayDot extends StatelessWidget {
+  const _PayDot({required this.paid, required this.label});
+  final bool paid;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: paid ? const Color(0xFF059669) : const Color(0xFFD1D5DB),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 90),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: paid ? const Color(0xFF374151) : const Color(0xFF9CA3AF),
+              fontSize: 10,
+              fontWeight: paid ? FontWeight.w600 : FontWeight.w400,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }
