@@ -5,6 +5,9 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';
 import '../domain/matchmaking_models.dart';
 
+// ignore: avoid_print
+void _mmLog(String msg) => debugPrint('[MM:repo] $msg');
+
 class MatchmakingRepository {
   MatchmakingRepository({Dio? dio}) : _dio = dio ?? ApiClient.instance.dio;
 
@@ -119,9 +122,14 @@ class MatchmakingRepository {
   }
 
   Future<MmLobbyStatus?> getActiveLobby() async {
+    _mmLog('getActiveLobby → GET ${ApiEndpoints.matchmakingActiveLobby}');
     final resp = await _dio.get(ApiEndpoints.matchmakingActiveLobby);
     final data = _unwrap(resp.data);
-    if (data.isEmpty || data['lobbyId'] == null) return null;
+    if (data.isEmpty || data['lobbyId'] == null) {
+      _mmLog('getActiveLobby → no active lobby');
+      return null;
+    }
+    _mmLog('getActiveLobby → lobbyId=${data['lobbyId']} status=${data['status']}');
     return MmLobbyStatus.fromJson(data);
   }
 
@@ -134,19 +142,29 @@ class MatchmakingRepository {
     String? date,
     String? format,
   }) async {
-    final resp = await _dio.get(
-      ApiEndpoints.matchmakingLobbies,
-      queryParameters: {
-        if (date != null) 'date': date,
-        if (format != null && format.isNotEmpty) 'format': format,
-      },
-    );
-    final data = _unwrap(resp.data);
-    final rawList = (data['lobbies'] as List?) ?? [];
-    return rawList
-        .whereType<Map<String, dynamic>>()
-        .map(MmOpenLobby.fromJson)
-        .toList();
+    _mmLog('listOpenLobbies → date=$date format=$format');
+    try {
+      final resp = await _dio.get(
+        ApiEndpoints.matchmakingLobbies,
+        queryParameters: {
+          if (date != null) 'date': date,
+          if (format != null && format.isNotEmpty) 'format': format,
+        },
+      );
+      _mmLog('listOpenLobbies → HTTP ${resp.statusCode}');
+      final data = _unwrap(resp.data);
+      final rawList = (data['lobbies'] as List?) ?? [];
+      _mmLog('listOpenLobbies → raw count=${rawList.length} keys=${data.keys.toList()}');
+      final result = rawList
+          .whereType<Map<String, dynamic>>()
+          .map(MmOpenLobby.fromJson)
+          .toList();
+      _mmLog('listOpenLobbies → parsed count=${result.length}');
+      return result;
+    } catch (e, st) {
+      _mmLog('listOpenLobbies ERROR: $e\n$st');
+      rethrow;
+    }
   }
 
   Future<({String status, String? bookingId})> confirmMatch(

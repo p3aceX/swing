@@ -1,13 +1,17 @@
 import { prisma, FacilityUnitType, Prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { ArenaService } from '../arenas/arena.service'
+import { NotificationService } from '../notifications/notification.service'
 import Razorpay from 'razorpay'
+
+const notificationService = new NotificationService()
 
 const MATCHMAKING_EXPIRY_HOURS = 24
 const MAX_ACTIVE_REQUESTS = 3
 const DEFAULT_MATCH_COST_PER_PLAYER_PAISE = 45000
 const LOBBY_EXPIRY_HOURS = 24
-const MATCH_CONFIRM_MINUTES = 15
+const MATCH_PAYMENT_HOURS = 4
+const CONFIRMATION_FEE_PAISE = 50000 // ₹500 flat per team
 
 export type MatchmakingFormat = 'T10' | 'T20' | 'ODI' | 'Test' | 'Custom'
 
@@ -237,9 +241,15 @@ export class MatchmakingService {
 
       const unit = await tx.arenaUnit.findUnique({ where: { id: picked.groundId } })
       if (!unit) throw Errors.notFound('Arena unit')
-      const perTeam = Math.floor(
-        Math.round((unit.pricePerHourPaise * this.formatDurationMins(input.format)) / 60) / 2,
-      )
+      const groundFeePaise = Math.floor(unit.pricePerHourPaise * this.formatDurationMins(input.format) / 60 / 2)
+      const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
+      // Clean up stale cancelled matches to avoid @unique constraint on lobbyAId/lobbyBId
+      await tx.matchmakingMatch.deleteMany({
+        where: {
+          status: { in: ['cancelled', 'expired'] },
+          OR: [{ lobbyAId: matchedLobby.id }, { lobbyBId: matchedLobby.id }],
+        },
+      })
       const match = await tx.matchmakingMatch.create({
         data: {
           lobbyAId: lobby.id,
@@ -248,11 +258,13 @@ export class MatchmakingService {
           slotTime: picked.slotTime,
           date,
           format: input.format,
-          status: 'pending_confirm',
-          confirmDeadline: new Date(Date.now() + MATCH_CONFIRM_MINUTES * 60 * 1000),
+          status: 'pending_payment',
+          confirmDeadline: new Date(Date.now() + MATCH_PAYMENT_HOURS * 60 * 60 * 1000),
           teamAConfirmed: false,
           teamBConfirmed: false,
-          paymentAmountPerTeam: perTeam,
+          paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
+          groundFeePaise,
+          remainingFeePaise,
         },
       })
       await tx.matchmakingLobby.updateMany({
@@ -265,6 +277,8 @@ export class MatchmakingService {
     if (!result.match) {
       return { lobbyId: result.lobby.id, status: 'searching' as const }
     }
+    // Notify both captains that a matchup was found
+    await this.notifyMatchFound(result.match.id).catch(() => undefined)
     return {
       lobbyId: result.lobby.id,
       status: 'matched' as const,
@@ -277,13 +291,47 @@ export class MatchmakingService {
     const lobby = await prisma.matchmakingLobby.findFirst({
       where: {
         playerId: player.id,
-        status: { in: ['searching', 'matched'] },
+        status: { in: ['searching', 'matched', 'confirmed'] },
         expiresAt: { gt: new Date() },
       },
+      include: { picks: { orderBy: { preferenceOrder: 'asc' } }, team: true },
       orderBy: { createdAt: 'desc' },
     })
     if (!lobby) return null
-    const out: any = { lobbyId: lobby.id, status: lobby.status }
+
+    // Expire the lobby lazily if its earliest pick slot has already passed
+    const pickList0 = (lobby as any).picks as Array<{ groundId: string; slotTime: string }>
+    const firstPick = pickList0[0]
+    if (firstPick && this.isSlotPast(lobby.date, firstPick.slotTime)) {
+      await prisma.matchmakingLobby.update({
+        where: { id: lobby.id },
+        data: { status: 'expired' },
+      })
+      return null
+    }
+
+    const pickList = pickList0
+    const groundIds = pickList.map((p) => p.groundId)
+    const units = groundIds.length
+      ? await prisma.arenaUnit.findMany({
+          where: { id: { in: groundIds } },
+          select: { id: true, name: true, arena: { select: { name: true } } },
+        })
+      : []
+    const unitById = new Map(units.map((u) => [u.id, u]))
+    const out: any = {
+      lobbyId: lobby.id,
+      status: lobby.status,
+      format: lobby.format,
+      date: this.toDateOnly(lobby.date),
+      teamId: lobby.teamId ?? null,
+      teamName: (lobby as any).team?.name ?? null,
+      picks: pickList.map((p) => ({
+        groundId: p.groundId,
+        groundName: unitById.get(p.groundId)?.arena?.name ?? unitById.get(p.groundId)?.name ?? null,
+        slotTime: p.slotTime,
+      })),
+    }
     if (lobby.matchId) out.match = await this.buildMatchSummary(lobby.matchId, lobby.id)
     return out
   }
@@ -318,12 +366,26 @@ export class MatchmakingService {
 
     const player = await this.getPlayerProfile(userId)
     const today = this.startOfDay(new Date().toISOString().slice(0, 10))
+
+    // Get all teams this user belongs to (captain, creator, or player member)
+    const myTeams = await prisma.team.findMany({
+      where: {
+        OR: [
+          { captainId: player.id },
+          { createdByUserId: userId },
+          { playerIds: { has: player.id } },
+        ],
+      },
+      select: { id: true },
+    })
+    const myTeamIds = myTeams.map((t) => t.id)
+
     const lobbies = await prisma.matchmakingLobby.findMany({
       where: {
         status: 'searching',
         expiresAt: { gt: new Date() },
-        // never show the caller's own lobbies; arena lobbies have playerId=null (always visible)
-        OR: [{ playerId: null }, { playerId: { not: player.id } }],
+        // Exclude lobbies from any team the caller belongs to; arena lobbies (teamId=null) always show
+        OR: [{ teamId: null }, { teamId: { notIn: myTeamIds } }],
         // if date given → exact match; otherwise show all upcoming lobbies from today
         ...(input.date ? { date: this.startOfDay(input.date) } : { date: { gte: today } }),
         ...(input.format ? { format: input.format } : {}),
@@ -417,12 +479,10 @@ export class MatchmakingService {
       } as any,
       include: {
         team: true,
-        picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 },
+        picks: { orderBy: { preferenceOrder: 'asc' } },
       },
       orderBy: { createdAt: 'asc' },
     })
-
-    // eslint-disable-next-line no-console
 
     const teamIds: string[] = playerLobbies.flatMap((l) => l.teamId ? [l.teamId] : [])
     const ages = await this.getTeamAgeGroupsMap(teamIds)
@@ -432,28 +492,49 @@ export class MatchmakingService {
       : []
     const unitsById = new Map(units.map((u) => [u.id, u]))
 
+    // Fetch confirmed slot times for accepted lobbies (splitBookingId set)
+    const acceptedBookingIds = playerLobbies
+      .map((l) => (l as any).splitBookingId as string | null)
+      .filter((id): id is string => !!id)
+    const bookingStartTimes = acceptedBookingIds.length
+      ? await prisma.slotBooking.findMany({
+          where: { id: { in: acceptedBookingIds } },
+          select: { id: true, startTime: true },
+        })
+      : []
+    const startTimeByBookingId = new Map(bookingStartTimes.map((b) => [b.id, b.startTime]))
+
     const out = playerLobbies
       .filter((l) => {
         const pick = l.picks[0]
         return !this.isSlotPast(l.date, pick?.slotTime ?? null)
       })
       .map((l) => {
-      const pick = l.picks[0]
-      const unit = pick ? unitsById.get(pick.groundId) : null
-      return {
-        lobbyId: l.id,
-        teamName: l.team?.name ?? 'TBD',
-        ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
-        format: l.format,
-        ballType: (l as any).ballType ?? null,
-        groundName: unit?.name ?? null,
-        unitId: pick?.groundId ?? null,
-        pricePerTeam: unit ? Math.round(unit.pricePerHourPaise * this.formatDurationMins(l.format as MatchmakingFormat) / 60 / 2) : 90000,
-        slotTime: pick?.slotTime ?? null,
-        date: this.toDateOnly(l.date),
-        daysFromNow: this.daysFromNow(l.date),
-      }
-    })
+        const firstPick = l.picks[0]
+        const firstUnit = firstPick ? unitsById.get(firstPick.groundId) : null
+        const splitBookingId = (l as any).splitBookingId as string | null
+        return {
+          lobbyId: l.id,
+          teamName: l.team?.name ?? 'TBD',
+          ageGroup: l.teamId ? (ages.get(l.teamId) ?? null) : null,
+          format: l.format,
+          ballType: (l as any).ballType ?? null,
+          groundName: firstUnit?.name ?? null,
+          unitId: firstPick?.groundId ?? null,
+          pricePerTeam: firstUnit ? Math.round(firstUnit.pricePerHourPaise * this.formatDurationMins(l.format as MatchmakingFormat) / 60 / 2) : 90000,
+          slotTime: firstPick?.slotTime ?? null,
+          date: this.toDateOnly(l.date),
+          daysFromNow: this.daysFromNow(l.date),
+          accepted: !!splitBookingId,
+          confirmedSlot: splitBookingId ? (startTimeByBookingId.get(splitBookingId) ?? null) : null,
+          picks: l.picks.map((p: any) => ({
+            slotTime: p.slotTime,
+            unitId: p.groundId,
+            groundName: unitsById.get(p.groundId)?.name ?? null,
+            preferenceOrder: p.preferenceOrder,
+          })),
+        }
+      })
     return { lobbies: out }
   }
 
@@ -477,10 +558,18 @@ export class MatchmakingService {
       const unit = await tx.arenaUnit.findUnique({ where: { id: pick.groundId } })
       if (!unit) throw Errors.notFound('Arena unit')
 
-      const perTeam = Math.floor(
-        Math.round((unit.pricePerHourPaise * this.formatDurationMins(targetLobby.format as MatchmakingFormat)) / 60) / 2,
-      )
+      const groundFeePaise = Math.floor(unit.pricePerHourPaise * this.formatDurationMins(targetLobby.format as MatchmakingFormat) / 60 / 2)
+      const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
       const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
+
+      // Clean up any previously cancelled/expired matches for this lobby so the @unique
+      // constraint on lobbyAId/lobbyBId doesn't block creating a fresh match.
+      await tx.matchmakingMatch.deleteMany({
+        where: {
+          status: { in: ['cancelled', 'expired'] },
+          OR: [{ lobbyAId: targetLobby.id }, { lobbyBId: targetLobby.id }],
+        },
+      })
 
       const joinerLobby = await tx.matchmakingLobby.create({
         data: {
@@ -505,11 +594,13 @@ export class MatchmakingService {
           slotTime: pick.slotTime,
           date: targetLobby.date,
           format: targetLobby.format,
-          status: 'pending_confirm',
-          confirmDeadline: new Date(Date.now() + MATCH_CONFIRM_MINUTES * 60 * 1000),
+          status: 'pending_payment',
+          confirmDeadline: new Date(Date.now() + MATCH_PAYMENT_HOURS * 60 * 60 * 1000),
           teamAConfirmed: false,
           teamBConfirmed: false,
-          paymentAmountPerTeam: perTeam,
+          paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
+          groundFeePaise,
+          remainingFeePaise,
         },
       })
 
@@ -521,6 +612,7 @@ export class MatchmakingService {
       return { joinerLobby, match }
     })
 
+    await this.notifyMatchFound(result.match.id).catch(() => undefined)
     return {
       lobbyId: result.joinerLobby.id,
       status: 'matched' as const,
@@ -528,7 +620,7 @@ export class MatchmakingService {
     }
   }
 
-  async acceptLobbyAsOwner(userId: string, lobbyId: string, arenaId: string) {
+  async acceptLobbyAsOwner(userId: string, lobbyId: string, arenaId: string, slotTime?: string) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
     const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
@@ -536,12 +628,15 @@ export class MatchmakingService {
 
     const lobby = await prisma.matchmakingLobby.findUnique({
       where: { id: lobbyId },
-      include: { picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 } },
+      include: { picks: { orderBy: { preferenceOrder: 'asc' } } },
     })
     if (!lobby) throw Errors.notFound('Lobby')
     if (lobby.status !== 'searching') throw new AppError('INVALID_STATE', 'Lobby is no longer searching', 400)
 
-    const pick = lobby.picks[0]
+    // Use the owner-chosen slot or fall back to first preference
+    const pick = slotTime
+      ? (lobby.picks.find((p: any) => p.slotTime === slotTime) ?? lobby.picks[0])
+      : lobby.picks[0]
     if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
 
     // Verify the pick's ground belongs to this arena
@@ -585,6 +680,96 @@ export class MatchmakingService {
   }
 
 
+  async assignOpponentToLobby(userId: string, lobbyId: string, input: { teamId: string; teamName?: string }) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+      include: { picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 } },
+    })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.status !== 'searching') throw new AppError('INVALID_STATE', 'Lobby is no longer searching', 400)
+
+    // Verify the pick's ground belongs to an arena owned by this owner
+    const pick = lobby.picks[0]
+    if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: pick.groundId }, include: { arena: true } })
+    if (!unit || unit.arena.ownerId !== owner.id) throw new AppError('GROUND_MISMATCH', 'Pick does not belong to your arena', 400)
+
+    // Resolve target team captain player profile id for the proxy lobby
+    const targetTeam = await prisma.team.findUnique({
+      where: { id: input.teamId },
+      select: { id: true, captainId: true },
+    })
+    if (!targetTeam) throw Errors.notFound('Team')
+
+    // captainId on Team is a playerProfile id; look up the userId via playerProfile
+    let captainPlayerId = targetTeam.captainId ?? ''
+    if (!captainPlayerId) {
+      // fall back to lobby owner's player id — shouldn't happen for well-formed teams
+      captainPlayerId = ''
+    }
+
+    const groundFeePaise = Math.floor(unit.pricePerHourPaise * this.formatDurationMins(lobby.format as MatchmakingFormat) / 60 / 2)
+    const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
+    const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Clean stale matches on the existing lobby
+      await tx.matchmakingMatch.deleteMany({
+        where: {
+          status: { in: ['cancelled', 'expired'] },
+          OR: [{ lobbyAId: lobby.id }, { lobbyBId: lobby.id }],
+        },
+      })
+
+      // Create a proxy lobby for the assigned team
+      const proxyLobby = await tx.matchmakingLobby.create({
+        data: {
+          teamId: input.teamId,
+          playerId: captainPlayerId,
+          format: lobby.format,
+          ballType: (lobby as any).ballType ?? null,
+          date: lobby.date,
+          status: 'searching',
+          expiresAt,
+          picks: {
+            create: [{ groundId: pick.groundId, slotTime: pick.slotTime, preferenceOrder: 1 }],
+          },
+        },
+      })
+
+      const match = await tx.matchmakingMatch.create({
+        data: {
+          lobbyAId: lobby.id,
+          lobbyBId: proxyLobby.id,
+          groundId: pick.groundId,
+          slotTime: pick.slotTime,
+          date: lobby.date,
+          format: lobby.format,
+          status: 'pending_payment',
+          confirmDeadline: new Date(Date.now() + MATCH_PAYMENT_HOURS * 60 * 60 * 1000),
+          paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
+          groundFeePaise,
+          remainingFeePaise,
+        },
+      })
+
+      await tx.matchmakingLobby.updateMany({
+        where: { id: { in: [lobby.id, proxyLobby.id] } },
+        data: { status: 'matched', matchId: match.id },
+      })
+
+      return { match, proxyLobby }
+    })
+
+    // Notify both team captains
+    await this.notifyMatchFound(result.match.id).catch(() => undefined)
+
+    return { matchId: result.match.id, lobbyId: result.proxyLobby.id }
+  }
+
   async confirmMatchLobby(userId: string, matchId: string, lobbyId: string) {
     const player = await this.getPlayerProfile(userId)
     const result = await prisma.$transaction(async (tx) => {
@@ -618,18 +803,12 @@ export class MatchmakingService {
         return { status: 'waiting_opponent' as const }
       }
 
-      const bookingId = await this.createBookedSlotForMatch(after, tx)
-      await tx.matchmakingMatch.update({
-        where: { id: after.id },
-        data: { status: 'confirmed', bookingId },
-      })
-      await tx.matchmakingLobby.updateMany({
-        where: { id: { in: [after.lobbyAId, after.lobbyBId] } },
-        data: { status: 'confirmed' },
-      })
-
+      const bookingId = await this.finalizeMatch(after, tx)
       return { status: 'confirmed' as const, bookingId }
     })
+    if (result.status === 'confirmed') {
+      this.notifyMatchConfirmed(matchId).catch(() => undefined)
+    }
     return result
   }
 
@@ -667,22 +846,81 @@ export class MatchmakingService {
   }
 
   async expireStaleLobbies() {
+    // Expire by expiresAt
     await prisma.matchmakingLobby.updateMany({
       where: { status: 'searching', expiresAt: { lt: new Date() } },
       data: { status: 'expired' },
     })
+
+    // Expire lobbies whose first pick's slot time has passed (date = today, slotTime <= now IST)
+    const today = new Date()
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
+    const nowIstMins = (today.getUTCHours() * 60 + today.getUTCMinutes() + 330) % 1440
+
+    const todayLobbies = await prisma.matchmakingLobby.findMany({
+      where: { status: 'searching', date: todayUTC },
+      select: { id: true, picks: { orderBy: { preferenceOrder: 'asc' }, take: 1, select: { slotTime: true } } },
+    })
+    const pastIds = todayLobbies
+      .filter((l) => {
+        const slotTime = (l as any).picks[0]?.slotTime
+        if (!slotTime) return false
+        return this.timeToMinutes(slotTime) <= nowIstMins
+      })
+      .map((l) => l.id)
+
+    if (pastIds.length > 0) {
+      await prisma.matchmakingLobby.updateMany({
+        where: { id: { in: pastIds } },
+        data: { status: 'expired' },
+      })
+    }
   }
 
   async expireUnconfirmedMatches() {
     const stale = await prisma.matchmakingMatch.findMany({
-      where: { status: 'pending_confirm', confirmDeadline: { lt: new Date() } },
-      select: { id: true, lobbyAId: true, lobbyBId: true },
+      where: { status: 'pending_payment', confirmDeadline: { lt: new Date() } },
+      select: { id: true, lobbyAId: true, lobbyBId: true, teamAPaymentId: true, teamBPaymentId: true },
     })
     if (stale.length === 0) return
+
+    // Issue refunds for any teams that already paid
+    for (const m of stale) {
+      for (const paymentId of [m.teamAPaymentId, m.teamBPaymentId]) {
+        if (!paymentId) continue
+        try {
+          const payment = await prisma.payment.findFirst({
+            where: { id: paymentId, status: 'COMPLETED' },
+            select: { id: true, gatewayPaymentId: true, amountPaise: true, userId: true },
+          })
+          if (payment?.gatewayPaymentId) {
+            await getRazorpay().payments.refund(payment.gatewayPaymentId, {
+              amount: payment.amountPaise,
+              notes: { reason: 'Match expired — opponent did not pay in time' },
+            })
+            await prisma.payment.update({
+              where: { id: payment.id },
+              data: { status: 'REFUND_PENDING', refundReason: 'Match expired' },
+            })
+            // Notify the user about the refund
+            await notificationService.createNotification(payment.userId, {
+              type: 'mm_refund',
+              title: 'Matchup expired — refund initiated',
+              body: 'Your ₹500 deposit will be returned within 5-7 business days.',
+              entityType: 'match',
+              entityId: m.id,
+              sendPush: true,
+              audience: 'PLAYER',
+            }).catch(() => undefined)
+          }
+        } catch (_) { /* best-effort */ }
+      }
+    }
+
     await prisma.$transaction([
       prisma.matchmakingMatch.updateMany({
         where: { id: { in: stale.map((m) => m.id) } },
-        data: { status: 'cancelled' },
+        data: { status: 'expired' },
       }),
       prisma.matchmakingLobby.updateMany({
         where: { id: { in: stale.flatMap((m) => [m.lobbyAId, m.lobbyBId]) } },
@@ -1349,6 +1587,205 @@ export class MatchmakingService {
     return count > 0
   }
 
+  async listMyConfirmedMatches(userId: string) {
+    const player = await this.getPlayerProfile(userId)
+
+    // Find all confirmed lobbies belonging to this player
+    const lobbies = await prisma.matchmakingLobby.findMany({
+      where: {
+        playerId: player.id,
+        status: 'confirmed',
+        matchId: { not: null },
+      },
+      select: { id: true, matchId: true },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    if (lobbies.length === 0) return { matches: [] }
+
+    const matchIds = lobbies.map((l) => l.matchId as string)
+    const lobbyByMatchId = new Map(lobbies.map((l) => [l.matchId as string, l.id]))
+
+    const matches = await prisma.matchmakingMatch.findMany({
+      where: { id: { in: matchIds }, status: 'confirmed' },
+      orderBy: { date: 'asc' },
+    })
+
+    const groundIds = matches.map((m) => m.groundId)
+    const lobbyIds = matches.flatMap((m) => [m.lobbyAId, m.lobbyBId])
+    const [units, allLobbies] = await Promise.all([
+      prisma.arenaUnit.findMany({
+        where: { id: { in: groundIds } },
+        include: { arena: { select: { name: true, address: true, city: true } } },
+      }),
+      prisma.matchmakingLobby.findMany({
+        where: { id: { in: lobbyIds } },
+        include: { team: { select: { id: true, name: true } } },
+      }),
+    ])
+
+    const unitById = new Map(units.map((u) => [u.id, u]))
+    const lobbyById = new Map(allLobbies.map((l) => [l.id, l]))
+
+    const out = matches.map((m) => {
+      const myLobbyId = lobbyByMatchId.get(m.id) ?? m.lobbyAId
+      const isLobbyA = m.lobbyAId === myLobbyId
+      const myLobby = lobbyById.get(myLobbyId)
+      const opponentLobby = lobbyById.get(isLobbyA ? m.lobbyBId : m.lobbyAId)
+      const unit = unitById.get(m.groundId)
+      const n = new Date()
+      const today = new Date(n.getFullYear(), n.getMonth(), n.getDate())
+      const matchDate = new Date(m.date)
+      const daysFromNow = Math.round((matchDate.getTime() - today.getTime()) / 86400000)
+      return {
+        matchId: m.id,
+        myTeamName: myLobby?.team?.name ?? 'Your Team',
+        opponentTeamName: opponentLobby?.team?.name ?? 'Opponent',
+        groundName: unit?.name ?? '',
+        arenaName: (unit as any)?.arena?.name ?? '',
+        groundArea: unit ? this.arenaArea((unit as any).arena?.address ?? '', (unit as any).arena?.city ?? '') : '',
+        slotTime: m.slotTime,
+        date: this.toDateOnly(m.date),
+        daysFromNow,
+        format: m.format,
+        groundFeePaise: m.groundFeePaise,
+        remainingFeePaise: m.remainingFeePaise,
+      }
+    })
+    return { matches: out }
+  }
+
+  async listArenaMatches(userId: string, arenaId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+    const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
+    if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    const units = await prisma.arenaUnit.findMany({
+      where: { arenaId },
+      select: { id: true, name: true },
+    })
+    const unitIds = units.map((u) => u.id)
+    if (unitIds.length === 0) return { matches: [] }
+
+    const unitNameById = new Map(units.map((u) => [u.id, u.name]))
+
+    const matches = await prisma.matchmakingMatch.findMany({
+      where: {
+        groundId: { in: unitIds },
+        status: { in: ['pending_payment', 'confirmed'] },
+      },
+      orderBy: { date: 'asc' },
+    })
+
+    if (matches.length === 0) return { matches: [] }
+
+    // Batch-fetch all lobbies and teams
+    const lobbyIds = matches.flatMap((m) => [m.lobbyAId, m.lobbyBId])
+    const lobbies = await prisma.matchmakingLobby.findMany({
+      where: { id: { in: lobbyIds } },
+      include: { team: { select: { id: true, name: true } } },
+    })
+    const lobbyById = new Map(lobbies.map((l) => [l.id, l]))
+
+    const out = matches.map((m) => {
+      const lobbyA = lobbyById.get(m.lobbyAId)
+      const lobbyB = lobbyById.get(m.lobbyBId)
+      const n = new Date()
+      const today = new Date(n.getFullYear(), n.getMonth(), n.getDate())
+      const matchDate = new Date(m.date)
+      const daysFromNow = Math.round((matchDate.getTime() - today.getTime()) / 86400000)
+      return {
+        matchId: m.id,
+        teamAName: lobbyA?.team?.name ?? 'Team A',
+        teamBName: lobbyB?.team?.name ?? 'Team B',
+        teamALobbyId: m.lobbyAId,
+        teamBLobbyId: m.lobbyBId,
+        groundName: unitNameById.get(m.groundId) ?? '',
+        slotTime: m.slotTime,
+        date: this.toDateOnly(m.date),
+        daysFromNow,
+        format: m.format,
+        status: m.status,
+        teamAConfirmed: m.teamAConfirmed,
+        teamBConfirmed: m.teamBConfirmed,
+        confirmDeadline: m.confirmDeadline.toISOString(),
+        confirmationFeePaise: m.paymentAmountPerTeam,
+      }
+    })
+    return { matches: out }
+  }
+
+  private async finalizeMatch(match: any, tx: any): Promise<string> {
+    // Reuse the HELD booking created by acceptLobbyAsOwner if it exists,
+    // otherwise create a fresh CONFIRMED booking.
+    const lobbyA = await tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } })
+    const heldBookingId = (lobbyA as any)?.splitBookingId as string | null
+
+    let bookingId: string
+    if (heldBookingId) {
+      await tx.slotBooking.update({
+        where: { id: heldBookingId },
+        data: { status: 'CONFIRMED', paidAt: new Date() },
+      })
+      bookingId = heldBookingId
+    } else {
+      bookingId = await this.createBookedSlotForMatch(match, tx)
+    }
+
+    await tx.matchmakingMatch.update({
+      where: { id: match.id },
+      data: { status: 'confirmed', bookingId },
+    })
+    await tx.matchmakingLobby.updateMany({
+      where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
+      data: { status: 'confirmed' },
+    })
+    return bookingId
+  }
+
+  async markMatchPaidOffline(userId: string, matchId: string, lobbyId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+    if (match.status === 'confirmed') throw new AppError('ALREADY_CONFIRMED', 'Match is already confirmed', 400)
+
+    // Verify the ground belongs to this owner's arena
+    const unit = await prisma.arenaUnit.findUnique({
+      where: { id: match.groundId },
+      include: { arena: true },
+    })
+    if (!unit || unit.arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    if (lobbyId !== match.lobbyAId && lobbyId !== match.lobbyBId) {
+      throw new AppError('INVALID_LOBBY', 'Lobby is not part of this match', 400)
+    }
+
+    const updates: any = {}
+    if (match.lobbyAId === lobbyId) updates.teamAConfirmed = true
+    if (match.lobbyBId === lobbyId) updates.teamBConfirmed = true
+
+    const result = await prisma.$transaction(async (tx) => {
+      const after = await tx.matchmakingMatch.update({
+        where: { id: matchId },
+        data: updates,
+      })
+
+      if (after.teamAConfirmed && after.teamBConfirmed) {
+        const bookingId = await this.finalizeMatch(after, tx)
+        return { status: 'confirmed' as const, bookingId }
+      }
+      return { status: 'waiting_opponent' as const }
+    })
+
+    if (result.status === 'confirmed') {
+      this.notifyMatchConfirmed(matchId).catch(() => undefined)
+    }
+    return result
+  }
+
   private async buildMatchSummary(matchId: string, lobbyId: string) {
     const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
     if (!match) return null
@@ -1358,6 +1795,7 @@ export class MatchmakingService {
       prisma.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: true } }),
     ])
     const opponent = lobbyA?.id === lobbyId ? lobbyB : lobbyA
+    const isLobbyA = lobbyA?.id === lobbyId
     return {
       matchId: match.id,
       groundId: match.groundId,
@@ -1366,9 +1804,85 @@ export class MatchmakingService {
       slotTime: match.slotTime,
       date: this.toDateOnly(match.date),
       format: match.format,
+      status: match.status,
       opponentTeamName: opponent?.team?.name ?? '',
       pricePerTeam: match.paymentAmountPerTeam,
+      confirmationFeePaise: match.paymentAmountPerTeam,
+      groundFeePaise: (match as any).groundFeePaise ?? 0,
+      remainingFeePaise: (match as any).remainingFeePaise ?? 0,
+      myTeamPaid: isLobbyA ? (match as any).teamAPaid : (match as any).teamBPaid,
+      opponentPaid: isLobbyA ? (match as any).teamBPaid : (match as any).teamAPaid,
       confirmDeadline: match.confirmDeadline.toISOString(),
+    }
+  }
+
+  private async notifyMatchFound(matchId: string) {
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) return
+    const [lobbyA, lobbyB] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
+    ])
+    const captains = [
+      { lobby: lobbyA, opponent: lobbyB },
+      { lobby: lobbyB, opponent: lobbyA },
+    ]
+    for (const { lobby, opponent } of captains) {
+      if (!lobby?.playerId) continue
+      const profile = await prisma.playerProfile.findUnique({
+        where: { id: lobby.playerId },
+        select: { userId: true },
+      })
+      if (!profile?.userId) continue
+      await notificationService.createNotification(profile.userId, {
+        type: 'mm_match_found',
+        title: 'Matchup found! Pay ₹500 to confirm',
+        body: `${opponent?.team?.name ?? 'An opponent'} wants to play. Pay ₹500 to lock the slot.`,
+        entityType: 'match',
+        entityId: matchId,
+        data: { lobbyId: lobby.id },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+  }
+
+  private async notifyMatchConfirmed(matchId: string) {
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) return
+    const [lobbyA, lobbyB, unit] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
+      prisma.arenaUnit.findUnique({ where: { id: match.groundId }, select: { name: true } }),
+    ])
+    const groundName = unit?.name ?? 'the ground'
+    const [hh, mm] = match.slotTime.split(':').map(Number)
+    const ampm = hh < 12 ? 'AM' : 'PM'
+    const h = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+    const slotDisplay = `${h}:${String(mm).padStart(2, '0')} ${ampm}`
+    const dateLabel = this.toDateOnly(match.date)
+
+    const captains = [
+      { lobby: lobbyA, opponent: lobbyB },
+      { lobby: lobbyB, opponent: lobbyA },
+    ]
+    for (const { lobby, opponent } of captains) {
+      if (!lobby?.playerId) continue
+      const profile = await prisma.playerProfile.findUnique({
+        where: { id: lobby.playerId },
+        select: { userId: true },
+      })
+      if (!profile?.userId) continue
+      await notificationService.createNotification(profile.userId, {
+        type: 'mm_match_confirmed',
+        title: 'Match confirmed!',
+        body: `${opponent?.team?.name ?? 'Your opponent'} at ${groundName} — ${dateLabel} ${slotDisplay}`,
+        entityType: 'match',
+        entityId: matchId,
+        data: { lobbyId: lobby.id },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
     }
   }
 

@@ -107,16 +107,30 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }
     const body = z.object({ teamId: z.string() }).parse(request.body)
-    const data = await svc.joinOpenLobby(user.userId, lobbyId, body.teamId)
-    return reply.code(201).send({ success: true, data })
+    try {
+      const data = await svc.joinOpenLobby(user.userId, lobbyId, body.teamId)
+      return reply.code(201).send({ success: true, data })
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[matchmaking] joinOpenLobby error:', err)
+      throw err
+    }
   })
 
   app.post('/lobbies/:lobbyId/accept', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }
-    const body = z.object({ arenaId: z.string() }).parse(request.body)
-    const data = await svc.acceptLobbyAsOwner(user.userId, lobbyId, body.arenaId)
+    const body = z.object({ arenaId: z.string(), slotTime: z.string().optional() }).parse(request.body)
+    const data = await svc.acceptLobbyAsOwner(user.userId, lobbyId, body.arenaId, body.slotTime)
     return reply.send({ success: true, data })
+  })
+
+  app.post('/lobbies/:lobbyId/assign', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    const body = z.object({ teamId: z.string(), teamName: z.string().optional() }).parse(request.body)
+    const data = await svc.assignOpponentToLobby(user.userId, lobbyId, body)
+    return reply.code(201).send({ success: true, data })
   })
 
   app.post('/matches/:matchId/confirm', auth, async (request, reply) => {
@@ -140,5 +154,22 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const { lobbyId } = request.params as { lobbyId: string }
     await svc.leaveLobby(user.userId, lobbyId)
     return reply.code(204).send()
+  })
+
+  app.get('/matches', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const q = z.object({ arenaId: z.string().optional() }).parse(request.query)
+    const data = q.arenaId
+      ? await svc.listArenaMatches(user.userId, q.arenaId)
+      : await svc.listMyConfirmedMatches(user.userId)
+    return reply.send({ success: true, data })
+  })
+
+  app.post('/matches/:matchId/mark-paid', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { matchId } = request.params as { matchId: string }
+    const body = z.object({ lobbyId: z.string() }).parse(request.body)
+    const data = await svc.markMatchPaidOffline(user.userId, matchId, body.lobbyId)
+    return reply.send({ success: true, data })
   })
 }

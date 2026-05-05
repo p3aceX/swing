@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import 'arena_lobbies_section.dart';
+import 'arena_matches_section.dart';
 import 'split_booking_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ class _BookingsBody extends ConsumerStatefulWidget {
 }
 
 class _BookingsBodyState extends ConsumerState<_BookingsBody> {
-  int _tab = 0; // 0=Bookings  1=Invitations
+  int _tab = 0; // 0=Bookings  1=MatchUp Requests
   String _selectedFilter = 'All';
   String _selectedUnitId = 'All';
   late DateTime _calendarMonth;
@@ -127,7 +128,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               duration: const Duration(milliseconds: 200),
               child: _tab == 0
                   ? _buildBookingsTab(context, today, allBookingsAsync)
-                  : _buildInvitationsTab(),
+                  : _buildMatchUpRequestsTab(),
             ),
           ),
         ],
@@ -296,10 +297,10 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     );
   }
 
-  Widget _buildInvitationsTab() {
+  Widget _buildMatchUpRequestsTab() {
     final filtered =
         widget.arena == null ? widget.arenas : [widget.arena!];
-    return _InvitationsTab(
+    return _MatchUpRequestsTab(
       key: ValueKey(widget.arena?.id ?? 'all'),
       arenas: filtered,
     );
@@ -350,7 +351,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               const SizedBox(height: 10),
               _BookingTypeOption(
                 icon: Icons.call_split_rounded,
-                title: 'Invitation',
+                title: 'MatchUp Request',
                 subtitle: 'Half price · find rival team via matchmaking',
                 onTap: () {
                   Navigator.pop(context);
@@ -570,7 +571,7 @@ class _BigTabHeader extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
-          // Bookings / Invitations tab bar
+          // Bookings / MatchUp Requests tab bar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Container(
@@ -588,7 +589,7 @@ class _BigTabHeader extends ConsumerWidget {
                     onTap: () => onSelect(0),
                   ),
                   _BigTab(
-                    label: 'Invitations',
+                    label: 'MatchUp Requests',
                     active: selected == 1,
                     onTap: () => onSelect(1),
                   ),
@@ -679,10 +680,10 @@ class _BigTab extends StatelessWidget {
   }
 }
 
-// ─── Invitations tab ─────────────────────────────────────────────────────────
+// ─── MatchUp Requests tab ─────────────────────────────────────────────────────
 
-class _InvitationsTab extends ConsumerWidget {
-  const _InvitationsTab({
+class _MatchUpRequestsTab extends ConsumerWidget {
+  const _MatchUpRequestsTab({
     super.key,
     required this.arenas,
   });
@@ -705,7 +706,7 @@ class _InvitationsTab extends ConsumerWidget {
     }
     if (allErrored) {
       return Center(
-        child: Text('Could not load invitations',
+        child: Text('Could not load MatchUp Requests',
             style: TextStyle(color: _muted, fontSize: 13)),
       );
     }
@@ -719,58 +720,125 @@ class _InvitationsTab extends ConsumerWidget {
             if (seen.add(lobby.lobbyId)) (lobby, arena.id, arena.name),
     ];
 
-    if (combined.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.sports_cricket_rounded,
-                color: _muted.withValues(alpha: 0.4), size: 40),
-            const SizedBox(height: 12),
-            const Text(
-              'No teams waiting to play',
-              style: TextStyle(
-                  color: _muted, fontSize: 14, fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Create an Invitation to attract teams',
-              style: TextStyle(color: _muted, fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    }
-
     return RefreshIndicator(
       color: _accent,
       backgroundColor: _surface,
       onRefresh: () async {
         for (final a in arenas) {
           ref.invalidate(arenaLobbiesProvider(a.id));
+          ref.invalidate(arenaMatchesProvider(a.id));
         }
       },
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        itemCount: combined.length,
-        separatorBuilder: (_, __) =>
-            Divider(height: 1, color: Colors.grey.shade100),
-        itemBuilder: (_, i) {
-          final (lobby, arenaId, arenaName) = combined[i];
-          return _InvitationRow(
-            lobby: lobby,
-            arenaId: arenaId,
-            arenaName: arenaName,
-            onAccepted: () => ref.invalidate(arenaLobbiesProvider(arenaId)),
-          );
-        },
+      child: CustomScrollView(
+        slivers: [
+          // ── Confirmed Matches ──────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final a in arenas)
+                  ArenaMatchesSection(arenaId: a.id),
+              ],
+            ),
+          ),
+
+          // ── Open Requests ──────────────────────────────────────────
+          if (combined.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    const Text(
+                      'OPEN REQUESTS',
+                      style: TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF059669),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${combined.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (_, i) {
+                  final (lobby, arenaId, arenaName) = combined[i];
+                  return Column(
+                    children: [
+                      _MatchUpRequestRow(
+                        lobby: lobby,
+                        arenaId: arenaId,
+                        arenaName: arenaName,
+                        onAccepted: () {
+                          ref.invalidate(arenaLobbiesProvider(arenaId));
+                          ref.invalidate(arenaMatchesProvider(arenaId));
+                        },
+                      ),
+                      if (i < combined.length - 1)
+                        Divider(height: 1, color: Colors.grey.shade100),
+                    ],
+                  );
+                },
+                childCount: combined.length,
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
+
+          // ── Empty state (no requests AND no matches) ───────────────
+          if (combined.isEmpty)
+            SliverFillRemaining(
+              child: _buildEmpty(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.sports_cricket_rounded,
+              color: _muted.withValues(alpha: 0.4), size: 40),
+          const SizedBox(height: 12),
+          const Text(
+            'No MatchUp Requests',
+            style: TextStyle(color: _muted, fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Teams looking for rivals will appear here',
+            style: TextStyle(color: _muted, fontSize: 12),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _InvitationRow extends StatelessWidget {
-  const _InvitationRow({
+class _MatchUpRequestRow extends StatelessWidget {
+  const _MatchUpRequestRow({
     required this.lobby,
     required this.arenaId,
     required this.arenaName,
@@ -3198,10 +3266,13 @@ class _SlotOption {
 
 List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit,
     {int? pricePerHourOverride}) {
-  return BookingPricingEngine.durationOptions(
+  final opts = BookingPricingEngine.durationOptions(
     unit,
     variantPricePaise: pricePerHourOverride,
   ).map((o) => _SlotOption(durationMins: o.durationMins, label: o.label, paise: o.pricePaise)).toList();
+  debugPrint('🔵 [_buildSlotOptions] unit=${unit.name} unitType=${unit.unitType} '
+      'opts=${opts.map((o) => '${o.durationMins}m(${o.label})').toList()}');
+  return opts;
 }
 
 String _fmtDate(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
@@ -3696,7 +3767,10 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final increment = unit.isGround
         ? durMins
         : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
-    debugPrint('🔵 [bookings slots] unitType=${unit.unitType} isGround=${unit.isGround} durMins=$durMins increment=$increment openMins=$openMins closeMins=$closeMins');
+    debugPrint('🔵 [_rebuildTimes] unit=${unit.name} unitType=${unit.unitType} isGround=${unit.isGround} '
+        'pricePerHourPaise=${unit.pricePerHourPaise} price4Hr=${unit.price4HrPaise} price8Hr=${unit.price8HrPaise} priceFullDay=${unit.priceFullDayPaise} '
+        'durMins=$durMins increment=$increment openMins=$openMins($openStr) closeMins=$closeMins($closeStr) '
+        '_selectedDurationIdx=$_selectedDurationIdx');
 
     List<String> _slotsForDate(DateTime date) {
       final isToday = DateUtils.isSameDay(date, DateTime.now());
@@ -3725,6 +3799,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       }
     }
 
+    debugPrint('🔵 [_rebuildTimes] → slots built: ${slots.length} (${slots.take(3).join(', ')}${slots.length > 3 ? '…' : ''})');
     _allDaySlots = slots;
     _selectedSlots.clear();
     _selectedAddons.clear();

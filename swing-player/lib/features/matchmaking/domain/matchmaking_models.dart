@@ -232,6 +232,12 @@ class MmMatchSummary {
     required this.opponentTeamName,
     required this.pricePerTeamPaise,
     required this.confirmDeadline,
+    this.status = 'pending_payment',
+    this.confirmationFeePaise = 50000,
+    this.groundFeePaise = 0,
+    this.remainingFeePaise = 0,
+    this.myTeamPaid = false,
+    this.opponentPaid = false,
   });
 
   final String matchId;
@@ -244,8 +250,17 @@ class MmMatchSummary {
   final String opponentTeamName;
   final int pricePerTeamPaise;
   final DateTime confirmDeadline;
+  final String status;
+  final int confirmationFeePaise;
+  final int groundFeePaise;
+  final int remainingFeePaise;
+  final bool myTeamPaid;
+  final bool opponentPaid;
 
   int get priceRupees => pricePerTeamPaise ~/ 100;
+  int get confirmationFeeRupees => confirmationFeePaise ~/ 100;
+  int get groundFeeRupees => groundFeePaise ~/ 100;
+  int get remainingFeeRupees => remainingFeePaise ~/ 100;
 
   String get displaySlot {
     try {
@@ -269,10 +284,31 @@ class MmMatchSummary {
         date: (j['date'] as String?) ?? '',
         format: (j['format'] as String?) ?? '',
         opponentTeamName: (j['opponentTeamName'] as String?) ?? 'Opponent',
-        pricePerTeamPaise:
-            (j['pricePerTeam'] as num?)?.toInt() ?? 90000,
-        confirmDeadline:
-            DateTime.parse(j['confirmDeadline'] as String),
+        pricePerTeamPaise: (j['pricePerTeam'] as num?)?.toInt() ?? 50000,
+        confirmDeadline: DateTime.parse(j['confirmDeadline'] as String),
+        status: (j['status'] as String?) ?? 'pending_payment',
+        confirmationFeePaise: (j['confirmationFeePaise'] as num?)?.toInt() ?? 50000,
+        groundFeePaise: (j['groundFeePaise'] as num?)?.toInt() ?? 0,
+        remainingFeePaise: (j['remainingFeePaise'] as num?)?.toInt() ?? 0,
+        myTeamPaid: (j['myTeamPaid'] as bool?) ?? false,
+        opponentPaid: (j['opponentPaid'] as bool?) ?? false,
+      );
+}
+
+class MmLobbyStatusPick {
+  const MmLobbyStatusPick({
+    required this.groundId,
+    required this.slotTime,
+    this.groundName,
+  });
+  final String groundId;
+  final String slotTime;
+  final String? groundName;
+  factory MmLobbyStatusPick.fromJson(Map<String, dynamic> j) =>
+      MmLobbyStatusPick(
+        groundId: j['groundId'] as String,
+        slotTime: j['slotTime'] as String? ?? '',
+        groundName: j['groundName'] as String?,
       );
 }
 
@@ -281,11 +317,21 @@ class MmLobbyStatus {
     required this.lobbyId,
     required this.status,
     this.match,
+    this.format,
+    this.date,
+    this.teamId,
+    this.teamName,
+    this.picks = const [],
   });
 
   final String lobbyId;
   final String status; // searching | matched | confirmed | expired | cancelled
   final MmMatchSummary? match;
+  final String? format;
+  final String? date;
+  final String? teamId;
+  final String? teamName;
+  final List<MmLobbyStatusPick> picks;
 
   factory MmLobbyStatus.fromJson(Map<String, dynamic> j) => MmLobbyStatus(
         lobbyId: j['lobbyId'] as String,
@@ -293,6 +339,15 @@ class MmLobbyStatus {
         match: j['match'] != null
             ? MmMatchSummary.fromJson(j['match'] as Map<String, dynamic>)
             : null,
+        format: j['format'] as String?,
+        date: j['date'] as String?,
+        teamId: j['teamId'] as String?,
+        teamName: j['teamName'] as String?,
+        picks: (j['picks'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(MmLobbyStatusPick.fromJson)
+                .toList() ??
+            [],
       );
 }
 
