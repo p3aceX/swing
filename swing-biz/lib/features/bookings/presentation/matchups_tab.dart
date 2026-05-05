@@ -360,11 +360,15 @@ class _MatchupsLane extends StatelessWidget {
       );
     }
 
-    final pendingPay = items.where((e) => !e.$1.isConfirmed).toList();
-    final today =
-        items.where((e) => e.$1.isConfirmed && e.$1.daysFromNow == 0).toList();
-    final upcoming =
-        items.where((e) => e.$1.isConfirmed && e.$1.daysFromNow != 0).toList();
+    final pendingPay = items
+        .where((e) => !e.$1.isReadyToPlay && !e.$1.isSetUp)
+        .toList();
+    final today = items
+        .where((e) => e.$1.isReadyToPlay && e.$1.daysFromNow == 0)
+        .toList();
+    final upcoming = items
+        .where((e) => e.$1.isReadyToPlay && e.$1.daysFromNow != 0)
+        .toList();
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 80),
@@ -510,12 +514,19 @@ class _MatchRow extends StatelessWidget {
     final paidCount =
         (match.teamAConfirmed ? 1 : 0) + (match.teamBConfirmed ? 1 : 0);
 
+    final String stateMeta;
+    if (match.isSetUp) {
+      stateMeta = 'setup done';
+    } else if (match.isConfirmed) {
+      stateMeta = 'advance received · ready to setup';
+    } else {
+      stateMeta = '$paidCount of 2 advance received';
+    }
     final meta = [
       match.format,
       match.dateLabel,
       match.displaySlot,
-      if (!match.isConfirmed) '$paidCount of 2 advance received',
-      if (match.isConfirmed) 'advance received · ready to start',
+      stateMeta,
     ].join(' · ');
 
     return InkWell(
@@ -562,24 +573,18 @@ class _MatchRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            if (match.isConfirmed)
-              const Text(
-                'Start',
-                style: TextStyle(
-                  color: _text,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              )
-            else
-              const Text(
-                'Manage',
-                style: TextStyle(
-                  color: _text,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+            Text(
+              match.isSetUp
+                  ? 'Open'
+                  : match.isConfirmed
+                      ? 'Setup'
+                      : 'Manage',
+              style: const TextStyle(
+                color: _text,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
+            ),
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right_rounded, size: 18, color: _faint),
           ],

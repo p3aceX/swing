@@ -43,6 +43,8 @@ class ArenaMatch {
   final int remainingFeePaise;
 
   bool get isConfirmed => status == 'confirmed';
+  bool get isSetUp => status == 'setup';
+  bool get isReadyToPlay => status == 'confirmed' || status == 'setup';
   bool get bothPaid => teamAConfirmed && teamBConfirmed;
 
   String get dateLabel {
@@ -445,7 +447,7 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
       Navigator.pop(context, {'started': true, 'linkedMatchId': linkedMatchId});
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Match started — open the scoring screen.'),
+          content: Text('Match set up — see you on match day.'),
           backgroundColor: Color(0xFF059669),
         ),
       );
@@ -598,15 +600,19 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: match.isConfirmed
+                  color: match.isReadyToPlay
                       ? const Color(0xFFDCFCE7)
                       : const Color(0xFFFEF3C7),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  match.isConfirmed ? 'Advance Received' : 'Advance Pending',
+                  match.isSetUp
+                      ? 'Setup Done'
+                      : match.isConfirmed
+                          ? 'Advance Received'
+                          : 'Advance Pending',
                   style: TextStyle(
-                    color: match.isConfirmed
+                    color: match.isReadyToPlay
                         ? const Color(0xFF059669)
                         : const Color(0xFFD97706),
                     fontSize: 11,
@@ -715,13 +721,33 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
                             strokeWidth: 1.5, color: Colors.white),
                       )
                     : const Text(
-                        'Start Match',
+                        'Setup Match',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+              ),
+            ),
+          ] else if (match.isSetUp) ...[
+            const SizedBox(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              alignment: Alignment.center,
+              child: const Text(
+                'Match Setup Complete',
+                style: TextStyle(
+                  color: Color(0xFF059669),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],

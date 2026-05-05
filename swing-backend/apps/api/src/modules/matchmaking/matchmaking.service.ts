@@ -1708,7 +1708,7 @@ export class MatchmakingService {
     const matches = await prisma.matchmakingMatch.findMany({
       where: {
         groundId: { in: unitIds },
-        status: { in: ['pending_payment', 'confirmed'] },
+        status: { in: ['pending_payment', 'confirmed', 'setup'] },
       },
       orderBy: { date: 'asc' },
     })
@@ -2220,13 +2220,16 @@ export class MatchmakingService {
   }
 
   /**
-   * Arena owner taps "Start Match" once both teams' advance has been received
-   * (matchmakingMatch.status === 'confirmed'). Flips the linked cricket Match
-   * to IN_PROGRESS and the matchmakingMatch to 'started' so the row can move
-   * out of the "ready to start" bucket on the owner's MatchUps tab.
+   * Arena owner taps "Setup Match" once both teams' advance has been received
+   * (matchmakingMatch.status === 'confirmed'). Marks the matchmakingMatch as
+   * 'setup' so the row stays visible in the owner's Match-Up tab under
+   * TODAY/UPCOMING but is no longer asking for the setup action.
    *
-   * Returns { linkedMatchId, status } so the client can navigate the scorer
-   * straight to the scoring screen.
+   * Does NOT touch Match.status — the cricket Match stays SCHEDULED until
+   * scoring actually begins from the match-day scoring screen.
+   *
+   * Returns { linkedMatchId, status } so the client can deep-link to the
+   * match details / scoring setup screen if it wants to.
    */
   async startMatchAsArenaOwner(userId: string, matchId: string) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
@@ -2241,18 +2244,18 @@ export class MatchmakingService {
     })
     if (!unit || unit.arena.ownerId !== owner.id) throw Errors.forbidden()
 
-    // Idempotent: if already started/in-progress, just return the linked match.
-    if (match.status === 'started') {
+    // Idempotent: if already setup, just return the linked match.
+    if (match.status === 'setup') {
       return {
-        status: 'started',
+        status: 'setup',
         linkedMatchId: (match as any).linkedMatchId ?? null,
       }
     }
 
     if (match.status !== 'confirmed') {
       throw new AppError(
-        'NOT_READY_TO_START',
-        'Match cannot be started until both teams have paid the advance.',
+        'NOT_READY_FOR_SETUP',
+        'Match can only be set up after both teams pay the advance.',
         400,
       )
     }
@@ -2266,18 +2269,12 @@ export class MatchmakingService {
       )
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.match.update({
-        where: { id: linkedMatchId },
-        data: { status: 'IN_PROGRESS' as any },
-      })
-      await tx.matchmakingMatch.update({
-        where: { id: matchId },
-        data: { status: 'started' },
-      })
+    await prisma.matchmakingMatch.update({
+      where: { id: matchId },
+      data: { status: 'setup' },
     })
 
-    return { status: 'started', linkedMatchId }
+    return { status: 'setup', linkedMatchId }
   }
 
   async cancelMatchAsArenaOwner(userId: string, matchId: string) {
