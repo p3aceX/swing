@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:geocoding/geocoding.dart';
@@ -54,6 +56,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void initState() {
     super.initState();
     _loadCurrentCity();
+    _initNotificationTapHandlers();
+  }
+
+  void _initNotificationTapHandlers() {
+    // App opened from a terminated state by tapping a notification
+    FirebaseMessaging.instance.getInitialMessage().then(_handleNotificationTap);
+    // App brought to foreground by tapping a notification
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+  }
+
+  void _handleNotificationTap(RemoteMessage? message) {
+    if (message == null) return;
+    final type = message.data['type'] as String?;
+    if (type == 'mm_match_found' || type == 'mm_match_confirmed') {
+      if (mounted) setState(() => _currentIndex = 2);
+    }
   }
 
   void _onNavTap(int index) => setState(() => _currentIndex = index);
