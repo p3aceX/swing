@@ -142,6 +142,7 @@ class PlayerMatch {
       ballType: ballType,
       tossWinner: tossWinner ?? this.tossWinner,
       tossDecision: tossDecision ?? this.tossDecision,
+      isMatchmaking: isMatchmaking,
     );
   }
 }
