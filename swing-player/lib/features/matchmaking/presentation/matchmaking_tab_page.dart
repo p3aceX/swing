@@ -345,24 +345,19 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
 
   Future<void> _confirmMatch() async {
     final matchId = _matchSummary?.matchId;
-    if (matchId == null) return;
+    final lobbyId = _lobbyId;
+    if (matchId == null || lobbyId == null) return;
     setState(() { _lobbyState = _LobbyState.confirming; _error = null; });
     try {
       final repo = ref.read(matchmakingRepositoryProvider);
-      final order = await repo.createMatchPaymentOrder(matchId);
+      final result = await repo.confirmMatch(matchId, lobbyId);
       if (!mounted) return;
-      if (order.orderId.isEmpty) {
-        setState(() { _lobbyState = _LobbyState.matched; _error = 'Could not create payment. Try again.'; });
-        return;
+      if (result.status == 'confirmed') {
+        setState(() => _lobbyState = _LobbyState.confirmed);
+      } else {
+        setState(() => _lobbyState = _LobbyState.waitingOpponent);
+        _startPolling();
       }
-      _razorpay.open({
-        'key': order.key,
-        'amount': order.amountPaise,
-        'currency': order.currency,
-        'name': 'Swing Matchup',
-        'description': 'Your share · ${_matchSummary?.groundName ?? "Ground"}',
-        'order_id': order.orderId,
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() { _lobbyState = _LobbyState.matched; _error = _parseError(e); });
@@ -4570,7 +4565,7 @@ class _MatchedFind extends StatelessWidget {
                               strokeWidth: 2, color: context.ctaFg),
                         )
                       : Text(
-                          'Pay ₹$confirmFee  →  Lock Slot',
+                          'Confirm Match  →  Lock Slot',
                           style: TextStyle(
                             color: context.ctaFg,
                             fontSize: 15,
