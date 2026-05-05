@@ -286,6 +286,7 @@ class _MatchDetailSheet extends ConsumerStatefulWidget {
 class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
   bool _markingA = false;
   bool _markingB = false;
+  bool _cancelling = false;
   String? _error;
 
   Future<void> _markPaid(String lobbyId, String teamName, bool isA) async {
@@ -334,6 +335,48 @@ class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
       if (mounted) setState(() => _error = msg);
     } finally {
       if (mounted) setState(() { _markingA = false; _markingB = false; });
+    }
+  }
+
+  Future<void> _cancelMatch() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel Match'),
+        content: Text(
+          'Cancel the match between ${widget.match.teamAName} and ${widget.match.teamBName}? '
+          'Both teams will be notified.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel Match',
+                style: TextStyle(color: Color(0xFFDC2626))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() { _cancelling = true; _error = null; });
+    try {
+      final dio = ref.read(hostDioProvider);
+      await dio.delete('/matchmaking/matches/${widget.match.matchId}');
+      if (mounted) {
+        ref.invalidate(arenaMatchesProvider(widget.arenaId));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      String msg = e.toString();
+      final m = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(msg);
+      if (m != null) msg = m.group(1)!;
+      if (mounted) setState(() => _error = msg);
+    } finally {
+      if (mounted) setState(() => _cancelling = false);
     }
   }
 
@@ -478,7 +521,34 @@ class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
                 style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
           ],
 
-          const SizedBox(height: 4),
+          const SizedBox(height: 20),
+          GestureDetector(
+            onTap: _cancelling ? null : _cancelMatch,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: _cancelling
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.5, color: Color(0xFFDC2626)),
+                    )
+                  : const Text(
+                      'Cancel Match',
+                      style: TextStyle(
+                        color: Color(0xFFDC2626),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+            ),
+          ),
         ],
       ),
     );
