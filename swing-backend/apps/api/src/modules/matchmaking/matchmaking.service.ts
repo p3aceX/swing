@@ -784,7 +784,7 @@ export class MatchmakingService {
 
       const match = await tx.matchmakingMatch.findUnique({ where: { id: matchId } })
       if (!match) throw Errors.notFound('Match')
-      if (match.status !== 'pending_confirm') throw new AppError('INVALID_STATE', 'Match is not pending confirmation', 400)
+      if (!['pending_payment', 'pending_confirm'].includes(match.status)) throw new AppError('INVALID_STATE', 'Match is not pending confirmation', 400)
 
       if (new Date() > match.confirmDeadline) {
         await tx.matchmakingMatch.update({ where: { id: match.id }, data: { status: 'cancelled' } })
