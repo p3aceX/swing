@@ -315,7 +315,7 @@ export class TournamentService {
     })
     const grouped: Record<string, typeof standings> = {}
     for (const s of standings) {
-      const key = s.groupId ?? "overall"
+      const key = s.group?.name ?? (s.groupId ? s.groupId : "Overall")
       if (!grouped[key]) grouped[key] = []
       grouped[key].push(s)
     }

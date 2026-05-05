@@ -15,6 +15,8 @@ class ScoringMatch {
     this.hasImpactPlayer = false,
     this.teamAPlayerIds = const [],
     this.teamBPlayerIds = const [],
+    this.teamAId,
+    this.teamBId,
     this.scorerId,
     this.venueName,
     this.venueCity,
@@ -36,6 +38,8 @@ class ScoringMatch {
   final bool hasImpactPlayer;
   final List<String> teamAPlayerIds;
   final List<String> teamBPlayerIds;
+  final String? teamAId;
+  final String? teamBId;
   final String? scorerId;
   final String? venueName;
   final String? venueCity;
@@ -43,6 +47,7 @@ class ScoringMatch {
 
   factory ScoringMatch.fromJson(Map<String, dynamic> json) {
     final payload = _unwrapMap(json);
+    final tournament = _map(payload['tournament']);
     final rawInnings = (_list(payload['innings'])
           ..sort((a, b) => _asInt(_map(a)['inningsNumber']).compareTo(_asInt(_map(b)['inningsNumber']))))
         .whereType<Map>()
@@ -55,14 +60,25 @@ class ScoringMatch {
       try { parsedAt = DateTime.parse('$rawAt').toLocal(); } catch (_) {}
     }
 
+    final matchFormat = _asString(
+      payload['format'] ?? tournament['format'],
+      fallback: 'T20',
+    );
+    final customOvers = _asInt(
+      payload['customOvers'] ??
+          tournament['customOvers'] ??
+          tournament['oversPerInnings'] ??
+          tournament['overs'],
+    );
+
     return ScoringMatch(
       id: _asString(payload['id']),
       status: _asString(payload['status']),
       teamAName: _asString(payload['teamAName'], fallback: 'Team A'),
       teamBName: _asString(payload['teamBName'], fallback: 'Team B'),
-      format: _asString(payload['format'], fallback: 'T20'),
+      format: matchFormat,
       innings: rawInnings,
-      customOvers: payload['customOvers'] is num ? (payload['customOvers'] as num).toInt() : null,
+      customOvers: customOvers > 0 ? customOvers : null,
       tossWonBy: _nullableString(payload['tossWonBy']),
       tossDecision: _nullableString(payload['tossDecision']),
       winnerId: _nullableString(payload['winnerId']),
@@ -71,6 +87,8 @@ class ScoringMatch {
       hasImpactPlayer: payload['hasImpactPlayer'] == true,
       teamAPlayerIds: _list(payload['teamAPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       teamBPlayerIds: _list(payload['teamBPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
+      teamAId: _nullableString(payload['teamAId'] ?? _map(payload['teamA'])['id']),
+      teamBId: _nullableString(payload['teamBId'] ?? _map(payload['teamB'])['id']),
       scorerId: _nullableString(payload['scorerId']),
       venueName: _nullableString(payload['venueName']),
       venueCity: _nullableString(payload['venueCity']),

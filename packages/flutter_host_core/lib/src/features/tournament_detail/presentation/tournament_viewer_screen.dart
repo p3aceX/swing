@@ -131,33 +131,34 @@ class _DetailBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NestedScrollView(
-      headerSliverBuilder: (ctx, _) => [
-        SliverToBoxAdapter(
-          child: _TournamentHeader(
+    return SafeArea(
+      top: true,
+      bottom: false,
+      child: Column(
+        children: [
+          _TournamentHeader(
             tournament: tournament,
             onBack: callbacks.onBack ?? () => Navigator.of(context).maybePop(),
             isHost: isHost,
             onEdit: onEdit,
           ),
-        ),
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: _TabBarDelegate(controller: tabs, bg: context.bg),
-        ),
-      ],
-      body: TabBarView(
-        controller: tabs,
-        children: [
-          _OverviewTab(tournament: tournament),
-          _MatchesTab(slug: slug, tournament: tournament, callbacks: callbacks),
-          _StandingsTab(slug: slug, tournament: tournament),
-          _LeaderboardTab(
-            slug: slug,
-            tournamentName: tournament.name,
-            tournamentStatus: tournament.status,
+          _InlineTabBar(controller: tabs, bg: context.bg),
+          Expanded(
+            child: TabBarView(
+              controller: tabs,
+              children: [
+                _OverviewTab(tournament: tournament),
+                _MatchesTab(slug: slug, tournament: tournament, callbacks: callbacks),
+                _StandingsTab(slug: slug, tournament: tournament),
+                _LeaderboardTab(
+                  slug: slug,
+                  tournamentName: tournament.name,
+                  tournamentStatus: tournament.status,
+                ),
+                _TeamsTab(tournament: tournament, callbacks: callbacks),
+              ],
+            ),
           ),
-          _TeamsTab(tournament: tournament, callbacks: callbacks),
         ],
       ),
     );
@@ -221,10 +222,10 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
           controller: controller,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          indicatorColor: context.accent,
-          indicatorWeight: 2.5,
+          indicatorColor: context.fgSub.withValues(alpha: 0.45),
+          indicatorWeight: 1.5,
           indicatorSize: TabBarIndicatorSize.label,
-          dividerColor: context.stroke,
+          dividerColor: context.stroke.withValues(alpha: 0.35),
           labelColor: context.accent,
           unselectedLabelColor: context.fgSub,
           labelPadding: const EdgeInsets.only(right: 24, left: 12),
@@ -248,6 +249,42 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
       old.controller != controller;
 }
 
+class _InlineTabBar extends StatelessWidget {
+  const _InlineTabBar({required this.controller, required this.bg});
+  final TabController controller;
+  final Color bg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: bg,
+      height: 48,
+      child: TabBar(
+        controller: controller,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        indicatorColor: context.accent,
+        indicatorWeight: 2,
+        indicatorSize: TabBarIndicatorSize.label,
+        dividerColor: context.stroke.withValues(alpha: 0.35),
+        labelColor: context.accent,
+        unselectedLabelColor: context.fgSub,
+        labelPadding: const EdgeInsets.only(right: 24, left: 12),
+        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        unselectedLabelStyle:
+            const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        tabs: const [
+          Tab(text: 'Overview'),
+          Tab(text: 'Matches'),
+          Tab(text: 'Standings'),
+          Tab(text: 'Leaderboard'),
+          Tab(text: 'Teams'),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Tournament header ─────────────────────────────────────────────────────────
 
 class _TournamentHeader extends StatelessWidget {
@@ -265,23 +302,25 @@ class _TournamentHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = tournament;
-    final topPad = MediaQuery.of(context).padding.top;
-    const coverH = 220.0;
+    final coverH = MediaQuery.of(context).size.width * 0.46;
     const logoSize = 72.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Cover ──────────────────────────────────────────────────────────
-        SizedBox(
-          height: coverH,
-          width: double.infinity,
-          child: Stack(
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: SizedBox(
+            height: coverH,
+            width: double.infinity,
+            child: Stack(
             fit: StackFit.expand,
             children: [
               if (t.coverUrl != null)
                 Image.network(t.coverUrl!,
                     fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
                     errorBuilder: (_, __, ___) => _accentGradient(context))
               else
                 _accentGradient(context),
@@ -290,18 +329,18 @@ class _TournamentHeader extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    stops: const [0.0, 0.35, 0.65, 1.0],
+                    stops: const [0.0, 0.36, 0.66, 1.0],
                     colors: [
                       Colors.black.withValues(alpha: 0.72),
-                      Colors.transparent,
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.85),
+                      Colors.black.withValues(alpha: 0.18),
+                      Colors.black.withValues(alpha: 0.28),
+                      Colors.black.withValues(alpha: 0.95),
                     ],
                   ),
                 ),
               ),
               Positioned(
-                top: topPad + 8,
+                top: 8,
                 left: 12,
                 right: 12,
                 child: Row(
@@ -361,8 +400,15 @@ class _TournamentHeader extends StatelessWidget {
                   ],
                 ),
               ),
+              if (!isHost)
+                Positioned(
+                  right: 16,
+                  bottom: 12,
+                  child: _TournamentFollowButton(tournamentId: t.id),
+                ),
             ],
           ),
+        ),
         ),
 
         // ── Info below cover ───────────────────────────────────────────────
@@ -372,129 +418,55 @@ class _TournamentHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Transform.translate(
-                offset: const Offset(0, -28),
+                offset: const Offset(0, -10),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: logoSize,
-                      height: logoSize,
-                      decoration: BoxDecoration(
-                        color: context.cardBg,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: context.bg, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                        image: t.logoUrl != null
-                            ? DecorationImage(
-                                image: CachedNetworkImageProvider(t.logoUrl!),
-                                fit: BoxFit.cover)
+                    Transform.translate(
+                      offset: const Offset(0, -10),
+                      child: Container(
+                        width: logoSize,
+                        height: logoSize,
+                        decoration: BoxDecoration(
+                          color: context.cardBg,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: context.bg, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.2),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                          image: t.logoUrl != null
+                              ? DecorationImage(
+                                  image: CachedNetworkImageProvider(t.logoUrl!),
+                                  fit: BoxFit.cover)
+                              : null,
+                        ),
+                        child: t.logoUrl == null
+                            ? Icon(Icons.emoji_events_rounded,
+                                color: context.accent, size: 30)
                             : null,
                       ),
-                      child: t.logoUrl == null
-                          ? Icon(Icons.emoji_events_rounded,
-                              color: context.accent, size: 30)
-                          : null,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            t.name,
-                            style: TextStyle(
-                              color: context.fg,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.4,
-                              height: 1.15,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 3),
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  t.resolvedOrganiserName,
-                                  style: TextStyle(
-                                    color: context.fgSub,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (t.isVerified || t.isSwingOfficial) ...[
-                                const SizedBox(width: 3),
-                                Icon(Icons.verified_rounded,
-                                    color: context.accent, size: 12),
-                              ],
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _TournamentFollowButton(tournamentId: t.id),
-                  ],
-                ),
-              ),
-              Transform.translate(
-                offset: const Offset(0, -20),
-                child: Wrap(
-                  spacing: 5,
-                  runSpacing: 4,
-                  children: [
-                    _StatusBadge(status: t.status),
-                    _FormatBadge(format: t.format),
-                    _BallTypeBadge(ballType: t.ballType),
-                    _TournamentFormatBadge(format: t.tournamentFormat),
-                  ],
-                ),
-              ),
-              Transform.translate(
-                offset: const Offset(0, -14),
-                child: Row(
-                  children: [
-                    Icon(Icons.groups_rounded, size: 13, color: context.fgSub),
-                    const SizedBox(width: 4),
-                    Text('${t.confirmedTeamCount}/${t.maxTeams} teams',
-                        style:
-                            TextStyle(color: context.fgSub, fontSize: 12)),
-                    if (t.city != null) ...[
-                      const SizedBox(width: 8),
-                      Icon(Icons.location_on_rounded,
-                          size: 12, color: context.fgSub),
-                      const SizedBox(width: 2),
-                      Flexible(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 20),
                         child: Text(
-                          t.venueName != null
-                              ? '${t.venueName}, ${t.city}'
-                              : t.city!,
-                          style:
-                              TextStyle(color: context.fgSub, fontSize: 12),
-                          maxLines: 1,
+                          t.name,
+                          style: TextStyle(
+                            color: context.fg,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.4,
+                            height: 1.15,
+                          ),
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                    ],
-                    const Spacer(),
-                    Text(
-                      _dateRange(t.startDate, t.endDate),
-                      style: TextStyle(
-                          color: context.fgSub,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -653,6 +625,11 @@ class _OverviewTab extends StatelessWidget {
               ),
             ],
           ),
+        ),
+        Divider(
+          height: 12,
+          thickness: 1,
+          color: context.stroke.withValues(alpha: 0.3),
         ),
         const SizedBox(height: 14),
         if (t.status == 'UPCOMING' &&
@@ -1023,7 +1000,7 @@ class _MatchesTabState extends ConsumerState<_MatchesTab> {
       List<TournamentMatchModel> matches) {
     final grouped = <String, List<TournamentMatchModel>>{};
     for (final m in matches) {
-      final key = m.round ?? m.groupName ?? 'Matches';
+      final key = '${m.round ?? m.groupName ?? 'Matches'}';
       grouped.putIfAbsent(key, () => []).add(m);
     }
     return grouped;
@@ -1303,7 +1280,7 @@ class _MatchCard extends StatelessWidget {
             Row(
               children: [
                 if (m.round != null || m.groupName != null)
-                  Text(m.round ?? m.groupName ?? 'Match',
+                  Text('${m.round ?? m.groupName ?? 'Match'}',
                       style: TextStyle(
                           color: context.fgSub,
                           fontSize: 10,
@@ -1676,14 +1653,15 @@ class _StandingsBracketView extends StatelessWidget {
 
   int _roundOrder(String round) {
     final r = round.toLowerCase();
-    if (r.contains('quarter')) return 0;
-    if (r.contains('semi')) return 1;
-    if (r.contains('third') || r.contains('3rd')) return 2;
-    return 3; // Final
+    if (r.startsWith('group') || r.contains('league') || r.contains('series')) return 0;
+    if (r.contains('quarter')) return 10;
+    if (r.contains('semi')) return 20;
+    if (r.contains('third') || r.contains('3rd')) return 30;
+    return 40; // Final / Grand Final
   }
 
   String? _resolveWinner(TournamentMatchModel m) {
-    final w = m.winner;
+    final w = _winnerValue(m);
     if (w == null || w.isEmpty) return null;
     if (w == 'A') return m.teamAName;
     if (w == 'B') return m.teamBName;
@@ -1694,29 +1672,43 @@ class _StandingsBracketView extends StatelessWidget {
     return w;
   }
 
+  String? _winnerValue(TournamentMatchModel m) {
+    final dynamic winnerDynamic = (m as dynamic).winner;
+    if (winnerDynamic == null) return null;
+    return '$winnerDynamic';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final knockoutMatches = matches
-        .where((m) => m.round != null && _isKnockout(m.round!))
+    final allRoundMatches = matches
+        .where((m) => m.round != null)
         .toList()
-      ..sort((a, b) => _roundOrder(a.round!).compareTo(_roundOrder(b.round!)));
+      ..sort((a, b) {
+        final orderCmp = _roundOrder('${a.round}').compareTo(_roundOrder('${b.round}'));
+        if (orderCmp != 0) return orderCmp;
+        return '${a.round}'.compareTo('${b.round}'); // alphabetical within same order
+      });
 
-    // Fall back to seeded bracket if no real knockout data
-    if (knockoutMatches.isEmpty) {
+    // Fall back to seeded bracket if no match data
+    if (allRoundMatches.isEmpty) {
       return _SeededBracket(standings: standings);
     }
 
     // Group by round
     final byRound = <String, List<TournamentMatchModel>>{};
-    for (final m in knockoutMatches) {
-      byRound.putIfAbsent(m.round!, () => []).add(m);
+    for (final m in allRoundMatches) {
+      byRound.putIfAbsent('${m.round}', () => []).add(m);
     }
     final rounds = byRound.keys.toList()
-      ..sort((a, b) => _roundOrder(a).compareTo(_roundOrder(b)));
+      ..sort((a, b) {
+        final orderCmp = _roundOrder(a).compareTo(_roundOrder(b));
+        if (orderCmp != 0) return orderCmp;
+        return a.compareTo(b);
+      });
 
-    // Find champion
-    final finalMatches = knockoutMatches
-        .where((m) => _roundOrder(m.round!) == 3 && m.status == 'COMPLETED')
+    // Find champion from Final match
+    final finalMatches = allRoundMatches
+        .where((m) => _roundOrder('${m.round}') == 40 && m.status == 'COMPLETED')
         .toList();
     final champion = finalMatches.isNotEmpty ? _resolveWinner(finalMatches.last) : null;
 
@@ -2443,10 +2435,16 @@ class _LeaderboardRow extends StatelessWidget {
           width: isTopRank ? 1.2 : 1,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final baseWidth = values.length <= 3 ? 46.0 : 40.0;
+          final availableForStats =
+              (constraints.maxWidth - 32).clamp(0.0, double.infinity);
+          final adaptiveWidth =
+              values.isEmpty ? baseWidth : availableForStats / values.length;
+          final colWidth = adaptiveWidth.clamp(34.0, baseWidth);
+
+          return Row(
             children: [
               SizedBox(
                   width: 24,
@@ -2480,28 +2478,32 @@ class _LeaderboardRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(p.name,
-                        style: TextStyle(
-                            color: isTopRank ? context.accent : context.fg,
-                            fontSize: isTopRank ? 13 : 12,
-                            fontWeight: FontWeight.w700),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    if (p.username != null && p.username!.isNotEmpty)
-                      Text('@${p.username}',
-                          style: TextStyle(
-                              color: context.fgSub,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                  ],
+                child: Text(
+                  p.name,
+                  style: TextStyle(
+                      color: isTopRank ? context.accent : context.fg,
+                      fontSize: isTopRank ? 13 : 12,
+                      fontWeight: FontWeight.w700),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (isTopRank && onShare != null)
+              ...values.asMap().entries.map((e) {
+                final isLast = e.key == values.length - 1;
+                final highlighted = (isLast && ipHighlight) || isTopRank;
+                return SizedBox(
+                  width: colWidth,
+                  child: Text(e.value,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: highlighted ? context.accent : context.fg,
+                          fontSize: 12,
+                          fontWeight:
+                              highlighted ? FontWeight.w800 : FontWeight.w600)),
+                );
+              }),
+              if (isTopRank && onShare != null) ...[
+                const SizedBox(width: 6),
                 GestureDetector(
                   onTap: onShare,
                   child: Container(
@@ -2513,35 +2515,10 @@ class _LeaderboardRow extends StatelessWidget {
                         size: 13, color: context.accent),
                   ),
                 ),
+              ],
             ],
-          ),
-          const SizedBox(height: 8),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final colWidth = values.isEmpty
-                  ? 72.0
-                  : (constraints.maxWidth / values.length).clamp(58.0, 96.0);
-              return Row(
-                children: values.asMap().entries.map((e) {
-                  final isLast = e.key == values.length - 1;
-                  final highlighted = (isLast && ipHighlight) || isTopRank;
-                  return SizedBox(
-                    width: colWidth,
-                    child: Text(e.value,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color:
-                                highlighted ? context.accent : context.fg,
-                            fontSize: 12,
-                            fontWeight: highlighted
-                                ? FontWeight.w800
-                                : FontWeight.w600)),
-                  );
-                }).toList(),
-              );
-            },
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -4123,11 +4100,7 @@ class _OverviewFactsCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
       child: Column(
         children: [
-          for (var i = 0; i < items.length; i++) ...[
-            _OverviewFactLine(item: items[i]),
-            if (i != items.length - 1)
-              Divider(height: 1, thickness: 1, color: context.stroke),
-          ],
+          for (final item in items) _OverviewFactLine(item: item),
         ],
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app.dart';
@@ -8,6 +9,10 @@ import 'providers/auth_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+  ));
 
   // Init secure storage and warm cache once on startup
   const flutterSecureStorage = FlutterSecureStorage(
@@ -21,6 +26,7 @@ void main() async {
       overrides: [
         secureStorageProvider.overrideWithValue(storage),
         hostDioOverride,
+        hostPathConfigOverride,
       ],
       child: const SwingClubApp(),
     ),

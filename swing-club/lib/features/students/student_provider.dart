@@ -10,12 +10,14 @@ class StudentsNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     final res = await ref.read(apiClientProvider)
         .get('/academy/${s.academyId}/students', params: {'limit': 100});
     final data = res.data['data'];
-    if (data is List) return data.cast<Map<String, dynamic>>();
-    if (data is Map) {
-      if (data['items'] != null) return (data['items'] as List).cast<Map<String, dynamic>>();
-      if (data['data']  != null) return (data['data']  as List).cast<Map<String, dynamic>>();
+    List<Map<String, dynamic>> result = [];
+    if (data is List) {
+      result = data.cast<Map<String, dynamic>>();
+    } else if (data is Map) {
+      if (data['items'] != null) result = (data['items'] as List).cast<Map<String, dynamic>>();
+      else if (data['data'] != null) result = (data['data'] as List).cast<Map<String, dynamic>>();
     }
-    return [];
+    return result;
   }
 
   Future<void> enroll(String batchId, Map<String, dynamic> payload) async {
@@ -34,9 +36,15 @@ class StudentsNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
   Future<void> updateEnrollment(String enrollmentId, Map<String, dynamic> payload) async {
     final s = await ref.read(academyProvider.future);
-    await ref.read(apiClientProvider)
-        .patch('/academy/${s.academyId}/students/$enrollmentId', data: payload);
+    await ref.read(apiClientProvider).patch(
+      '/academy/${s.academyId}/students/$enrollmentId',
+      data: payload,
+    );
     ref.invalidateSelf();
+  }
+
+  Future<void> remove(String enrollmentId) async {
+    await updateEnrollment(enrollmentId, {'enrollmentStatus': 'INACTIVE'});
   }
 }
 

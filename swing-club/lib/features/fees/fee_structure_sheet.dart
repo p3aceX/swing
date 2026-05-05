@@ -85,7 +85,7 @@ class _FeeStructureSheetState extends ConsumerState<FeeStructureSheet> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _frequency,
+              initialValue: _frequency,
               decoration: const InputDecoration(labelText: 'Frequency'),
               items: kFeeFrequencies
                   .map((f) => DropdownMenuItem(value: f, child: Text(f)))
@@ -95,7 +95,7 @@ class _FeeStructureSheetState extends ConsumerState<FeeStructureSheet> {
             const SizedBox(height: 12),
             batchesState.maybeWhen(
               data: (batches) => DropdownButtonFormField<String?>(
-                value: _batchId,
+                initialValue: _batchId,
                 decoration: const InputDecoration(labelText: 'Batch (optional)'),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('All students')),

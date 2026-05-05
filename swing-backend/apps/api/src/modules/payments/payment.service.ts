@@ -1,8 +1,11 @@
 import { prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
+import { sendOneSignalPushNotification } from '../../lib/onesignal'
 import crypto from 'crypto'
 import Razorpay from 'razorpay'
 import { StoreService } from '../store/store.service'
+
+const CONFIRMATION_FEE_PAISE = 50000 // ₹500
 
 let _razorpay: Razorpay | null = null
 function getRazorpay() {
@@ -81,7 +84,7 @@ export class PaymentService {
       },
     })
 
-    await this.fulfillPayment(payment.entityType as EntityType, payment.entityId!)
+    await this.fulfillPayment(payment.entityType as EntityType, payment.entityId!, updatedPayment.id, payment.userId)
 
     return updatedPayment
   }
@@ -108,7 +111,7 @@ export class PaymentService {
           data: { status: 'COMPLETED', gatewayPaymentId: paymentEntity.id, completedAt: new Date() },
         })
         if (payment.entityType && payment.entityId) {
-          await this.fulfillPayment(payment.entityType as EntityType, payment.entityId)
+          await this.fulfillPayment(payment.entityType as EntityType, payment.entityId, payment.id, payment.userId)
         }
       }
     } else if (event === 'payment.failed' && paymentEntity) {
@@ -191,14 +194,17 @@ export class PaymentService {
       case 'MATCHMAKING_MATCH': {
         const match = await prisma.matchmakingMatch.findUnique({ where: { id: entityId } })
         if (!match) throw Errors.notFound('Match')
-        return { amountPaise: match.paymentAmountPerTeam, description: `Matchup slot booking ${entityId}` }
+        if (match.status !== 'pending_payment') {
+          throw new AppError('INVALID_STATE', 'Match is not awaiting payment', 400)
+        }
+        return { amountPaise: CONFIRMATION_FEE_PAISE, description: `Match confirmation deposit ${entityId}` }
       }
       default:
         throw new AppError('INVALID_ENTITY', 'Unknown entity type', 400)
     }
   }
 
-  private async fulfillPayment(entityType: EntityType, entityId: string) {
+  private async fulfillPayment(entityType: EntityType, entityId: string, paymentId?: string, payingUserId?: string) {
     switch (entityType) {
       case 'SLOT_BOOKING':
         await prisma.slotBooking.update({ where: { id: entityId }, data: { status: 'CONFIRMED', paidAt: new Date() } })
@@ -223,23 +229,100 @@ export class PaymentService {
           const match = await tx.matchmakingMatch.findUnique({ where: { id: entityId } })
           if (!match || match.status === 'confirmed') return
 
-          const unit = await tx.arenaUnit.findUnique({ where: { id: match.groundId } })
-          if (!unit) throw Errors.notFound('Arena unit')
-
+          // Determine which team this payment belongs to by matching the paying user
+          // to whichever lobby captain they are
           const [aLobby, bLobby] = await Promise.all([
             tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } }),
             tx.matchmakingLobby.findUnique({ where: { id: match.lobbyBId } }),
           ])
           if (!aLobby || !bLobby) throw new AppError('INVALID_MATCH', 'Lobby not found', 400)
 
-          const durations: Record<string, number> = { T10: 90, T20: 240, ODI: 480, Test: 2400, Custom: 240 }
+          // Resolve paying user → playerProfile id
+          let payerProfileId: string | null = null
+          if (payingUserId) {
+            const profile = await tx.playerProfile.findUnique({
+              where: { userId: payingUserId },
+              select: { id: true },
+            })
+            payerProfileId = profile?.id ?? null
+          }
+
+          const isTeamA = payerProfileId != null && aLobby.playerId === payerProfileId
+          const isTeamB = payerProfileId != null && bLobby.playerId === payerProfileId
+
+          const updateData: Record<string, any> = {}
+          if (isTeamA && !(match as any).teamAPaid) {
+            updateData.teamAPaid = true
+            updateData.teamAPaymentId = paymentId ?? null
+          } else if (isTeamB && !(match as any).teamBPaid) {
+            updateData.teamBPaid = true
+            updateData.teamBPaymentId = paymentId ?? null
+          }
+
+          if (Object.keys(updateData).length === 0) return // duplicate webhook
+
+          const updated = await tx.matchmakingMatch.update({
+            where: { id: entityId },
+            data: updateData,
+          })
+
+          const bothPaid = (updated as any).teamAPaid && (updated as any).teamBPaid
+
+          if (!bothPaid) {
+            // Notify the paying team — waiting for opponent
+            if (payingUserId) {
+              await sendOneSignalPushNotification(
+                payingUserId,
+                'Payment received — waiting for opponent',
+                'Your ₹500 deposit is confirmed. Waiting for the opponent team to pay.',
+                { type: 'mm_waiting_opponent', matchId: entityId },
+                'PLAYER',
+              ).catch(() => undefined)
+            }
+            // Notify the other captain to pay
+            const otherLobby = isTeamA ? bLobby : aLobby
+            if (otherLobby?.playerId) {
+              const otherProfile = await tx.playerProfile.findUnique({
+                where: { id: otherLobby.playerId },
+                select: { userId: true },
+              })
+              if (otherProfile?.userId) {
+                await sendOneSignalPushNotification(
+                  otherProfile.userId,
+                  'Opponent paid — your turn!',
+                  'The other team has paid ₹500. Pay now to confirm the match.',
+                  { type: 'mm_opponent_paid', matchId: entityId, lobbyId: otherLobby.id },
+                  'PLAYER',
+                ).catch(() => undefined)
+              }
+            }
+            return
+          }
+
+          // Both paid — create booking and confirm
+          const unit = await tx.arenaUnit.findUnique({ where: { id: match.groundId } })
+          if (!unit) throw Errors.notFound('Arena unit')
+
+          const durations: Record<string, number> = { T10: 240, T20: 240, ODI: 480, Test: 480, Custom: 240 }
           const durationMins = durations[match.format as string] ?? 240
           const [sh, sm] = match.slotTime.split(':').map(Number)
           const endMins = sh * 60 + sm + durationMins
           const endTime = `${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}`
-          const totalAmount = match.paymentAmountPerTeam * 2
+          const totalDepositPaise = CONFIRMATION_FEE_PAISE * 2
 
-          await tx.slotBooking.create({
+          const conflict = await tx.slotBooking.findFirst({
+            where: {
+              unitId: unit.id,
+              date: match.date,
+              status: { in: ['CONFIRMED', 'CHECKED_IN', 'PENDING_PAYMENT'] },
+              startTime: { lt: endTime },
+              endTime: { gt: match.slotTime },
+            },
+            select: { id: true },
+          })
+          if (conflict) throw new AppError('SLOT_ALREADY_BOOKED', 'Matched slot is no longer available', 409)
+
+          const booking = await tx.slotBooking.create({
             data: {
               arenaId: unit.arenaId,
               unitId: unit.id,
@@ -248,10 +331,10 @@ export class PaymentService {
               startTime: match.slotTime,
               endTime,
               durationMins,
-              baseAmountPaise: totalAmount,
-              totalAmountPaise: totalAmount,
-              totalPricePaise: totalAmount,
-              advancePaise: totalAmount,
+              baseAmountPaise: totalDepositPaise,
+              totalAmountPaise: totalDepositPaise,
+              totalPricePaise: totalDepositPaise,
+              advancePaise: totalDepositPaise,
               status: 'CONFIRMED',
               paymentMode: 'ONLINE',
               bookingSource: 'MATCHMAKING',
@@ -262,12 +345,32 @@ export class PaymentService {
 
           await tx.matchmakingMatch.update({
             where: { id: entityId },
-            data: { status: 'confirmed', teamAConfirmed: true, teamBConfirmed: true },
+            data: { status: 'confirmed', teamAConfirmed: true, teamBConfirmed: true, bookingId: booking.id },
           })
           await tx.matchmakingLobby.updateMany({
             where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
             data: { status: 'confirmed' },
           })
+
+          // Notify both teams that the match is confirmed
+          const remainingFeePaise = (match as any).remainingFeePaise ?? 0
+          for (const lobby of [aLobby, bLobby]) {
+            if (!lobby?.playerId) continue
+            const profile = await tx.playerProfile.findUnique({
+              where: { id: lobby.playerId },
+              select: { userId: true },
+            })
+            if (!profile?.userId) continue
+            await sendOneSignalPushNotification(
+              profile.userId,
+              'Match confirmed!',
+              remainingFeePaise > 0
+                ? `Your match is locked. Pay ₹${Math.round(remainingFeePaise / 100)} remaining at the ground.`
+                : 'Your match is locked. See you on the field!',
+              { type: 'mm_confirmed', matchId: entityId },
+              'PLAYER',
+            ).catch(() => undefined)
+          }
         })
         break
       }

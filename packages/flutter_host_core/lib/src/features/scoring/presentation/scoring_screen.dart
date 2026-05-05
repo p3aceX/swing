@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 
 import '../../../repositories/host_match_repository.dart';
 import '../../../theme/host_colors.dart';
+import '../../match_detail/presentation/match_detail_screen.dart';
+import '../../playing_eleven/presentation/playing_eleven_screen.dart';
 import '../controller/scoring_controller.dart';
 import '../domain/scoring_models.dart';
 import '../domain/scoring_rules.dart';
@@ -295,7 +297,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     debugPrint('[autoSetup] done');
   }
 
-  // Returns (winnerId, winMargin). winnerId is 'A', 'B', or '' for a tie.
+  // Returns (winnerSide, winMargin). winnerSide is 'A', 'B', or '' for a tie.
   (String, String?) _calcWinner(ScoringMatch match) {
     final sorted = [...match.innings]..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
     if (sorted.length < 2) return ('', null);
@@ -310,6 +312,18 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       return (inn1.battingTeam, '$runs run${runs != 1 ? "s" : ""}');
     }
     return ('', null); // tie
+  }
+
+  String _resolveWinnerId(ScoringMatch match, String winnerSide) {
+    if (winnerSide == 'A') {
+      final id = (match.teamAId ?? '').trim();
+      return id.isNotEmpty ? id : 'A';
+    }
+    if (winnerSide == 'B') {
+      final id = (match.teamBId ?? '').trim();
+      return id.isNotEmpty ? id : 'B';
+    }
+    return winnerSide;
   }
 
   bool _canStartNextInnings(ScoringMatch match, ScoringInnings inn) {
@@ -352,9 +366,20 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
           final after = ref.read(hostScoringControllerProvider(widget.matchId));
           final freshMatch = after.match ?? match;
           print('[onEndMatch] freshMatch innings=${freshMatch.innings.map((i) => "inn${i.inningsNumber}:${i.totalRuns}/${i.totalWickets}").join(", ")}');
-          final (winnerId, winMargin) = _calcWinner(freshMatch);
-          print('[onEndMatch] calling completeMatch winnerId="$winnerId" winMargin="$winMargin"');
-          await _ctrl.completeMatch(winnerId, winMargin);
+          final (winnerSide, winMargin) = _calcWinner(freshMatch);
+          final winnerId = _resolveWinnerId(freshMatch, winnerSide);
+          print(
+            '[onEndMatch] calling completeMatch winnerSide="$winnerSide" '
+            'winnerId="$winnerId" teamAId="${freshMatch.teamAId}" '
+            'teamBId="${freshMatch.teamBId}" winMargin="$winMargin"',
+          );
+          final ok = await _ctrl.completeMatch(winnerId, winMargin);
+          if (!mounted || !ok) return;
+          if (widget.onNavigateBack != null) {
+            widget.onNavigateBack!(context, widget.matchId);
+          } else {
+            Navigator.of(context).maybePop();
+          }
         },
         onStartNextInnings: () async {
           Navigator.pop(ctx);
@@ -670,9 +695,18 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
             onPressed: state.isLoading
                 ? null
                 : () {
-                    if (widget.onNavigateToMatchDetail != null && match != null) {
+                    if (match == null) return;
+                    if (widget.onNavigateToMatchDetail != null) {
                       widget.onNavigateToMatchDetail!(context, widget.matchId);
+                      return;
                     }
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => HostMatchDetailScreen(
+                          matchId: widget.matchId,
+                        ),
+                      ),
+                    );
                   },
           ),
         ],
@@ -713,6 +747,8 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     if (ok && mounted) await _autoSetupNewInnings();
                     return ok;
                   },
+                  onUpdateMatchOvers: _ctrl.updateMatchOvers,
+                  onUpdateMatchSchedule: _ctrl.updateMatchSchedule,
                   onContinueInnings: _ctrl.continueInnings,
                   onNavigateToToss: widget.onNavigateToToss != null
                       ? () {
@@ -782,7 +818,16 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                       if (ok && mounted) await _afterBall();
                     },
                   ),
-                  onEndInnings: _ctrl.completeInnings,
+                  onEndInnings: () async {
+                    final ok = await _ctrl.completeInnings();
+                    if (!mounted || !ok) return false;
+                    if (widget.onNavigateBack != null) {
+                      widget.onNavigateBack!(context, widget.matchId);
+                    } else {
+                      Navigator.of(context).maybePop();
+                    }
+                    return true;
+                  },
                 ),
     );
   }
@@ -805,6 +850,8 @@ class _ScoringBody extends StatelessWidget {
     this.onChangeWicketKeeper,
     required this.onUndo,
     required this.onStartMatch,
+    required this.onUpdateMatchOvers,
+    required this.onUpdateMatchSchedule,
     required this.onContinueInnings,
     this.onNavigateToToss,
     this.onNavigateToPlaying11,
@@ -832,6 +879,8 @@ class _ScoringBody extends StatelessWidget {
   final VoidCallback? onChangeWicketKeeper;
   final Future<bool> Function() onUndo;
   final Future<bool> Function() onStartMatch;
+  final Future<bool> Function(int overs) onUpdateMatchOvers;
+  final Future<bool> Function(DateTime scheduledAt) onUpdateMatchSchedule;
   final Future<bool> Function() onContinueInnings;
   final VoidCallback? onNavigateToToss;
   final VoidCallback? onNavigateToPlaying11;
@@ -927,6 +976,8 @@ class _ScoringBody extends StatelessWidget {
             match: match,
             isSubmitting: state.isSubmitting,
             onStart: onStartMatch,
+            onUpdateMatchOvers: onUpdateMatchOvers,
+            onUpdateMatchSchedule: onUpdateMatchSchedule,
             onContinue: onContinueInnings,
             onNavigateToToss: onNavigateToToss,
             onNavigateToPlaying11: onNavigateToPlaying11,
@@ -1930,6 +1981,8 @@ class _InactiveInningsSection extends StatefulWidget {
     required this.match,
     required this.isSubmitting,
     required this.onStart,
+    required this.onUpdateMatchOvers,
+    required this.onUpdateMatchSchedule,
     required this.onContinue,
     this.onNavigateToToss,
     this.onNavigateToPlaying11,
@@ -1939,6 +1992,8 @@ class _InactiveInningsSection extends StatefulWidget {
   final ScoringMatch match;
   final bool isSubmitting;
   final Future<bool> Function() onStart;
+  final Future<bool> Function(int overs) onUpdateMatchOvers;
+  final Future<bool> Function(DateTime scheduledAt) onUpdateMatchSchedule;
   final Future<bool> Function() onContinue;
   final VoidCallback? onNavigateToToss;
   final VoidCallback? onNavigateToPlaying11;
@@ -1964,6 +2019,11 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
       widget.match.innings.isNotEmpty &&
       widget.match.innings.every((i) => i.isCompleted) &&
       widget.match.innings.length < 4;
+
+  bool get _canChangeOvers {
+    final f = widget.match.format.toUpperCase();
+    return f == 'CUSTOM' || widget.match.customOvers != null;
+  }
 
   String _formatLabel() {
     final m = widget.match;
@@ -2068,6 +2128,99 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
     }
   }
 
+  Future<void> _changeOvers() async {
+    final current = widget.match.customOvers ?? widget.match.maxOvers;
+    final controller = TextEditingController(text: '$current');
+    final next = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change overs'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Overs per innings',
+            hintText: 'e.g. 16',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final v = int.tryParse(controller.text.trim());
+              if (v == null || v <= 0 || v > 90) return;
+              Navigator.pop(ctx, v);
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+    if (next == null || !mounted) return;
+    final ok = await widget.onUpdateMatchOvers(next);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Overs updated to $next' : 'Could not update overs'),
+      ),
+    );
+  }
+
+  Future<void> _changeDateTime() async {
+    final now = DateTime.now();
+    final initial = widget.match.scheduledAt ?? now;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 3),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+    );
+    if (time == null || !mounted) return;
+    final next = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    final ok = await widget.onUpdateMatchSchedule(next);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Match date/time updated' : 'Could not update date/time'),
+      ),
+    );
+  }
+
+  VoidCallback? _resolvePlaying11Nav() {
+    if (widget.onNavigateToPlaying11 != null) return widget.onNavigateToPlaying11;
+    final m = widget.match;
+    final aId = (m.teamAId ?? '').trim();
+    final bId = (m.teamBId ?? '').trim();
+    if (aId.isEmpty || bId.isEmpty) return null;
+    return () {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlayingElevenScreen(
+            matchId: m.id,
+            teamAId: aId,
+            teamAName: m.teamAName,
+            teamBId: bId,
+            teamBName: m.teamBName,
+          ),
+        ),
+      );
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final match = widget.match;
@@ -2147,6 +2300,17 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
             label: 'Format',
             value: _formatLabel(),
           ),
+          if (_canChangeOvers) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: busy ? null : _changeOvers,
+                icon: const Icon(Icons.tune_rounded, size: 16),
+                label: const Text('Change overs'),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           if (_ballTypeLabel() != null) ...[
             _DetailRow(
@@ -2161,6 +2325,15 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
               icon: Icons.calendar_today_rounded,
               label: 'Scheduled',
               value: _dateLabel()!,
+            ),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: busy ? null : _changeDateTime,
+                icon: const Icon(Icons.edit_calendar_rounded, size: 16),
+                label: const Text('Change date & time'),
+              ),
             ),
             const SizedBox(height: 12),
           ],
@@ -2206,12 +2379,12 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
           const SizedBox(height: 8),
 
           // ── Primary CTA ───────────────────────────────────────────────────
-          if (_needsPlayingXI && widget.onNavigateToPlaying11 != null) ...[
+          if (_needsPlayingXI) ...[
             SizedBox(
               width: double.infinity,
               height: 52,
               child: FilledButton.icon(
-                onPressed: busy ? null : widget.onNavigateToPlaying11,
+                onPressed: busy ? null : _resolvePlaying11Nav(),
                 icon: const Icon(Icons.groups_rounded, size: 20),
                 label: const Text(
                   'Select Playing 11',
@@ -2223,6 +2396,13 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
                 ),
               ),
             ),
+            if (_resolvePlaying11Nav() == null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Playing 11 navigation is not configured for this route.',
+                style: TextStyle(color: context.warn, fontSize: 12),
+              ),
+            ],
           ] else if (_needsToss) ...[
             SizedBox(
               width: double.infinity,

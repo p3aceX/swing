@@ -26,133 +26,133 @@ class TournamentCard extends StatelessWidget {
         t.status.toUpperCase() == 'LIVE' ||
         t.status.toUpperCase() == 'IN_PROGRESS';
 
-    return Material(
-      color: isAlternate ? context.panel : context.bg,
-      child: InkWell(
-        onTap: onTap,
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-            // Status strip
-            Container(width: 3, color: statusColor),
-
-            // Main content
-            Expanded(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: context.stroke.withValues(alpha: 0.65),
+              width: 0.8,
+            ),
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTap,
+            child: Ink(
+              decoration: BoxDecoration(
+                color: isAlternate ? context.panel : context.surf,
+                borderRadius: BorderRadius.circular(14),
+              ),
               child: Padding(
-                padding: EdgeInsets.fromLTRB(14, compact ? 12 : 14, 16, compact ? 12 : 14),
-                child: Row(
+                padding: EdgeInsets.fromLTRB(12, compact ? 11 : 12, 12, compact ? 11 : 12),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Logo(url: t.logoUrl, size: compact ? 40 : 46),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Name + status pill
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Logo(url: t.logoUrl, size: compact ? 38 : 42),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              t.name,
+                              style: TextStyle(
+                                color: context.fg,
+                                fontSize: compact ? 13.5 : 15,
+                                fontWeight: FontWeight.w700,
+                                height: 1.2,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              [
+                                _formatLabel(t.format),
+                                '${t.teamCount}/${t.maxTeams} teams',
+                                if (t.entryFee != null && t.entryFee! > 0) '₹${t.entryFee}',
+                              ].join('  •  '),
+                              style: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _StatusPill(
+                        label: statusLabel,
+                        color: statusColor,
+                        isLive: isLive,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today_rounded, size: 11, color: context.fgSub),
+                      const SizedBox(width: 4),
+                      Text(
+                        t.dateRange,
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (t.city != null || t.venueName != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 3,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: context.fgSub.withValues(alpha: 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Row(
                             children: [
+                              Icon(Icons.location_on_rounded, size: 11, color: context.fgSub),
+                              const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  t.name,
-                                  style: TextStyle(
-                                    color: context.fg,
-                                    fontSize: compact ? 13 : 15,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.3,
-                                    height: 1.2,
-                                  ),
-                                  maxLines: 2,
+                                  _locationLabel(t),
+                                  maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              _StatusPill(
-                                label: statusLabel,
-                                color: statusColor,
-                                isLive: isLive,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-
-                          // Badges
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              _Badge(
-                                label: _formatLabel(t.format),
-                                color: context.sky,
-                                bg: context.sky.withValues(alpha: 0.1),
-                              ),
-                              if (t.isHost)
-                                _Badge(
-                                  label: 'Hosting',
-                                  color: context.gold,
-                                  bg: context.gold.withValues(alpha: 0.12),
-                                  icon: Icons.star_rounded,
-                                ),
-                              if (t.ballType != null)
-                                _Badge(
-                                  label: t.ballType!,
-                                  color: context.fgSub,
-                                  bg: context.stroke.withValues(alpha: 0.5),
-                                ),
-                              if (t.entryFee != null && t.entryFee! > 0)
-                                _Badge(
-                                  label: '₹${t.entryFee}',
-                                  color: context.success,
-                                  bg: context.success.withValues(alpha: 0.1),
-                                  icon: Icons.confirmation_number_rounded,
-                                ),
-                            ],
-                          ),
-
-                          if (!compact) ...[
-                            const SizedBox(height: 10),
-                            _TeamsBar(current: t.teamCount, max: t.maxTeams, context: context),
-                          ],
-
-                          const SizedBox(height: 8),
-
-                          // Footer
-                          Row(
-                            children: [
-                              if (t.city != null || t.venueName != null) ...[
-                                Icon(Icons.location_on_rounded, size: 11, color: context.fgSub),
-                                const SizedBox(width: 3),
-                                Flexible(
-                                  child: Text(
-                                    _locationLabel(t),
-                                    style: TextStyle(color: context.fgSub, fontSize: 11),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                const SizedBox(width: 10),
-                              ],
-                              Icon(Icons.calendar_today_rounded, size: 11, color: context.fgSub),
-                              const SizedBox(width: 3),
-                              Text(
-                                t.dateRange,
-                                style: TextStyle(color: context.fgSub, fontSize: 11),
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(Icons.chevron_right_rounded, size: 16, color: context.fgSub),
+                        ),
+                      ],
+                      const SizedBox(width: 6),
+                      Icon(Icons.chevron_right_rounded, size: 16, color: context.fgSub),
+                    ],
+                  ),
                   ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
         ),
       ),
     );
@@ -236,79 +236,6 @@ class _StatusPill extends StatelessWidget {
 }
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.label, required this.color, required this.bg, this.icon});
-  final String label;
-  final Color color;
-  final Color bg;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 10, color: color),
-            const SizedBox(width: 3),
-          ],
-          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Teams bar ────────────────────────────────────────────────────────────────
-
-class _TeamsBar extends StatelessWidget {
-  const _TeamsBar({required this.current, required this.max, required this.context});
-  final int current;
-  final int max;
-  final BuildContext context;
-
-  @override
-  Widget build(BuildContext _) {
-    final pct = max > 0 ? (current / max).clamp(0.0, 1.0) : 0.0;
-    final isFull = current >= max;
-    final barColor = isFull ? context.danger : context.accent;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.groups_rounded, size: 12, color: context.fgSub),
-            const SizedBox(width: 4),
-            Text(
-              '$current / $max teams',
-              style: TextStyle(color: context.fgSub, fontSize: 11, fontWeight: FontWeight.w500),
-            ),
-            if (isFull) ...[
-              const SizedBox(width: 6),
-              Text('Full',
-                  style: TextStyle(color: context.danger, fontSize: 10, fontWeight: FontWeight.w700)),
-            ],
-          ],
-        ),
-        const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(2),
-          child: LinearProgressIndicator(
-            value: pct,
-            minHeight: 3,
-            backgroundColor: context.stroke,
-            valueColor: AlwaysStoppedAnimation<Color>(barColor),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

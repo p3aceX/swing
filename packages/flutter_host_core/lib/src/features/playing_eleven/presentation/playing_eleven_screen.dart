@@ -60,6 +60,8 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
 
   _RosterState _teamA = const _RosterState.loading();
   _RosterState _teamB = const _RosterState.loading();
+  final Set<String> _hiddenA = <String>{};
+  final Set<String> _hiddenB = <String>{};
   bool _submitting = false;
   String? _submitError;
 
@@ -114,12 +116,14 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
       final players = roster.players
           .map((row) => _RosterPlayer.fromJson(row))
           .where((p) => p.profileId.isNotEmpty)
+          .where((p) => !(isA ? _hiddenA : _hiddenB).contains(p.profileId))
           .toList();
       final loaded = _RosterState.ready(
         players: players,
-        selected: {
-          for (final p in players.take(_squadSize)) p.profileId,
-        },
+        selected: _prefillSelected(
+          current: isA ? _teamA.asLoaded : _teamB.asLoaded,
+          players: players,
+        ),
         captainId: roster.captainId,
         viceCaptainId: roster.viceCaptainId,
         wicketKeeperId: roster.wicketKeeperId,
@@ -200,55 +204,114 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
 
   Future<void> _addPlayer(bool isA) async {
     final teamId = isA ? widget.teamAId : widget.teamBId;
-    final result = await showModalBottomSheet<_RosterPlayer>(
+    final results = await showModalBottomSheet<List<_RosterPlayer>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const _AddPlayerSheet(),
     );
-    if (result == null || !mounted) return;
+    if (results == null || results.isEmpty || !mounted) return;
 
-    // Quick-add to team if we have a teamId so the roster persists
-    if (teamId.isNotEmpty) {
-      try {
-        final added = await ref.read(hostTeamRepositoryProvider).quickAddPlayer(
-              teamId,
-              profileId: result.profileId.isNotEmpty ? result.profileId : null,
+    final toAppend = <_RosterPlayer>[];
+    for (final result in results) {
+      if (teamId.isNotEmpty) {
+        try {
+          final added = await ref.read(hostTeamRepositoryProvider).quickAddPlayer(
+                teamId,
+                profileId: (result.profileId.isNotEmpty &&
+                        !result.profileId.startsWith('local:'))
+                    ? result.profileId
+                    : null,
+                name: result.name,
+                phone: result.phone?.trim().isNotEmpty == true ? result.phone!.trim() : null,
+              );
+          final profileId = '${added['data']?['profileId'] ?? added['profileId'] ?? result.profileId}'.trim();
+          toAppend.add(
+            _RosterPlayer(
+              profileId: profileId.isNotEmpty ? profileId : result.profileId,
+              teamPlayerId: '${added['data']?['id'] ?? added['id'] ?? profileId}'.trim(),
+              userId: result.userId,
               name: result.name,
+              avatarUrl: result.avatarUrl,
+              swingId: result.swingId,
+            ),
+          );
+          continue;
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not add ${result.name}. Please retry.')),
             );
-        final profileId = '${added['data']?['profileId'] ?? added['profileId'] ?? result.profileId}'.trim();
-        _appendPlayer(isA, _RosterPlayer(
-          profileId: profileId.isNotEmpty ? profileId : result.profileId,
-          userId: result.userId,
-          name: result.name,
-          avatarUrl: result.avatarUrl,
-          swingId: result.swingId,
-        ));
-        return;
-      } catch (_) {
-        // fall through — still add locally even if team persistence fails
+          }
+          continue;
+        }
       }
+      toAppend.add(result);
     }
-    _appendPlayer(isA, result);
+    _appendPlayers(isA, toAppend);
   }
 
-  void _appendPlayer(bool isA, _RosterPlayer player) {
-    if (player.profileId.isEmpty) return;
+  void _appendPlayers(bool isA, List<_RosterPlayer> playersToAdd) {
+    if (playersToAdd.isEmpty) return;
     _updateLoaded(
       isA: isA,
       transform: (loaded) {
-        if (loaded.players.any((p) => p.profileId == player.profileId)) {
-          // Already in roster — just select them
-          final sel = {...loaded.selected};
-          if (sel.length < _squadSize) sel.add(player.profileId);
-          return loaded.rebuild(selected: sel);
-        }
-        final players = [...loaded.players, player];
+        final players = [...loaded.players];
         final sel = {...loaded.selected};
-        if (sel.length < _squadSize) sel.add(player.profileId);
+        for (final player in playersToAdd) {
+          if (player.profileId.isEmpty) continue;
+          if (isA) {
+            _hiddenA.remove(player.profileId);
+          } else {
+            _hiddenB.remove(player.profileId);
+          }
+          final exists = players.any((p) => p.profileId == player.profileId);
+          if (!exists) players.add(player);
+          if (sel.length < _squadSize) sel.add(player.profileId);
+        }
         return loaded.rebuild(players: players, selected: sel);
       },
     );
+  }
+
+  Future<void> _removePlayer(bool isA, _RosterPlayer player) async {
+    if (isA) {
+      _hiddenA.add(player.profileId);
+    } else {
+      _hiddenB.add(player.profileId);
+    }
+    _updateLoaded(
+      isA: isA,
+      transform: (loaded) {
+        final nextPlayers =
+            loaded.players.where((p) => p.profileId != player.profileId).toList();
+        final nextSelected = {...loaded.selected}..remove(player.profileId);
+        return loaded.rebuild(
+          players: nextPlayers,
+          selected: nextSelected,
+          captainId:
+              loaded.captainId == player.profileId ? null : loaded.captainId,
+          viceCaptainId: loaded.viceCaptainId == player.profileId
+              ? null
+              : loaded.viceCaptainId,
+          wicketKeeperId: loaded.wicketKeeperId == player.profileId
+              ? null
+              : loaded.wicketKeeperId,
+        );
+      },
+    );
+  }
+
+  Set<String> _prefillSelected({
+    required _LoadedRoster? current,
+    required List<_RosterPlayer> players,
+  }) {
+    final available = players.map((p) => p.profileId).toSet();
+    if (current != null) {
+      final kept = current.selected.where(available.contains).toSet();
+      if (kept.isNotEmpty) return kept;
+    }
+    return {for (final p in players.take(_squadSize)) p.profileId};
   }
 
   void _setRole(bool isA, String profileId, _Role role) {
@@ -440,6 +503,7 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
             onRetry: () => _loadSide(isA: true),
             onToggleSelect: (id) => _toggleSelect(true, id),
             onSetRole: (id, role) => _setRole(true, id, role),
+            onRemovePlayer: (p) => _removePlayer(true, p),
             onAddPlayer: () => _addPlayer(true),
           ),
           _RosterPane(
@@ -447,6 +511,7 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
             onRetry: () => _loadSide(isA: false),
             onToggleSelect: (id) => _toggleSelect(false, id),
             onSetRole: (id, role) => _setRole(false, id, role),
+            onRemovePlayer: (p) => _removePlayer(false, p),
             onAddPlayer: () => _addPlayer(false),
           ),
         ],
@@ -507,6 +572,7 @@ class _RosterPane extends StatelessWidget {
     required this.onRetry,
     required this.onToggleSelect,
     required this.onSetRole,
+    required this.onRemovePlayer,
     this.onAddPlayer,
   });
 
@@ -514,6 +580,7 @@ class _RosterPane extends StatelessWidget {
   final VoidCallback onRetry;
   final ValueChanged<String> onToggleSelect;
   final void Function(String profileId, _Role role) onSetRole;
+  final ValueChanged<_RosterPlayer> onRemovePlayer;
   final VoidCallback? onAddPlayer;
 
   @override
@@ -529,7 +596,7 @@ class _RosterPane extends StatelessWidget {
       return _EmptyState(onRetry: onRetry, onAddPlayer: onAddPlayer);
     }
 
-    // rows: [0] = status strip, [1..n] = players, [n+1] = add player button
+    // rows: [0] = status strip, [1] = add player button, [2..] = players
     final playerCount = loaded.players.length;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
@@ -538,8 +605,24 @@ class _RosterPane extends StatelessWidget {
           i == 0 ? const SizedBox(height: 14) : const SizedBox(height: 10),
       itemBuilder: (_, i) {
         if (i == 0) return _StatusStrip(loaded: loaded);
-        if (i <= playerCount) {
-          final player = loaded.players[i - 1];
+        if (i == 1) {
+          if (onAddPlayer == null) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: FilledButton.icon(
+              onPressed: onAddPlayer,
+              icon: const Icon(Icons.person_search_rounded, size: 16),
+              label: const Text('Add Player (search name, phone, swing id)'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 46),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          );
+        }
+        final player = loaded.players[i - 2];
+        if (i >= 2) {
           final isSelected = loaded.selected.contains(player.profileId);
           return _PlayerRow(
             player: player,
@@ -548,23 +631,10 @@ class _RosterPane extends StatelessWidget {
             roles: loaded.rolesFor(player.profileId),
             onToggleSelect: () => onToggleSelect(player.profileId),
             onSetRole: (role) => onSetRole(player.profileId, role),
+            onRemove: () => onRemovePlayer(player),
           );
         }
-        // Last item: "Add Player" button
-        if (onAddPlayer == null) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: OutlinedButton.icon(
-            onPressed: onAddPlayer,
-            icon: const Icon(Icons.person_add_rounded, size: 16),
-            label: const Text('Add Player'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 48),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-        );
+        return const SizedBox.shrink();
       },
     );
   }
@@ -657,6 +727,7 @@ class _PlayerRow extends StatelessWidget {
     required this.roles,
     required this.onToggleSelect,
     required this.onSetRole,
+    required this.onRemove,
   });
 
   final _RosterPlayer player;
@@ -665,6 +736,7 @@ class _PlayerRow extends StatelessWidget {
   final Set<_Role> roles;
   final VoidCallback onToggleSelect;
   final void Function(_Role) onSetRole;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -735,6 +807,15 @@ class _PlayerRow extends StatelessWidget {
                             ],
                           ],
                         ),
+                      ),
+                      IconButton(
+                        onPressed: onRemove,
+                        icon: Icon(
+                          Icons.remove_circle_outline_rounded,
+                          color: context.fgSub.withValues(alpha: 0.8),
+                          size: 20,
+                        ),
+                        tooltip: 'Remove from XI',
                       ),
                     ],
                   ),
@@ -1159,19 +1240,28 @@ class _AddPlayerSheet extends ConsumerStatefulWidget {
 
 class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
   final _ctrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   List<_RosterPlayer> _results = [];
+  Set<String> _pickedIds = {};
   bool _loading = false;
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _search(String q) async {
+    if (_nameCtrl.text.trim().isEmpty) {
+      _nameCtrl.text = q.trim();
+    }
     if (q.trim().length < 2) {
       setState(() {
         _results = [];
+        _pickedIds = {};
         _loading = false;
       });
       return;
@@ -1193,6 +1283,7 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
             .whereType<Map>()
             .map((p) => _RosterPlayer.fromJson(Map<String, dynamic>.from(p)))
             .toList();
+        _pickedIds = {};
         _loading = false;
       });
     } on DioException catch (_) {
@@ -1200,11 +1291,53 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
     }
   }
 
+  String _digitsOnly(String input) =>
+      input.replaceAll(RegExp(r'[^0-9]'), '');
+
+  Future<void> _createQuickPlayer() async {
+    final name = _nameCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
+    if (name.length < 2) return;
+    if (phone.length < 8) return;
+
+    // Prevent duplicate quick-create when mobile already exists.
+    final normalizedPhone = _digitsOnly(phone);
+    if (normalizedPhone.length >= 8) {
+      await _search(normalizedPhone);
+      final hasExact = _results.any(
+        (p) => _digitsOnly(p.phone ?? '') == normalizedPhone,
+      );
+      if (!mounted) return;
+      if (hasExact) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Player with this mobile already exists. Select from results.'),
+          ),
+        );
+        return;
+      }
+    }
+
+    Navigator.of(context).pop([
+      _RosterPlayer(
+        profileId: 'local:${DateTime.now().microsecondsSinceEpoch}',
+        teamPlayerId: '',
+        userId: '',
+        name: name,
+        avatarUrl: null,
+        swingId: '',
+        phone: phone,
+      ),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final maxH = MediaQuery.of(context).size.height * 0.82;
     final accent = context.accent;
+    final query = _ctrl.text.trim();
+    final canSearch = query.length >= 2;
 
     return Container(
       constraints: BoxConstraints(maxHeight: maxH),
@@ -1230,14 +1363,28 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-            child: Text(
-              'Add Player',
-              style: TextStyle(
-                color: context.fg,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add Player',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Search first. If not found, create quickly.',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -1248,9 +1395,22 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
               onChanged: _search,
               style: TextStyle(color: context.fg, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Search by name or Swing ID…',
+                hintText: 'Search by name, phone or Swing ID…',
                 hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
                 prefixIcon: Icon(Icons.search_rounded, color: context.fgSub, size: 20),
+                suffixIcon: query.isEmpty
+                    ? null
+                    : IconButton(
+                        onPressed: () {
+                          _ctrl.clear();
+                          setState(() {
+                            _results = [];
+                            _pickedIds = {};
+                            _loading = false;
+                          });
+                        },
+                        icon: Icon(Icons.close_rounded, color: context.fgSub, size: 18),
+                      ),
                 filled: true,
                 fillColor: context.surf,
                 border: OutlineInputBorder(
@@ -1268,14 +1428,81 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
                     child: Center(child: CircularProgressIndicator()),
                   )
                 : _results.isEmpty
-                    ? Padding(
+                    ? SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                        child: Text(
-                          _ctrl.text.trim().length < 2
-                              ? 'Type at least 2 characters to search'
-                              : 'No players found',
-                          style: TextStyle(color: context.fgSub, fontSize: 13),
-                          textAlign: TextAlign.center,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              canSearch
+                                  ? 'No players found'
+                                  : 'Type at least 2 characters to search',
+                              style: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              textAlign: TextAlign.left,
+                            ),
+                            if (canSearch) ...[
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: _nameCtrl,
+                                textCapitalization: TextCapitalization.words,
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 14,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: 'Player name',
+                                  labelStyle: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 13,
+                                  ),
+                                  filled: true,
+                                  fillColor: context.surf,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              TextField(
+                                controller: _phoneCtrl,
+                                keyboardType: TextInputType.phone,
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 14,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: 'Mobile number',
+                                  labelStyle: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 13,
+                                  ),
+                                  filled: true,
+                                  fillColor: context.surf,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  onPressed: _createQuickPlayer,
+                                  icon: const Icon(Icons.person_add_alt_rounded, size: 16),
+                                  label: const Text('Create Player'),
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(double.infinity, 46),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       )
                     : ListView.builder(
@@ -1284,11 +1511,20 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
                         itemCount: _results.length,
                         itemBuilder: (_, i) {
                           final p = _results[i];
+                          final picked = _pickedIds.contains(p.profileId);
                           return InkWell(
                             borderRadius: BorderRadius.circular(12),
-                            onTap: () => Navigator.of(context).pop(p),
+                            onTap: () {
+                              setState(() {
+                                if (picked) {
+                                  _pickedIds.remove(p.profileId);
+                                } else {
+                                  _pickedIds.add(p.profileId);
+                                }
+                              });
+                            },
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              padding: const EdgeInsets.symmetric(vertical: 11),
                               child: Row(
                                 children: [
                                   _Avatar(
@@ -1322,7 +1558,7 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
                                     ),
                                   ),
                                   Icon(Icons.add_circle_outline_rounded,
-                                      color: accent, size: 20),
+                                      color: picked ? accent : context.fgSub, size: 20),
                                 ],
                               ),
                             ),
@@ -1330,6 +1566,24 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
                         },
                       ),
           ),
+          if (_results.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _pickedIds.isEmpty
+                      ? null
+                      : () {
+                          final selected = _results
+                              .where((p) => _pickedIds.contains(p.profileId))
+                              .toList();
+                          Navigator.of(context).pop(selected);
+                        },
+                  child: Text('Add Selected (${_pickedIds.length})'),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1345,27 +1599,33 @@ enum _Role { captain, viceCaptain, wicketKeeper }
 class _RosterPlayer {
   const _RosterPlayer({
     required this.profileId,
+    required this.teamPlayerId,
     required this.userId,
     required this.name,
     required this.avatarUrl,
     required this.swingId,
+    this.phone,
   });
 
   final String profileId;
+  final String teamPlayerId;
   final String userId;
   final String name;
   final String? avatarUrl;
   final String swingId;
+  final String? phone;
 
   factory _RosterPlayer.fromJson(Map<String, dynamic> json) {
     String s(Object? v) => '${v ?? ''}'.trim();
     final avatar = s(json['avatarUrl']);
     return _RosterPlayer(
-      profileId: s(json['profileId'] ?? json['id']),
+      profileId: s(json['profileId'] ?? json['id'] ?? json['playerId']),
+      teamPlayerId: s(json['id'] ?? json['playerId'] ?? json['profileId']),
       userId: s(json['userId']),
       name: s(json['name']).isEmpty ? 'Player' : s(json['name']),
       avatarUrl: avatar.isEmpty ? null : avatar,
       swingId: s(json['swingId']),
+      phone: s(json['phone']).isEmpty ? null : s(json['phone']),
     );
   }
 }

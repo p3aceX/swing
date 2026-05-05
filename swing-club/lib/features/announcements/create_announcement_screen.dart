@@ -5,7 +5,9 @@ import '../../shared/widgets.dart';
 import 'announcement_provider.dart';
 
 class CreateAnnouncementScreen extends ConsumerStatefulWidget {
-  const CreateAnnouncementScreen({super.key});
+  final Map<String, dynamic>? existing;
+
+  const CreateAnnouncementScreen({super.key, this.existing});
 
   @override
   ConsumerState<CreateAnnouncementScreen> createState() =>
@@ -18,8 +20,20 @@ class _CreateAnnouncementScreenState extends ConsumerState<CreateAnnouncementScr
   final _bodyCtrl = TextEditingController();
   String _targetGroup = kTargetGroups.first;
   bool _isPinned = false;
-  final Set<String> _sentVia = {};
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    if (e != null) {
+      _titleCtrl.text = e['title'] as String? ?? '';
+      _bodyCtrl.text = e['body'] as String? ?? '';
+      final tg = e['targetGroup'] as String?;
+      if (tg != null && kTargetGroups.contains(tg)) _targetGroup = tg;
+      _isPinned = e['isPinned'] as bool? ?? false;
+    }
+  }
 
   @override
   void dispose() {
@@ -32,16 +46,21 @@ class _CreateAnnouncementScreenState extends ConsumerState<CreateAnnouncementScr
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
-      await ref.read(announcementsProvider.notifier).create({
+      final payload = {
         'title': _titleCtrl.text.trim(),
         'body': _bodyCtrl.text.trim(),
         'targetGroup': _targetGroup,
         'isPinned': _isPinned,
-        'sentVia': _sentVia.toList(),
-      });
+      };
+      final e = widget.existing;
+      if (e != null) {
+        await ref.read(announcementsProvider.notifier).edit(e['id'] as String, payload);
+      } else {
+        await ref.read(announcementsProvider.notifier).create(payload);
+      }
       if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (mounted) showSnack(context, 'Failed to send announcement');
+    } catch (_) {
+      if (mounted) showSnack(context, 'Failed to save announcement');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -49,9 +68,10 @@ class _CreateAnnouncementScreenState extends ConsumerState<CreateAnnouncementScr
 
   @override
   Widget build(BuildContext context) {
+    final isEdit = widget.existing != null;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Announcement'),
+        title: Text(isEdit ? 'Edit Announcement' : 'New Announcement'),
         actions: [
           TextButton(
             onPressed: _isLoading ? null : _send,
@@ -59,7 +79,7 @@ class _CreateAnnouncementScreenState extends ConsumerState<CreateAnnouncementScr
                 ? const SizedBox(
                     height: 18, width: 18,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Send'),
+                : Text(isEdit ? 'Update' : 'Send'),
           ),
         ],
       ),
@@ -82,7 +102,7 @@ class _CreateAnnouncementScreenState extends ConsumerState<CreateAnnouncementScr
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _targetGroup,
+              initialValue: _targetGroup,
               decoration: const InputDecoration(labelText: 'Target Group'),
               items: kTargetGroups
                   .map((g) => DropdownMenuItem(value: g, child: Text(g)))
@@ -96,23 +116,6 @@ class _CreateAnnouncementScreenState extends ConsumerState<CreateAnnouncementScr
               value: _isPinned,
               onChanged: (v) => setState(() => _isPinned = v),
             ),
-            const Divider(),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('Send Via', style: TextStyle(fontWeight: FontWeight.w500)),
-            ),
-            ...kSentViaOptions.map((opt) => CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(opt),
-                  value: _sentVia.contains(opt),
-                  onChanged: (v) => setState(() {
-                    if (v == true) {
-                      _sentVia.add(opt);
-                    } else {
-                      _sentVia.remove(opt);
-                    }
-                  }),
-                )),
           ],
         ),
       ),

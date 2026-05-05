@@ -2250,6 +2250,13 @@ export class PlayerService {
       academyId?: string;
       coachId?: string;
       arenaId?: string;
+      motto?: string;
+      homeGroundName?: string;
+      foundedYear?: number;
+      ageGroup?: string;
+      format?: string;
+      skillLevel?: string;
+      isPublic?: boolean;
     },
   ) {
     const profile = await this.getOrCreateProfile(userId);
@@ -2266,6 +2273,13 @@ export class PlayerService {
         academyId: data.academyId || null,
         coachId: data.coachId || null,
         arenaId: data.arenaId || null,
+        motto: data.motto?.trim() || null,
+        homeGroundName: data.homeGroundName?.trim() || null,
+        foundedYear: data.foundedYear ?? null,
+        ageGroup: data.ageGroup || null,
+        format: data.format || null,
+        skillLevel: data.skillLevel || null,
+        isPublic: data.isPublic !== false,
       },
     });
     await this.performanceService.eliteAnalytics.recalculateTeamPowerScore(

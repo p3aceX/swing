@@ -177,6 +177,29 @@ class HostPathConfig {
         arenasBase: '/admin/arenas',
         playerSearchPath: '/admin/players/search',
       );
+
+  /// Paths for the club/academy app. Teams are created under `/admin/teams`
+  /// with an `academyId` stamped at the API layer from the JWT context.
+  factory HostPathConfig.club() => const HostPathConfig(
+        teamsBase: '/admin/teams',
+        teamsMutationBase: '/admin/teams',
+        tournamentsBase: '/admin/tournaments',
+        matchesBase: '/matches',
+        arenasBase: '/arenas',
+        playerSearchPath: '/admin/players/search',
+        matchHistoryPath: '/admin/matches',
+      );
+
+  /// Paths for the arena app. Teams created under `/arena/teams` are
+  /// automatically linked to the authenticated arena owner's `arenaId`.
+  factory HostPathConfig.arena() => const HostPathConfig(
+        teamsBase: '/arena/teams',
+        teamsMutationBase: '/arena/teams',
+        tournamentsBase: '/arena/tournaments',
+        matchesBase: '/matches',
+        arenasBase: '/arenas',
+        playerSearchPath: '/player/search',
+      );
 }
 
 /// Override this in each host's `ProviderScope`. Defaults to the player

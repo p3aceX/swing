@@ -20,6 +20,18 @@ class InventoryNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     await ref.read(apiClientProvider).post('/academy/${s.academyId}/inventory', data: payload);
     ref.invalidateSelf();
   }
+
+  Future<void> edit(String id, Map<String, dynamic> payload) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider).patch('/academy/${s.academyId}/inventory/$id', data: payload);
+    ref.invalidateSelf();
+  }
+
+  Future<void> remove(String id) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider).delete('/academy/${s.academyId}/inventory/$id');
+    ref.invalidateSelf();
+  }
 }
 
 final inventoryProvider =

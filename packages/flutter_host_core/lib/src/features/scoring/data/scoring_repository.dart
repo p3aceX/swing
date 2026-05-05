@@ -5,17 +5,54 @@ import '../../../providers/host_dio_provider.dart';
 import '../../../repositories/host_match_repository.dart';
 import '../../../repositories/host_player_repository.dart';
 import '../../../repositories/host_scoring_repository.dart';
+import '../../../repositories/host_tournament_repository.dart';
 import '../domain/scoring_models.dart';
 
 class HostScoringService {
-  HostScoringService(this._repo, this._matchRepo, this._playerRepo);
+  HostScoringService(
+    this._repo,
+    this._matchRepo,
+    this._playerRepo,
+    this._tournamentRepo,
+  );
 
   final HostScoringRepository _repo;
   final HostMatchRepository _matchRepo;
   final HostPlayerRepository _playerRepo;
+  final SharedTournamentRepository _tournamentRepo;
 
   Future<ScoringMatch> loadMatch(String matchId) async {
     final data = await _repo.loadMatch(matchId);
+    final payload = _asMap(data['data'] ?? data);
+    final tournamentId = '${payload['tournamentId'] ?? ''}'.trim();
+    if (tournamentId.isNotEmpty) {
+      try {
+        final tournament = await _tournamentRepo.getTournament(tournamentId);
+        final tFormat = '${tournament['format'] ?? ''}'.trim();
+        final tOvers = _asInt(
+          tournament['customOvers'] ??
+              tournament['oversPerInnings'] ??
+              tournament['overs'],
+        );
+        final mFormat = '${payload['format'] ?? ''}'.trim();
+        final mOvers = _asInt(payload['customOvers']);
+        final shouldOverrideFormat = tFormat.isNotEmpty &&
+            (mFormat.isEmpty ||
+                mFormat.toUpperCase() == 'T20' ||
+                mFormat.toUpperCase() != tFormat.toUpperCase());
+        final shouldOverrideOvers = tOvers > 0 && (mOvers <= 0);
+        if (shouldOverrideFormat || shouldOverrideOvers) {
+          final merged = Map<String, dynamic>.from(payload)
+            ..['tournament'] = tournament;
+          if (shouldOverrideFormat) merged['format'] = tFormat;
+          if (shouldOverrideOvers) merged['customOvers'] = tOvers;
+          return ScoringMatch.fromJson({'data': merged});
+        }
+      } catch (_) {
+        // Best-effort fallback; keep existing match payload on tournament fetch
+        // failure so setup remains usable offline.
+      }
+    }
     return ScoringMatch.fromJson(data);
   }
 
@@ -95,6 +132,10 @@ class HostScoringService {
       _matchRepo.changeWicketKeeper(matchId, team, playerId);
 
   Future<void> startMatch(String matchId) => _matchRepo.startMatch(matchId);
+  Future<void> updateMatchOvers(String matchId, int customOvers) =>
+      _matchRepo.updateMatchOvers(matchId, customOvers);
+  Future<void> updateMatchSchedule(String matchId, DateTime scheduledAt) =>
+      _matchRepo.updateMatchSchedule(matchId, scheduledAt);
   Future<void> cancelMatch(String matchId) => _matchRepo.cancelMatch(matchId);
   Future<void> deleteMatch(String matchId) => _matchRepo.deleteMatch(matchId);
   Future<void> updateScorer(String matchId, String scorerId) =>
@@ -159,6 +200,18 @@ class HostScoringService {
   }
 }
 
+Map<String, dynamic> _asMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return <String, dynamic>{};
+}
+
+int _asInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse('$value') ?? 0;
+}
+
 final hostScoringServiceProvider = Provider<HostScoringService>((ref) {
   final dio = ref.watch(hostDioProvider);
   final paths = ref.watch(hostPathConfigProvider);
@@ -166,5 +219,6 @@ final hostScoringServiceProvider = Provider<HostScoringService>((ref) {
     HostScoringRepository(dio, paths),
     HostMatchRepository(dio, paths),
     HostPlayerRepository(dio, paths),
+    SharedTournamentRepository(dio, paths),
   );
 });

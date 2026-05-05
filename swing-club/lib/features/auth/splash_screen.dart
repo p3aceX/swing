@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_provider.dart';
+import '../home/home_provider.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -38,10 +39,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 
   Future<void> _navigate() async {
-    await Future.delayed(const Duration(milliseconds: 2400));
+    await Future.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
     final isAuthenticated = ref.read(authProvider).isAuthenticated;
-    context.go(isAuthenticated ? '/home' : '/phone');
+    if (!isAuthenticated) { context.go('/phone'); return; }
+    // Pre-fetch home data so the user lands on a fully loaded screen
+    try { await ref.read(homeProvider.future); } catch (_) {}
+    if (mounted) context.go('/home');
   }
 
   @override

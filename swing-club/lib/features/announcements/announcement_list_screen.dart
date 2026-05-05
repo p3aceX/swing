@@ -23,7 +23,7 @@ class AnnouncementListScreen extends ConsumerWidget {
                 onRefresh: () async => ref.invalidate(announcementsProvider),
                 child: ListView.separated(
                   itemCount: list.length,
-                  separatorBuilder: (_, __) => const Divider(),
+                  separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (_, i) => _AnnouncementTile(item: list[i]),
                 ),
               ),
@@ -36,13 +36,16 @@ class AnnouncementListScreen extends ConsumerWidget {
   }
 }
 
-class _AnnouncementTile extends StatelessWidget {
+class _AnnouncementTile extends ConsumerWidget {
   final Map<String, dynamic> item;
 
   const _AnnouncementTile({required this.item});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final id = item['id'] as String;
+    final isPinned = item['isPinned'] as bool? ?? false;
+
     String dateLabel = '';
     final createdAt = item['createdAt'] as String?;
     if (createdAt != null) {
@@ -51,18 +54,59 @@ class _AnnouncementTile extends StatelessWidget {
       } catch (_) {}
     }
 
-    return ListTile(
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(item['title'] as String? ?? '—',
-                style: const TextStyle(fontWeight: FontWeight.w500)),
-          ),
-          if (item['isPinned'] == true)
-            const Icon(Icons.push_pin_outlined, size: 16, color: Colors.grey),
-        ],
+    return Dismissible(
+      key: ValueKey(id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
       ),
-      subtitle: Text(dateLabel, style: const TextStyle(fontSize: 12)),
+      confirmDismiss: (_) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Delete Announcement'),
+            content: Text('Delete "${item['title'] ?? 'this announcement'}"?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Delete', style: TextStyle(color: Colors.red))),
+            ],
+          ),
+        ) ?? false;
+      },
+      onDismissed: (_) {
+        ref.read(announcementsProvider.notifier).remove(id);
+      },
+      child: ListTile(
+        title: Text(item['title'] as String? ?? '—',
+            style: const TextStyle(fontWeight: FontWeight.w500)),
+        subtitle: Text(dateLabel, style: const TextStyle(fontSize: 12)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(
+                isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                size: 18,
+                color: isPinned ? Theme.of(context).colorScheme.primary : Colors.grey,
+              ),
+              onPressed: () {
+                ref.read(announcementsProvider.notifier).edit(id, {'isPinned': !isPinned});
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              onPressed: () => context.push('/announcements/create', extra: item),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

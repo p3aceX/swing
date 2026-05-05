@@ -519,7 +519,14 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
             loading: loadingBody,
             error: (_, __) => const Text('Failed to load batches',
                 style: TextStyle(color: Colors.red)),
-            data: (batches) => Column(
+            data: (batches) {
+              // Auto-select when there's exactly one batch
+              if (batches.length == 1 && _batchId == null) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() => _batchId = batches[0]['id'] as String);
+                });
+              }
+              return Column(
               children: batches.map((b) {
                 final id  = b['id'] as String;
                 final sel = _batchId == id;
@@ -567,7 +574,8 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
                   ),
                 );
               }).toList(),
-            ),
+            );
+          },
           ),
 
         const SizedBox(height: 24),

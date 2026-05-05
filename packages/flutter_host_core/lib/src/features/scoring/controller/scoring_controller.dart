@@ -318,6 +318,36 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     }
   }
 
+  Future<bool> updateMatchOvers(int overs) async {
+    if (overs <= 0) {
+      state = state.copyWith(error: 'Overs must be greater than 0');
+      return false;
+    }
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _service.updateMatchOvers(_matchId, overs);
+      await _init();
+      return true;
+    } catch (e) {
+      _logError('updateMatchOvers', e);
+      state = state.copyWith(isSubmitting: false, error: _msg(e));
+      return false;
+    }
+  }
+
+  Future<bool> updateMatchSchedule(DateTime scheduledAt) async {
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _service.updateMatchSchedule(_matchId, scheduledAt);
+      await _init();
+      return true;
+    } catch (e) {
+      _logError('updateMatchSchedule', e);
+      state = state.copyWith(isSubmitting: false, error: _msg(e));
+      return false;
+    }
+  }
+
   Future<bool> recordToss(String tossWonBy, String tossDecision) async {
     print('[scoring] recordToss tossWonBy=$tossWonBy tossDecision=$tossDecision');
     state = state.copyWith(isSubmitting: true, clearError: true);
@@ -504,6 +534,17 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     } catch (e) {
       if (e is DioException) {
         print('[recordBall] ✗ status=${e.response?.statusCode} body=${e.response?.data}');
+        final code = (e.response?.data is Map)
+            ? '${(e.response!.data as Map)['error'] is Map ? ((e.response!.data as Map)['error'] as Map)['code'] : ''}'
+            : '';
+        if (code == 'INNINGS_COMPLETED') {
+          await _init();
+          state = state.copyWith(
+            isSubmitting: false,
+            error: 'Innings already completed. State refreshed.',
+          );
+          return false;
+        }
       } else {
         print('[recordBall] ✗ error: $e');
       }

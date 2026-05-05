@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 class AppTheme {
   static const deepBlue = Color(0xFF0057C8);
   static const deepNavy = Color(0xFF071B3D);
-  static const ivory = Color(0xFFF4F2EB);
+  static const ivory = Color(0xFFF1EEE7);
   static const white = Color(0xFFFFFFFF);
   static const darkBg = Color(0xFF0F1219);
   static const darkSurface = Color(0xFF171C26);
@@ -59,7 +59,7 @@ class AppTheme {
       hintStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w400),
     ),
     navigationBarTheme: const NavigationBarThemeData(
-      backgroundColor: white,
+      backgroundColor: ivory,
       indicatorColor: Color(0xFFE8F0FD),
       elevation: 0,
       height: 64,
@@ -149,7 +149,7 @@ class AppTheme {
       hintStyle: const TextStyle(color: darkMuted, fontWeight: FontWeight.w400),
     ),
     navigationBarTheme: const NavigationBarThemeData(
-      backgroundColor: darkSurface,
+      backgroundColor: darkBg,
       indicatorColor: Color(0xFF263551),
       elevation: 0,
       height: 64,

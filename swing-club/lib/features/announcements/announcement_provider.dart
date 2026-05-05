@@ -21,6 +21,18 @@ class AnnouncementsNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     await ref.read(apiClientProvider).post('/academy/${s.academyId}/announcements', data: payload);
     ref.invalidateSelf();
   }
+
+  Future<void> edit(String id, Map<String, dynamic> payload) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider).patch('/academy/${s.academyId}/announcements/$id', data: payload);
+    ref.invalidateSelf();
+  }
+
+  Future<void> remove(String id) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider).delete('/academy/${s.academyId}/announcements/$id');
+    ref.invalidateSelf();
+  }
 }
 
 final announcementsProvider =

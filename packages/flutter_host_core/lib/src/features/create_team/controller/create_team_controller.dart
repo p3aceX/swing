@@ -40,6 +40,16 @@ class HostCreateTeamController extends StateNotifier<HostCreateTeamState> {
     String? city,
     required String teamType,
     required bool iAmCaptain,
+    String? academyId,
+    String? coachId,
+    String? arenaId,
+    String? motto,
+    String? homeGroundName,
+    int? foundedYear,
+    String? ageGroup,
+    String? format,
+    String? skillLevel,
+    bool isPublic = true,
   }) async {
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
@@ -50,6 +60,16 @@ class HostCreateTeamController extends StateNotifier<HostCreateTeamState> {
         city: city,
         teamType: teamType,
         iAmCaptain: iAmCaptain,
+        academyId: academyId,
+        coachId: coachId,
+        arenaId: arenaId,
+        motto: motto,
+        homeGroundName: homeGroundName,
+        foundedYear: foundedYear,
+        ageGroup: ageGroup,
+        format: format,
+        skillLevel: skillLevel,
+        isPublic: isPublic,
       );
       state = state.copyWith(
         isSubmitting: false,

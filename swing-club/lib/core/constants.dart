@@ -12,3 +12,4 @@ const kCompensationTypes = ['FIXED_MONTHLY', 'PER_SESSION', 'PER_BATCH', 'REVENU
 const kPayoutCycles = ['MONTHLY', 'FORTNIGHTLY'];
 const kTargetGroups = ['ALL', 'BATCH', 'STUDENT'];
 const kSentViaOptions = ['PUSH', 'SMS', 'EMAIL'];
+const kExpenseCategories = ['SALARY', 'EQUIPMENT', 'MAINTENANCE', 'INFRASTRUCTURE', 'MARKETING', 'UTILITIES', 'OTHER'];

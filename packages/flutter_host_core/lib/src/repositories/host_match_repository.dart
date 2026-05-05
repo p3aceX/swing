@@ -30,6 +30,13 @@ class HostMatchRepository {
     );
   }
 
+  Future<void> updateMatchSchedule(String matchId, DateTime scheduledAt) async {
+    await _dio.patch(
+      _paths.match(matchId),
+      data: {'scheduledAt': scheduledAt.toUtc().toIso8601String()},
+    );
+  }
+
   Future<void> changeWicketKeeper(String matchId, String team, String wicketKeeperId) async {
     await _dio.patch(
       _paths.matchWicketkeeper(matchId),

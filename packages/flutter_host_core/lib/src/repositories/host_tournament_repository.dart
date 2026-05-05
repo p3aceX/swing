@@ -242,6 +242,17 @@ class SharedTournamentRepository {
     );
   }
 
+  Future<Map<String, dynamic>> updateTournament(
+    String tournamentId,
+    Map<String, dynamic> data,
+  ) async {
+    final response = await _dio.patch(
+      _paths.tournament(tournamentId),
+      data: data,
+    );
+    return _extractDataMap(response.data);
+  }
+
   Future<void> deleteSchedule(String tournamentId) async {
     await _dio.delete('${_paths.tournament(tournamentId)}/schedule');
   }

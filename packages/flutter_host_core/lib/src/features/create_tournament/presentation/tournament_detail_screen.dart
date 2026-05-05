@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../../repositories/host_team_repository.dart';
 import '../../../repositories/host_tournament_repository.dart';
 import '../../../theme/host_colors.dart';
+import '../../scoring/presentation/scoring_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Public entry points
@@ -164,8 +165,13 @@ class _TournamentDetailScreenState
   String _friendlyError(Object error) {
     if (error is DioException) {
       final body = error.response?.data;
-      final code = body is Map ? '${body['error']?['code'] ?? ''}' : '';
-      final serverMsg = body is Map ? '${body['error']?['message'] ?? ''}' : '';
+      final mapBody = body is Map ? Map<String, dynamic>.from(body) : null;
+      final errorField = mapBody?['error'];
+      final errorMap = errorField is Map
+          ? Map<String, dynamic>.from(errorField)
+          : null;
+      final code = '${errorMap?['code'] ?? mapBody?['code'] ?? ''}';
+      final serverMsg = '${errorMap?['message'] ?? mapBody?['message'] ?? ''}';
       switch (code) {
         case 'TOURNAMENT_FULL':
           final max = _tournament?['maxTeams'];
@@ -335,45 +341,37 @@ class _TournamentDetailScreenState
           ),
         ),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
+          preferredSize: const Size.fromHeight(52),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: Container(
-              decoration: BoxDecoration(
-                color: context.panel.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: context.stroke),
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              indicatorSize: TabBarIndicatorSize.label,
+              indicatorColor: context.accent,
+              indicatorWeight: 2.2,
+              labelColor: context.accent,
+              unselectedLabelColor: context.fgSub,
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
               ),
-              child: TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                indicatorSize: TabBarIndicatorSize.tab,
-                indicator: BoxDecoration(
-                  color: context.accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                labelColor: context.accent,
-                unselectedLabelColor: context.fgSub,
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-                dividerColor: Colors.transparent,
-                tabs: const [
-                  Tab(text: 'Overview'),
-                  Tab(text: 'Teams'),
-                  Tab(text: 'Groups'),
-                  Tab(text: 'Fixtures'),
-                  Tab(text: 'Schedule'),
-                  Tab(text: 'Points Table'),
-                  Tab(text: 'Settings'),
-                ],
+              unselectedLabelStyle: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 13,
               ),
+              labelPadding: const EdgeInsets.only(right: 24, left: 2),
+              dividerColor: Colors.transparent,
+              tabs: const [
+                Tab(text: 'Overview'),
+                Tab(text: 'Teams'),
+                Tab(text: 'Groups'),
+                Tab(text: 'Fixtures'),
+                Tab(text: 'Schedule'),
+                Tab(text: 'Points Table'),
+                Tab(text: 'Settings'),
+              ],
             ),
           ),
         ),
@@ -568,7 +566,27 @@ class _TournamentDetailScreenState
                         isPublic: _isPublic,
                         onIsPublicChanged: (v) =>
                             setState(() => _isPublic = v),
-                        onSave: () => _showSnack('Feature coming soon'),
+                        onSave: () => _runAction(() async {
+                          final payload = <String, dynamic>{
+                            'name': _nameController.text.trim(),
+                            'organiserName': _organiserNameController.text.trim(),
+                            'organiserPhone': _organiserPhoneController.text.trim(),
+                            'description': _descriptionController.text.trim(),
+                            'isPublic': _isPublic,
+                          };
+                          final maxTeams = int.tryParse(_maxTeamsController.text.trim());
+                          final entryFee = int.tryParse(_entryFeeController.text.trim());
+                          final prizePool = _prizePoolController.text.trim();
+                          if (maxTeams != null) payload['maxTeams'] = maxTeams;
+                          if (entryFee != null) payload['entryFee'] = entryFee;
+                          if (prizePool.isNotEmpty) payload['prizePool'] = prizePool;
+
+                          await _repository.updateTournament(
+                            widget.tournamentId,
+                            payload,
+                          );
+                          _showSnack('Tournament updated');
+                        }),
                         onCreateGroups: () => _showCreateGroupDialog(defaultAutoAssign: false),
                         onAutoAssign: () => _showCreateGroupDialog(defaultAutoAssign: true),
                         onDeleteTournament: () async {
@@ -657,8 +675,6 @@ class _OverviewTab extends StatelessWidget {
     final confirmedCount =
         teams.where((t) => t['isConfirmed'] == true).length;
     final maxTeams = tournament['maxTeams'];
-    final playedCount =
-        schedule.where((m) => '${m['status']}'.toUpperCase() == 'COMPLETED').length;
     final totalMatches = schedule.length;
 
     // Unique rounds in order
@@ -761,9 +777,7 @@ class _OverviewTab extends StatelessWidget {
                 ),
                 _StatTile(
                   label: 'Matches',
-                  value: totalMatches == 0
-                      ? '-'
-                      : '$playedCount/$totalMatches',
+                  value: totalMatches == 0 ? '-' : '$totalMatches',
                 ),
                 _StatTile(
                   label: 'Groups',
@@ -2465,8 +2479,13 @@ class _MatchCard extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: ColoredBox(
-        color: context.bg,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: context.cardBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.stroke),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2558,7 +2577,7 @@ class _MatchCard extends StatelessWidget {
               ],
             ),
             if (scoreStr != null) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               Text(
                 scoreStr,
                 style: TextStyle(
@@ -2568,9 +2587,6 @@ class _MatchCard extends StatelessWidget {
                 ),
               ),
             ],
-            Divider(
-                height: 1,
-                color: context.stroke.withValues(alpha: 0.5)),
           ],
         ),
       ),
@@ -3289,10 +3305,7 @@ class _TournamentScheduleTab extends StatelessWidget {
             _ScheduleSectionHeader(label: 'Live', count: live.length, color: context.success),
             ...live.map((m) {
               final id = '${m['id'] ?? ''}';
-              final cb = onStartMatch != null ? () {
-                debugPrint('[Schedule] Resume tapped id=$id teamAId=${m['teamAId']} teamBId=${m['teamBId']}');
-                onStartMatch!(m);
-              } : null;
+              final cb = _matchActionCallback(context, m, id);
               return _TournamentMatchRow(
                 match: m,
                 onTap: cb,
@@ -3306,10 +3319,7 @@ class _TournamentScheduleTab extends StatelessWidget {
             _ScheduleSectionHeader(label: 'Today', count: today.length, color: context.accent),
             ...today.map((m) {
               final id = '${m['id'] ?? ''}';
-              final cb = onStartMatch != null ? () {
-                debugPrint('[Schedule] Start tapped id=$id teamAId=${m['teamAId']} teamBId=${m['teamBId']}');
-                onStartMatch!(m);
-              } : null;
+              final cb = _matchActionCallback(context, m, id);
               return _TournamentMatchRow(
                 match: m,
                 onTap: cb,
@@ -3323,10 +3333,7 @@ class _TournamentScheduleTab extends StatelessWidget {
             _ScheduleSectionHeader(label: 'Upcoming', count: upcoming.length, color: context.fgSub),
             ...upcoming.map((m) {
               final id = '${m['id'] ?? ''}';
-              final cb = onStartMatch != null ? () {
-                debugPrint('[Schedule] Start tapped id=$id teamAId=${m['teamAId']} teamBId=${m['teamBId']}');
-                onStartMatch!(m);
-              } : null;
+              final cb = _matchActionCallback(context, m, id);
               return _TournamentMatchRow(
                 match: m,
                 onTap: cb,
@@ -3340,12 +3347,16 @@ class _TournamentScheduleTab extends StatelessWidget {
             _ScheduleSectionHeader(label: 'Completed', count: completed.length, color: context.fgSub),
             ...completed.map((m) {
               final id = '${m['id'] ?? ''}';
+              final cb = onNavigateToMatch != null && id.isNotEmpty ? () {
+                debugPrint('[Schedule] Completed tap id=$id');
+                onNavigateToMatch!(id);
+              } : null;
               return _TournamentMatchRow(
                 match: m,
-                onTap: onNavigateToMatch != null ? () {
-                  debugPrint('[Schedule] Completed tap id=$id');
-                  onNavigateToMatch!(id);
-                } : null,
+                onTap: cb,
+                onAction: cb,
+                actionLabel: 'Open',
+                actionColor: context.fgSub,
               );
             }),
           ],
@@ -3356,6 +3367,36 @@ class _TournamentScheduleTab extends StatelessWidget {
 
   DateTime _dt(Map<String, dynamic> m) {
     try { return DateTime.parse('${m['scheduledAt']}').toLocal(); } catch (_) { return DateTime(2099); }
+  }
+
+  VoidCallback? _matchActionCallback(
+      BuildContext context, Map<String, dynamic> m, String id) {
+    debugPrint(
+      '[Schedule] resolve action id=$id hasNavigate=${onNavigateToMatch != null} hasStart=${onStartMatch != null} status=${m['status']}',
+    );
+    if (onNavigateToMatch != null && id.isNotEmpty) {
+      return () {
+        debugPrint('[Schedule] Start/Resume navigate id=$id');
+        onNavigateToMatch!(id);
+      };
+    }
+    if (onStartMatch != null) {
+      return () {
+        debugPrint('[Schedule] Start/Resume tapped id=$id teamAId=${m['teamAId']} teamBId=${m['teamBId']}');
+        onStartMatch!(m);
+      };
+    }
+    if (id.isNotEmpty) {
+      return () {
+        debugPrint('[Schedule] Start/Resume internal fallback to scoring id=$id');
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ScoringScreen(matchId: id),
+          ),
+        );
+      };
+    }
+    return null;
   }
 }
 
@@ -3431,34 +3472,64 @@ class _TournamentMatchRow extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: ColoredBox(
-          color: context.bg,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+          decoration: BoxDecoration(
+            color: context.cardBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: context.stroke),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
                 if (round.isNotEmpty)
-                  Text(round,
+                  Expanded(
+                    child: Text(
+                      round,
                       style: TextStyle(
                           color: context.fgSub,
                           fontSize: 11,
-                          fontWeight: FontWeight.w600)),
-                const Spacer(),
-                if (isLive) ...[
-                  Container(
-                      width: 6, height: 6,
-                      decoration: BoxDecoration(color: context.success, shape: BoxShape.circle)),
-                  const SizedBox(width: 4),
-                ],
-                Text(statusLabel,
-                    style: TextStyle(
-                        color: statusColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.4)),
+                          fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                else
+                  const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isLive) ...[
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                              color: context.success, shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        statusLabel,
+                        style: TextStyle(
+                            color: statusColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3),
+                      ),
+                    ],
+                  ),
+                ),
                 if (onTap != null && !isCompleted) ...[
                   const SizedBox(width: 8),
-                  Icon(Icons.chevron_right_rounded, size: 16, color: context.accent),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 16, color: context.accent),
                 ],
               ]),
               const SizedBox(height: 8),
@@ -3472,11 +3543,20 @@ class _TournamentMatchRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis)),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text('vs',
-                      style: TextStyle(
-                          color: context.fgSub,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500)),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: context.panel,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text('VS',
+                        style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3)),
+                  ),
                 ),
                 Expanded(
                     child: Text(teamB,
@@ -3496,30 +3576,51 @@ class _TournamentMatchRow extends StatelessWidget {
                         style: TextStyle(color: context.fgSub, fontSize: 11))
                   else
                     const SizedBox.shrink(),
-                  if (onAction != null)
-                    GestureDetector(
-                      onTap: onAction,
-                      child: Container(
+                  if (!isCompleted || onAction != null || onTap != null)
+                    FilledButton.icon(
+                      onPressed: (onAction ?? onTap) == null
+                          ? null
+                          : () {
+                              final id = '${match['id'] ?? ''}';
+                              debugPrint(
+                                '[ScheduleCard] action pressed id=$id status=$status actionLabel=${actionLabel ?? 'Start'} hasOnAction=${onAction != null} hasOnTap=${onTap != null}',
+                              );
+                              final cb = onAction ?? onTap;
+                              if (cb == null) {
+                                debugPrint('[ScheduleCard] no callback available id=$id');
+                                return;
+                              }
+                              cb();
+                            },
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 32),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: actionColor ?? context.accent,
-                          borderRadius: BorderRadius.circular(6),
+                            horizontal: 12, vertical: 0),
+                        backgroundColor: (actionColor ?? context.accent)
+                            .withValues(alpha: (onAction ?? onTap) != null ? 1 : 0.45),
+                        foregroundColor: context.bg,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Text(
-                          actionLabel ?? 'Start',
-                          style: TextStyle(
-                            color: context.bg,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      ),
+                      icon: Icon(
+                        (actionLabel ?? 'Start') == 'Resume'
+                            ? Icons.play_circle_fill_rounded
+                            : Icons.play_arrow_rounded,
+                        size: 14,
+                      ),
+                      label: Text(
+                        (actionLabel ?? 'Start') == 'Resume'
+                            ? 'Resume Match'
+                            : 'Start Match',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Divider(height: 1, color: context.stroke.withValues(alpha: 0.5)),
             ],
           ),
         ),
@@ -3620,7 +3721,7 @@ class _PointsTableTabState extends State<_PointsTableTab> {
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: _RoundChip(
-                        label: g == 'overall' ? 'Overall' : g,
+                        label: _groupLabel(g),
                         selected: isSelected,
                         onTap: () =>
                             setState(() => _selectedGroup = g),
@@ -3717,6 +3818,8 @@ class _PointsTableTabState extends State<_PointsTableTab> {
 
                 final row = rows[index];
                 final isQualifying = index < qualifyingCount;
+                final teamName = _teamName(row);
+                final teamLogoUrl = _teamLogoUrl(row);
                 final nrr =
                     (row['nrr'] as num?)?.toDouble() ?? 0.0;
                 final nrrStr =
@@ -3748,15 +3851,14 @@ class _PointsTableTabState extends State<_PointsTableTab> {
                             ),
                             const SizedBox(width: 8),
                             _TeamAvatar(
-                              name: '${row['teamName'] ?? '?'}',
-                              logoUrl:
-                                  '${row['teamLogoUrl'] ?? ''}',
+                              name: teamName,
+                              logoUrl: teamLogoUrl,
                               size: 28,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '${row['teamName'] ?? '-'}',
+                                teamName,
                                 style: TextStyle(
                                   color: context.fg,
                                   fontSize: 13,
@@ -3854,6 +3956,44 @@ class _PointsTableTabState extends State<_PointsTableTab> {
     if (total <= 4) return (total / 2).ceil();
     if (total <= 8) return 4;
     return (total * 0.5).floor();
+  }
+
+  String _groupLabel(String key) {
+    if (key == 'overall') return 'Overall';
+    final groupRows = widget.standings[key] ?? const [];
+    if (groupRows.isNotEmpty) {
+      final first = groupRows.first;
+      final fromRow = '${first['groupName'] ?? first['group']?['name'] ?? ''}'.trim();
+      if (fromRow.isNotEmpty) return fromRow;
+    }
+    // Fallback when API key is an internal id.
+    final looksLikeId = RegExp(r'^[a-z0-9]{8,}$', caseSensitive: false).hasMatch(key);
+    if (looksLikeId) return 'Group';
+    return key;
+  }
+
+  String _teamName(Map<String, dynamic> row) {
+    final direct = '${row['teamName'] ?? row['name'] ?? ''}'.trim();
+    if (direct.isNotEmpty) return direct;
+    final teamObj = row['team'];
+    if (teamObj is Map) {
+      final nested = '${teamObj['name'] ?? teamObj['teamName'] ?? ''}'.trim();
+      if (nested.isNotEmpty) return nested;
+    }
+    final fromId = '${row['teamId'] ?? ''}'.trim();
+    if (fromId.isNotEmpty) return fromId;
+    return '-';
+  }
+
+  String _teamLogoUrl(Map<String, dynamic> row) {
+    final direct = '${row['teamLogoUrl'] ?? row['logoUrl'] ?? ''}'.trim();
+    if (direct.isNotEmpty) return direct;
+    final teamObj = row['team'];
+    if (teamObj is Map) {
+      final nested = '${teamObj['logoUrl'] ?? ''}'.trim();
+      if (nested.isNotEmpty) return nested;
+    }
+    return '';
   }
 }
 

@@ -13,11 +13,24 @@ class HostTournamentDetailRepository {
 
   Future<TournamentDetailModel> fetchDetail(String slug) async {
     if (kDebugMode) debugPrint('[HTD] fetching detail slug=$slug');
-    final response = await _dio.get('/public/tournament/$slug');
-    final data = response.data;
-    final root = data is Map ? data as Map<String, dynamic> : <String, dynamic>{};
-    final inner = root['data'] is Map ? root['data'] as Map<String, dynamic> : root;
-    return TournamentDetailModel.fromJson(inner);
+    try {
+      final response = await _dio.get('/public/tournament/$slug');
+      final data = response.data;
+      final root = data is Map ? data as Map<String, dynamic> : <String, dynamic>{};
+      final inner = root['data'] is Map ? root['data'] as Map<String, dynamic> : root;
+      return TournamentDetailModel.fromJson(inner);
+    } on DioException catch (e) {
+      // Tournament may be private — fall back to the authenticated owner endpoint
+      if (e.response?.statusCode == 404) {
+        if (kDebugMode) debugPrint('[HTD] public 404, trying player endpoint slug=$slug');
+        final res = await _dio.get('/player/tournaments/$slug');
+        final data = res.data;
+        final root = data is Map ? data as Map<String, dynamic> : <String, dynamic>{};
+        final inner = root['data'] is Map ? root['data'] as Map<String, dynamic> : root;
+        return TournamentDetailModel.fromJson(inner);
+      }
+      rethrow;
+    }
   }
 
   Future<List<TournamentMatchModel>> fetchMatches(String slug) async {

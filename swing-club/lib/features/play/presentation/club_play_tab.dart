@@ -12,7 +12,9 @@ class ClubPlayTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentUserId = ref.watch(authProvider).userId;
 
-    return HostPlayTab(
+    return SafeArea(
+      bottom: false,
+      child: HostPlayTab(
       currentUserId: currentUserId,
       callbacks: PlayTabCallbacks(
         onCreateTeam: (ctx) => ctx.push('/play/create-team'),
@@ -36,6 +38,7 @@ class ClubPlayTab extends ConsumerWidget {
             extra: {'isHost': isHost, 'tournamentId': tournamentId},
           );
         },
+      ),
       ),
     );
   }

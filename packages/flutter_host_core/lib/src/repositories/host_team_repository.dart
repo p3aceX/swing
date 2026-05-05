@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../contracts/host_path_config.dart';
@@ -96,7 +97,34 @@ class HostTeamRepository {
   }
 
   Future<void> removePlayer(String teamId, String playerId) async {
-    await _dio.delete(_paths.teamPlayer(teamId, playerId));
+    final readPath = _paths.teamPlayer(teamId, playerId);
+    final mutationPath = _paths.teamMember(teamId, playerId);
+    try {
+      debugPrint('[TeamRepo.removePlayer] DELETE $readPath');
+      await _dio.delete(readPath);
+      debugPrint('[TeamRepo.removePlayer] OK $readPath');
+      return;
+    } on DioException catch (e1) {
+      debugPrint(
+        '[TeamRepo.removePlayer] FAIL $readPath '
+        'status=${e1.response?.statusCode} body=${e1.response?.data}',
+      );
+      try {
+        debugPrint('[TeamRepo.removePlayer] DELETE $mutationPath');
+        await _dio.delete(mutationPath);
+        debugPrint('[TeamRepo.removePlayer] OK $mutationPath');
+        return;
+      } on DioException catch (e2) {
+        debugPrint(
+          '[TeamRepo.removePlayer] FAIL $mutationPath '
+          'status=${e2.response?.statusCode} body=${e2.response?.data}',
+        );
+        throw Exception(
+          'removePlayer failed for id=$playerId '
+          '(read:${e1.response?.statusCode}, mutate:${e2.response?.statusCode})',
+        );
+      }
+    }
   }
 
   List<Map<String, dynamic>> _normalizeList(Object? data) {
