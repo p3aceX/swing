@@ -127,6 +127,8 @@ export async function academyRoutes(app: FastifyInstance) {
       feeAmountPaise: z.number().nullish(),
       feeFrequency: z.enum(['MONTHLY', 'QUARTERLY', 'YEARLY', 'ONE_TIME']).nullish(),
       feeStatus: z.enum(['UNPAID', 'PAID', 'OVERDUE']).optional(),
+      enrollmentStatus: z.enum(['ACTIVE', 'INACTIVE', 'TRIAL', 'PAUSED']).optional(),
+      isTrial: z.boolean().optional(),
       notes: z.string().nullish(),
       bloodGroup: z.string().nullish(),
       aadhaarLast4: z.string().length(4).nullish(),
