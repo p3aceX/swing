@@ -183,7 +183,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _restoredPicks = active.picks;
         if (active.status == 'matched' && active.match != null) {
           _matchSummary = active.match;
-          _lobbyState = active.match!.myTeamPaid
+          _lobbyState = active.match!.myTeamConfirmed
               ? _LobbyState.waitingOpponent
               : _LobbyState.matched;
         } else if (active.status == 'confirmed') {
@@ -258,15 +258,15 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       if (status.status == 'matched' && status.match != null) {
         final match = status.match!;
         _pollTimer?.cancel();
-        // If we're waiting for opponent and both just paid → confirmed
+        // If we're waiting for opponent and both confirmed → done
         if (_lobbyState == _LobbyState.waitingOpponent &&
-            match.myTeamPaid && match.opponentPaid) {
+            match.myTeamConfirmed && match.opponentConfirmed) {
           setState(() => _lobbyState = _LobbyState.confirmed);
           return;
         }
         setState(() {
           _matchSummary = match;
-          _lobbyState = match.myTeamPaid
+          _lobbyState = match.myTeamConfirmed
               ? _LobbyState.waitingOpponent
               : _LobbyState.matched;
         });

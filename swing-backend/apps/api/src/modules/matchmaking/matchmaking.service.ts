@@ -1816,6 +1816,8 @@ export class MatchmakingService {
       remainingFeePaise: (match as any).remainingFeePaise ?? 0,
       myTeamPaid: isLobbyA ? (match as any).teamAPaid : (match as any).teamBPaid,
       opponentPaid: isLobbyA ? (match as any).teamBPaid : (match as any).teamAPaid,
+      myTeamConfirmed: isLobbyA ? match.teamAConfirmed : match.teamBConfirmed,
+      opponentConfirmed: isLobbyA ? match.teamBConfirmed : match.teamAConfirmed,
       confirmDeadline: match.confirmDeadline.toISOString(),
     }
   }

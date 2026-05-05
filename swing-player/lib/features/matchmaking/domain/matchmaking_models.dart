@@ -238,6 +238,8 @@ class MmMatchSummary {
     this.remainingFeePaise = 0,
     this.myTeamPaid = false,
     this.opponentPaid = false,
+    this.myTeamConfirmed = false,
+    this.opponentConfirmed = false,
   });
 
   final String matchId;
@@ -256,6 +258,8 @@ class MmMatchSummary {
   final int remainingFeePaise;
   final bool myTeamPaid;
   final bool opponentPaid;
+  final bool myTeamConfirmed;
+  final bool opponentConfirmed;
 
   int get priceRupees => pricePerTeamPaise ~/ 100;
   int get confirmationFeeRupees => confirmationFeePaise ~/ 100;
@@ -292,6 +296,8 @@ class MmMatchSummary {
         remainingFeePaise: (j['remainingFeePaise'] as num?)?.toInt() ?? 0,
         myTeamPaid: (j['myTeamPaid'] as bool?) ?? false,
         opponentPaid: (j['opponentPaid'] as bool?) ?? false,
+        myTeamConfirmed: (j['myTeamConfirmed'] as bool?) ?? false,
+        opponentConfirmed: (j['opponentConfirmed'] as bool?) ?? false,
       );
 }
 
