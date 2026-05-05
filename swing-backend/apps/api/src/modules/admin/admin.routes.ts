@@ -2576,4 +2576,12 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: result })
   })
 
+  // POST /admin/matches/backfill-roles
+  // Phase 5: Idempotent backfill of MatchRole rows for all existing matches.
+  // Skips matches that already have MatchRole rows. Safe to re-run.
+  app.post('/matches/backfill-roles', auth, async (_request, reply) => {
+    const result = await svc.backfillMatchRoles()
+    return reply.send({ success: true, data: result })
+  })
+
 }
