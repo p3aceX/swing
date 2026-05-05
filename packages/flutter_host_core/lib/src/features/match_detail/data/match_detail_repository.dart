@@ -554,6 +554,7 @@ class HostMatchDetailRepository {
       scoreSummary: _buildMatchCardSummary(stat, match, playerTeamName, opponentTeamName),
       tossWinner: _buildTossSummary(match, firstTeam, secondTeam),
       tossDecision: null,
+      isMatchmaking: _str(match['matchmakingId']).isNotEmpty,
       playerTeamLogoUrl: switch (playerSide) {
         'A' => _orNull(_str(match['teamALogoUrl'])),
         'B' => _orNull(_str(match['teamBLogoUrl'])),
