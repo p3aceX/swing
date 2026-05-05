@@ -427,7 +427,7 @@ class _MatchList extends ConsumerWidget {
         itemBuilder: (_, i) {
           final m = visible[i];
           if (m.canScore && m.lifecycle != MatchLifecycle.past) {
-            final canDelete = m.lifecycle != MatchLifecycle.live && !m.isMatchmaking;
+            final canDelete = m.lifecycle != MatchLifecycle.live && m.canDelete;
             return _HostedMatchItem(
               match: m,
               callbacks: callbacks,

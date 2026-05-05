@@ -1,5 +1,6 @@
 import { prisma, Prisma } from "@swing/db";
 import { Errors, AppError } from "../../lib/errors";
+import { resolveMatchRoleBatch } from "../../lib/match-role";
 import {
   getPaginationParams,
   buildPaginationMeta,
@@ -520,19 +521,25 @@ export class PlayerService {
     });
     const teamByName = new Map(teams.map((team) => [team.name, team]));
 
-    const enriched = data.map((item) => ({
-      ...item,
-      isHost: item.match.scorerId === profileId ||
-              item.match.teamACaptainId === profileId ||
-              item.match.teamBCaptainId === profileId,
-      match: {
-        ...item.match,
-        teamALogoUrl: teamByName.get(item.match.teamAName)?.logoUrl ?? null,
-        teamAShortName: teamByName.get(item.match.teamAName)?.shortName ?? null,
-        teamBLogoUrl: teamByName.get(item.match.teamBName)?.logoUrl ?? null,
-        teamBShortName: teamByName.get(item.match.teamBName)?.shortName ?? null,
-      },
-    }));
+    const matchIds = data.map((item) => item.matchId)
+    const roleMap = await resolveMatchRoleBatch(profileId, matchIds)
+
+    const enriched = data.map((item) => {
+      const myRole = roleMap.get(item.matchId) ?? null
+      return {
+        ...item,
+        myRole,
+        // legacy field — kept for backwards compat, derived from myRole
+        isHost: myRole === 'owner' || myRole === 'manager',
+        match: {
+          ...item.match,
+          teamALogoUrl: teamByName.get(item.match.teamAName)?.logoUrl ?? null,
+          teamAShortName: teamByName.get(item.match.teamAName)?.shortName ?? null,
+          teamBLogoUrl: teamByName.get(item.match.teamBName)?.logoUrl ?? null,
+          teamBShortName: teamByName.get(item.match.teamBName)?.shortName ?? null,
+        },
+      }
+    })
 
     return { data: enriched, meta: buildPaginationMeta(total, page, limit) };
   }

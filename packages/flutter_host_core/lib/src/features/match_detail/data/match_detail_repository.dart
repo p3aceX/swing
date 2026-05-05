@@ -555,6 +555,7 @@ class HostMatchDetailRepository {
       tossWinner: _buildTossSummary(match, firstTeam, secondTeam),
       tossDecision: null,
       isMatchmaking: _str(match['matchmakingId']).isNotEmpty,
+      myRole: _orNull(_str(raw['myRole'] ?? stat['myRole'])),
       playerTeamLogoUrl: switch (playerSide) {
         'A' => _orNull(_str(match['teamALogoUrl'])),
         'B' => _orNull(_str(match['teamBLogoUrl'])),

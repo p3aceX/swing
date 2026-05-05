@@ -58,6 +58,7 @@ class PlayerMatch {
     this.scoringOwnerIds = const [],
     this.involvesPlayerTeam = false,
     this.isMatchmaking = false,
+    this.myRole,
     this.ballType,
     this.tossWinner,
     this.tossDecision,
@@ -97,6 +98,13 @@ class PlayerMatch {
   /// True when this match was created via the matchmaking flow.
   /// Delete is controlled by the arena owner, not the player.
   final bool isMatchmaking;
+
+  /// Role the current user holds on this match: 'owner', 'manager', 'scorer', or null.
+  final String? myRole;
+
+  bool get canDelete => myRole == 'owner';
+  bool get canManage => myRole == 'owner' || myRole == 'manager';
+  bool get isActiveScorer => myRole == 'scorer';
 
   /// e.g. 'LEATHER' or 'TENNIS'
   final String? ballType;
@@ -143,6 +151,7 @@ class PlayerMatch {
       tossWinner: tossWinner ?? this.tossWinner,
       tossDecision: tossDecision ?? this.tossDecision,
       isMatchmaking: isMatchmaking,
+      myRole: myRole,
     );
   }
 }

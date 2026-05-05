@@ -533,6 +533,7 @@ class MatchesRepository extends BaseRepository {
           _truthy(match['isOwner']) ||
           _truthy(match['isManager']),
       isMatchmaking: _string(match['matchmakingId']).isNotEmpty,
+      myRole: _nullIfEmpty(_string(raw['myRole'] ?? match['myRole'])),
       scoringOwnerIds: scoringOwnerIds.toList(growable: false),
       involvesPlayerTeam: involvesPlayerTeam,
       ballType: _nullIfEmpty(_firstNonEmpty([

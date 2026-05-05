@@ -412,6 +412,7 @@ class HostTeamDetailRepository {
       tossWinner: tossWonBy.isEmpty ? null : tossWonBy,
       tossDecision: tossDecision.isEmpty ? null : tossDecision,
       isMatchmaking: _str(raw['matchmakingId']).isNotEmpty,
+      myRole: () { final v = _str(raw['myRole']); return v.isEmpty ? null : v; }(),
     );
   }
 

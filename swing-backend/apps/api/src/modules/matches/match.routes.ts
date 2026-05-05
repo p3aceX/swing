@@ -9,6 +9,8 @@ import {
 } from '@swing/contracts'
 import { MatchService } from './match.service'
 import { ViewTrackingService } from '../player/view-tracking.service'
+import { resolveMatchRole } from '../../lib/match-role'
+import { prisma } from '@swing/db'
 
 export async function matchRoutes(app: FastifyInstance) {
   const svc = new MatchService()
@@ -146,9 +148,15 @@ export async function matchRoutes(app: FastifyInstance) {
   app.get('/:id', async (request, reply) => {
     const { id } = request.params as { id: string }
     const user = (request as any).user as { userId: string } | undefined
-    const data = await svc.getMatch(id)
+    const [data, myRole] = await Promise.all([
+      svc.getMatch(id),
+      user?.userId
+        ? prisma.playerProfile.findUnique({ where: { userId: user.userId }, select: { id: true } })
+            .then((p) => p ? resolveMatchRole(p.id, id) : null)
+        : Promise.resolve(null),
+    ])
     viewTrackingSvc.trackMatchView(id, user?.userId ?? null).catch(() => {})
-    return reply.send({ success: true, data })
+    return reply.send({ success: true, data: { ...data, myRole } })
   })
 
   // ── Match Preview ──────────────────────────────────────────────────────────

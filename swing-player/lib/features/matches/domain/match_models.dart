@@ -61,6 +61,7 @@ class PlayerMatch {
     this.tossWinner,
     this.tossDecision,
     this.isMatchmaking = false,
+    this.myRole,
   });
 
   final String id;
@@ -103,6 +104,13 @@ class PlayerMatch {
   /// True when this match was created via the matchmaking flow.
   /// Delete is controlled by the arena owner, not the player.
   final bool isMatchmaking;
+
+  /// Role the current user holds: 'owner', 'manager', 'scorer', or null.
+  final String? myRole;
+
+  bool get canDelete => myRole == 'owner';
+  bool get canManage => myRole == 'owner' || myRole == 'manager';
+  bool get isActiveScorer => myRole == 'scorer';
 }
 
 // ── Structured scorecard row types ────────────────────────────────────────────
