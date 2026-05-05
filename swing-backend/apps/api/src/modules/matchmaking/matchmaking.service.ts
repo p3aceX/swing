@@ -826,13 +826,33 @@ export class MatchmakingService {
     const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
     if (!match) throw Errors.notFound('Match')
     if (match.status === 'confirmed') throw new AppError('INVALID_STATE', 'Cannot decline a confirmed match', 400)
-    await prisma.$transaction([
-      prisma.matchmakingMatch.update({ where: { id: matchId }, data: { status: 'cancelled' } }),
-      prisma.matchmakingLobby.updateMany({
+
+    // Find the HELD booking on lobbyA (created by acceptLobbyAsOwner) to release the slot
+    const lobbyA = await prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } })
+    const heldBookingId = (lobbyA as any)?.splitBookingId as string | null
+
+    await prisma.$transaction(async (tx) => {
+      await tx.matchmakingMatch.update({ where: { id: matchId }, data: { status: 'cancelled' } })
+      await tx.matchmakingLobby.updateMany({
         where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
         data: { status: 'searching', matchId: null },
-      }),
-    ])
+      })
+      // Cancel the slot booking and clear splitBookingId so the slot is freed
+      if (heldBookingId) {
+        await tx.slotBooking.update({ where: { id: heldBookingId }, data: { status: 'CANCELLED' } })
+        await tx.matchmakingLobby.update({
+          where: { id: match.lobbyAId },
+          data: { splitBookingId: null } as any,
+        })
+      }
+      // Also cancel if match had a confirmed bookingId
+      if ((match as any).bookingId && (match as any).bookingId !== heldBookingId) {
+        await tx.slotBooking.update({
+          where: { id: (match as any).bookingId },
+          data: { status: 'CANCELLED' },
+        })
+      }
+    })
     return { status: 'searching' as const, lobbyId }
   }
 
