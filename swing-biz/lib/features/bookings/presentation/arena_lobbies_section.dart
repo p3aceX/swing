@@ -208,21 +208,12 @@ class ArenaLobbiesSection extends ConsumerWidget {
                 ],
               ),
             ),
-            SizedBox(
-              height: 168,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                itemCount: lobbies.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (_, i) => _LobbyCard(
-                  lobby: lobbies[i],
+            ...lobbies.map((lobby) => _LobbyCard(
+                  lobby: lobby,
                   arenaId: arenaId,
                   arenaName: arenaName,
                   onRefresh: () => ref.invalidate(arenaLobbiesProvider(arenaId)),
-                ),
-              ),
-            ),
+                )),
             const SizedBox(height: 4),
             Divider(height: 1, color: Colors.grey.shade200),
           ],
@@ -270,78 +261,81 @@ class _LobbyCard extends StatelessWidget {
     final slot = lobby.confirmedSlot != null
         ? _fmtSlot(lobby.confirmedSlot!)
         : lobby.displaySlot;
-    return Container(
-      width: 210,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF86EFAC)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF86EFAC)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF059669),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'SLOT CONFIRMED',
+                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    lobby.format,
+                    style: const TextStyle(color: Color(0xFF059669), fontSize: 10, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              lobby.teamName,
+              style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${lobby.dateLabel}  ·  $slot',
+              style: const TextStyle(color: Color(0xFF059669), fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () => _showAssignSheet(context),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 6),
                 decoration: BoxDecoration(
                   color: const Color(0xFF059669),
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Text(
-                  'SLOT CONFIRMED',
-                  style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                alignment: Alignment.center,
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Assign Rival', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 13),
+                  ],
                 ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDCFCE7),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  lobby.format,
-                  style: const TextStyle(color: Color(0xFF059669), fontSize: 10, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            lobby.teamName,
-            style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w700),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '${lobby.dateLabel}  ·  $slot',
-            style: const TextStyle(color: Color(0xFF059669), fontSize: 11, fontWeight: FontWeight.w600),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => _showAssignSheet(context),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF059669),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              alignment: Alignment.center,
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Assign Rival', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 13),
-                ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -351,70 +345,73 @@ class _LobbyCard extends StatelessWidget {
     final slots = lobby.picks.isNotEmpty
         ? lobby.picks
         : [ArenaLobbyPick(slotTime: lobby.slotTime, unitId: '', groundName: lobby.groundName)];
-    return Container(
-      width: 210,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  lobby.teamName,
-                  style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w700),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    lobby.teamName,
+                    style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(4)),
-                child: Text(lobby.format, style: const TextStyle(color: Color(0xFF374151), fontSize: 10, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 3),
-          Row(
-            children: [
-              Text(lobby.dateLabel, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
-              if (lobby.ballType != null) ...[
-                const Text('  ·  ', style: TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                const SizedBox(width: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(4)),
-                  child: Text(_ballTypeLabel(lobby.ballType!), style: const TextStyle(color: Color(0xFF374151), fontSize: 9, fontWeight: FontWeight.w600)),
+                  child: Text(lobby.format, style: const TextStyle(color: Color(0xFF374151), fontSize: 10, fontWeight: FontWeight.w600)),
                 ),
               ],
-            ],
-          ),
-          const SizedBox(height: 8),
-          ...slots.map((p) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(children: [
-                  Container(width: 5, height: 5, margin: const EdgeInsets.only(right: 6, top: 1),
-                      decoration: const BoxDecoration(color: Color(0xFF059669), shape: BoxShape.circle)),
-                  Text(p.displaySlot, style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w600)),
-                ]),
-              )),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => _showAcceptSheet(context),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(color: const Color(0xFF059669), borderRadius: BorderRadius.circular(6)),
-              alignment: Alignment.center,
-              child: const Text('Accept', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
             ),
-          ),
-        ],
+            const SizedBox(height: 3),
+            Row(
+              children: [
+                Text(lobby.dateLabel, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                if (lobby.ballType != null) ...[
+                  const Text('  ·  ', style: TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(4)),
+                    child: Text(_ballTypeLabel(lobby.ballType!), style: const TextStyle(color: Color(0xFF374151), fontSize: 9, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...slots.map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(children: [
+                    Container(width: 5, height: 5, margin: const EdgeInsets.only(right: 6, top: 1),
+                        decoration: const BoxDecoration(color: Color(0xFF059669), shape: BoxShape.circle)),
+                    Text(p.displaySlot, style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
+                )),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => _showAcceptSheet(context),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(color: const Color(0xFF059669), borderRadius: BorderRadius.circular(6)),
+                alignment: Alignment.center,
+                child: const Text('Accept', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
