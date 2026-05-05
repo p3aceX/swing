@@ -79,6 +79,14 @@ export async function matchRoutes(app: FastifyInstance) {
     })
   })
 
+  // Phase 4: role-based scorer assignment
+  app.post('/:id/assign-scorer', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = z.object({ profileId: z.string().min(1) }).parse(request.body)
+    return reply.send({ success: true, data: await svc.assignScorer(id, user.userId, body.profileId) })
+  })
+
   app.post('/:id/innings/:num/ball', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id, num } = request.params as { id: string; num: string }

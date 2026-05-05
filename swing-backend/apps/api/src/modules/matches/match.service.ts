@@ -693,6 +693,14 @@ export class MatchService {
     })
     console.log('[recordToss] OK newStatus=%s', newStatus)
     fireStudioEvent(matchId, TriggerEventType.TOSS_DONE)
+
+    // Auto-assign scorer to bowling team captain
+    const bowlingTeam: 'A' | 'B' =
+      tossDecision === 'BAT'
+        ? (tossWonBy === 'A' ? 'B' : 'A')
+        : (tossWonBy as 'A' | 'B')
+    this.autoAssignScorerForBowlingTeam(matchId, bowlingTeam).catch(() => undefined)
+
     return updated
   }
 
@@ -792,6 +800,130 @@ export class MatchService {
       where: { id: matchId },
       data: { scorerId: scorerProfile.id },
     })
+  }
+
+  // ── Phase 4: role-based scorer assignment ─────────────────────────────────
+
+  async assignScorer(matchId: string, userId: string, targetProfileId: string) {
+    const match = await prisma.match.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+    if (['COMPLETED', 'CANCELLED'].includes(match.status)) {
+      throw new AppError('INVALID_STATE', 'Cannot assign scorer for a completed or cancelled match', 400)
+    }
+
+    const requester = await prisma.playerProfile.findUnique({ where: { userId }, select: { id: true } })
+    if (!requester) throw Errors.forbidden()
+
+    const role = await resolveMatchRole(requester.id, matchId)
+    if (role !== 'owner' && role !== 'manager') {
+      throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager or owner can assign the scorer', 403)
+    }
+
+    const target = await prisma.playerProfile.findUnique({
+      where: { id: targetProfileId },
+      select: { id: true, userId: true },
+    })
+    if (!target) throw new AppError('NOT_FOUND', 'Scorer profile not found', 404)
+
+    const prevScorerId = match.activeScorerId
+
+    await prisma.$transaction(async (tx) => {
+      // Remove previous SCORER role entries for this match
+      await tx.matchRole.deleteMany({ where: { matchId, role: 'SCORER' } })
+      // Write new SCORER role
+      await tx.matchRole.create({
+        data: {
+          id: `${matchId}-${target.id}-SCORER-${Date.now()}`,
+          matchId,
+          profileId: target.id,
+          role: 'SCORER',
+          grantedBy: requester.id,
+        },
+      })
+      // Update activeScorerId on the match
+      await tx.match.update({ where: { id: matchId }, data: { activeScorerId: target.id } })
+    })
+
+    // Notify new scorer
+    notificationSvc.createNotification(target.userId, {
+      type: 'scorer_assigned',
+      title: 'You\'re the Scorer',
+      body: `You've been assigned to score ${match.teamAName} vs ${match.teamBName}`,
+      entityType: 'match',
+      entityId: matchId,
+      sendPush: true,
+      audience: 'PLAYER',
+    }).catch(() => undefined)
+
+    // Notify previous scorer if different
+    if (prevScorerId && prevScorerId !== target.id) {
+      const prev = await prisma.playerProfile.findUnique({ where: { id: prevScorerId }, select: { userId: true } })
+      if (prev) {
+        notificationSvc.createNotification(prev.userId, {
+          type: 'scorer_handedoff',
+          title: 'Scoring Handed Off',
+          body: `Scoring for ${match.teamAName} vs ${match.teamBName} has been handed to someone else`,
+          entityType: 'match',
+          entityId: matchId,
+          sendPush: true,
+          audience: 'PLAYER',
+        }).catch(() => undefined)
+      }
+    }
+
+    return { matchId, activeScorerId: target.id }
+  }
+
+  private async autoAssignScorerForBowlingTeam(matchId: string, bowlingTeam: 'A' | 'B') {
+    const match = await prisma.match.findUnique({ where: { id: matchId } })
+    if (!match) return
+
+    const captainId = bowlingTeam === 'A' ? match.teamACaptainId : match.teamBCaptainId
+    if (!captainId) return
+
+    const prev = match.activeScorerId
+
+    await prisma.$transaction(async (tx) => {
+      await tx.matchRole.deleteMany({ where: { matchId, role: 'SCORER' } })
+      await tx.matchRole.create({
+        data: {
+          id: `${matchId}-${captainId}-SCORER-${Date.now()}`,
+          matchId,
+          profileId: captainId,
+          role: 'SCORER',
+          grantedBy: null,
+        },
+      })
+      await tx.match.update({ where: { id: matchId }, data: { activeScorerId: captainId } })
+    })
+
+    const scorer = await prisma.playerProfile.findUnique({ where: { id: captainId }, select: { userId: true } })
+    if (scorer) {
+      notificationSvc.createNotification(scorer.userId, {
+        type: 'scorer_assigned',
+        title: 'You\'re the Scorer',
+        body: `${bowlingTeam === 'A' ? match.teamAName : match.teamBName} is bowling — you're now the scorer`,
+        entityType: 'match',
+        entityId: matchId,
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+
+    if (prev && prev !== captainId) {
+      const prevProfile = await prisma.playerProfile.findUnique({ where: { id: prev }, select: { userId: true } })
+      if (prevProfile) {
+        notificationSvc.createNotification(prevProfile.userId, {
+          type: 'scorer_handedoff',
+          title: 'Scoring Handed Off',
+          body: `Scoring for ${match.teamAName} vs ${match.teamBName} has been passed to the bowling captain`,
+          entityType: 'match',
+          entityId: matchId,
+          sendPush: true,
+          audience: 'PLAYER',
+        }).catch(() => undefined)
+      }
+    }
   }
 
   async updateMatchOvers(matchId: string, userId: string, customOvers: number) {
@@ -1183,15 +1315,18 @@ export class MatchService {
     if (!isMultiInnings) {
       // Limited overs: after innings 1, create innings 2 for the other team
       if (inningsNum === 1) {
-        await prisma.innings.create({ data: { matchId, inningsNumber: 2, battingTeam: innings.battingTeam === 'A' ? 'B' : 'A' } })
+        const nextBatting = innings.battingTeam === 'A' ? 'B' : 'A'
+        await prisma.innings.create({ data: { matchId, inningsNumber: 2, battingTeam: nextBatting } })
+        // Scorer shifts to new bowling team (original batting team now bowls)
+        this.autoAssignScorerForBowlingTeam(matchId, innings.battingTeam as 'A' | 'B').catch(() => undefined)
       }
     } else {
       // Test / two-innings: up to 4 innings
       if (inningsNum === 1) {
-        // Innings 2: other team bats
-        await prisma.innings.create({ data: { matchId, inningsNumber: 2, battingTeam: innings.battingTeam === 'A' ? 'B' : 'A' } })
+        const nextBatting = innings.battingTeam === 'A' ? 'B' : 'A'
+        await prisma.innings.create({ data: { matchId, inningsNumber: 2, battingTeam: nextBatting } })
+        this.autoAssignScorerForBowlingTeam(matchId, innings.battingTeam as 'A' | 'B').catch(() => undefined)
       } else if (inningsNum === 2) {
-        // Check if follow-on applicable (team 2 trails by 200+ in a test)
         const inn1 = match.innings.find(i => i.inningsNumber === 1)
         const inn2 = match.innings.find(i => i.inningsNumber === 2)
         const followOnThreshold = match.format === 'TEST' ? 200 : 150
@@ -1207,12 +1342,14 @@ export class MatchService {
             }
           }
         }
-        // No follow-on or deficit below threshold: create innings 3 automatically
-        // Team 1 bats again
+        // Team 1 bats again (innings 3) — original team 1 batting team bowls in inn2, so now bats inn3
         await prisma.innings.create({ data: { matchId, inningsNumber: 3, battingTeam: inn1?.battingTeam ?? 'A' } })
+        const inn3BowlingTeam: 'A' | 'B' = (inn1?.battingTeam === 'A' ? 'B' : 'A') as 'A' | 'B'
+        this.autoAssignScorerForBowlingTeam(matchId, inn3BowlingTeam).catch(() => undefined)
       } else if (inningsNum === 3) {
-        // Innings 4: other team bats
-        await prisma.innings.create({ data: { matchId, inningsNumber: 4, battingTeam: innings.battingTeam === 'A' ? 'B' : 'A' } })
+        const nextBatting = innings.battingTeam === 'A' ? 'B' : 'A'
+        await prisma.innings.create({ data: { matchId, inningsNumber: 4, battingTeam: nextBatting } })
+        this.autoAssignScorerForBowlingTeam(matchId, innings.battingTeam as 'A' | 'B').catch(() => undefined)
       }
     }
     fireStudioEvent(matchId, TriggerEventType.INNINGS_COMPLETED)
@@ -1236,6 +1373,11 @@ export class MatchService {
     if (!lastCompleted) throw new AppError('INVALID_STATE', 'No completed innings found', 400)
     const nextBattingTeam = lastCompleted.battingTeam === 'A' ? 'B' : 'A'
     await prisma.innings.create({ data: { matchId, inningsNumber: nextNum, battingTeam: nextBattingTeam } })
+
+    // Scorer shifts to the new bowling team's captain
+    const newBowlingTeam: 'A' | 'B' = nextBattingTeam === 'A' ? 'B' : 'A'
+    this.autoAssignScorerForBowlingTeam(matchId, newBowlingTeam).catch(() => undefined)
+
     return this.getMatch(matchId)
   }
 
