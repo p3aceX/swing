@@ -1753,9 +1753,11 @@ export class MatchmakingService {
   }
 
   private async finalizeMatch(match: any, tx: any): Promise<string> {
-    // Reuse the HELD booking created by acceptLobbyAsOwner if it exists,
-    // otherwise create a fresh CONFIRMED booking.
-    const lobbyA = await tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } })
+    const [lobbyA, lobbyB, unit] = await Promise.all([
+      tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
+      tx.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
+      tx.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: true } }),
+    ])
     const heldBookingId = (lobbyA as any)?.splitBookingId as string | null
 
     let bookingId: string
@@ -1769,9 +1771,37 @@ export class MatchmakingService {
       bookingId = await this.createBookedSlotForMatch(match, tx)
     }
 
+    // Create a real Match record so this match surfaces in the Play tab
+    // (supporting toss, scoring, live overlay, etc.)
+    const formatMap: Record<string, string> = {
+      T10: 'T10', T20: 'T20', ODI: 'ONE_DAY', Test: 'TWO_INNINGS', Custom: 'CUSTOM',
+    }
+    const matchFormat = formatMap[match.format] ?? 'T20'
+    const [hh, mm] = match.slotTime.split(':').map(Number)
+    const scheduledAt = new Date(match.date)
+    scheduledAt.setUTCHours(hh, mm, 0, 0)
+    const linkedMatch = await tx.match.create({
+      data: {
+        matchType: 'FRIENDLY' as any,
+        format: matchFormat as any,
+        status: 'SCHEDULED' as any,
+        teamAName: (lobbyA as any)?.team?.name ?? 'Team A',
+        teamBName: (lobbyB as any)?.team?.name ?? 'Team B',
+        teamAId: (lobbyA as any)?.teamId ?? null,
+        teamBId: (lobbyB as any)?.teamId ?? null,
+        teamACaptainId: (lobbyA as any)?.playerId ?? null,
+        teamBCaptainId: (lobbyB as any)?.playerId ?? null,
+        scheduledAt,
+        scorerId: (lobbyA as any)?.playerId ?? null,
+        venueName: (unit as any)?.arena?.name ?? (unit as any)?.name ?? null,
+        ballType: (lobbyA as any)?.ballType ?? null,
+        matchmakingId: match.id,
+      },
+    })
+
     await tx.matchmakingMatch.update({
       where: { id: match.id },
-      data: { status: 'confirmed', bookingId },
+      data: { status: 'confirmed', bookingId, linkedMatchId: linkedMatch.id },
     })
     await tx.matchmakingLobby.updateMany({
       where: { id: { in: [match.lobbyAId, match.lobbyBId] } },

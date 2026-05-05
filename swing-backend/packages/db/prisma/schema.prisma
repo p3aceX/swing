@@ -2676,6 +2676,7 @@ model MatchmakingMatch {
   groundFeePaise       Int      @default(0)
   remainingFeePaise    Int      @default(0)
   bookingId            String?
+  linkedMatchId        String?  @unique
   createdAt            DateTime @default(now())
 
   ground ArenaUnit @relation(fields: [groundId], references: [id])
