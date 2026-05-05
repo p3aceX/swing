@@ -2002,12 +2002,12 @@ export class MatchmakingService {
         baseAmountPaise: totalAmount,
         totalAmountPaise: totalAmount,
         totalPricePaise: totalAmount,
-        advancePaise: totalAmount,
+        advancePaise: 0,
         status: 'CONFIRMED',
         paymentMode: 'ONLINE',
         bookingSource: 'MATCHMAKING',
         notes: `matchmaking:${match.id};teamA:${aLobby.teamId};teamB:${bLobby.teamId}`,
-        paidAt: new Date(),
+        paidAt: null,
       } as any,
     })
     return booking.id
