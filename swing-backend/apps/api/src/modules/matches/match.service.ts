@@ -1,5 +1,6 @@
 import { prisma, TriggerEventType } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
+import { resolveMatchRole } from '../../lib/match-role'
 import { PlayerService } from '../player/player.service'
 import { PerformanceService } from '../performance/performance.service'
 import { StudioService } from '../studio/studio.service'
@@ -23,7 +24,7 @@ import {
 
 const studioService = new StudioService()
 const performanceService = new PerformanceService()
-type MutationAccess = 'SCORER' | 'ADMIN'
+type MutationAccess = 'SCORER' | 'MANAGER' | 'OWNER' | 'ADMIN'
 type MutationOptions = { access?: MutationAccess }
 
 function fireStudioEvent(matchId: string, eventType: TriggerEventType) {
@@ -483,14 +484,38 @@ export class MatchService {
   private async authorizeMutation(matchId: string, userId: string, options: MutationOptions = {}) {
     const match = await prisma.match.findUnique({ where: { id: matchId } })
     if (!match) throw Errors.notFound('Match')
+
     if ((options.access ?? 'SCORER') === 'ADMIN') {
       await this.verifyAdminUser(userId)
       return match
     }
+
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
-    if (!player || match.scorerId !== player.id) {
-      throw new AppError('NOT_SCORER', 'Only the scorer can update this match', 403)
+    if (!player) throw Errors.forbidden()
+
+    const required = options.access ?? 'SCORER'
+    const role = await resolveMatchRole(player.id, matchId)
+
+    if (required === 'OWNER') {
+      if (role !== 'owner') {
+        throw new AppError('INSUFFICIENT_ROLE', 'Only the match owner can perform this action', 403)
+      }
+      return match
     }
+
+    if (required === 'MANAGER') {
+      if (role !== 'owner' && role !== 'manager') {
+        throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager can perform this action', 403)
+      }
+      return match
+    }
+
+    // SCORER — active scorer OR any manager/owner (manager can score in a pinch)
+    const isActiveScorer = match.activeScorerId === player.id
+    if (!isActiveScorer && role !== 'owner' && role !== 'manager') {
+      throw new AppError('NOT_SCORER', 'Only the active scorer or a manager can update this match', 403)
+    }
+
     return match
   }
 
@@ -652,7 +677,7 @@ export class MatchService {
 
   async recordToss(matchId: string, userId: string, tossWonBy: string, tossDecision: string, options: MutationOptions = {}) {
     console.log('[recordToss] matchId=%s userId=%s tossWonBy=%s tossDecision=%s', matchId, userId, tossWonBy, tossDecision)
-    const match = await this.authorizeMutation(matchId, userId, options)
+    const match = await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     console.log('[recordToss] match.status=%s match.tossWonBy=%s', match.status, match.tossWonBy)
     // Allow SCHEDULED (normal flow) and IN_PROGRESS (match started before toss was recorded)
     const allowedStatuses = ['SCHEDULED', 'IN_PROGRESS']
@@ -672,7 +697,7 @@ export class MatchService {
   }
 
   async startMatch(matchId: string, userId: string, options: MutationOptions = {}) {
-    const match = await this.authorizeMutation(matchId, userId, options)
+    const match = await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     if (!['SCHEDULED', 'TOSS_DONE'].includes(match.status)) {
       throw new AppError('INVALID_STATE', 'Cannot start match in current state', 400)
     }
@@ -770,7 +795,7 @@ export class MatchService {
   }
 
   async updateMatchOvers(matchId: string, userId: string, customOvers: number) {
-    const match = await this.authorizeMutation(matchId, userId)
+    const match = await this.authorizeMutation(matchId, userId, { access: 'MANAGER' })
     if (!['SCHEDULED', 'TOSS_DONE'].includes(match.status)) {
       throw new AppError('INVALID_STATE', 'Overs can only be changed before the match starts', 400)
     }
@@ -782,7 +807,7 @@ export class MatchService {
   }
 
   async cancelMatch(matchId: string, userId: string, options: MutationOptions = {}) {
-    const match = await this.authorizeMutation(matchId, userId, options)
+    const match = await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'OWNER' })
     if (!['SCHEDULED', 'TOSS_DONE', 'CREATED'].includes(match.status)) {
       throw new AppError(
         'INVALID_STATE',
@@ -803,7 +828,7 @@ export class MatchService {
   }
 
   async deleteMatch(matchId: string, userId: string, options: MutationOptions = {}) {
-    const match = await this.authorizeMutation(matchId, userId, options)
+    const match = await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'OWNER' })
     const allPlayerIds = [...match.teamAPlayerIds, ...match.teamBPlayerIds]
 
     await prisma.$transaction(async (tx) => {
@@ -1144,7 +1169,7 @@ export class MatchService {
 
   async completeInnings(matchId: string, inningsNum: number, userId: string, options: MutationOptions = {}) {
     console.log('[completeInnings] matchId=%s inningsNum=%d userId=%s', matchId, inningsNum, userId)
-    await this.authorizeMutation(matchId, userId, options)
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'SCORER' })
     const innings = await prisma.innings.findUnique({ where: { matchId_inningsNumber: { matchId, inningsNumber: inningsNum } } })
     console.log('[completeInnings] found innings=%o', innings ? { id: innings.id, isCompleted: innings.isCompleted, totalRuns: innings.totalRuns, totalWickets: innings.totalWickets } : null)
     if (!innings) throw Errors.notFound('Innings')
@@ -1195,7 +1220,7 @@ export class MatchService {
   }
 
   async continueInnings(matchId: string, userId: string, options: MutationOptions = {}) {
-    await this.authorizeMutation(matchId, userId, options)
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     const match = await prisma.match.findUnique({
       where: { id: matchId },
       include: { innings: { orderBy: { inningsNumber: 'asc' } } },
@@ -1215,7 +1240,7 @@ export class MatchService {
   }
 
   async reopenInnings(matchId: string, inningsNum: number, userId: string, options: MutationOptions = {}) {
-    await this.authorizeMutation(matchId, userId, options)
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     const innings = await prisma.innings.findUnique({
       where: { matchId_inningsNumber: { matchId, inningsNumber: inningsNum } },
     })
@@ -1229,7 +1254,7 @@ export class MatchService {
   }
 
   async enforceFollowOn(matchId: string, userId: string, options: MutationOptions = {}) {
-    await this.authorizeMutation(matchId, userId, options)
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     const match = await prisma.match.findUnique({ where: { id: matchId }, include: { innings: true } })
     if (!match) throw Errors.notFound('Match')
     const inn2 = match.innings.find(i => i.inningsNumber === 2)
@@ -1242,7 +1267,7 @@ export class MatchService {
   }
 
   async createSuperOver(matchId: string, userId: string, options: MutationOptions = {}) {
-    await this.authorizeMutation(matchId, userId, options)
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     const match = await prisma.match.findUnique({ where: { id: matchId }, include: { innings: { orderBy: { inningsNumber: 'asc' } } } })
     if (!match) throw Errors.notFound('Match')
     if (match.status !== 'IN_PROGRESS') throw new AppError('INVALID_STATE', 'Match must be in progress', 400)
@@ -1262,7 +1287,7 @@ export class MatchService {
   }
 
   async changeWicketKeeper(matchId: string, userId: string, team: 'A' | 'B', wicketKeeperId: string, options: MutationOptions = {}) {
-    await this.authorizeMutation(matchId, userId, options)
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     const data = team === 'A'
       ? { teamAWicketKeeperId: wicketKeeperId }
       : { teamBWicketKeeperId: wicketKeeperId }
@@ -1271,7 +1296,7 @@ export class MatchService {
 
   async completeMatch(matchId: string, userId: string, winnerId: string, winMargin?: string, options: MutationOptions = {}) {
     console.log('[completeMatch] matchId=%s userId=%s winnerId="%s" winMargin="%s"', matchId, userId, winnerId, winMargin)
-    const match = await this.authorizeMutation(matchId, userId, options)
+    const match = await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
     console.log('[completeMatch] match status=%s innings count=%d', match.status, (match as any).innings?.length ?? 'N/A')
     if (match.status !== 'IN_PROGRESS') {
       console.error('[completeMatch] REJECT — match status is "%s", expected IN_PROGRESS', match.status)
@@ -2295,7 +2320,7 @@ export class MatchService {
   }
 
   async updateMatchPlayers(matchId: string, userId: string, data: any) {
-    const match = await this.authorizeMutation(matchId, userId)
+    const match = await this.authorizeMutation(matchId, userId, { access: 'MANAGER' })
     if (match.status !== 'SCHEDULED') {
       throw new AppError('INVALID_STATE', 'Only scheduled matches can have their playing XI updated', 400)
     }
