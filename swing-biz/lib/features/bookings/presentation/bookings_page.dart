@@ -92,7 +92,7 @@ class _BookingsBody extends ConsumerStatefulWidget {
 }
 
 class _BookingsBodyState extends ConsumerState<_BookingsBody> {
-  int _tab = 0; // 0=Bookings  1=MatchUp Requests
+  int _tab = 0; // 0=MatchUp Requests  1=Bookings
   String _selectedFilter = 'All';
   String _selectedUnitId = 'All';
   late DateTime _calendarMonth;
@@ -127,8 +127,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
               child: _tab == 0
-                  ? _buildBookingsTab(context, today, allBookingsAsync)
-                  : _buildMatchUpRequestsTab(),
+                  ? _buildMatchUpRequestsTab()
+                  : _buildBookingsTab(context, today, allBookingsAsync),
             ),
           ),
         ],
@@ -584,12 +584,12 @@ class _BigTabHeader extends ConsumerWidget {
               child: Row(
                 children: [
                   _BigTab(
-                    label: 'Bookings',
+                    label: 'MatchUp Requests',
                     active: selected == 0,
                     onTap: () => onSelect(0),
                   ),
                   _BigTab(
-                    label: 'MatchUp Requests',
+                    label: 'Bookings',
                     active: selected == 1,
                     onTap: () => onSelect(1),
                   ),
