@@ -825,6 +825,7 @@ export class MatchmakingService {
 
     const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
     if (!match) throw Errors.notFound('Match')
+    if (match.status === 'confirmed') throw new AppError('INVALID_STATE', 'Cannot decline a confirmed match', 400)
     await prisma.$transaction([
       prisma.matchmakingMatch.update({ where: { id: matchId }, data: { status: 'cancelled' } }),
       prisma.matchmakingLobby.updateMany({
@@ -1594,26 +1595,35 @@ export class MatchmakingService {
   async listMyConfirmedMatches(userId: string) {
     const player = await this.getPlayerProfile(userId)
 
-    // Find all confirmed lobbies belonging to this player
+    // Find all lobbies belonging to this player (any status) that have a matchId
     const lobbies = await prisma.matchmakingLobby.findMany({
-      where: {
-        playerId: player.id,
-        status: 'confirmed',
-        matchId: { not: null },
-      },
+      where: { playerId: player.id, matchId: { not: null } },
       select: { id: true, matchId: true },
       orderBy: { createdAt: 'desc' },
     })
 
-    if (lobbies.length === 0) return { matches: [] }
-
-    const matchIds = lobbies.map((l) => l.matchId as string)
-    const lobbyByMatchId = new Map(lobbies.map((l) => [l.matchId as string, l.id]))
-
-    const matches = await prisma.matchmakingMatch.findMany({
-      where: { id: { in: matchIds }, status: 'confirmed' },
+    // Also find confirmed matches directly where player is lobbyA or lobbyB
+    const directMatches = await prisma.matchmakingMatch.findMany({
+      where: {
+        status: 'confirmed',
+        bookingId: { not: null },
+        OR: [
+          { lobbyAId: { in: lobbies.map((l) => l.id) } },
+          { lobbyBId: { in: lobbies.map((l) => l.id) } },
+        ],
+      },
       orderBy: { date: 'asc' },
     })
+
+    if (directMatches.length === 0) return { matches: [] }
+
+    const matches = directMatches
+    const matchIds = matches.map((m) => m.id)
+    const lobbyByMatchId = new Map(
+      lobbies
+        .filter((l) => matchIds.includes(l.matchId as string))
+        .map((l) => [l.matchId as string, l.id])
+    )
 
     const groundIds = matches.map((m) => m.groundId)
     const lobbyIds = matches.flatMap((m) => [m.lobbyAId, m.lobbyBId])
