@@ -21,6 +21,8 @@ class ArenaMatch {
     required this.teamAConfirmed,
     required this.teamBConfirmed,
     required this.confirmationFeePaise,
+    this.groundFeePaise = 0,
+    this.remainingFeePaise = 0,
   });
 
   final String matchId;
@@ -37,6 +39,8 @@ class ArenaMatch {
   final bool teamAConfirmed;
   final bool teamBConfirmed;
   final int confirmationFeePaise;
+  final int groundFeePaise;
+  final int remainingFeePaise;
 
   bool get isConfirmed => status == 'confirmed';
   bool get bothPaid => teamAConfirmed && teamBConfirmed;
@@ -79,6 +83,8 @@ class ArenaMatch {
         teamAConfirmed: (j['teamAConfirmed'] as bool?) ?? false,
         teamBConfirmed: (j['teamBConfirmed'] as bool?) ?? false,
         confirmationFeePaise: (j['confirmationFeePaise'] as num?)?.toInt() ?? 50000,
+        groundFeePaise: (j['groundFeePaise'] as num?)?.toInt() ?? 0,
+        remainingFeePaise: (j['remainingFeePaise'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -164,25 +170,130 @@ class ArenaMatchesSection extends ConsumerWidget {
 
 // ─── Match Row ────────────────────────────────────────────────────────────────
 
-class _MatchRow extends ConsumerStatefulWidget {
+class _MatchRow extends StatelessWidget {
   const _MatchRow({required this.match, required this.arenaId});
   final ArenaMatch match;
   final String arenaId;
 
   @override
-  ConsumerState<_MatchRow> createState() => _MatchRowState();
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _MatchDetailSheet(match: match, arenaId: arenaId),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          match.teamAName,
+                          style: const TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('vs',
+                            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                      ),
+                      Flexible(
+                        child: Text(
+                          match.teamBName,
+                          style: const TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    [
+                      match.format,
+                      match.dateLabel,
+                      match.displaySlot,
+                      if (match.groundName.isNotEmpty) match.groundName,
+                    ].join('  ·  '),
+                    style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: match.isConfirmed
+                        ? const Color(0xFFDCFCE7)
+                        : const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    match.isConfirmed ? 'Confirmed' : 'Pending',
+                    style: TextStyle(
+                      color: match.isConfirmed
+                          ? const Color(0xFF059669)
+                          : const Color(0xFFD97706),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Icon(Icons.chevron_right_rounded,
+                    size: 16, color: Color(0xFFD1D5DB)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _MatchRowState extends ConsumerState<_MatchRow> {
+// ─── Match Detail Sheet ───────────────────────────────────────────────────────
+
+class _MatchDetailSheet extends ConsumerStatefulWidget {
+  const _MatchDetailSheet({required this.match, required this.arenaId});
+  final ArenaMatch match;
+  final String arenaId;
+
+  @override
+  ConsumerState<_MatchDetailSheet> createState() => _MatchDetailSheetState();
+}
+
+class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
   bool _markingA = false;
   bool _markingB = false;
+  String? _error;
 
   Future<void> _markPaid(String lobbyId, String teamName, bool isA) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Mark as Paid'),
-        content: Text('Confirm that $teamName has paid offline (cash/UPI)?'),
+        content: Text('Confirm that $teamName has paid offline (cash / UPI)?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -190,99 +301,104 @@ class _MatchRowState extends ConsumerState<_MatchRow> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm', style: TextStyle(color: Color(0xFF059669))),
+            child: const Text('Confirm',
+                style: TextStyle(color: Color(0xFF059669))),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
 
-    setState(() => isA ? _markingA = true : _markingB = true);
+    setState(() {
+      if (isA) _markingA = true; else _markingB = true;
+      _error = null;
+    });
     try {
       final dio = ref.read(hostDioProvider);
       await dio.post(
         '/matchmaking/matches/${widget.match.matchId}/mark-paid',
         data: {'lobbyId': lobbyId},
       );
-      if (mounted) ref.invalidate(arenaMatchesProvider(widget.arenaId));
-    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not mark as paid. Try again.')),
-        );
+        ref.invalidate(arenaMatchesProvider(widget.arenaId));
+        Navigator.pop(context);
       }
+    } catch (e) {
+      String msg = 'Could not mark as paid. Try again.';
+      final s = e.toString();
+      final m = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(s);
+      if (m != null) msg = m.group(1)!;
+      if (mounted) setState(() => _error = msg);
     } finally {
-      if (mounted) setState(() => isA ? _markingA = false : _markingB = false);
+      if (mounted) setState(() { _markingA = false; _markingB = false; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final match = widget.match;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+    final remainingRupees = match.remainingFeePaise ~/ 100;
+    final hasRemaining = remainingRupees > 0;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+          20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 24),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Teams + status badge
+          // Handle
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE5E7EB),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Header
           Row(
             children: [
               Expanded(
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        match.teamAName,
-                        style: const TextStyle(
-                          color: Color(0xFF111827),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Text('vs',
-                          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-                    ),
-                    Flexible(
-                      child: Text(
-                        match.teamBName,
-                        style: const TextStyle(
-                          color: Color(0xFF111827),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  '${match.teamAName}  vs  ${match.teamBName}',
+                  style: const TextStyle(
+                    color: Color(0xFF111827),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: match.isConfirmed
                       ? const Color(0xFFDCFCE7)
                       : const Color(0xFFFEF3C7),
-                  borderRadius: BorderRadius.circular(5),
+                  borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  match.isConfirmed ? 'Confirmed' : 'Pending',
+                  match.isConfirmed ? 'Confirmed' : 'Pending Payment',
                   style: TextStyle(
                     color: match.isConfirmed
                         ? const Color(0xFF059669)
                         : const Color(0xFFD97706),
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             [
               match.format,
@@ -290,111 +406,178 @@ class _MatchRowState extends ConsumerState<_MatchRow> {
               match.displaySlot,
               if (match.groundName.isNotEmpty) match.groundName,
             ].join('  ·  '),
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
           ),
-          const SizedBox(height: 10),
-          // Payment status + mark-paid buttons
-          Row(
-            children: [
-              _PayBadge(teamName: match.teamAName, confirmed: match.teamAConfirmed),
-              if (!match.teamAConfirmed && !match.isConfirmed) ...[
-                const SizedBox(width: 6),
-                _MarkPaidButton(
-                  loading: _markingA,
-                  onTap: () => _markPaid(match.teamALobbyId, match.teamAName, true),
-                ),
-              ],
-              const SizedBox(width: 10),
-              _PayBadge(teamName: match.teamBName, confirmed: match.teamBConfirmed),
-              if (!match.teamBConfirmed && !match.isConfirmed) ...[
-                const SizedBox(width: 6),
-                _MarkPaidButton(
-                  loading: _markingB,
-                  onTap: () => _markPaid(match.teamBLobbyId, match.teamBName, false),
-                ),
-              ],
-            ],
+          const SizedBox(height: 20),
+
+          // Remaining balance callout (confirmed matches)
+          if (match.isConfirmed && hasRemaining) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.account_balance_wallet_outlined,
+                      size: 18, color: Color(0xFFD97706)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Remaining Ground Fee',
+                          style: TextStyle(
+                            color: Color(0xFF92400E),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          '₹$remainingRupees per team to collect at check-in',
+                          style: const TextStyle(
+                            color: Color(0xFFB45309),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Team payment rows
+          _TeamPayRow(
+            teamName: match.teamAName,
+            confirmed: match.teamAConfirmed,
+            loading: _markingA,
+            showButton: !match.teamAConfirmed && !match.isConfirmed,
+            onMarkPaid: () => _markPaid(match.teamALobbyId, match.teamAName, true),
           ),
+          const SizedBox(height: 8),
+          _TeamPayRow(
+            teamName: match.teamBName,
+            confirmed: match.teamBConfirmed,
+            loading: _markingB,
+            showButton: !match.teamBConfirmed && !match.isConfirmed,
+            onMarkPaid: () => _markPaid(match.teamBLobbyId, match.teamBName, false),
+          ),
+
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!,
+                style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
+          ],
+
+          const SizedBox(height: 4),
         ],
       ),
     );
   }
 }
 
-// ─── Mark Paid button ─────────────────────────────────────────────────────────
+// ─── Team Pay Row ─────────────────────────────────────────────────────────────
 
-class _MarkPaidButton extends StatelessWidget {
-  const _MarkPaidButton({required this.loading, required this.onTap});
-  final bool loading;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: loading ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF059669),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: loading
-            ? const SizedBox(
-                width: 10,
-                height: 10,
-                child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white),
-              )
-            : const Text(
-                'Mark Paid',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-      ),
-    );
-  }
-}
-
-// ─── Payment badge ────────────────────────────────────────────────────────────
-
-class _PayBadge extends StatelessWidget {
-  const _PayBadge({required this.teamName, required this.confirmed});
+class _TeamPayRow extends StatelessWidget {
+  const _TeamPayRow({
+    required this.teamName,
+    required this.confirmed,
+    required this.loading,
+    required this.showButton,
+    required this.onMarkPaid,
+  });
   final String teamName;
   final bool confirmed;
+  final bool loading;
+  final bool showButton;
+  final VoidCallback onMarkPaid;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: confirmed
-            ? const Color(0xFFDCFCE7)
-            : const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(6),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            confirmed ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-            size: 12,
-            color: confirmed ? const Color(0xFF059669) : const Color(0xFF9CA3AF),
+            confirmed
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded,
+            size: 18,
+            color: confirmed
+                ? const Color(0xFF059669)
+                : const Color(0xFF9CA3AF),
           ),
-          const SizedBox(width: 4),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 100),
+          const SizedBox(width: 10),
+          Expanded(
             child: Text(
               teamName,
               style: TextStyle(
-                color: confirmed ? const Color(0xFF059669) : const Color(0xFF6B7280),
-                fontSize: 11,
+                color: confirmed
+                    ? const Color(0xFF111827)
+                    : const Color(0xFF6B7280),
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (confirmed)
+            const Text(
+              'Confirmed',
+              style: TextStyle(
+                color: Color(0xFF059669),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            )
+          else if (showButton)
+            GestureDetector(
+              onTap: loading ? null : onMarkPaid,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: loading
+                      ? const Color(0xFF059669).withValues(alpha: 0.6)
+                      : const Color(0xFF059669),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: loading
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 1.5, color: Colors.white),
+                      )
+                    : const Text(
+                        'Mark Paid',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            )
+          else
+            const Text(
+              'Awaiting',
+              style: TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
         ],
       ),
     );

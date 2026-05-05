@@ -1725,6 +1725,8 @@ export class MatchmakingService {
         teamBConfirmed: m.teamBConfirmed,
         confirmDeadline: m.confirmDeadline.toISOString(),
         confirmationFeePaise: m.paymentAmountPerTeam,
+        groundFeePaise: (m as any).groundFeePaise ?? 0,
+        remainingFeePaise: (m as any).remainingFeePaise ?? 0,
       }
     })
     return { matches: out }
@@ -1764,7 +1766,6 @@ export class MatchmakingService {
 
     const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
     if (!match) throw Errors.notFound('Match')
-    if (match.status === 'confirmed') throw new AppError('ALREADY_CONFIRMED', 'Match is already confirmed', 400)
 
     // Verify the ground belongs to this owner's arena
     const unit = await prisma.arenaUnit.findUnique({
@@ -1775,6 +1776,11 @@ export class MatchmakingService {
 
     if (lobbyId !== match.lobbyAId && lobbyId !== match.lobbyBId) {
       throw new AppError('INVALID_LOBBY', 'Lobby is not part of this match', 400)
+    }
+
+    // Already fully confirmed — nothing to finalize
+    if (match.status === 'confirmed') {
+      return { status: 'confirmed' as const, bookingId: (match as any).bookingId }
     }
 
     const updates: any = {}
