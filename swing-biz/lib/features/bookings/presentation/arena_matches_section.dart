@@ -119,8 +119,42 @@ class ArenaMatchesSection extends ConsumerWidget {
     final async = ref.watch(arenaMatchesProvider(arenaId));
 
     return async.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF2563EB)),
+          ),
+        ),
+      ),
+      error: (e, _) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, size: 14, color: Color(0xFF6B7280)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Could not load confirmed matches',
+                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              ),
+            ),
+            GestureDetector(
+              onTap: () => ref.invalidate(arenaMatchesProvider(arenaId)),
+              child: const Text(
+                'Retry',
+                style: TextStyle(
+                  color: Color(0xFF2563EB),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
       data: (matches) {
         if (matches.isEmpty) return const SizedBox.shrink();
         return Column(
@@ -184,7 +218,7 @@ class _MatchRow extends StatelessWidget {
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (_) => _MatchDetailSheet(match: match, arenaId: arenaId),
+        builder: (_) => MatchDetailSheet(match: match, arenaId: arenaId),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -376,27 +410,63 @@ class _PayDot extends StatelessWidget {
 
 // ─── Match Detail Sheet ───────────────────────────────────────────────────────
 
-class _MatchDetailSheet extends ConsumerStatefulWidget {
-  const _MatchDetailSheet({required this.match, required this.arenaId});
+class MatchDetailSheet extends ConsumerStatefulWidget {
+  const MatchDetailSheet({super.key, required this.match, required this.arenaId});
   final ArenaMatch match;
   final String arenaId;
 
   @override
-  ConsumerState<_MatchDetailSheet> createState() => _MatchDetailSheetState();
+  ConsumerState<MatchDetailSheet> createState() => _MatchDetailSheetState();
 }
 
-class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
+class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
   bool _markingA = false;
   bool _markingB = false;
   bool _cancelling = false;
+  bool _starting = false;
   String? _error;
+
+  Future<void> _startMatch() async {
+    setState(() {
+      _starting = true;
+      _error = null;
+    });
+    try {
+      final dio = ref.read(hostDioProvider);
+      final resp = await dio.post(
+        '/matchmaking/matches/${widget.match.matchId}/start',
+      );
+      final body = resp.data;
+      final data = (body is Map) ? (body['data'] ?? body) : body;
+      final linkedMatchId =
+          (data is Map) ? data['linkedMatchId'] as String? : null;
+      if (!mounted) return;
+      ref.invalidate(arenaMatchesProvider(widget.arenaId));
+      Navigator.pop(context, {'started': true, 'linkedMatchId': linkedMatchId});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Match started — open the scoring screen.'),
+          backgroundColor: Color(0xFF059669),
+        ),
+      );
+    } catch (e) {
+      String msg = 'Could not start match. Try again.';
+      final s = e.toString();
+      final m = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(s);
+      if (m != null) msg = m.group(1)!;
+      if (mounted) setState(() => _error = msg);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
 
   Future<void> _markPaid(String lobbyId, String teamName, bool isA) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Mark as Paid'),
-        content: Text('Confirm that $teamName has paid offline (cash / UPI)?'),
+        title: const Text('Mark Advance Received'),
+        content: Text(
+            'Confirm that $teamName has paid the advance offline (cash / UPI)?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -405,7 +475,7 @@ class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Confirm',
-                style: TextStyle(color: Color(0xFF059669))),
+                style: TextStyle(color: Color(0xFFF43F5E))),
           ),
         ],
       ),
@@ -534,7 +604,7 @@ class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  match.isConfirmed ? 'Confirmed' : 'Pending Payment',
+                  match.isConfirmed ? 'Advance Received' : 'Advance Pending',
                   style: TextStyle(
                     color: match.isConfirmed
                         ? const Color(0xFF059669)
@@ -623,7 +693,40 @@ class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
                 style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
           ],
 
-          const SizedBox(height: 20),
+          if (match.isConfirmed) ...[
+            const SizedBox(height: 20),
+            GestureDetector(
+              onTap: _starting ? null : _startMatch,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: _starting
+                      ? const Color(0xFFF43F5E).withValues(alpha: 0.7)
+                      : const Color(0xFFF43F5E),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: _starting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 1.5, color: Colors.white),
+                      )
+                    : const Text(
+                        'Start Match',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
           GestureDetector(
             onTap: _cancelling ? null : _cancelMatch,
             child: Container(
@@ -708,7 +811,7 @@ class _TeamPayRow extends StatelessWidget {
           ),
           if (confirmed)
             const Text(
-              'Confirmed',
+              'Advance Received',
               style: TextStyle(
                 color: Color(0xFF059669),
                 fontSize: 12,
@@ -723,8 +826,8 @@ class _TeamPayRow extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: loading
-                      ? const Color(0xFF059669).withValues(alpha: 0.6)
-                      : const Color(0xFF059669),
+                      ? const Color(0xFFF43F5E).withValues(alpha: 0.6)
+                      : const Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: loading
@@ -735,7 +838,7 @@ class _TeamPayRow extends StatelessWidget {
                             strokeWidth: 1.5, color: Colors.white),
                       )
                     : const Text(
-                        'Mark Paid',
+                        'Mark Received',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 12,
@@ -746,7 +849,7 @@ class _TeamPayRow extends StatelessWidget {
             )
           else
             const Text(
-              'Awaiting',
+              'Pending',
               style: TextStyle(
                 color: Color(0xFF9CA3AF),
                 fontSize: 12,

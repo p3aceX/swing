@@ -75,6 +75,7 @@ class ArenaLobby {
     this.picks = const [],
     this.accepted = false,
     this.confirmedSlot,
+    this.source = 'player',
   });
 
   final String lobbyId;
@@ -89,6 +90,9 @@ class ArenaLobby {
   final List<ArenaLobbyPick> picks;
   final bool accepted;
   final String? confirmedSlot;
+  final String source; // 'player' = inbound request, 'owner' = my listing
+
+  bool get isOwnerOriginated => source == 'owner';
 
   String get dateLabel {
     if (daysFromNow == 0) return 'Today';
@@ -140,6 +144,7 @@ class ArenaLobby {
       picks: picks,
       accepted: (j['accepted'] as bool?) ?? false,
       confirmedSlot: j['confirmedSlot'] as String?,
+      source: (j['source'] as String?) ?? 'player',
     );
   }
 }
@@ -206,7 +211,7 @@ class ArenaLobbiesSection extends ConsumerWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF059669),
+                      color: const Color(0xFFF43F5E),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
@@ -267,9 +272,9 @@ class _LobbyCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF0FDF4),
+          color: const Color(0xFFFFF1F2),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF86EFAC)),
+          border: Border.all(color: const Color(0xFFFECDD3)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -279,7 +284,7 @@ class _LobbyCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF059669),
+                    color: const Color(0xFFF43F5E),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text(
@@ -291,12 +296,12 @@ class _LobbyCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDCFCE7),
+                    color: const Color(0xFFFFE4E6),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     lobby.format,
-                    style: const TextStyle(color: Color(0xFF059669), fontSize: 10, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: Color(0xFFF43F5E), fontSize: 10, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
@@ -311,7 +316,7 @@ class _LobbyCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               '${lobby.dateLabel}  ·  $slot',
-              style: const TextStyle(color: Color(0xFF059669), fontSize: 11, fontWeight: FontWeight.w600),
+              style: const TextStyle(color: Color(0xFFF43F5E), fontSize: 11, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
             GestureDetector(
@@ -320,7 +325,7 @@ class _LobbyCard extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF059669),
+                  color: const Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 alignment: Alignment.center,
@@ -395,7 +400,7 @@ class _LobbyCard extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Row(children: [
                     Container(width: 5, height: 5, margin: const EdgeInsets.only(right: 6, top: 1),
-                        decoration: const BoxDecoration(color: Color(0xFF059669), shape: BoxShape.circle)),
+                        decoration: const BoxDecoration(color: Color(0xFFF43F5E), shape: BoxShape.circle)),
                     Text(p.displaySlot, style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w600)),
                   ]),
                 )),
@@ -405,7 +410,7 @@ class _LobbyCard extends StatelessWidget {
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                decoration: BoxDecoration(color: const Color(0xFF059669), borderRadius: BorderRadius.circular(6)),
+                decoration: BoxDecoration(color: const Color(0xFFF43F5E), borderRadius: BorderRadius.circular(6)),
                 alignment: Alignment.center,
                 child: const Text('Accept', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
               ),
@@ -567,7 +572,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
           const SizedBox(height: 2),
           const Text(
             'Team willing to play',
-            style: TextStyle(color: Color(0xFF059669), fontSize: 13, fontWeight: FontWeight.w600),
+            style: TextStyle(color: Color(0xFFF43F5E), fontSize: 13, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 4),
           Text(
@@ -608,12 +613,12 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                 decoration: BoxDecoration(
                   color: selected
-                      ? const Color(0xFF059669).withValues(alpha: 0.07)
+                      ? const Color(0xFFF43F5E).withValues(alpha: 0.07)
                       : const Color(0xFFF9FAFB),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: selected
-                        ? const Color(0xFF059669)
+                        ? const Color(0xFFF43F5E)
                         : const Color(0xFFE5E7EB),
                     width: selected ? 1.5 : 1,
                   ),
@@ -627,7 +632,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: selected
-                              ? const Color(0xFF059669)
+                              ? const Color(0xFFF43F5E)
                               : const Color(0xFFD1D5DB),
                           width: 1.5,
                         ),
@@ -638,7 +643,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                                 width: 8,
                                 height: 8,
                                 decoration: const BoxDecoration(
-                                  color: Color(0xFF059669),
+                                  color: Color(0xFFF43F5E),
                                   shape: BoxShape.circle,
                                 ),
                               ),
@@ -650,7 +655,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                       p.displaySlot,
                       style: TextStyle(
                         color: selected
-                            ? const Color(0xFF059669)
+                            ? const Color(0xFFF43F5E)
                             : const Color(0xFF111827),
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -692,8 +697,8 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
                   color: _loading
-                      ? const Color(0xFF059669).withValues(alpha: 0.6)
-                      : const Color(0xFF059669),
+                      ? const Color(0xFFF43F5E).withValues(alpha: 0.6)
+                      : const Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
@@ -790,7 +795,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${_selected!.name} assigned — match is live!'),
-            backgroundColor: const Color(0xFF059669),
+            backgroundColor: const Color(0xFFF43F5E),
           ),
         );
       }
@@ -944,10 +949,10 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: sel ? const Color(0xFFF0FDF4) : Colors.white,
+                        color: sel ? const Color(0xFFFFF1F2) : Colors.white,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: sel ? const Color(0xFF86EFAC) : Colors.transparent,
+                          color: sel ? const Color(0xFFFECDD3) : Colors.transparent,
                           width: 1.5,
                         ),
                         boxShadow: sel ? [] : [
@@ -965,7 +970,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                             width: 38, height: 38,
                             decoration: BoxDecoration(
                               color: sel
-                                  ? const Color(0xFF059669).withValues(alpha: 0.12)
+                                  ? const Color(0xFFF43F5E).withValues(alpha: 0.12)
                                   : const Color(0xFFF3F4F6),
                               shape: BoxShape.circle,
                             ),
@@ -973,7 +978,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                             child: Text(
                               initials,
                               style: TextStyle(
-                                color: sel ? const Color(0xFF059669) : const Color(0xFF6B7280),
+                                color: sel ? const Color(0xFFF43F5E) : const Color(0xFF6B7280),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -987,7 +992,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                                 Text(
                                   t.name,
                                   style: TextStyle(
-                                    color: sel ? const Color(0xFF059669) : const Color(0xFF111827),
+                                    color: sel ? const Color(0xFFF43F5E) : const Color(0xFF111827),
                                     fontSize: 14,
                                     fontWeight: FontWeight.w700,
                                   ),
@@ -1007,7 +1012,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                           ),
                           if (sel)
                             const Icon(Icons.check_circle_rounded,
-                                color: Color(0xFF059669), size: 20),
+                                color: Color(0xFFF43F5E), size: 20),
                         ],
                       ),
                     ),
@@ -1045,8 +1050,8 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                   color: _selected == null
                       ? const Color(0xFFE5E7EB)
                       : _loading
-                          ? const Color(0xFF059669).withValues(alpha: 0.7)
-                          : const Color(0xFF059669),
+                          ? const Color(0xFFF43F5E).withValues(alpha: 0.7)
+                          : const Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,

@@ -187,4 +187,13 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const data = await svc.cancelMatchAsArenaOwner(user.userId, matchId)
     return reply.send({ success: true, data })
   })
+
+  // Arena owner: start match once both advances received. Returns linkedMatchId
+  // so client can navigate scorer to the scoring screen.
+  app.post('/matches/:matchId/start', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { matchId } = request.params as { matchId: string }
+    const data = await svc.startMatchAsArenaOwner(user.userId, matchId)
+    return reply.send({ success: true, data })
+  })
 }

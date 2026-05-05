@@ -527,6 +527,7 @@ export class MatchmakingService {
           daysFromNow: this.daysFromNow(l.date),
           accepted: !!splitBookingId,
           confirmedSlot: splitBookingId ? (startTimeByBookingId.get(splitBookingId) ?? null) : null,
+          source: l.playerId ? 'player' : 'owner',
           picks: l.picks.map((p: any) => ({
             slotTime: p.slotTime,
             unitId: p.groundId,
@@ -2216,6 +2217,67 @@ export class MatchmakingService {
     }
 
     return { processed, skipped, errors }
+  }
+
+  /**
+   * Arena owner taps "Start Match" once both teams' advance has been received
+   * (matchmakingMatch.status === 'confirmed'). Flips the linked cricket Match
+   * to IN_PROGRESS and the matchmakingMatch to 'started' so the row can move
+   * out of the "ready to start" bucket on the owner's MatchUps tab.
+   *
+   * Returns { linkedMatchId, status } so the client can navigate the scorer
+   * straight to the scoring screen.
+   */
+  async startMatchAsArenaOwner(userId: string, matchId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+
+    const unit = await prisma.arenaUnit.findUnique({
+      where: { id: match.groundId },
+      include: { arena: true },
+    })
+    if (!unit || unit.arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    // Idempotent: if already started/in-progress, just return the linked match.
+    if (match.status === 'started') {
+      return {
+        status: 'started',
+        linkedMatchId: (match as any).linkedMatchId ?? null,
+      }
+    }
+
+    if (match.status !== 'confirmed') {
+      throw new AppError(
+        'NOT_READY_TO_START',
+        'Match cannot be started until both teams have paid the advance.',
+        400,
+      )
+    }
+
+    const linkedMatchId = (match as any).linkedMatchId as string | null
+    if (!linkedMatchId) {
+      throw new AppError(
+        'NO_LINKED_MATCH',
+        'Cricket match record missing — please contact support.',
+        400,
+      )
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.match.update({
+        where: { id: linkedMatchId },
+        data: { status: 'IN_PROGRESS' as any },
+      })
+      await tx.matchmakingMatch.update({
+        where: { id: matchId },
+        data: { status: 'started' },
+      })
+    })
+
+    return { status: 'started', linkedMatchId }
   }
 
   async cancelMatchAsArenaOwner(userId: string, matchId: string) {

@@ -14,16 +14,15 @@ import 'dart:io';
 import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
-import 'arena_lobbies_section.dart';
-import 'arena_matches_section.dart';
+import 'matchups_tab.dart';
 import 'split_booking_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
 const _bg = Color(0xFFF9FAFB);
 const _surface = Color(0xFFFFFFFF);
 const _border = Color(0xFFE5E7EB);
-const _accent = Color(0xFF059669);
-const _accentLight = Color(0xFFD1FAE5);
+const _accent = Color(0xFFF43F5E); // rose-500 / coral — matches AppTheme.light primary
+const _accentLight = Color(0xFFFFE4E6); // rose-100 — matches AppTheme indicatorTint
 const _text = Color(0xFF111827);
 const _muted = Color(0xFF6B7280);
 
@@ -300,7 +299,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   Widget _buildMatchUpRequestsTab() {
     final filtered =
         widget.arena == null ? widget.arenas : [widget.arena!];
-    return _MatchUpRequestsTab(
+    return MatchUpsTab(
       key: ValueKey(widget.arena?.id ?? 'all'),
       arenas: filtered,
     );
@@ -351,7 +350,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               const SizedBox(height: 10),
               _BookingTypeOption(
                 icon: Icons.call_split_rounded,
-                title: 'MatchUp Request',
+                title: 'Match-Up Request',
                 subtitle: 'Half price · find rival team via matchmaking',
                 onTap: () {
                   Navigator.pop(context);
@@ -388,7 +387,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           const SnackBar(
             content:
                 Text('Split booking created — lobby is now live for players'),
-            backgroundColor: Color(0xFF059669),
+            backgroundColor: _accent,
           ),
         );
       }
@@ -584,7 +583,7 @@ class _BigTabHeader extends ConsumerWidget {
               child: Row(
                 children: [
                   _BigTab(
-                    label: 'MatchUp Requests',
+                    label: 'Match-Up',
                     active: selected == 0,
                     onTap: () => onSelect(0),
                   ),
@@ -675,261 +674,6 @@ class _BigTab extends StatelessWidget {
             child: Text(label),
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ─── MatchUp Requests tab ─────────────────────────────────────────────────────
-
-class _MatchUpRequestsTab extends ConsumerWidget {
-  const _MatchUpRequestsTab({
-    super.key,
-    required this.arenas,
-  });
-  final List<ArenaListing> arenas;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Watch one provider per arena, combine results
-    final results = [
-      for (final a in arenas) (a, ref.watch(arenaLobbiesProvider(a.id)))
-    ];
-
-    final isLoading = results.any((r) => r.$2.isLoading);
-    final allErrored =
-        results.isNotEmpty && results.every((r) => r.$2.hasError);
-
-    if (isLoading) {
-      return const Center(
-          child: CircularProgressIndicator(strokeWidth: 1.5, color: _accent));
-    }
-    if (allErrored) {
-      return Center(
-        child: Text('Could not load MatchUp Requests',
-            style: TextStyle(color: _muted, fontSize: 13)),
-      );
-    }
-
-    // (lobby, arenaId, arenaName) tuples — dedup by lobbyId
-    final seen = <String>{};
-    final combined = [
-      for (final (arena, async) in results)
-        if (async.hasValue)
-          for (final lobby in async.value!)
-            if (seen.add(lobby.lobbyId)) (lobby, arena.id, arena.name),
-    ];
-
-    return RefreshIndicator(
-      color: _accent,
-      backgroundColor: _surface,
-      onRefresh: () async {
-        for (final a in arenas) {
-          ref.invalidate(arenaLobbiesProvider(a.id));
-          ref.invalidate(arenaMatchesProvider(a.id));
-        }
-      },
-      child: CustomScrollView(
-        slivers: [
-          // ── Confirmed Matches ──────────────────────────────────────
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final a in arenas)
-                  ArenaMatchesSection(arenaId: a.id),
-              ],
-            ),
-          ),
-
-          // ── Open Requests ──────────────────────────────────────────
-          if (combined.isNotEmpty) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Row(
-                  children: [
-                    const Text(
-                      'OPEN REQUESTS',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF059669),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${combined.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (_, i) {
-                  final (lobby, arenaId, arenaName) = combined[i];
-                  return Column(
-                    children: [
-                      _MatchUpRequestRow(
-                        lobby: lobby,
-                        arenaId: arenaId,
-                        arenaName: arenaName,
-                        onAccepted: () {
-                          ref.invalidate(arenaLobbiesProvider(arenaId));
-                          ref.invalidate(arenaMatchesProvider(arenaId));
-                        },
-                      ),
-                      if (i < combined.length - 1)
-                        Divider(height: 1, color: Colors.grey.shade100),
-                    ],
-                  );
-                },
-                childCount: combined.length,
-              ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          ],
-
-          // ── Empty state (no requests AND no matches) ───────────────
-          if (combined.isEmpty)
-            SliverFillRemaining(
-              child: _buildEmpty(),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmpty() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.sports_cricket_rounded,
-              color: _muted.withValues(alpha: 0.4), size: 40),
-          const SizedBox(height: 12),
-          const Text(
-            'No MatchUp Requests',
-            style: TextStyle(color: _muted, fontSize: 14, fontWeight: FontWeight.w500),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Teams looking for rivals will appear here',
-            style: TextStyle(color: _muted, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MatchUpRequestRow extends StatelessWidget {
-  const _MatchUpRequestRow({
-    required this.lobby,
-    required this.arenaId,
-    required this.arenaName,
-    required this.onAccepted,
-  });
-  final ArenaLobby lobby;
-  final String arenaId;
-  final String arenaName;
-  final VoidCallback onAccepted;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  lobby.teamName,
-                  style: const TextStyle(
-                    color: _text,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  '${lobby.format}  ·  ${lobby.dateLabel}  ·  ${lobby.displaySlot}',
-                  style: const TextStyle(color: _muted, fontSize: 12),
-                ),
-                if (lobby.groundName.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    lobby.groundName,
-                    style: TextStyle(
-                        color: _muted.withValues(alpha: 0.7), fontSize: 11),
-                  ),
-                ],
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(Icons.stadium_rounded,
-                        size: 11, color: _accent.withValues(alpha: 0.7)),
-                    const SizedBox(width: 3),
-                    Text(
-                      arenaName,
-                      style: TextStyle(
-                          color: _accent.withValues(alpha: 0.8),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: () => showModalBottomSheet(
-              context: context,
-              isScrollControlled: true,
-              backgroundColor: Colors.transparent,
-              builder: (_) => AcceptLobbySheet(
-                lobby: lobby,
-                arenaId: arenaId,
-                arenaName: arenaName,
-                onAccepted: onAccepted,
-              ),
-            ),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: _accent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Matchup',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -3088,7 +2832,7 @@ class _UnitPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
-        color: isToday ? Colors.white.withValues(alpha: 0.2) : const Color(0xFFF0FDF4),
+        color: isToday ? Colors.white.withValues(alpha: 0.2) : _accentLight,
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
@@ -4441,7 +4185,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: _isMonthlyPass ? const Color(0xFFF0FDF4) : _bg,
+            color: _isMonthlyPass ? _accentLight : _bg,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _isMonthlyPass ? _accent : _border),
           ),
@@ -4583,7 +4327,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           margin: const EdgeInsets.only(bottom: 20),
-          decoration: BoxDecoration(color: const Color(0xFFF0FDF4), borderRadius: BorderRadius.circular(10), border: Border.all(color: _accent.withValues(alpha: .3))),
+          decoration: BoxDecoration(color: _accentLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: _accent.withValues(alpha: .3))),
           child: Row(children: [
             const Icon(Icons.card_membership_rounded, size: 16, color: _accent),
             const SizedBox(width: 8),
