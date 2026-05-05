@@ -60,6 +60,7 @@ class PlayerMatch {
     this.ballType,
     this.tossWinner,
     this.tossDecision,
+    this.isMatchmaking = false,
   });
 
   final String id;
@@ -98,6 +99,10 @@ class PlayerMatch {
 
   final String? tossWinner;
   final String? tossDecision;
+
+  /// True when this match was created via the matchmaking flow.
+  /// Delete is controlled by the arena owner, not the player.
+  final bool isMatchmaking;
 }
 
 // ── Structured scorecard row types ────────────────────────────────────────────

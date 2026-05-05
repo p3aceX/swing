@@ -57,6 +57,7 @@ class PlayerMatch {
     this.canScore = false,
     this.scoringOwnerIds = const [],
     this.involvesPlayerTeam = false,
+    this.isMatchmaking = false,
     this.ballType,
     this.tossWinner,
     this.tossDecision,
@@ -92,6 +93,10 @@ class PlayerMatch {
   /// True when the backend payload indicates this match involves the
   /// current player's team, not just the surrounding tournament schedule.
   final bool involvesPlayerTeam;
+
+  /// True when this match was created via the matchmaking flow.
+  /// Delete is controlled by the arena owner, not the player.
+  final bool isMatchmaking;
 
   /// e.g. 'LEATHER' or 'TENNIS'
   final String? ballType;
