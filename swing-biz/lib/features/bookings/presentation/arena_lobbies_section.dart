@@ -488,10 +488,28 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
       if (mounted) {
         Navigator.pop(context);
         widget.onAccepted();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Slot locked — now searching for a rival team'),
-            backgroundColor: Color(0xFF059669),
+        // Open assign team sheet immediately after slot is confirmed
+        final acceptedLobby = ArenaLobby(
+          lobbyId: widget.lobby.lobbyId,
+          teamName: widget.lobby.teamName,
+          ageGroup: widget.lobby.ageGroup,
+          format: widget.lobby.format,
+          ballType: widget.lobby.ballType,
+          groundName: widget.lobby.groundName,
+          slotTime: widget.lobby.slotTime,
+          date: widget.lobby.date,
+          daysFromNow: widget.lobby.daysFromNow,
+          picks: widget.lobby.picks,
+          accepted: true,
+          confirmedSlot: _selectedSlot,
+        );
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => AssignTeamSheet(
+            lobby: acceptedLobby,
+            onAssigned: widget.onAccepted,
           ),
         );
       }
