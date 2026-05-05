@@ -920,7 +920,7 @@ class _MatchUpRequestRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(
-                'Accept',
+                'Matchup',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 13,
