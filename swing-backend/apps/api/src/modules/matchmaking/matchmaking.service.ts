@@ -1756,7 +1756,7 @@ export class MatchmakingService {
     const [lobbyA, lobbyB, unit] = await Promise.all([
       tx.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
       tx.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
-      tx.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: true } }),
+      tx.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: { include: { owner: true } } } }),
     ])
     const heldBookingId = (lobbyA as any)?.splitBookingId as string | null
 
@@ -1771,8 +1771,17 @@ export class MatchmakingService {
       bookingId = await this.createBookedSlotForMatch(match, tx)
     }
 
-    // Create a real Match record so this match surfaces in the Play tab
-    // (supporting toss, scoring, live overlay, etc.)
+    // Resolve arena owner's player profile (if they have one) to grant scoring rights.
+    const arenaOwnerUserId = (unit as any)?.arena?.owner?.userId as string | undefined
+    let arenaOwnerProfileId: string | null = null
+    if (arenaOwnerUserId) {
+      const pp = await tx.playerProfile.findUnique({ where: { userId: arenaOwnerUserId }, select: { id: true } })
+      arenaOwnerProfileId = pp?.id ?? null
+    }
+
+    // scorerId = arena owner's player profile (primary scorer for the venue).
+    // teamACaptainId / teamBCaptainId = both team captains.
+    // buildMatchHistoryForProfileId checks all three so all three get canScore=true.
     const formatMap: Record<string, string> = {
       T10: 'T10', T20: 'T20', ODI: 'ONE_DAY', Test: 'TWO_INNINGS', Custom: 'CUSTOM',
     }
@@ -1792,7 +1801,7 @@ export class MatchmakingService {
         teamACaptainId: (lobbyA as any)?.playerId ?? null,
         teamBCaptainId: (lobbyB as any)?.playerId ?? null,
         scheduledAt,
-        scorerId: (lobbyA as any)?.playerId ?? null,
+        scorerId: arenaOwnerProfileId ?? (lobbyA as any)?.playerId ?? null,
         venueName: (unit as any)?.arena?.name ?? (unit as any)?.name ?? null,
         ballType: (lobbyA as any)?.ballType ?? null,
         matchmakingId: match.id,
@@ -2151,7 +2160,7 @@ export class MatchmakingService {
         const [lobbyA, lobbyB, unit] = await Promise.all([
           prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
           prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
-          prisma.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: true } }),
+          prisma.arenaUnit.findUnique({ where: { id: match.groundId }, include: { arena: { include: { owner: true } } } }),
         ])
 
         const teamAName = (lobbyA as any)?.team?.name
@@ -2160,6 +2169,13 @@ export class MatchmakingService {
           skipped++
           errors.push(`match ${match.id}: missing team name (lobbyA=${match.lobbyAId}, lobbyB=${match.lobbyBId})`)
           continue
+        }
+
+        const arenaOwnerUserId = (unit as any)?.arena?.owner?.userId as string | undefined
+        let arenaOwnerProfileId: string | null = null
+        if (arenaOwnerUserId) {
+          const pp = await prisma.playerProfile.findUnique({ where: { userId: arenaOwnerUserId }, select: { id: true } })
+          arenaOwnerProfileId = pp?.id ?? null
         }
 
         const formatMap: Record<string, string> = {
@@ -2182,7 +2198,7 @@ export class MatchmakingService {
             teamACaptainId: (lobbyA as any)?.playerId ?? null,
             teamBCaptainId: (lobbyB as any)?.playerId ?? null,
             scheduledAt,
-            scorerId: (lobbyA as any)?.playerId ?? null,
+            scorerId: arenaOwnerProfileId ?? (lobbyA as any)?.playerId ?? null,
             venueName: (unit as any)?.arena?.name ?? (unit as any)?.name ?? null,
             ballType: (lobbyA as any)?.ballType ?? null,
             matchmakingId: match.id,

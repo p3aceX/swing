@@ -522,7 +522,9 @@ export class PlayerService {
 
     const enriched = data.map((item) => ({
       ...item,
-      isHost: item.match.scorerId === profileId,
+      isHost: item.match.scorerId === profileId ||
+              item.match.teamACaptainId === profileId ||
+              item.match.teamBCaptainId === profileId,
       match: {
         ...item.match,
         teamALogoUrl: teamByName.get(item.match.teamAName)?.logoUrl ?? null,
