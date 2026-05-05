@@ -717,6 +717,8 @@ class LocalSettingsStore {
   static const _appLockEnabledKey = 'app_lock_enabled';
   static const _pinKey = 'app_lock_pin';
   static const _biometricKey = 'biometric_enabled';
+  static const _oneOnOneSetupKey = 'one_on_one_setup_completed';
+  static const _oneOnOneSetupDataKey = 'one_on_one_setup_data';
 
   Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
 
@@ -733,10 +735,7 @@ class LocalSettingsStore {
       ThemeMode.system => 'system',
       ThemeMode.light => 'light',
     };
-    await (await _prefs).setString(
-      _themeKey,
-      modeValue,
-    );
+    await (await _prefs).setString(_themeKey, modeValue);
   }
 
   Future<bool> isAppLockEnabled() async {
@@ -769,6 +768,26 @@ class LocalSettingsStore {
     await prefs.setBool(_appLockEnabledKey, false);
     await prefs.setBool(_biometricKey, false);
     await prefs.remove(_pinKey);
+  }
+
+  Future<bool> isOneOnOneSetupCompleted() async {
+    return (await _prefs).getBool(_oneOnOneSetupKey) ?? false;
+  }
+
+  Future<Map<String, dynamic>> loadOneOnOneSetupData() async {
+    final raw = (await _prefs).getString(_oneOnOneSetupDataKey);
+    if (raw == null || raw.isEmpty) return const <String, dynamic>{};
+    try {
+      return (jsonDecode(raw) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
+  Future<void> saveOneOnOneSetupData(Map<String, dynamic> data) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_oneOnOneSetupKey, true);
+    await prefs.setString(_oneOnOneSetupDataKey, jsonEncode(data));
   }
 }
 
@@ -1475,12 +1494,20 @@ class _CoachRouterAppState extends ConsumerState<CoachRouterApp> {
           builder: (context, state) => const OneOnOneSettingsScreen(),
         ),
         GoRoute(
+          path: '/one-on-one/activate',
+          builder: (context, state) => const ActivateOneOnOneSessionScreen(),
+        ),
+        GoRoute(
           path: '/profile',
           builder: (context, state) => const CoachProfileScreen(),
           routes: [
             GoRoute(
               path: 'view',
               builder: (context, state) => const CoachProfileViewScreen(),
+            ),
+            GoRoute(
+              path: 'banking',
+              builder: (context, state) => const BankingDetailsScreen(),
             ),
             GoRoute(
               path: 'edit',
@@ -1610,12 +1637,24 @@ class HomeScreen extends ConsumerWidget {
           }
           final data = snapshot.data ?? const <String, dynamic>{};
           final coachName = data['coachName']?.toString() ?? 'Coach';
+          final profileSummary =
+              (data['profileSummary'] as Map?)?.cast<String, dynamic>() ??
+              const <String, dynamic>{};
+          final activeBatches = data['activeBatches'] as int? ?? 0;
+          final monthlyOneOnOneBookings =
+              data['monthlyOneOnOneBookings'] as int? ?? 0;
           final monthlyRevenuePaise = data['monthlyRevenuePaise'] as num? ?? 0;
-          final upcomingSessions = data['upcomingSessions'] as int? ?? 0;
+          final revenueSeries =
+              (data['revenueSeries'] as List?)?.cast<Map<String, dynamic>>() ??
+              const <Map<String, dynamic>>[];
+          final hasRevenueData = data['hasRevenueData'] == true;
           final todaySessions =
               (data['todaySessions'] as List?)?.cast<Map<String, dynamic>>() ??
               const [];
-          final setupComplete = data['batchSetupComplete'] == true;
+          final batchSetupComplete = data['batchSetupComplete'] == true;
+          final oneOnOneSetupComplete = data['oneOnOneSetupComplete'] == true;
+          final showSetupSection =
+              !batchSetupComplete || !oneOnOneSetupComplete;
           final upcomingFromTimetable =
               (data['upcomingTimetable'] as List?)
                   ?.cast<Map<String, dynamic>>() ??
@@ -1630,41 +1669,60 @@ class HomeScreen extends ConsumerWidget {
                   GreetingHeader(
                     coachName: coachName,
                     onNotificationsTap: () => context.push('/notifications'),
-                    onProfileTap: () => context.push('/profile'),
+                    onProfileTap: () =>
+                        showCoachProfileDrawer(context, ref, profileSummary),
+                  ),
+                  const SizedBox(height: 16),
+                  RevenueChartCard(
+                    enabled: hasRevenueData,
+                    monthlyRevenuePaise: monthlyRevenuePaise,
+                    series: revenueSeries,
                   ),
                   const SizedBox(height: 16),
                   Row(
                     children: [
                       Expanded(
                         child: StatCard(
-                          title: 'Monthly Revenue',
-                          value: _rupees(monthlyRevenuePaise),
-                          icon: Icons.account_balance_wallet_outlined,
-                          subtext: 'This Month',
+                          title: 'Active Batches',
+                          value: '$activeBatches',
+                          icon: Icons.groups_2_outlined,
+                          subtext: 'Batches currently assigned to you',
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: StatCard(
-                          title: 'Upcoming Sessions',
-                          value: '$upcomingSessions',
-                          icon: Icons.event_note_rounded,
-                          subtext: 'Next sessions',
+                          title: '1-to-1 Bookings',
+                          value: '$monthlyOneOnOneBookings',
+                          icon: Icons.person_pin_circle_outlined,
+                          subtext: 'Booked sessions this month',
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 16),
-                  if (setupComplete)
-                    UpcomingSessionsCard(items: upcomingFromTimetable)
-                  else
-                    ActionRow(
-                      leading: const Icon(Icons.grid_view_rounded),
-                      title: 'Quick Setup Your Batch',
-                      subtitle: 'Set session type for each day. Time is automatic.',
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => context.push('/batch-setup'),
-                    ),
+                  if (showSetupSection) ...[
+                    SectionTitle('Session Setup'),
+                    if (!batchSetupComplete)
+                      ActionRow(
+                        leading: const Icon(Icons.grid_view_rounded),
+                        title: 'Quick Batch Setup',
+                        subtitle:
+                            'Choose one session type per day for your week.',
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => context.push('/batch-setup'),
+                      ),
+                    if (!oneOnOneSetupComplete)
+                      ActionRow(
+                        leading: const Icon(Icons.person_add_alt_rounded),
+                        title: 'Activate 1-to-1 Session',
+                        subtitle: 'Set up private coaching in about a minute.',
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => context.push('/one-on-one/activate'),
+                      ),
+                  ] else ...[
+                    UpcomingSessionsCard(items: upcomingFromTimetable),
+                  ],
                   const SizedBox(height: 16),
                   SectionTitle('Quick Actions'),
                   QuickAction(
@@ -1683,7 +1741,7 @@ class HomeScreen extends ConsumerWidget {
                     onTap: () => showFeedbackSheet(context, ref),
                   ),
                   const SizedBox(height: 10),
-                  SectionTitle('Today\'s Sessions'),
+                  SectionTitle('Sessions Overview'),
                   if (todaySessions.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 16),
@@ -1712,23 +1770,40 @@ class HomeScreen extends ConsumerWidget {
       api.getList('/coach/sessions', query: {'page': '1', 'limit': '50'}),
       api.getList('/coach/batches'),
       api.getList('/coach/schedules'),
+      api.getList('/coach/gig-bookings', query: {'page': '1', 'limit': '50'}),
     ]);
     final profile = data[0] as Map<String, dynamic>;
     final earnings = data[1] as Map<String, dynamic>;
     final sessions = (data[2] as List).cast<Map<String, dynamic>>();
     final batches = (data[3] as List).cast<Map<String, dynamic>>();
     final schedules = (data[4] as List).cast<Map<String, dynamic>>();
-    final upcomingCount = sessions.where((item) {
-      final status = _statusOf(item);
-      return status == 'SCHEDULED' || status == 'UPCOMING';
-    }).length;
+    final oneOnOneBookings = (data[5] as List).cast<Map<String, dynamic>>();
+    final revenueSeries = _revenueTrend(earnings);
+    final monthlyRevenue = _extractMonthlyRevenuePaise(earnings);
+    final oneOnOneSetupComplete = await ref
+        .read(settingsStoreProvider)
+        .isOneOnOneSetupCompleted();
     return {
       'coachName': _labelOf(profile, ['name', 'coachName', 'fullName']),
-      'monthlyRevenuePaise': _extractMonthlyRevenuePaise(earnings),
-      'upcomingSessions': upcomingCount,
+      'profileSummary': _profileSummary(profile),
+      'activeBatches': batches
+          .where((batch) => _read(batch, ['isActive']) != false)
+          .length,
+      'monthlyOneOnOneBookings': oneOnOneBookings
+          .where(_isCurrentMonthBooking)
+          .length,
+      'monthlyRevenuePaise': monthlyRevenue,
+      'revenueSeries': revenueSeries,
+      'hasRevenueData':
+          monthlyRevenue > 0 ||
+          revenueSeries.any((item) => (item['amountPaise'] as num? ?? 0) > 0),
       'todaySessions': sessions.where(_isTodaySession).toList(),
       'batchSetupComplete': _isBatchSetupComplete(batches, schedules),
-      'upcomingTimetable': _upcomingTimetableToday(schedules),
+      'oneOnOneSetupComplete': oneOnOneSetupComplete,
+      'upcomingTimetable': [
+        ..._upcomingTimetableToday(schedules),
+        ...oneOnOneBookings.where(_isTodaySession).map(_oneOnOneSessionCard),
+      ],
     };
   }
 }
@@ -2276,24 +2351,33 @@ class BatchTabScreen extends ConsumerWidget {
                 .toList();
             final byDay = <String, String>{};
             for (final s in batchSchedules) {
-              final type = _titleCase((_read(s, ['sessionType'])?.toString().toLowerCase() ?? ''));
+              final type = _titleCase(
+                (_read(s, ['sessionType'])?.toString().toLowerCase() ?? ''),
+              );
               for (final d in _listAt(s, ['daysOfWeek'])) {
                 final dayIndex = int.tryParse('$d');
-                if (dayIndex != null && dayIndex >= 0 && dayIndex < _days.length) {
+                if (dayIndex != null &&
+                    dayIndex >= 0 &&
+                    dayIndex < _days.length) {
                   byDay[_days[dayIndex]] = type;
                 }
               }
             }
             return {
               ...batch,
-              '_days': byDay.entries.map((e) => '${e.key}:${e.value}').join('  '),
+              '_days': byDay.entries
+                  .map((e) => '${e.key}:${e.value}')
+                  .join('  '),
             };
           }).toList();
         },
         itemBuilder: (context, item) => Card(
           margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
           child: ListTile(
-            title: Text(_labelOf(item, ['name', 'batchName']), style: const TextStyle(fontWeight: FontWeight.w700)),
+            title: Text(
+              _labelOf(item, ['name', 'batchName']),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
             subtitle: Text(
               '${_labelOf(item, ['academyName', 'academy.name'])}\n${_read(item, ['_days'])?.toString() ?? ''}',
             ),
@@ -2378,7 +2462,10 @@ class _PlayTabScreenState extends ConsumerState<PlayTabScreen> {
         '/arena/$arenaId/availability',
         '/bookings/availability',
       ]) {
-        slots = await api.getList(path, query: {'date': _selectedDate.toIso8601String()});
+        slots = await api.getList(
+          path,
+          query: {'date': _selectedDate.toIso8601String()},
+        );
         if (slots.isNotEmpty) break;
       }
       if (!mounted) return;
@@ -2397,7 +2484,8 @@ class _PlayTabScreenState extends ConsumerState<PlayTabScreen> {
 
   Future<void> _confirmBooking() async {
     final arena = _selectedArena;
-    if (arena == null || _selectedSlot == null || _selectedSport == null) return;
+    if (arena == null || _selectedSlot == null || _selectedSport == null)
+      return;
     final api = ref.read(apiClientProvider);
     await api.post('/bookings', {
       'arenaId': _idOf(arena),
@@ -2417,111 +2505,165 @@ class _PlayTabScreenState extends ConsumerState<PlayTabScreen> {
       body: _loading
           ? const LoadingView(label: 'Loading')
           : _error != null
-              ? InlineError(message: _error!, onRetry: _step <= 1 ? _loadArenas : _loadSlots)
-              : Stepper(
-                  currentStep: _step.clamp(0, 5),
-                  onStepContinue: () async {
-                    if (_step == 0 && _selectedArena != null) setState(() => _step = 1);
-                    else if (_step == 1 && _selectedSport != null) {
-                      setState(() => _step = 2);
-                      await _loadSlots();
-                    } else if (_step == 2 && _selectedSlot != null) setState(() => _step = 3);
-                    else if (_step == 3) setState(() => _step = 4);
-                    else if (_step == 4) setState(() => _step = 5);
-                    else if (_step == 5) await _confirmBooking();
-                  },
-                  onStepCancel: () {
-                    if (_step > 0) setState(() => _step--);
-                  },
-                  steps: [
-                    Step(
-                      title: const Text('Select Arena / Ground'),
-                      isActive: _step >= 0,
-                      content: _arenas.isEmpty
-                          ? const Text('No arenas found.')
-                          : Column(
-                              children: _arenas
-                                  .map((a) => RadioListTile<String>(
-                                        value: _idOf(a),
-                                        groupValue: _selectedArena == null ? null : _idOf(_selectedArena!),
-                                        title: Text(_labelOf(a, ['name', 'arenaName'])),
-                                        subtitle: Text(_labelOf(a, ['address', 'location', 'city'])),
-                                        onChanged: (_) => setState(() => _selectedArena = a),
-                                      ))
-                                  .toList(),
-                            ),
-                    ),
-                    Step(
-                      title: const Text('Select Sport / Activity'),
-                      isActive: _step >= 1,
-                      content: Wrap(
-                        spacing: 8,
-                        children: sports
-                            .map((s) => ChoiceChip(
-                                  label: Text(s),
-                                  selected: _selectedSport == s,
-                                  onSelected: (_) => setState(() => _selectedSport = s),
-                                ))
-                            .toList(),
-                      ),
-                    ),
-                    Step(
-                      title: const Text('Select Date & Time Slot'),
-                      isActive: _step >= 2,
-                      content: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          OutlinedButton(
-                            onPressed: () async {
-                              final next = await showDatePicker(
-                                context: context,
-                                firstDate: DateTime.now(),
-                                lastDate: DateTime.now().add(const Duration(days: 30)),
-                                initialDate: _selectedDate,
-                              );
-                              if (next != null) {
-                                setState(() => _selectedDate = next);
-                                await _loadSlots();
-                              }
-                            },
-                            child: Text('Date: ${_selectedDate.toLocal().toString().split(' ').first}'),
-                          ),
-                          const SizedBox(height: 8),
-                          ..._slots.map((s) {
-                            final label = _labelOf(s, ['label', 'slot', 'time', 'startTime']);
-                            return RadioListTile<String>(
-                              value: label,
-                              groupValue: _selectedSlot,
-                              title: Text(label),
-                              onChanged: (v) => setState(() => _selectedSlot = v),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                    Step(title: const Text('Availability Check'), isActive: _step >= 3, content: const Text('Selected slot is available.')),
-                    Step(
-                      title: const Text('Booking Summary'),
-                      isActive: _step >= 4,
-                      content: Text(
-                        '${_labelOf(_selectedArena ?? const {}, ['name', 'arenaName'])}\n${_selectedSport ?? '-'}\n${_selectedDate.toLocal().toString().split(' ').first} • ${_selectedSlot ?? '-'}',
-                      ),
-                    ),
-                    Step(title: const Text('Confirm Booking'), isActive: _step >= 5, content: const Text('Tap continue to confirm booking.')),
-                  ],
+          ? InlineError(
+              message: _error!,
+              onRetry: _step <= 1 ? _loadArenas : _loadSlots,
+            )
+          : Stepper(
+              currentStep: _step.clamp(0, 5),
+              onStepContinue: () async {
+                if (_step == 0 && _selectedArena != null)
+                  setState(() => _step = 1);
+                else if (_step == 1 && _selectedSport != null) {
+                  setState(() => _step = 2);
+                  await _loadSlots();
+                } else if (_step == 2 && _selectedSlot != null)
+                  setState(() => _step = 3);
+                else if (_step == 3)
+                  setState(() => _step = 4);
+                else if (_step == 4)
+                  setState(() => _step = 5);
+                else if (_step == 5)
+                  await _confirmBooking();
+              },
+              onStepCancel: () {
+                if (_step > 0) setState(() => _step--);
+              },
+              steps: [
+                Step(
+                  title: const Text('Select Arena / Ground'),
+                  isActive: _step >= 0,
+                  content: _arenas.isEmpty
+                      ? const Text('No arenas found.')
+                      : Column(
+                          children: _arenas
+                              .map(
+                                (a) => RadioListTile<String>(
+                                  value: _idOf(a),
+                                  groupValue: _selectedArena == null
+                                      ? null
+                                      : _idOf(_selectedArena!),
+                                  title: Text(
+                                    _labelOf(a, ['name', 'arenaName']),
+                                  ),
+                                  subtitle: Text(
+                                    _labelOf(a, [
+                                      'address',
+                                      'location',
+                                      'city',
+                                    ]),
+                                  ),
+                                  onChanged: (_) =>
+                                      setState(() => _selectedArena = a),
+                                ),
+                              )
+                              .toList(),
+                        ),
                 ),
+                Step(
+                  title: const Text('Select Sport / Activity'),
+                  isActive: _step >= 1,
+                  content: Wrap(
+                    spacing: 8,
+                    children: sports
+                        .map(
+                          (s) => ChoiceChip(
+                            label: Text(s),
+                            selected: _selectedSport == s,
+                            onSelected: (_) =>
+                                setState(() => _selectedSport = s),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+                Step(
+                  title: const Text('Select Date & Time Slot'),
+                  isActive: _step >= 2,
+                  content: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () async {
+                          final next = await showDatePicker(
+                            context: context,
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(
+                              const Duration(days: 30),
+                            ),
+                            initialDate: _selectedDate,
+                          );
+                          if (next != null) {
+                            setState(() => _selectedDate = next);
+                            await _loadSlots();
+                          }
+                        },
+                        child: Text(
+                          'Date: ${_selectedDate.toLocal().toString().split(' ').first}',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ..._slots.map((s) {
+                        final label = _labelOf(s, [
+                          'label',
+                          'slot',
+                          'time',
+                          'startTime',
+                        ]);
+                        return RadioListTile<String>(
+                          value: label,
+                          groupValue: _selectedSlot,
+                          title: Text(label),
+                          onChanged: (v) => setState(() => _selectedSlot = v),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                Step(
+                  title: const Text('Availability Check'),
+                  isActive: _step >= 3,
+                  content: const Text('Selected slot is available.'),
+                ),
+                Step(
+                  title: const Text('Booking Summary'),
+                  isActive: _step >= 4,
+                  content: Text(
+                    '${_labelOf(_selectedArena ?? const {}, ['name', 'arenaName'])}\n${_selectedSport ?? '-'}\n${_selectedDate.toLocal().toString().split(' ').first} • ${_selectedSlot ?? '-'}',
+                  ),
+                ),
+                Step(
+                  title: const Text('Confirm Booking'),
+                  isActive: _step >= 5,
+                  content: const Text('Tap continue to confirm booking.'),
+                ),
+              ],
+            ),
       bottomNavigationBar: _step >= 6
           ? SafeArea(
               child: Container(
                 padding: const EdgeInsets.all(16),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.check_circle_rounded, color: Colors.green, size: 36),
-                  const SizedBox(height: 8),
-                  const Text('Success Screen', style: TextStyle(fontWeight: FontWeight.w800)),
-                  const Text('Booking confirmed successfully.'),
-                  const SizedBox(height: 10),
-                  FilledButton(onPressed: () => setState(() => _step = 0), child: const Text('Book Another')),
-                ]),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: Colors.green,
+                      size: 36,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Success Screen',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const Text('Booking confirmed successfully.'),
+                    const SizedBox(height: 10),
+                    FilledButton(
+                      onPressed: () => setState(() => _step = 0),
+                      child: const Text('Book Another'),
+                    ),
+                  ],
+                ),
               ),
             )
           : null,
@@ -2537,14 +2679,17 @@ class OneToOneTabScreen extends ConsumerWidget {
     return FilteredListScreen(
       title: '1-to-1 Sessions',
       tabs: const ['Upcoming', 'Completed'],
-      load: (tab) => ref.read(apiClientProvider).getList('/coach/gig-bookings', query: {'page': '1', 'limit': '30'}),
+      load: (tab) => ref
+          .read(apiClientProvider)
+          .getList('/coach/gig-bookings', query: {'page': '1', 'limit': '30'}),
       filter: (item, tab, query) {
         final status = _statusOf(item);
         return tab == 'Upcoming' ? status == 'UPCOMING' : status == 'COMPLETED';
       },
       itemBuilder: (context, item) => ActionRow(
         title: _studentName(item),
-        subtitle: '${_formatDate(_read(item, ['scheduledAt'])?.toString())} • ${_labelOf(item, ['status'])}',
+        subtitle:
+            '${_formatDate(_read(item, ['scheduledAt'])?.toString())} • ${_labelOf(item, ['status'])}',
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => context.push('/gigs/${_idOf(item)}'),
       ),
@@ -2571,29 +2716,62 @@ class PaymentTabScreen extends ConsumerWidget {
             return const LoadingView(label: 'Loading payments');
           }
           if (snapshot.hasError) {
-            return InlineError(message: _errorMessage(snapshot.error), onRetry: () => (context as Element).markNeedsBuild());
+            return InlineError(
+              message: _errorMessage(snapshot.error),
+              onRetry: () => (context as Element).markNeedsBuild(),
+            );
           }
           final data = snapshot.data ?? const {};
-          final txns = (data['transactions'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+          final txns =
+              (data['transactions'] as List?)?.cast<Map<String, dynamic>>() ??
+              const [];
           return ListView(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
             children: [
-              Row(children: [
-                Expanded(child: StatCard(title: 'Total', value: _rupees(data['total']), icon: Icons.payments_outlined, subtext: 'Earnings')),
-                const SizedBox(width: 10),
-                Expanded(child: StatCard(title: 'This Month', value: _rupees(data['month']), icon: Icons.calendar_month_rounded, subtext: 'Current month')),
-              ]),
+              Row(
+                children: [
+                  Expanded(
+                    child: StatCard(
+                      title: 'Total',
+                      value: _rupees(data['total']),
+                      icon: Icons.payments_outlined,
+                      subtext: 'Earnings',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: StatCard(
+                      title: 'This Month',
+                      value: _rupees(data['month']),
+                      icon: Icons.calendar_month_rounded,
+                      subtext: 'Current month',
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 10),
-              StatCard(title: 'Pending', value: _rupees(data['pending']), icon: Icons.timelapse_rounded, subtext: 'Pending payouts'),
+              StatCard(
+                title: 'Pending',
+                value: _rupees(data['pending']),
+                icon: Icons.timelapse_rounded,
+                subtext: 'Pending payouts',
+              ),
               const SizedBox(height: 16),
               const SectionTitle('Transactions'),
-              if (txns.isEmpty) const Padding(padding: EdgeInsets.only(top: 8), child: Text('No payments found.')),
-              ...txns.map((t) => ActionRow(
-                    title: _studentName(t),
-                    subtitle: '${_formatDate(_read(t, ['scheduledAt'])?.toString())} • ${_statusOf(t)}',
-                    trailing: Text(_rupees(_read(t, ['amountPaise', 'amount']))),
-                    onTap: () => context.push('/gigs/${_idOf(t)}'),
-                  )),
+              if (txns.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('No payments found.'),
+                ),
+              ...txns.map(
+                (t) => ActionRow(
+                  title: _studentName(t),
+                  subtitle:
+                      '${_formatDate(_read(t, ['scheduledAt'])?.toString())} • ${_statusOf(t)}',
+                  trailing: Text(_rupees(_read(t, ['amountPaise', 'amount']))),
+                  onTap: () => context.push('/gigs/${_idOf(t)}'),
+                ),
+              ),
               const SizedBox(height: 10),
               FilledButton.tonalIcon(
                 onPressed: () => context.push('/profile/payout'),
@@ -2612,7 +2790,8 @@ class AutoSessionFlowScreen extends ConsumerStatefulWidget {
   const AutoSessionFlowScreen({super.key});
 
   @override
-  ConsumerState<AutoSessionFlowScreen> createState() => _AutoSessionFlowScreenState();
+  ConsumerState<AutoSessionFlowScreen> createState() =>
+      _AutoSessionFlowScreenState();
 }
 
 class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
@@ -2658,14 +2837,21 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
         });
       }
       if (!mounted) return;
-      final present = _ctx!.players.where((p) => _attendance[_idOf(p)] == true).toList();
+      final present = _ctx!.players
+          .where((p) => _attendance[_idOf(p)] == true)
+          .toList();
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => CoachFeedbackFlowScreen(
             sessionId: _ctx!.sessionId,
             sessionType: _toFeedbackTemplateType(_ctx!.sessionType),
             players: present
-                .map((p) => FeedbackPlayer(playerId: _idOf(p), playerName: _studentName(p)))
+                .map(
+                  (p) => FeedbackPlayer(
+                    playerId: _idOf(p),
+                    playerName: _studentName(p),
+                  ),
+                )
                 .toList(),
             submitRows: (rows) async {
               final auth = ref.read(sessionStateProvider);
@@ -2681,7 +2867,10 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
             },
             onSubmitted: () async {
               try {
-                await api.post('/coach/sessions/${_ctx!.sessionId}/complete', {});
+                await api.post(
+                  '/coach/sessions/${_ctx!.sessionId}/complete',
+                  {},
+                );
               } catch (_) {}
             },
           ),
@@ -2695,7 +2884,8 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: LoadingView(label: 'Detecting session'));
+    if (_loading)
+      return const Scaffold(body: LoadingView(label: 'Detecting session'));
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Start Session')),
@@ -2736,11 +2926,22 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(_ctx!.batchName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                    const SizedBox(height: 4),
-                    Text('${_titleCase(_ctx!.sessionType)} • ${_ctx!.timeLabel}'),
-                  ]),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _ctx!.batchName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_titleCase(_ctx!.sessionType)} • ${_ctx!.timeLabel}',
+                      ),
+                    ],
+                  ),
                 ),
                 FilledButton(
                   onPressed: () {},
@@ -2758,8 +2959,13 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
                 final id = _idOf(player);
                 return Card(
                   child: ListTile(
-                    leading: CircleAvatar(child: Text(_avatarLetter(_studentName(player)))),
-                    title: Text(_studentName(player), style: const TextStyle(fontWeight: FontWeight.w700)),
+                    leading: CircleAvatar(
+                      child: Text(_avatarLetter(_studentName(player))),
+                    ),
+                    title: Text(
+                      _studentName(player),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     trailing: Switch(
                       value: _attendance[id] ?? true,
                       onChanged: (v) => setState(() => _attendance[id] = v),
@@ -2890,6 +3096,187 @@ class OneOnOneSettingsScreen extends ConsumerWidget {
   }
 }
 
+class ActivateOneOnOneSessionScreen extends ConsumerStatefulWidget {
+  const ActivateOneOnOneSessionScreen({super.key});
+
+  @override
+  ConsumerState<ActivateOneOnOneSessionScreen> createState() =>
+      _ActivateOneOnOneSessionScreenState();
+}
+
+class _ActivateOneOnOneSessionScreenState
+    extends ConsumerState<ActivateOneOnOneSessionScreen> {
+  final _specializations = <String>{};
+  final _coachLevels = <String>{};
+  final _emailCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  String? _experience;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _addressCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _activate() async {
+    if (_specializations.isEmpty) {
+      setState(() => _error = 'Select at least one coaching area.');
+      return;
+    }
+    if (_experience == null) {
+      setState(() => _error = 'Select your coaching experience.');
+      return;
+    }
+    if (_coachLevels.isEmpty) {
+      setState(() => _error = 'Select at least one coaching level.');
+      return;
+    }
+
+    final setupData = <String, dynamic>{
+      'specializations': _specializations.toList(),
+      'coachingExperience': _experience,
+      'coachLevels': _coachLevels.toList(),
+      if (_emailCtrl.text.trim().isNotEmpty) 'email': _emailCtrl.text.trim(),
+      if (_addressCtrl.text.trim().isNotEmpty)
+        'address': _addressCtrl.text.trim(),
+      'oneOnOneEnabled': true,
+    };
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      try {
+        await ref.read(apiClientProvider).put('/coach/profile', {
+          'oneOnOneEnabled': true,
+          'specializations': _specializations.toList(),
+          'expertiseTags': _specializations.toList(),
+          'coachingExperience': _experience,
+          'coachLevels': _coachLevels.toList(),
+          if (_emailCtrl.text.trim().isNotEmpty)
+            'email': _emailCtrl.text.trim(),
+          if (_addressCtrl.text.trim().isNotEmpty)
+            'address': _addressCtrl.text.trim(),
+        });
+      } catch (_) {
+        // TODO: Confirm the exact backend persistence keys for the 1-to-1 setup payload.
+      }
+      await ref.read(settingsStoreProvider).saveOneOnOneSetupData(setupData);
+      if (!mounted) return;
+      context.go('/home');
+    } catch (e) {
+      setState(() => _error = _errorMessage(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Activate 1-to-1 Session')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          children: [
+            const PageHeader(
+              title: 'Activate 1-to-1 Session',
+              subtitle:
+                  'Fast setup using simple taps. No typing required unless you want to add contact details.',
+            ),
+            ActivationStepCard(
+              step: '1',
+              title: 'What do you coach?',
+              child: OptionChipWrap(
+                options: _oneOnOneSpecializationOptions,
+                selected: _specializations,
+                multiSelect: true,
+                onChanged: (next) => setState(() {
+                  _specializations
+                    ..clear()
+                    ..addAll(next);
+                }),
+              ),
+            ),
+            ActivationStepCard(
+              step: '2',
+              title: 'How much coaching experience do you have?',
+              child: OptionChipWrap(
+                options: _experienceOptions,
+                selected: {if (_experience != null) _experience!},
+                multiSelect: false,
+                onChanged: (next) => setState(
+                  () => _experience = next.isEmpty ? null : next.first,
+                ),
+              ),
+            ),
+            ActivationStepCard(
+              step: '3',
+              title: 'What is your coaching level?',
+              child: OptionChipWrap(
+                options: _activationCoachLevelOptions,
+                selected: _coachLevels,
+                multiSelect: true,
+                onChanged: (next) => setState(() {
+                  _coachLevels
+                    ..clear()
+                    ..addAll(next);
+                }),
+              ),
+            ),
+            ActivationStepCard(
+              step: '4',
+              title: 'Optional details',
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(labelText: 'Email'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _addressCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: 'Address'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _saving ? null : _activate,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.check_circle_outline_rounded),
+              label: const Text('Activate 1-to-1 Sessions'),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFFC62828),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class CoachProfileScreen extends ConsumerWidget {
   const CoachProfileScreen({super.key});
 
@@ -2920,15 +3307,29 @@ class CoachProfileScreen extends ConsumerWidget {
                 ),
                 const Divider(height: 1),
                 ProfileListItem(
+                  icon: Icons.account_balance_outlined,
+                  title: 'Banking',
+                  onTap: () => context.push('/profile/banking'),
+                ),
+                const Divider(height: 1),
+                ProfileListItem(
                   icon: Icons.support_agent_rounded,
                   title: 'Support',
                   onTap: () => showSupportBottomSheet(context),
                 ),
                 const Divider(height: 1),
-                ProfileListItem(
-                  icon: Icons.palette_outlined,
-                  title: 'Appearance',
-                  onTap: () => showThemeSelectorSheet(context),
+                ProfileThemeListItem(
+                  icon: Icons.light_mode_rounded,
+                  title: 'Light Theme',
+                  selected: _currentThemeMode(context) == ThemeMode.light,
+                  onTap: () => _setThemeFromContext(context, ThemeMode.light),
+                ),
+                const Divider(height: 1),
+                ProfileThemeListItem(
+                  icon: Icons.dark_mode_rounded,
+                  title: 'Dark Theme',
+                  selected: _currentThemeMode(context) == ThemeMode.dark,
+                  onTap: () => _setThemeFromContext(context, ThemeMode.dark),
                 ),
                 const Divider(height: 1),
                 ProfileListItem(
@@ -2973,25 +3374,172 @@ class CoachProfileViewScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return DetailPage(
-      title: 'View Profile',
-      load: () async {
-        final data = await Future.wait([
-          ref.read(apiClientProvider).get('/coach/profile'),
-          ref.read(apiClientProvider).get('/biz/me'),
-        ]);
-        final profile = data[0] as Map<String, dynamic>;
-        final bizResponse = data[1] as Map<String, dynamic>;
-        final biz = ((bizResponse['data'] ?? bizResponse) as Map)
-            .cast<String, dynamic>();
-        final user = (biz['user'] as Map?)?.cast<String, dynamic>() ?? const {};
-        return {
-          ...profile,
-          'name': _coachDisplayName(profile, biz),
-          if (user['phone'] != null) 'phone': user['phone'],
-          if (user['email'] != null) 'email': user['email'],
-        };
-      },
+    return Scaffold(
+      appBar: AppBar(title: const Text('View Profile')),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _loadCoachProfileDetails(ref),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const LoadingView(label: 'Loading profile');
+          }
+          if (snapshot.hasError) {
+            return InlineError(
+              message: _errorMessage(snapshot.error),
+              onRetry: () => (context as Element).markNeedsBuild(),
+            );
+          }
+          final details = snapshot.data ?? const <String, dynamic>{};
+          final levels = _coachLevelLabels(details);
+          return SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                CoachDetailHero(details: details),
+                const SizedBox(height: 16),
+                DetailInfoCard(
+                  title: 'Coach Details',
+                  rows: [
+                    ('Name', _safeDisplayValue(details['name'])),
+                    ('Phone number', _safeDisplayValue(details['phone'])),
+                    (
+                      'Specialization',
+                      _listDisplayValue(_profileSpecializations(details)),
+                    ),
+                    ('Coaching experience', _experienceLabel(details)),
+                    if (_hasDisplayValue(details['email']))
+                      ('Email', _safeDisplayValue(details['email'])),
+                    if (_hasDisplayValue(details['address']))
+                      ('Address', _safeDisplayValue(details['address'])),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                DetailInfoCard(
+                  title: 'Coach Level',
+                  child: levels.isEmpty
+                      ? Text(
+                          'No coach level added yet.',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                        )
+                      : Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: levels
+                              .map((level) => CoachLevelChip(label: level))
+                              .toList(),
+                        ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: () => context.push('/profile/edit'),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit Profile'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> _loadCoachProfileDetails(WidgetRef ref) async {
+    final data = await Future.wait([
+      ref.read(apiClientProvider).get('/coach/profile'),
+      ref.read(apiClientProvider).get('/biz/me'),
+      ref.read(settingsStoreProvider).loadOneOnOneSetupData(),
+    ]);
+    final profile = data[0];
+    final bizResponse = data[1];
+    final oneOnOneSetup = (data[2] as Map).cast<String, dynamic>();
+    final biz = ((bizResponse['data'] ?? bizResponse) as Map)
+        .cast<String, dynamic>();
+    final user = (biz['user'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final business =
+        (biz['businessAccount'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return {
+      ...profile,
+      'name': _coachDisplayName(profile, biz),
+      if (user['phone'] != null) 'phone': user['phone'],
+      if (user['email'] != null) 'email': user['email'],
+      'address': _read(profile, ['address']) ?? business['address'],
+      ...oneOnOneSetup,
+    };
+  }
+}
+
+class BankingDetailsScreen extends ConsumerWidget {
+  const BankingDetailsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Banking')),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: ref.read(apiClientProvider).get('/biz/me'),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const LoadingView(label: 'Loading banking details');
+          }
+          if (snapshot.hasError) {
+            return InlineError(
+              message: _errorMessage(snapshot.error),
+              onRetry: () => (context as Element).markNeedsBuild(),
+            );
+          }
+          final payload =
+              ((snapshot.data?['data'] ?? snapshot.data ?? {}) as Map)
+                  .cast<String, dynamic>();
+          final account =
+              (payload['businessAccount'] as Map?)?.cast<String, dynamic>() ??
+              const {};
+          return SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                const PageHeader(
+                  title: 'Banking Details',
+                  subtitle:
+                      'Payout and UPI information used for coach payments.',
+                ),
+                DetailInfoCard(
+                  title: 'Payout Account',
+                  rows: [
+                    ('UPI ID', _safeDisplayValue(account['upiId'])),
+                    (
+                      'Account holder name',
+                      _safeDisplayValue(account['beneficiaryName']),
+                    ),
+                    ('Bank name', _safeDisplayValue(account['bankName'])),
+                    (
+                      'Account number',
+                      _safeDisplayValue(account['accountNumber']),
+                    ),
+                    ('IFSC code', _safeDisplayValue(account['ifscCode'])),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'TODO: Bank name is displayed when returned by the existing business details API.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: () => context.push('/profile/payout'),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit Banking Details'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -3007,6 +3555,8 @@ class QuickBatchSetupScreen extends ConsumerStatefulWidget {
 class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
   final Map<String, _BatchCardState> _states = {};
   bool _loading = true;
+  bool _savingSetup = false;
+  bool _showSummary = false;
   String? _error;
 
   @override
@@ -3045,7 +3595,11 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
         final batchSchedules = schedules
             .where((s) => _read(s, ['batchId'])?.toString() == batchId)
             .toList();
-        _states[batchId] = _BatchCardState.fromApi(batch, batchSchedules);
+        _states[batchId] = _BatchCardState.fromApi(
+          batchId,
+          batch,
+          batchSchedules,
+        );
       }
     } catch (e) {
       _error = _errorMessage(e);
@@ -3054,19 +3608,9 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
     }
   }
 
-  void _scheduleSave(String batchId) {
+  Future<bool> _saveBatch(String batchId) async {
     final state = _states[batchId];
-    if (state == null) return;
-    state.debounce?.cancel();
-    state.debounce = Timer(const Duration(milliseconds: 550), () {
-      _saveBatch(batchId);
-    });
-    setState(() => state.dirty = true);
-  }
-
-  Future<void> _saveBatch(String batchId) async {
-    final state = _states[batchId];
-    if (state == null) return;
+    if (state == null) return false;
     final api = ref.read(apiClientProvider);
     final desired = _toSchedulePayloads(batchId, state, state.rawSchedules);
     final existingByKey = <String, Map<String, dynamic>>{
@@ -3093,65 +3637,141 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
       }
       for (final schedule in state.rawSchedules) {
         final key = _scheduleKey(schedule);
-        if (!desiredKeys.contains(key) && _read(schedule, ['isActive']) != false) {
-          await api.patch('/coach/schedules/${_idOf(schedule)}', {'isActive': false});
+        if (!desiredKeys.contains(key) &&
+            _read(schedule, ['isActive']) != false) {
+          await api.patch('/coach/schedules/${_idOf(schedule)}', {
+            'isActive': false,
+          });
         }
       }
       state.dirty = false;
       state.completed = _isCardCompleted(state);
+      return true;
     } catch (_) {
-      // Keep dirty state if saving fails.
+      return false;
     } finally {
       if (mounted) setState(() => state.saving = false);
     }
   }
 
+  Future<void> _saveAllBatchSetups() async {
+    if (_savingSetup) return;
+    final validationMessage = _validateBatchSetupStates(_states.values);
+    if (validationMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validationMessage)));
+      return;
+    }
+    setState(() => _savingSetup = true);
+    var ok = true;
+    for (final entry in _states.entries) {
+      entry.value.debounce?.cancel();
+      if (_hasAnySelectedDay(entry.value)) {
+        ok = await _saveBatch(entry.key) && ok;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _savingSetup = false;
+      _showSummary = ok;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Batch setup saved successfully.'
+              : 'Unable to save batch setup. Please try again.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final canSave = !_savingSetup && _states.values.any(_hasAnySelectedDay);
     return Scaffold(
       appBar: AppBar(title: const Text('Quick Batch Setup')),
       body: _loading
           ? const LoadingView(label: 'Loading batches')
           : _error != null
           ? InlineError(message: _error!, onRetry: _load)
+          : _states.isEmpty
+          ? const EmptyState(
+              icon: Icons.groups_2_outlined,
+              title: 'No active batches found',
+              subtitle:
+                  'Create or assign a batch first, then return here to set up its weekly sessions.',
+            )
+          : _showSummary
+          ? _QuickBatchSetupSummaryView(
+              states: _states.values.where(_hasAnySelectedDay).toList(),
+              onEdit: () => setState(() => _showSummary = false),
+              onConfirm: () => Navigator.maybePop(context),
+            )
           : ListView(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
-              children: _states.entries.map((entry) {
-                final batchId = entry.key;
-                final state = entry.value;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: BatchCard(
-                    batchName: state.batchName,
-                    completed: state.completed,
-                    dirty: state.dirty,
-                    saving: state.saving,
-                    sameForAllDays: state.sameForAllDays,
-                    onSameForAllChanged: (value) =>
-                        setState(() => state.sameForAllDays = value),
-                    schedule: state.schedule,
-                    onDayTap: (day) async {
-                      final next = await _pickDaySessionType(
-                        context,
-                        current: state.schedule[day],
-                      );
-                      if (next == null) return;
-                      final selected = next.isEmpty ? null : next;
-                      setState(() {
-                        if (state.sameForAllDays) {
-                          for (final d in _days) {
-                            state.schedule[d] = selected;
-                          }
-                        } else {
-                          state.schedule[day] = selected;
-                        }
-                        state.completed = _isCardCompleted(state);
-                      });
-                      _scheduleSave(batchId);
-                    },
-                  ),
-                );
-              }).toList(),
+              children:
+                  _states.entries.map<Widget>((entry) {
+                    final state = entry.value;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: BatchCard(
+                        batchName: state.batchName,
+                        completed: state.completed,
+                        dirty: state.dirty,
+                        saving: state.saving,
+                        sameForAllDays: state.sameForAllDays,
+                        onSameForAllChanged: (value) =>
+                            setState(() => state.sameForAllDays = value),
+                        schedule: state.schedule,
+                        onCellTap: (sessionType, day) async {
+                          setState(() {
+                            final targetDays = state.sameForAllDays
+                                ? _days
+                                : <String>[day];
+                            if (state.sameForAllDays) {
+                              for (final d in _days) {
+                                _toggleQuickSetupCell(
+                                  state.schedule,
+                                  sessionType,
+                                  d,
+                                );
+                              }
+                            } else {
+                              for (final d in targetDays) {
+                                _toggleQuickSetupCell(
+                                  state.schedule,
+                                  sessionType,
+                                  d,
+                                );
+                              }
+                            }
+                            state.completed = _isCardCompleted(state);
+                            state.dirty = true;
+                            _error = null;
+                          });
+                        },
+                      ),
+                    );
+                  }).toList()..addAll([
+                    const SizedBox(height: 8),
+                    SafeArea(
+                      top: false,
+                      child: FilledButton(
+                        onPressed: canSave ? _saveAllBatchSetups : null,
+                        child: _savingSetup
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Save Batch Setup'),
+                      ),
+                    ),
+                  ]),
             ),
     );
   }
@@ -3159,15 +3779,17 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
 
 class _BatchCardState {
   _BatchCardState({
+    required this.batchId,
     required this.batchName,
     required this.rawSchedules,
     required this.schedule,
     required this.completed,
   });
 
+  final String batchId;
   final String batchName;
   final List<Map<String, dynamic>> rawSchedules;
-  final Map<String, String?> schedule;
+  final Map<String, Set<String>> schedule;
   bool completed;
   bool dirty = false;
   bool saving = false;
@@ -3177,30 +3799,32 @@ class _BatchCardState {
   void dispose() => debounce?.cancel();
 
   factory _BatchCardState.fromApi(
+    String batchId,
     Map<String, dynamic> batch,
     List<Map<String, dynamic>> schedules,
   ) {
     final map = _emptyBatchSchedule();
     for (final item in schedules) {
       if (_read(item, ['isActive']) == false) continue;
-      final dayIndexes = _listAt(item, ['daysOfWeek'])
-          .map((e) => int.tryParse(e.toString()))
-          .whereType<int>()
-          .toList();
-      final type = (_read(item, ['sessionType'])?.toString().toLowerCase() ?? '');
+      final dayIndexes = _listAt(item, [
+        'daysOfWeek',
+      ]).map((e) => int.tryParse(e.toString())).whereType<int>().toList();
+      final type =
+          (_read(item, ['sessionType'])?.toString().toLowerCase() ?? '');
       for (final d in dayIndexes) {
         if (d < 0 || d > 6) continue;
         final day = _days[d];
         if (type == 'holiday') {
-          map[day] = 'holiday';
-          continue;
-        }
-        if (_sessionRows.contains(type)) {
-          map[day] = type;
+          map[day] = {'holiday'};
+        } else if (_sessionRows.contains(type)) {
+          map[day]!
+            ..clear()
+            ..add(type);
         }
       }
     }
     final state = _BatchCardState(
+      batchId: batchId,
       batchName: _labelOf(batch, ['name', 'batchName']),
       rawSchedules: schedules,
       schedule: map,
@@ -3230,6 +3854,7 @@ class PayoutDetailsEditScreen extends ConsumerWidget {
         return {
           'beneficiaryName': account['beneficiaryName'],
           'upiId': account['upiId'],
+          'bankName': account['bankName'],
           'accountNumber': account['accountNumber'],
           'ifscCode': account['ifscCode'],
         };
@@ -3237,11 +3862,14 @@ class PayoutDetailsEditScreen extends ConsumerWidget {
       fields: const [
         FormFieldSpec('beneficiaryName', 'Beneficiary name'),
         FormFieldSpec('upiId', 'UPI ID', required: true),
+        FormFieldSpec('bankName', 'Bank name'),
         FormFieldSpec('accountNumber', 'Account number'),
         FormFieldSpec('ifscCode', 'IFSC code'),
       ],
       onSubmit: (body) async {
         final upiId = body['upiId']?.toString() ?? '';
+        // TODO: Persist bankName when the existing business-details API supports it.
+        body.remove('bankName');
         final accountNumber = body['accountNumber']?.toString() ?? '';
         final ifscCode = body['ifscCode']?.toString().toUpperCase() ?? '';
         if (!_isValidUpi(upiId)) {
@@ -3296,7 +3924,6 @@ class ProfileActionPlaceholderScreen extends StatelessWidget {
   }
 }
 
-
 class AddStudentActionScreen extends ConsumerStatefulWidget {
   const AddStudentActionScreen({super.key});
 
@@ -3305,7 +3932,8 @@ class AddStudentActionScreen extends ConsumerStatefulWidget {
       _AddStudentActionScreenState();
 }
 
-class _AddStudentActionScreenState extends ConsumerState<AddStudentActionScreen> {
+class _AddStudentActionScreenState
+    extends ConsumerState<AddStudentActionScreen> {
   final _queryCtrl = TextEditingController();
   bool _loading = false;
   bool _adding = false;
@@ -3344,9 +3972,9 @@ class _AddStudentActionScreenState extends ConsumerState<AddStudentActionScreen>
       setState(() => _results = items);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_errorMessage(error))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_errorMessage(error))));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -3361,15 +3989,15 @@ class _AddStudentActionScreenState extends ConsumerState<AddStudentActionScreen>
         'playerProfileId': playerId,
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Student added')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Student added')));
       Navigator.of(context).pop();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_errorMessage(error))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_errorMessage(error))));
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -3431,6 +4059,7 @@ class _AddStudentActionScreenState extends ConsumerState<AddStudentActionScreen>
     );
   }
 }
+
 class EditCoachProfileScreen extends ConsumerWidget {
   const EditCoachProfileScreen({super.key});
 
@@ -3458,6 +4087,7 @@ class EditCoachProfileScreen extends ConsumerWidget {
         FormFieldSpec('city', 'City'),
         FormFieldSpec('state', 'State'),
         FormFieldSpec('experienceYears', 'Experience years', number: true),
+        FormFieldSpec('coachLevels', 'Coach levels comma separated'),
         FormFieldSpec('specializations', 'Specializations comma separated'),
         FormFieldSpec('certifications', 'Certifications comma separated'),
         FormFieldSpec(
@@ -3470,7 +4100,11 @@ class EditCoachProfileScreen extends ConsumerWidget {
         FormFieldSpec('accountNumber', 'Account number'),
         FormFieldSpec('ifscCode', 'IFSC code'),
       ],
-      normalize: _normalizeCommaFields(['specializations', 'certifications']),
+      normalize: _normalizeCommaFields([
+        'coachLevels',
+        'specializations',
+        'certifications',
+      ]),
       onSubmit: (body) async {
         final profileUpdate = Map<String, dynamic>.from(body);
         final upiId = body.remove('upiId')?.toString();
@@ -3523,6 +4157,9 @@ class EditCoachProfileScreen extends ConsumerWidget {
           if (profileUpdate['bio'] != null) 'bio': profileUpdate['bio'],
           if (profileUpdate['experienceYears'] != null)
             'experienceYears': profileUpdate['experienceYears'],
+          // TODO: Confirm backend persistence key for multi-select coach levels.
+          if (profileUpdate['coachLevels'] != null)
+            'coachLevels': profileUpdate['coachLevels'],
           if (profileUpdate['specializations'] != null)
             'specializations': profileUpdate['specializations'],
           if (profileUpdate['certifications'] != null)
@@ -3882,9 +4519,9 @@ class GreetingHeader extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 coachName,
-                style: Theme.of(
-                  context,
-                ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ],
           ),
@@ -3923,17 +4560,25 @@ class StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       constraints: const BoxConstraints(minHeight: 120),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: [
+            colorScheme.surface,
+            colorScheme.primary.withValues(alpha: 0.06),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -3952,6 +4597,173 @@ class StatCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(subtext),
+        ],
+      ),
+    );
+  }
+}
+
+class RevenueChartCard extends StatelessWidget {
+  const RevenueChartCard({
+    required this.enabled,
+    required this.monthlyRevenuePaise,
+    required this.series,
+    super.key,
+  });
+
+  final bool enabled;
+  final num monthlyRevenuePaise;
+  final List<Map<String, dynamic>> series;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            colorScheme.surface,
+            colorScheme.primary.withValues(alpha: 0.08),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Total Monthly Revenue',
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _rupees(monthlyRevenuePaise),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Revenue Comparison',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 10),
+          if (enabled)
+            SizedBox(height: 132, child: RevenueBarChart(series: series))
+          else
+            Text(
+              'Revenue chart will appear after your batches or 1-to-1 sessions start generating revenue.',
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class RevenueBarChart extends StatelessWidget {
+  const RevenueBarChart({required this.series, super.key});
+
+  final List<Map<String, dynamic>> series;
+
+  @override
+  Widget build(BuildContext context) {
+    final values = series.isEmpty
+        ? const <num>[0, 0, 0, 0, 0, 0]
+        : series.map((item) => item['amountPaise'] as num? ?? 0).toList();
+    final maxValue = values.fold<num>(
+      0,
+      (max, value) => value > max ? value : max,
+    );
+    final items = series.isEmpty ? _fallbackRevenueSeries() : series;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: items.map((item) {
+        final amount = item['amountPaise'] as num? ?? 0;
+        final heightFactor = maxValue <= 0
+            ? 0.12
+            : (amount / maxValue).clamp(0.12, 1.0);
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: FractionallySizedBox(
+                      heightFactor: heightFactor.toDouble(),
+                      widthFactor: 0.72,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  item['label']?.toString() ?? '',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class RevenueBreakdownPill extends StatelessWidget {
+  const RevenueBreakdownPill({
+    required this.label,
+    required this.value,
+    required this.icon,
+    super.key,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 12)),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
         ],
       ),
     );
@@ -4013,6 +4825,294 @@ class ProfileListItem extends StatelessWidget {
   }
 }
 
+class ProfileThemeListItem extends StatelessWidget {
+  const ProfileThemeListItem({
+    required this.icon,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      minTileHeight: 52,
+      leading: Icon(icon, color: selected ? colorScheme.primary : null),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          color: selected ? colorScheme.primary : null,
+        ),
+      ),
+      trailing: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        child: selected
+            ? const Icon(Icons.check_circle_rounded, key: ValueKey('selected'))
+            : const SizedBox(width: 24, key: ValueKey('empty')),
+      ),
+      selected: selected,
+      selectedTileColor: colorScheme.primary.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      onTap: onTap,
+    );
+  }
+}
+
+class CoachDetailHero extends StatelessWidget {
+  const CoachDetailHero({required this.details, super.key});
+
+  final Map<String, dynamic> details;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _safeDisplayValue(details['name'], fallback: 'Coach');
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            child: Text(
+              _avatarLetter(name),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _safeDisplayValue(
+                    details['email'] ?? details['phone'],
+                    fallback: 'Coach profile',
+                  ),
+                  style: TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onPrimary.withValues(alpha: 0.72),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ActivationStepCard extends StatelessWidget {
+  const ActivationStepCard({
+    required this.step,
+    required this.title,
+    required this.child,
+    super.key,
+  });
+
+  final String step;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 15,
+                child: Text(
+                  step,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class OptionChipWrap extends StatelessWidget {
+  const OptionChipWrap({
+    required this.options,
+    required this.selected,
+    required this.multiSelect,
+    required this.onChanged,
+    super.key,
+  });
+
+  final List<String> options;
+  final Set<String> selected;
+  final bool multiSelect;
+  final ValueChanged<Set<String>> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: options.map((option) {
+        final isSelected = selected.contains(option);
+        return FilterChip(
+          label: Text(option),
+          selected: isSelected,
+          showCheckmark: true,
+          onSelected: (_) {
+            final next = <String>{};
+            if (multiSelect) next.addAll(selected);
+            if (isSelected) {
+              next.remove(option);
+            } else {
+              if (!multiSelect) next.clear();
+              next.add(option);
+            }
+            onChanged(next);
+          },
+        );
+      }).toList(),
+    );
+  }
+}
+
+class DetailInfoCard extends StatelessWidget {
+  const DetailInfoCard({
+    required this.title,
+    this.rows = const [],
+    this.child,
+    super.key,
+  });
+
+  final String title;
+  final List<(String, String)> rows;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 12),
+          if (child != null)
+            child!
+          else
+            ...rows.map(
+              (row) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 122,
+                      child: Text(
+                        row.$1,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        row.$2,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class CoachLevelChip extends StatelessWidget {
+  const CoachLevelChip({required this.label, super.key});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      label: Text(label),
+      avatar: const Icon(Icons.verified_outlined, size: 17),
+      labelStyle: const TextStyle(fontWeight: FontWeight.w800),
+      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+    );
+  }
+}
+
 class ProfileSettingsSkeleton extends StatelessWidget {
   const ProfileSettingsSkeleton({super.key});
 
@@ -4035,6 +5135,53 @@ class ProfileSettingsSkeleton extends StatelessWidget {
   }
 }
 
+class _QuickBatchSetupSummaryView extends StatelessWidget {
+  const _QuickBatchSetupSummaryView({
+    required this.states,
+    required this.onEdit,
+    required this.onConfirm,
+  });
+
+  final List<_BatchCardState> states;
+  final VoidCallback onEdit;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        const PageHeader(
+          title: 'Your weekly batch setup is saved',
+          subtitle:
+              'Review the weekly plan below. You can edit it before moving to the next workflow.',
+        ),
+        ...states.map(
+          (state) => Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: DetailInfoCard(
+              title: state.batchName,
+              rows: _batchSetupSummaryRows(state),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: onEdit,
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Edit Setup'),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: onConfirm,
+          icon: const Icon(Icons.check_circle_outline_rounded),
+          label: const Text('Confirm Setup'),
+        ),
+      ],
+    );
+  }
+}
+
 class BatchCard extends StatelessWidget {
   const BatchCard({
     required this.batchName,
@@ -4044,7 +5191,7 @@ class BatchCard extends StatelessWidget {
     required this.sameForAllDays,
     required this.onSameForAllChanged,
     required this.schedule,
-    required this.onDayTap,
+    required this.onCellTap,
     super.key,
   });
 
@@ -4054,8 +5201,8 @@ class BatchCard extends StatelessWidget {
   final bool saving;
   final bool sameForAllDays;
   final ValueChanged<bool> onSameForAllChanged;
-  final Map<String, String?> schedule;
-  final Future<void> Function(String day) onDayTap;
+  final Map<String, Set<String>> schedule;
+  final Future<void> Function(String sessionType, String day) onCellTap;
 
   @override
   Widget build(BuildContext context) {
@@ -4079,8 +5226,20 @@ class BatchCard extends StatelessWidget {
                 ),
               ),
               StatusBadge(completed ? 'COMPLETED' : 'INCOMPLETE'),
-              if (saving) const Padding(padding: EdgeInsets.only(left: 8), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
-              if (!saving && dirty) const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.circle, size: 8)),
+              if (saving)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              if (!saving && dirty)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(Icons.circle, size: 8),
+                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -4090,7 +5249,7 @@ class BatchCard extends StatelessWidget {
             onChanged: onSameForAllChanged,
           ),
           const SizedBox(height: 10),
-          ScheduleGrid(schedule: schedule, onDayTap: onDayTap),
+          ScheduleGrid(schedule: schedule, onCellTap: onCellTap),
         ],
       ),
     );
@@ -4098,52 +5257,133 @@ class BatchCard extends StatelessWidget {
 }
 
 class ScheduleGrid extends StatelessWidget {
-  const ScheduleGrid({required this.schedule, required this.onDayTap, super.key});
+  const ScheduleGrid({
+    required this.schedule,
+    required this.onCellTap,
+    super.key,
+  });
 
-  final Map<String, String?> schedule;
-  final Future<void> Function(String day) onDayTap;
+  final Map<String, Set<String>> schedule;
+  final Future<void> Function(String sessionType, String day) onCellTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: _days.map((day) {
-        final value = schedule[day];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => onDayTap(day),
-            child: Ink(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SizedBox(width: 86),
+              ..._days.map(
+                (day) => SizedBox(
+                  width: 54,
+                  child: Center(
+                    child: Text(
+                      day,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ..._quickSetupRows.map(
+            (sessionType) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 children: [
                   SizedBox(
-                    width: 42,
-                    child: Text(day, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
+                    width: 86,
                     child: Text(
-                      value == null ? 'No session selected' : _titleCase(value),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: value == null
-                            ? Theme.of(context).colorScheme.onSurfaceVariant
-                            : Theme.of(context).colorScheme.onSurface,
-                      ),
+                      _titleCase(sessionType),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
-                  const Icon(Icons.chevron_right_rounded),
+                  ..._days.map((day) {
+                    final selections = schedule[day] ?? <String>{};
+                    final holidaySelected = selections.contains('holiday');
+                    final selected = selections.contains(sessionType);
+                    final disabled =
+                        holidaySelected && sessionType != 'holiday';
+                    return SizedBox(
+                      width: 54,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: QuickSetupCell(
+                          selected: selected,
+                          disabled: disabled,
+                          isHoliday: sessionType == 'holiday',
+                          onTap: () => onCellTap(sessionType, day),
+                        ),
+                      ),
+                    );
+                  }),
                 ],
               ),
             ),
           ),
-        );
-      }).toList(),
+        ],
+      ),
+    );
+  }
+}
+
+class QuickSetupCell extends StatelessWidget {
+  const QuickSetupCell({
+    required this.selected,
+    required this.disabled,
+    required this.isHoliday,
+    required this.onTap,
+    super.key,
+  });
+
+  final bool selected;
+  final bool disabled;
+  final bool isHoliday;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = disabled
+        ? colorScheme.surfaceContainerHighest
+        : selected
+        ? (isHoliday ? const Color(0xFFFFE2C6) : colorScheme.primary)
+        : colorScheme.surface;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: disabled ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 42,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? colorScheme.primary
+                : colorScheme.outlineVariant.withValues(alpha: 0.8),
+          ),
+        ),
+        child: Center(
+          child: selected
+              ? Icon(
+                  isHoliday ? Icons.beach_access_rounded : Icons.check_rounded,
+                  size: 18,
+                  color: isHoliday ? Colors.black87 : colorScheme.onPrimary,
+                )
+              : disabled
+              ? Icon(
+                  Icons.block_rounded,
+                  size: 16,
+                  color: colorScheme.onSurfaceVariant,
+                )
+              : const SizedBox.shrink(),
+        ),
+      ),
     );
   }
 }
@@ -4192,7 +5432,10 @@ class GridCell extends StatelessWidget {
               child: Text(
                 label,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -4248,7 +5491,11 @@ class _TimePickerModalState extends State<TimePickerModal> {
   Future<void> _pickEnd() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: _end ?? (_start ?? TimeOfDay.now()).replacing(hour: ((_start ?? TimeOfDay.now()).hour + 1) % 24),
+      initialTime:
+          _end ??
+          (_start ?? TimeOfDay.now()).replacing(
+            hour: ((_start ?? TimeOfDay.now()).hour + 1) % 24,
+          ),
     );
     if (picked != null && mounted) setState(() => _end = picked);
   }
@@ -4257,7 +5504,12 @@ class _TimePickerModalState extends State<TimePickerModal> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          12,
+          16,
+          16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4265,12 +5517,18 @@ class _TimePickerModalState extends State<TimePickerModal> {
             const PageHeader(title: 'Select Time'),
             OutlinedButton(
               onPressed: _pickStart,
-              child: Text(_start == null ? 'Start Time' : 'Start: ${_start!.format(context)}'),
+              child: Text(
+                _start == null
+                    ? 'Start Time'
+                    : 'Start: ${_start!.format(context)}',
+              ),
             ),
             const SizedBox(height: 8),
             OutlinedButton(
               onPressed: _pickEnd,
-              child: Text(_end == null ? 'End Time' : 'End: ${_end!.format(context)}'),
+              child: Text(
+                _end == null ? 'End Time' : 'End: ${_end!.format(context)}',
+              ),
             ),
             const SizedBox(height: 12),
             FilledButton(
@@ -4309,23 +5567,59 @@ class UpcomingSessionsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Upcoming Sessions',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
+            "Today's Upcoming Sessions",
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
-          if (items.isEmpty) const Text('No upcoming session today.')
+          if (items.isEmpty)
+            const Text('No upcoming session today.')
           else
-            ...items.take(3).map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '${item['batch']} · ${item['type']} — ${item['time']}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+            ...items
+                .take(3)
+                .map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        final sessionId = _idOf(item);
+                        if (sessionId.isNotEmpty && sessionId != '-') {
+                          context.push('/sessions/$sessionId');
+                        } else {
+                          context.push('/sessions/start');
+                        }
+                      },
+                      child: Ink(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.play_circle_outline_rounded),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '${item['batch']} - ${item['type']} - ${item['time']}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
         ],
       ),
     );
@@ -4596,6 +5890,231 @@ class ProfileActionTile extends StatelessWidget {
   }
 }
 
+Future<void> showCoachProfileDrawer(
+  BuildContext context,
+  WidgetRef ref,
+  Map<String, dynamic> summary,
+) {
+  final selectedTheme = _currentThemeMode(context);
+  final changeTheme = _themeSetterFromContext(context);
+  return showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Close profile drawer',
+    barrierColor: Colors.black.withValues(alpha: 0.28),
+    transitionDuration: const Duration(milliseconds: 260),
+    pageBuilder: (context, animation, secondaryAnimation) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: CoachProfileSideDrawer(
+          summary: summary,
+          ref: ref,
+          selectedTheme: selectedTheme,
+          onThemeChanged: changeTheme,
+        ),
+      );
+    },
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+      );
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(1, 0),
+          end: Offset.zero,
+        ).animate(curved),
+        child: FadeTransition(opacity: curved, child: child),
+      );
+    },
+  );
+}
+
+class CoachProfileSideDrawer extends StatelessWidget {
+  const CoachProfileSideDrawer({
+    required this.summary,
+    required this.ref,
+    required this.selectedTheme,
+    required this.onThemeChanged,
+    super.key,
+  });
+
+  final Map<String, dynamic> summary;
+  final WidgetRef ref;
+  final ThemeMode selectedTheme;
+  final ValueChanged<ThemeMode>? onThemeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final width = size.width < 420 ? size.width * 0.86 : 360.0;
+    final name = _safeDisplayValue(summary['name'], fallback: 'Coach');
+    final contact = _safeDisplayValue(
+      summary['email'] ?? summary['phone'],
+      fallback: 'Profile details',
+    );
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      borderRadius: const BorderRadius.horizontal(left: Radius.circular(28)),
+      child: SizedBox(
+        width: width,
+        height: double.infinity,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Close',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                CircleAvatar(
+                  radius: 42,
+                  child: Text(
+                    _avatarLetter(name),
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  name,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  contact,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                ProfileDrawerTile(
+                  icon: Icons.person_outline_rounded,
+                  label: 'View Profile',
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/profile/view');
+                  },
+                ),
+                ProfileDrawerTile(
+                  icon: Icons.account_balance_outlined,
+                  label: 'Banking',
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/profile/banking');
+                  },
+                ),
+                ProfileDrawerTile(
+                  icon: Icons.light_mode_rounded,
+                  label: 'Light Theme',
+                  selected: selectedTheme == ThemeMode.light,
+                  onTap: () => onThemeChanged?.call(ThemeMode.light),
+                ),
+                ProfileDrawerTile(
+                  icon: Icons.dark_mode_rounded,
+                  label: 'Dark Theme',
+                  selected: selectedTheme == ThemeMode.dark,
+                  onTap: () => onThemeChanged?.call(ThemeMode.dark),
+                ),
+                ProfileDrawerTile(
+                  icon: Icons.support_agent_rounded,
+                  label: 'Support',
+                  onTap: () {
+                    Navigator.pop(context);
+                    showSupportBottomSheet(context);
+                  },
+                ),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await _confirmSignOut(context, ref);
+                  },
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Sign Out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ProfileDrawerTile extends StatelessWidget {
+  const ProfileDrawerTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: selected
+                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.10)
+                : Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                color: selected ? Theme.of(context).colorScheme.primary : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                ),
+              ),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ProfileMenuButton extends StatelessWidget {
   const ProfileMenuButton({
     required this.onThemeToggle,
@@ -4624,11 +6143,11 @@ class ProfileMenuButton extends StatelessWidget {
           case 'support':
             showSupportBottomSheet(context);
             break;
-          case 'theme':
-            showThemeSelectorSheet(
-              context,
-              onThemeModeChanged: onThemeModeChanged,
-            );
+          case 'light':
+            onThemeModeChanged(ThemeMode.light);
+            break;
+          case 'dark':
+            onThemeModeChanged(ThemeMode.dark);
             break;
           case 'logout':
             onLogout();
@@ -4638,32 +6157,12 @@ class ProfileMenuButton extends StatelessWidget {
       itemBuilder: (context) => const [
         PopupMenuItem(value: 'profile', child: Text('View Profile')),
         PopupMenuItem(value: 'support', child: Text('Support')),
-        PopupMenuItem(value: 'theme', child: Text('Appearance')),
+        PopupMenuItem(value: 'light', child: Text('Light Theme')),
+        PopupMenuItem(value: 'dark', child: Text('Dark Theme')),
         PopupMenuItem(value: 'logout', child: Text('Sign Out')),
       ],
     );
   }
-}
-
-Future<void> showThemeSelectorSheet(
-  BuildContext context, {
-  ValueChanged<ThemeMode>? onThemeModeChanged,
-}) {
-  final app = context.findAncestorStateOfType<_SwingCoachAppState>();
-  return showModalBottomSheet<void>(
-    context: context,
-    builder: (context) => ThemeSelector(
-      selectedMode: app?._themeMode ?? ThemeMode.light,
-      onSelected: (mode) {
-        if (onThemeModeChanged != null) {
-          onThemeModeChanged(mode);
-        } else {
-          app?._setThemeMode(mode);
-        }
-        Navigator.pop(context);
-      },
-    ),
-  );
 }
 
 void showSupportBottomSheet(BuildContext context) {
@@ -4909,54 +6408,6 @@ class _AppLockSettingsSheetState extends State<AppLockSettingsSheet> {
                   ],
                 ],
               ),
-      ),
-    );
-  }
-}
-
-class ThemeSelector extends StatelessWidget {
-  const ThemeSelector({
-    required this.selectedMode,
-    required this.onSelected,
-    super.key,
-  });
-
-  final ThemeMode selectedMode;
-  final ValueChanged<ThemeMode> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const PageHeader(title: 'Appearance'),
-            RadioListTile<ThemeMode>(
-              contentPadding: EdgeInsets.zero,
-              value: ThemeMode.light,
-              groupValue: selectedMode,
-              onChanged: (value) => onSelected(value ?? ThemeMode.light),
-              title: const Text('Light Mode'),
-            ),
-            RadioListTile<ThemeMode>(
-              contentPadding: EdgeInsets.zero,
-              value: ThemeMode.dark,
-              groupValue: selectedMode,
-              onChanged: (value) => onSelected(value ?? ThemeMode.dark),
-              title: const Text('Dark Mode'),
-            ),
-            RadioListTile<ThemeMode>(
-              contentPadding: EdgeInsets.zero,
-              value: ThemeMode.system,
-              groupValue: selectedMode,
-              onChanged: (value) => onSelected(value ?? ThemeMode.system),
-              title: const Text('System Default'),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -6132,7 +7583,7 @@ List<Widget> _detailRows(Map<String, dynamic> item) {
     rows.add(
       ActionRow(
         title: _titleCase(entry.key),
-        subtitle: _displayValue(entry.key, entry.value),
+        subtitle: _detailDisplayValue(entry.key, entry.value),
       ),
     );
   }
@@ -6281,24 +7732,107 @@ String _formatLongDate(DateTime date) {
 }
 
 const _monthNames = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
   'Dec',
 ];
 
 const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _sessionRows = ['nets', 'fielding', 'fitness', 'drills'];
+const _quickSetupRows = ['nets', 'drills', 'fitness', 'fielding', 'holiday'];
+const _oneOnOneSpecializationOptions = [
+  'Batting',
+  'Bowling',
+  'Fielding',
+  'Wicket Keeping',
+  'All Rounder',
+  'Fitness',
+  'Conditioning',
+  'Match Strategy',
+  'Mental Training',
+  'Other',
+];
+const _experienceOptions = ['0-2 years', '2-5 years', '5+ years'];
+const _activationCoachLevelOptions = [
+  'BCCI Level',
+  'State Level',
+  'District Level',
+  'Division Level',
+  'Club Level',
+  'Academy Level',
+  'School/College Level',
+  'Private Coach',
+];
 
-Map<String, String?> _emptyBatchSchedule() => {for (final day in _days) day: null};
+Map<String, Set<String>> _emptyBatchSchedule() => {
+  for (final day in _days) day: <String>{},
+};
+
+bool _hasAnySelectedDay(_BatchCardState state) {
+  return state.schedule.values.any((selected) => selected.isNotEmpty);
+}
+
+String? _validateBatchSetupStates(Iterable<_BatchCardState> states) {
+  final list = states.toList();
+  if (list.isEmpty || !list.any(_hasAnySelectedDay)) {
+    return 'Please complete required batch details before saving.';
+  }
+  for (final state in list) {
+    for (final entry in state.schedule.entries) {
+      if (entry.value.length > 1) {
+        return 'Only one session type can be selected for ${entry.key}.';
+      }
+      final invalid = entry.value.where(
+        (type) => !_quickSetupRows.contains(type),
+      );
+      if (invalid.isNotEmpty) {
+        return 'Unable to save batch setup. Please try again.';
+      }
+    }
+  }
+  return null;
+}
+
+List<(String, String)> _batchSetupSummaryRows(_BatchCardState state) {
+  return _days
+      .where((day) => state.schedule[day]?.isNotEmpty == true)
+      .map((day) => (day, _titleCase(state.schedule[day]!.single)))
+      .toList();
+}
+
+void _toggleQuickSetupCell(
+  Map<String, Set<String>> schedule,
+  String sessionType,
+  String day,
+) {
+  final selections = schedule.putIfAbsent(day, () => <String>{});
+  if (sessionType == 'holiday') {
+    if (selections.contains('holiday')) {
+      selections.clear();
+    } else {
+      selections
+        ..clear()
+        ..add('holiday');
+    }
+    return;
+  }
+  if (selections.contains(sessionType)) {
+    selections.clear();
+  } else {
+    selections
+      ..clear()
+      ..add(sessionType);
+  }
+}
 
 String _shortDay(String day) => day.length > 3 ? day.substring(0, 3) : day;
 
@@ -6339,40 +7873,14 @@ int _minutesDiff(String start, String end) {
   return em > sm ? em - sm : 60;
 }
 
-Future<String?> _pickDaySessionType(
-  BuildContext context, {
-  required String? current,
-}) async {
-  return showModalBottomSheet<String?>(
-    context: context,
-    builder: (context) => SafeArea(
-      child: ListView(
-        shrinkWrap: true,
-        children: [
-          const ListTile(title: Text('Select session type')),
-          ...[..._sessionRows, 'holiday'].map(
-            (item) => ListTile(
-              title: Text(_titleCase(item)),
-              trailing: current == item ? const Icon(Icons.check_rounded) : null,
-              onTap: () => Navigator.of(context).pop(item),
-            ),
-          ),
-          ListTile(
-            title: const Text('Clear day'),
-            onTap: () => Navigator.of(context).pop(''),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
 Future<void> showBookOneToOneSheet(BuildContext context, WidgetRef ref) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (context) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.82,
         child: DynamicFormScreen(
@@ -6404,8 +7912,18 @@ Future<Map<String, dynamic>> _loadPaymentTab(WidgetRef ref) async {
   final month = _extractMonthlyRevenuePaise(earnings);
   final pending = txns
       .where((t) => _statusOf(t) == 'PENDING')
-      .fold<num>(0, (sum, t) => sum + (num.tryParse('${_read(t, ['amountPaise', 'amount']) ?? 0}') ?? 0));
-  return {'total': total, 'month': month, 'pending': pending, 'transactions': txns};
+      .fold<num>(
+        0,
+        (sum, t) =>
+            sum +
+            (num.tryParse('${_read(t, ['amountPaise', 'amount']) ?? 0}') ?? 0),
+      );
+  return {
+    'total': total,
+    'month': month,
+    'pending': pending,
+    'transactions': txns,
+  };
 }
 
 class _LiveSessionContext {
@@ -6440,31 +7958,43 @@ Future<_LiveSessionContext> _detectOrCreateLiveSession(WidgetRef ref) async {
   Map<String, dynamic>? active;
   for (final s in schedules) {
     if (_read(s, ['isActive']) == false) continue;
-    final days = _listAt(s, ['daysOfWeek']).map((e) => int.tryParse('$e')).whereType<int>();
+    final days = _listAt(s, [
+      'daysOfWeek',
+    ]).map((e) => int.tryParse('$e')).whereType<int>();
     if (!days.contains(dayIndex)) continue;
     final type = (_read(s, ['sessionType'])?.toString().toLowerCase() ?? '');
     if (type == 'holiday') continue;
     final start = _read(s, ['startTime'])?.toString() ?? '00:00';
     final p = start.split(':');
     if (p.length != 2) continue;
-    final startMins = (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
-    final duration = int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60;
+    final startMins =
+        (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+    final duration =
+        int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60;
     if (nowMinutes >= startMins && nowMinutes <= startMins + duration + 30) {
       active = s;
       break;
     }
   }
-  if (active == null) throw const ApiException('No session scheduled for this time.');
+  if (active == null)
+    throw const ApiException('No session scheduled for this time.');
   final batchId = _read(active, ['batchId'])?.toString() ?? '';
-  final sessionType = (_read(active, ['sessionType'])?.toString().toLowerCase() ?? 'drills');
+  final sessionType =
+      (_read(active, ['sessionType'])?.toString().toLowerCase() ?? 'drills');
   final batch = batches.firstWhere(
     (b) => _idOf(b) == batchId,
     orElse: () => {'id': batchId, 'name': 'Batch'},
   );
   final existing = sessions.where((s) {
     final sameBatch = _read(s, ['batchId'])?.toString() == batchId;
-    final sameType = (_read(s, ['sessionType'])?.toString().toLowerCase() ?? '') == sessionType;
-    final liveOrUpcoming = ['SCHEDULED', 'LIVE', 'UPCOMING'].contains(_statusOf(s));
+    final sameType =
+        (_read(s, ['sessionType'])?.toString().toLowerCase() ?? '') ==
+        sessionType;
+    final liveOrUpcoming = [
+      'SCHEDULED',
+      'LIVE',
+      'UPCOMING',
+    ].contains(_statusOf(s));
     return sameBatch && sameType && liveOrUpcoming && _isTodaySession(s);
   }).toList();
   Map<String, dynamic> session;
@@ -6480,7 +8010,12 @@ Future<_LiveSessionContext> _detectOrCreateLiveSession(WidgetRef ref) async {
     });
   }
   final start = _read(active, ['startTime'])?.toString() ?? '00:00';
-  final end = _addMinutesToTime(start, int.tryParse(_read(active, ['durationMins'])?.toString() ?? '60') ?? 60) ?? start;
+  final end =
+      _addMinutesToTime(
+        start,
+        int.tryParse(_read(active, ['durationMins'])?.toString() ?? '60') ?? 60,
+      ) ??
+      start;
   return _LiveSessionContext(
     sessionId: _idOf(session),
     sessionType: sessionType,
@@ -6505,7 +8040,8 @@ class CoachFeedbackFlowScreen extends StatefulWidget {
   final Future<void> Function(List<PlayerFeedbackPayload> rows) submitRows;
   final Future<void> Function() onSubmitted;
   @override
-  State<CoachFeedbackFlowScreen> createState() => _CoachFeedbackFlowScreenState();
+  State<CoachFeedbackFlowScreen> createState() =>
+      _CoachFeedbackFlowScreenState();
 }
 
 class _CoachFeedbackFlowScreenState extends State<CoachFeedbackFlowScreen> {
@@ -6536,30 +8072,39 @@ List<Map<String, dynamic>> _toSchedulePayloads(
   final defaults = _defaultTimingByType(preserveFrom);
   for (var d = 0; d < _days.length; d++) {
     final day = _days[d];
-    final dayType = state.schedule[day];
-    if (dayType == null || dayType.isEmpty) continue;
-    if (dayType == 'holiday') {
-      byType.putIfAbsent('holiday|holiday', () => {
-        'sessionType': 'HOLIDAY',
-        'daysOfWeek': <int>[],
-        'startTime': '00:00',
-        'durationMins': 60,
-        'batchId': batchId,
-      });
+    final dayTypes = state.schedule[day] ?? const <String>{};
+    if (dayTypes.isEmpty) continue;
+    if (dayTypes.contains('holiday')) {
+      byType.putIfAbsent(
+        'holiday|holiday',
+        () => {
+          'sessionType': 'HOLIDAY',
+          'daysOfWeek': <int>[],
+          'startTime': '00:00',
+          'durationMins': 60,
+          'batchId': batchId,
+        },
+      );
       (byType['holiday|holiday']!['daysOfWeek'] as List<int>).add(d);
       continue;
     }
-    final timing =
-        defaults[dayType] ?? const _ScheduleTiming(startTime: '06:00', durationMins: 60);
-    final key = '$dayType|${timing.startTime}|${timing.durationMins}';
-    byType.putIfAbsent(key, () => {
+    for (final dayType in dayTypes) {
+      final timing =
+          defaults[dayType] ??
+          const _ScheduleTiming(startTime: '06:00', durationMins: 60);
+      final key = '$dayType|${timing.startTime}|${timing.durationMins}';
+      byType.putIfAbsent(
+        key,
+        () => {
           'sessionType': dayType.toUpperCase(),
           'daysOfWeek': <int>[],
           'startTime': timing.startTime,
           'durationMins': timing.durationMins,
           'batchId': batchId,
-        });
-    (byType[key]!['daysOfWeek'] as List<int>).add(d);
+        },
+      );
+      (byType[key]!['daysOfWeek'] as List<int>).add(d);
+    }
   }
   return byType.values.toList();
 }
@@ -6570,13 +8115,18 @@ class _ScheduleTiming {
   final int durationMins;
 }
 
-Map<String, _ScheduleTiming> _defaultTimingByType(List<Map<String, dynamic>> schedules) {
+Map<String, _ScheduleTiming> _defaultTimingByType(
+  List<Map<String, dynamic>> schedules,
+) {
   final timing = <String, _ScheduleTiming>{};
   for (final schedule in schedules) {
-    final type = (_read(schedule, ['sessionType'])?.toString().toLowerCase() ?? '');
+    final type =
+        (_read(schedule, ['sessionType'])?.toString().toLowerCase() ?? '');
     if (!_sessionRows.contains(type)) continue;
     final start = _read(schedule, ['startTime'])?.toString();
-    final duration = int.tryParse(_read(schedule, ['durationMins'])?.toString() ?? '');
+    final duration = int.tryParse(
+      _read(schedule, ['durationMins'])?.toString() ?? '',
+    );
     if (start == null || duration == null || duration <= 0) continue;
     timing[type] = _ScheduleTiming(startTime: start, durationMins: duration);
   }
@@ -6584,18 +8134,20 @@ Map<String, _ScheduleTiming> _defaultTimingByType(List<Map<String, dynamic>> sch
 }
 
 String _scheduleKey(Map<String, dynamic> schedule) {
-  final type = (_read(schedule, ['sessionType'])?.toString() ?? '').toUpperCase();
-  final days = _listAt(schedule, ['daysOfWeek'])
-      .map((e) => int.tryParse(e.toString()) ?? -1)
-      .where((e) => e >= 0)
-      .toList()
-    ..sort();
+  final type = (_read(schedule, ['sessionType'])?.toString() ?? '')
+      .toUpperCase();
+  final days =
+      _listAt(schedule, ['daysOfWeek'])
+          .map((e) => int.tryParse(e.toString()) ?? -1)
+          .where((e) => e >= 0)
+          .toList()
+        ..sort();
   return '$type|${_read(schedule, ['startTime'])}|${_read(schedule, ['durationMins'])}|${days.join(',')}';
 }
 
 bool _isCardCompleted(_BatchCardState state) {
   for (final day in _days) {
-    if (state.schedule[day] == null) return false;
+    if (state.schedule[day]?.isNotEmpty != true) return false;
   }
   return true;
 }
@@ -6608,35 +8160,54 @@ bool _isBatchSetupComplete(
   for (final batch in batches) {
     final batchId = _idOf(batch);
     final state = _BatchCardState.fromApi(
+      batchId,
       batch,
-      schedules.where((s) => _read(s, ['batchId'])?.toString() == batchId).toList(),
+      schedules
+          .where((s) => _read(s, ['batchId'])?.toString() == batchId)
+          .toList(),
     );
     if (!state.completed) return false;
   }
   return true;
 }
 
-List<Map<String, dynamic>> _upcomingTimetableToday(List<Map<String, dynamic>> schedules) {
+List<Map<String, dynamic>> _upcomingTimetableToday(
+  List<Map<String, dynamic>> schedules,
+) {
   final now = DateTime.now();
   final todayIndex = (now.weekday % 7);
   final nowMinutes = now.hour * 60 + now.minute;
   final today = schedules.where((s) {
     if (_read(s, ['isActive']) == false) return false;
-    final days = _listAt(s, ['daysOfWeek']).map((e) => int.tryParse(e.toString())).whereType<int>();
+    final days = _listAt(s, [
+      'daysOfWeek',
+    ]).map((e) => int.tryParse(e.toString())).whereType<int>();
     if (!days.contains(todayIndex)) return false;
     final time = _read(s, ['startTime'])?.toString() ?? '00:00';
     final p = time.split(':');
     if (p.length != 2) return false;
     final mins = (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
-    return mins > nowMinutes && (_read(s, ['sessionType'])?.toString().toUpperCase() != 'HOLIDAY');
+    return mins > nowMinutes &&
+        (_read(s, ['sessionType'])?.toString().toUpperCase() != 'HOLIDAY');
   }).toList();
-  today.sort((a, b) => (_read(a, ['startTime'])?.toString() ?? '').compareTo(_read(b, ['startTime'])?.toString() ?? ''));
+  today.sort(
+    (a, b) => (_read(a, ['startTime'])?.toString() ?? '').compareTo(
+      _read(b, ['startTime'])?.toString() ?? '',
+    ),
+  );
   return today.map((s) {
     final start = _read(s, ['startTime'])?.toString() ?? '00:00';
-    final end = _addMinutesToTime(start, int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60) ?? start;
+    final end =
+        _addMinutesToTime(
+          start,
+          int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60,
+        ) ??
+        start;
     return {
       'batch': _labelOf(s, ['batchName', 'batch.name', 'batchId']),
-      'type': _titleCase((_read(s, ['sessionType'])?.toString().toLowerCase() ?? 'session')),
+      'type': _titleCase(
+        (_read(s, ['sessionType'])?.toString().toLowerCase() ?? 'session'),
+      ),
       'time': '${_to12h(start)} - ${_to12h(end)}',
     };
   }).toList();
@@ -6662,6 +8233,134 @@ String _avatarLetter(String name) {
   return cleaned[0].toUpperCase();
 }
 
+Map<String, dynamic> _profileSummary(Map<String, dynamic> profile) {
+  return {
+    'name': _labelOf(profile, ['name', 'coachName', 'fullName']),
+    'phone': _read(profile, ['phone', 'mobile', 'phoneNumber']),
+    'email': _read(profile, ['email']),
+  };
+}
+
+String _safeDisplayValue(Object? value, {String fallback = '-'}) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty || text == 'null' ? fallback : text;
+}
+
+bool _hasDisplayValue(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  return text.isNotEmpty && text != 'null';
+}
+
+String _listDisplayValue(List<String> values) {
+  return values.isEmpty ? 'Not added' : values.join(', ');
+}
+
+List<String> _profileSpecializations(Map<String, dynamic> details) {
+  final raw = _read(details, [
+    'specializations',
+    'expertiseTags',
+    'specialization',
+  ]);
+  if (raw is List) {
+    return raw
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+  final text = raw?.toString() ?? '';
+  return text
+      .split(',')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+}
+
+String _experienceLabel(Map<String, dynamic> details) {
+  final raw = _read(details, [
+    'coachingExperience',
+    'experience',
+    'experienceYears',
+  ]);
+  final text = raw?.toString().trim() ?? '';
+  if (text.isEmpty) return 'Not added';
+  if (RegExp(r'^\d+$').hasMatch(text)) return '$text years';
+  return text;
+}
+
+List<String> _coachLevelLabels(Map<String, dynamic> details) {
+  const supported = [
+    'BCCI Level',
+    'State Level',
+    'District Level',
+    'Division Level',
+    'Academy Level',
+    'School Level',
+    'Private Coach',
+    'Fitness Coach',
+    'Other',
+  ];
+  final raw = _read(details, ['coachLevels', 'coachLevel', 'levels']);
+  final values = raw is List
+      ? raw.map((e) => e.toString()).toList()
+      : raw == null
+      ? const <String>[]
+      : raw.toString().split(',');
+  final normalized = values.map((e) => e.trim()).where((e) => e.isNotEmpty).map(
+    (e) {
+      return supported.firstWhere(
+        (level) => level.toLowerCase() == e.toLowerCase(),
+        orElse: () => e,
+      );
+    },
+  ).toList();
+  return normalized.isEmpty ? const <String>[] : normalized;
+}
+
+ThemeMode _currentThemeMode(BuildContext context) {
+  return context
+          .findAncestorStateOfType<_CoachRouterAppState>()
+          ?.widget
+          .themeMode ??
+      ThemeMode.light;
+}
+
+void _setThemeFromContext(BuildContext context, ThemeMode mode) {
+  context
+      .findAncestorStateOfType<_CoachRouterAppState>()
+      ?.widget
+      .onThemeModeChanged(mode);
+}
+
+bool _isCurrentMonthBooking(Map<String, dynamic> item) {
+  final status = _statusOf(item);
+  if (status == 'CANCELLED' || status == 'REJECTED') return false;
+  final raw = _read(item, ['scheduledAt', 'startTime', 'date', 'createdAt']);
+  final date = raw == null
+      ? null
+      : DateTime.tryParse(raw.toString())?.toLocal();
+  if (date == null) return false;
+  final now = DateTime.now();
+  return date.year == now.year && date.month == now.month;
+}
+
+Map<String, dynamic> _oneOnOneSessionCard(Map<String, dynamic> item) {
+  final start = _read(item, ['scheduledAt', 'startTime', 'date'])?.toString();
+  return {
+    ...item,
+    'id': '',
+    'batch': '1-to-1',
+    'type': _labelOf(item, ['sessionType', 'title', 'playerProfile.name']),
+    'time': start == null ? 'Today' : _formatDate(start),
+  };
+}
+
+ValueChanged<ThemeMode>? _themeSetterFromContext(BuildContext context) {
+  return context
+      .findAncestorStateOfType<_CoachRouterAppState>()
+      ?.widget
+      .onThemeModeChanged;
+}
+
 num _extractMonthlyRevenuePaise(Map<String, dynamic> earnings) {
   final months = _listAt(earnings, ['monthlyBreakdown', 'months']);
   final now = DateTime.now();
@@ -6680,6 +8379,44 @@ num _extractMonthlyRevenuePaise(Map<String, dynamic> earnings) {
   return parsed ?? 0;
 }
 
+List<Map<String, dynamic>> _revenueTrend(Map<String, dynamic> earnings) {
+  final months = _listAt(earnings, [
+    'monthlyBreakdown',
+    'months',
+  ]).cast<Map<String, dynamic>>();
+  if (months.isNotEmpty) {
+    final recent = months.length > 6
+        ? months.sublist(months.length - 6)
+        : months;
+    return recent.map((month) {
+      final label = _read(month, ['monthName', 'month'])?.toString() ?? '';
+      final amount = _read(month, ['amountPaise', 'totalAmountPaise']) ?? 0;
+      return {
+        'label': label.length > 3 ? label.substring(0, 3) : label,
+        'amountPaise': amount is num ? amount : num.tryParse('$amount') ?? 0,
+      };
+    }).toList();
+  }
+  final current = _extractMonthlyRevenuePaise(earnings);
+  if (current > 0) {
+    final fallback = _fallbackRevenueSeries();
+    fallback[fallback.length - 1] = {
+      'label': _monthNames[DateTime.now().month - 1],
+      'amountPaise': current,
+    };
+    return fallback;
+  }
+  return const <Map<String, dynamic>>[];
+}
+
+List<Map<String, dynamic>> _fallbackRevenueSeries() {
+  final now = DateTime.now();
+  return List.generate(6, (index) {
+    final monthIndex = (now.month - 6 + index) % 12;
+    return {'label': _monthNames[monthIndex], 'amountPaise': 0};
+  });
+}
+
 bool _isValidUpi(String value) {
   return RegExp(r'^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$').hasMatch(value);
 }
@@ -6689,7 +8426,8 @@ bool _hasCompletedUpiSetupFromProfile(
   Map<String, dynamic> payload,
 ) {
   final upiId = account['upiId'] ?? account['upi_id'] ?? payload['upi_id'];
-  final paymentDetails = payload['payment_details'] ?? payload['paymentDetails'];
+  final paymentDetails =
+      payload['payment_details'] ?? payload['paymentDetails'];
   final hasUpiId = upiId?.toString().trim().isNotEmpty == true;
   final hasPaymentDetails = paymentDetails is Map && paymentDetails.isNotEmpty;
   return hasUpiId || hasPaymentDetails;
@@ -6764,7 +8502,7 @@ bool _profileUpdatePersisted(
   return true;
 }
 
-String _displayValue(String key, dynamic value) {
+String _detailDisplayValue(String key, dynamic value) {
   if (value == null) return '';
   if (key.toLowerCase().contains('paise')) return _rupees(value);
   if (key.toLowerCase().contains('rate') ||
@@ -7417,8 +9155,7 @@ class AuthSession {
       phone: phone ?? this.phone,
       needsCoachRegistration:
           needsCoachRegistration ?? this.needsCoachRegistration,
-      hasCompletedUpiSetup:
-          hasCompletedUpiSetup ?? this.hasCompletedUpiSetup,
+      hasCompletedUpiSetup: hasCompletedUpiSetup ?? this.hasCompletedUpiSetup,
       refreshToken: refreshToken ?? this.refreshToken,
       userName: userName ?? this.userName,
     );
@@ -7439,6 +9176,3 @@ abstract final class AppPalette {
   static const cleanWhite = Color(0xFFFFFFFF);
   static const logoBlack = Color(0xFF000000);
 }
-
-
-
