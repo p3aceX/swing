@@ -4,8 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../shared/widgets.dart';
 import 'batch_provider.dart';
 
-const _kNavy  = Color(0xFF071B3D);
-const _kIvory = Color(0xFFF4F2EB);
+const _kNavy = Color(0xFF071B3D);
 
 class BatchListScreen extends ConsumerWidget {
   const BatchListScreen({super.key});
@@ -15,20 +14,23 @@ class BatchListScreen extends ConsumerWidget {
     final state = ref.watch(batchesProvider);
 
     return Scaffold(
-      backgroundColor: _kIvory,
-      body: state.when(
-        loading: loadingBody,
-        error: (e, _) => errorBody(e, () => ref.invalidate(batchesProvider)),
-        data: (batches) => batches.isEmpty
-            ? _EmptyBatches(onAdd: () => context.push('/batches/new'))
-            : RefreshIndicator(
-                onRefresh: () async => ref.invalidate(batchesProvider),
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-                  itemCount: batches.length,
-                  itemBuilder: (_, i) => _BatchCard(batch: batches[i]),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: SafeArea(
+        bottom: false,
+        child: state.when(
+          loading: loadingBody,
+          error: (e, _) => errorBody(e, () => ref.invalidate(batchesProvider)),
+          data: (batches) => batches.isEmpty
+              ? _EmptyBatches(onAdd: () => context.push('/batches/new'))
+              : RefreshIndicator(
+                  onRefresh: () async => ref.invalidate(batchesProvider),
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+                    itemCount: batches.length,
+                    itemBuilder: (_, i) => _BatchCard(batch: batches[i]),
+                  ),
                 ),
-              ),
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         heroTag: null,
@@ -40,25 +42,48 @@ class BatchListScreen extends ConsumerWidget {
   }
 }
 
-class _BatchCard extends StatelessWidget {
+class _BatchCard extends ConsumerWidget {
   final Map<String, dynamic> batch;
   const _BatchCard({required this.batch});
 
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final name = batch['name'] as String? ?? 'Batch';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Batch'),
+        content: Text('Delete "$name"? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(batchesProvider.notifier).deleteBatch(batch['id'] as String);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final name     = batch['name']   as String? ?? 'Batch';
     final ageGroup = batch['ageGroup'] as String?;
     final enrolled = batch['_count']?['enrollments'] ?? batch['studentCount'] ?? 0;
     final maxStuds = batch['maxStudents'] as int? ?? 0;
     final isActive = batch['isActive'] as bool? ?? true;
+    final cs = Theme.of(context).colorScheme;
 
     return GestureDetector(
       onTap: () => context.push('/batches/${batch['id']}'),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: cs.surface,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
@@ -81,8 +106,8 @@ class _BatchCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(name,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 15, color: _kNavy)),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 15, color: cs.onSurface)),
                       ),
                       if (!isActive)
                         Container(
@@ -114,7 +139,20 @@ class _BatchCard extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey),
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert_rounded, size: 20, color: Colors.grey.shade500),
+              onSelected: (v) {
+                if (v == 'edit') context.push('/batches/${batch['id']}/edit', extra: batch);
+                if (v == 'delete') _confirmDelete(context, ref);
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'edit',   child: Text('Edit')),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Delete', style: TextStyle(color: Colors.red)),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -156,8 +194,8 @@ class _EmptyBatches extends StatelessWidget {
           children: [
             const Icon(Icons.groups_outlined, size: 40, color: Color(0xFF0057C8)),
             const SizedBox(height: 16),
-            const Text('No batches yet',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _kNavy)),
+            Text('No batches yet',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 8),
             const Text('Create your first batch to start organising students by group.',
                 style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500, height: 1.5)),

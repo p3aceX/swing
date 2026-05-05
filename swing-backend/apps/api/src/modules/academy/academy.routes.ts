@@ -46,8 +46,20 @@ export async function academyRoutes(app: FastifyInstance) {
   app.post('/:id/coaches', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
-    const body = z.object({ phone: z.string().min(10), name: z.string().optional(), isHeadCoach: z.boolean().default(false) }).parse(request.body)
-    return reply.code(201).send({ success: true, data: await svc.inviteCoach(id, user.userId, body.phone, body.isHeadCoach, body.name) })
+    const body = z.object({
+      phone: z.string().min(10),
+      name: z.string().optional(),
+      isHeadCoach: z.boolean().default(false),
+      role: z.string().optional(),
+      salaryPaise: z.number().int().nonnegative().optional(),
+    }).parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.inviteCoach(id, user.userId, body.phone, body.isHeadCoach, body.name, body.role, body.salaryPaise) })
+  })
+
+  app.get('/:id/coaches/:coachLinkId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, coachLinkId } = request.params as { id: string; coachLinkId: string }
+    return reply.send({ success: true, data: await svc.getCoachDetail(id, user.userId, coachLinkId) })
   })
 
   app.patch('/:id/coaches/:coachLinkId', auth, async (request, reply) => {
@@ -56,6 +68,8 @@ export async function academyRoutes(app: FastifyInstance) {
     const body = z.object({
       isHeadCoach: z.boolean().optional(),
       isActive: z.boolean().optional(),
+      role: z.string().optional(),
+      salaryPaise: z.number().int().nonnegative().optional(),
     }).parse(request.body)
     return reply.send({ success: true, data: await svc.updateCoachLink(id, user.userId, coachLinkId, body) })
   })
@@ -93,6 +107,10 @@ export async function academyRoutes(app: FastifyInstance) {
   app.get('/:id/coaches', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
+    const { phone } = (request.query as any)
+    if (phone) {
+      return reply.send({ success: true, data: await svc.searchCoachByPhone(id, user.userId, phone) })
+    }
     return reply.send({ success: true, data: await svc.listCoaches(id, user.userId) })
   })
 
@@ -172,7 +190,7 @@ export async function academyRoutes(app: FastifyInstance) {
   app.post('/:id/fee-structures', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
-    const body = z.object({ name: z.string(), amountPaise: z.number().positive(), frequency: z.enum(['MONTHLY', 'QUARTERLY', 'ANNUAL', 'ONE_TIME']), batchId: z.string().optional(), dueDayOfMonth: z.number().min(1).max(28).default(1) }).parse(request.body)
+    const body = z.object({ name: z.string(), amountPaise: z.number().positive(), frequency: z.enum(['MONTHLY', 'QUARTERLY', 'ANNUAL', 'ONE_TIME', 'REGISTRATION']), batchId: z.string().optional(), dueDayOfMonth: z.number().min(1).max(28).default(1) }).parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.createFeeStructure(id, user.userId, body) })
   })
 
@@ -321,6 +339,13 @@ export async function academyRoutes(app: FastifyInstance) {
     const { id, announcementId } = request.params as { id: string; announcementId: string }
     await svc.deleteAnnouncement(id, user.userId, announcementId)
     return reply.send({ success: true, data: { message: 'Announcement deleted' } })
+  })
+
+  app.delete('/:id/batches/:batchId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, batchId } = request.params as { id: string; batchId: string }
+    await svc.deleteBatch(id, user.userId, batchId)
+    return reply.send({ success: true })
   })
 
   app.patch('/:id/batches/:batchId', auth, async (request, reply) => {

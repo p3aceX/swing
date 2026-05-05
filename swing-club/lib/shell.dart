@@ -26,7 +26,7 @@ class AppShell extends ConsumerWidget {
     _Tab(Icons.groups_outlined,         Icons.groups_rounded,          'Batches'),
     _Tab(Icons.people_outline_rounded,  Icons.people_rounded,          'Students'),
     _Tab(Icons.sports_cricket_outlined, Icons.sports_cricket_rounded,  'Play'),
-    _Tab(Icons.payments_outlined,       Icons.payments_rounded,        'Payments'),
+    _Tab(Icons.payments_outlined,       Icons.payments_rounded,        'Finance'),
   ];
 
   @override
@@ -52,7 +52,7 @@ class AppShell extends ConsumerWidget {
                 : h < 21
                     ? 'Good evening'
                     : 'Good night';
-    final homeNavTitle = '$greeting, $academyName';
+
     final userName = settingsAsync.maybeWhen(
       data: (d) => ((d['user'] as Map?)?.cast<String, dynamic>() ?? {})['name'] as String? ?? '',
       orElse: () => '',
@@ -68,17 +68,27 @@ class AppShell extends ConsumerWidget {
     final userInitial = userName.isNotEmpty ? userName[0].toUpperCase() : '?';
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: bgColor,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      ),
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        appBar: _AppBar(
-          currentIndex: idx,
-          homeNavTitle: homeNavTitle,
-          userInitial: userInitial,
-          onMenuTap: () => scaffoldKey.currentState?.openEndDrawer(),
-        ),
+        appBar: idx == 0
+            ? _AppBar(
+                greeting: greeting,
+                academyName: academyName,
+                userInitial: userInitial,
+                onMenuTap: () => scaffoldKey.currentState?.openEndDrawer(),
+              )
+            : null,
         endDrawer: _SideDrawer(
           userName: userName,
           userPhone: userPhone,
@@ -99,61 +109,85 @@ class AppShell extends ConsumerWidget {
 // ── App bar ───────────────────────────────────────────────────────────────────
 
 class _AppBar extends StatelessWidget implements PreferredSizeWidget {
-  final int currentIndex;
-  final String homeNavTitle;
+  final String greeting;
+  final String academyName;
   final String userInitial;
   final VoidCallback onMenuTap;
 
   const _AppBar({
-    required this.currentIndex,
-    required this.homeNavTitle,
+    required this.greeting,
+    required this.academyName,
     required this.userInitial,
     required this.onMenuTap,
   });
 
-  static const _titles = ['', 'Batches', 'Students', 'Play', 'Payments'];
-
   @override
-  Size get preferredSize => const Size.fromHeight(56);
+  Size get preferredSize => const Size.fromHeight(76);
+
+  Widget _trailingIcons(BuildContext context, ColorScheme cs) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.calendar_month_outlined,
+          color: cs.onSurface.withValues(alpha: 0.6), size: 22),
+      const SizedBox(width: 14),
+      Icon(Icons.notifications_none_rounded,
+          color: cs.onSurface.withValues(alpha: 0.6), size: 22),
+      const SizedBox(width: 12),
+      GestureDetector(
+        onTap: onMenuTap,
+        child: CircleAvatar(
+          radius: 18,
+          backgroundColor: cs.primary,
+          child: Text(userInitial,
+              style: TextStyle(color: cs.onPrimary, fontSize: 14, fontWeight: FontWeight.w800)),
+        ),
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
-    final title = currentIndex == 0 ? homeNavTitle : _titles[currentIndex];
     final cs = Theme.of(context).colorScheme;
+    final top = MediaQuery.of(context).padding.top;
+
     return Container(
-      height: preferredSize.height + MediaQuery.of(context).padding.top,
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(bottom: BorderSide(color: cs.outlineVariant, width: 0.5)),
-      ),
+      height: preferredSize.height + top,
+      padding: EdgeInsets.only(top: top),
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.2,
-                ),
-              ),
+              child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          greeting,
+                          style: TextStyle(
+                            color: cs.onSurface.withValues(alpha: 0.55),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          academyName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: cs.onSurface,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ],
+                    ),
             ),
-            GestureDetector(
-              onTap: onMenuTap,
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: cs.primary,
-                child: Text(userInitial,
-                    style: TextStyle(color: cs.onPrimary, fontSize: 14, fontWeight: FontWeight.w800)),
-              ),
-            ),
+            _trailingIcons(context, cs),
           ],
         ),
       ),

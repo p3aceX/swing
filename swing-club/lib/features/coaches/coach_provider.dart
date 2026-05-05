@@ -31,3 +31,11 @@ class CoachesNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
 final coachesProvider =
     AsyncNotifierProvider<CoachesNotifier, List<Map<String, dynamic>>>(CoachesNotifier.new);
+
+final coachDetailProvider =
+    FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, coachLinkId) async {
+  final s = await ref.watch(academyProvider.future);
+  final res = await ref.read(apiClientProvider)
+      .get('/academy/${s.academyId}/coaches/$coachLinkId');
+  return Map<String, dynamic>.from(res.data['data'] as Map);
+});

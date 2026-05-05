@@ -32,6 +32,7 @@ export class AcademyService {
         name: true,
         amountPaise: true,
         frequency: true,
+        dueDayOfMonth: true,
         batchId: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -99,7 +100,7 @@ export class AcademyService {
     return prisma.academy.update({ where: { id: academyId }, data: update })
   }
 
-  async inviteCoach(academyId: string, userId: string, phone: string, isHeadCoach: boolean, name?: string) {
+  async inviteCoach(academyId: string, userId: string, phone: string, isHeadCoach: boolean, name?: string, role?: string, salaryPaise?: number) {
     await this.verifyOwnership(academyId, userId)
     const normalizedPhone = normalizePhone(phone)
     let coachUser = await prisma.user.findUnique({ where: { phone: normalizedPhone } })
@@ -126,17 +127,30 @@ export class AcademyService {
     let link = existing
     if (existing) {
       if (!existing.isActive) {
-        link = await prisma.academyCoach.update({ where: { id: existing.id }, data: { isActive: true, isHeadCoach } })
+        link = await prisma.academyCoach.update({ where: { id: existing.id }, data: { isActive: true, isHeadCoach, ...(role !== undefined ? { role } : {}), ...(salaryPaise !== undefined ? { salaryPaise } : {}) } })
       }
-      // already active — return existing link with profile info
     } else {
-      link = await prisma.academyCoach.create({ data: { academyId, coachId: coachProfile.id, isHeadCoach } })
+      link = await prisma.academyCoach.create({ data: { academyId, coachId: coachProfile.id, isHeadCoach, role, salaryPaise } })
       await prisma.academy.update({ where: { id: academyId }, data: { totalCoaches: { increment: 1 } } })
     }
     return { ...link, coachProfileId: coachProfile.id, userName: coachUser.name, isNew }
   }
 
-  async updateCoachLink(academyId: string, userId: string, coachLinkId: string, data: { isHeadCoach?: boolean; isActive?: boolean }) {
+  async getCoachDetail(academyId: string, userId: string, coachLinkId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const link = await prisma.academyCoach.findFirst({
+      where: { id: coachLinkId, academyId },
+      include: { coach: { include: { user: { select: { name: true, phone: true, avatarUrl: true } } } } },
+    })
+    if (!link) throw Errors.notFound('Coach')
+    return {
+      ...link,
+      coachProfileId: link.coachId,
+      user: link.coach.user,
+    }
+  }
+
+  async updateCoachLink(academyId: string, userId: string, coachLinkId: string, data: { isHeadCoach?: boolean; isActive?: boolean; role?: string; salaryPaise?: number }) {
     await this.verifyOwnership(academyId, userId)
     const link = await prisma.academyCoach.findFirst({ where: { id: coachLinkId, academyId } })
     if (!link) throw new AppError('NOT_FOUND', 'Coach link not found', 404)
@@ -145,13 +159,15 @@ export class AcademyService {
       data: {
         ...(data.isHeadCoach !== undefined ? { isHeadCoach: data.isHeadCoach } : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+        ...(data.role !== undefined ? { role: data.role } : {}),
+        ...(data.salaryPaise !== undefined ? { salaryPaise: data.salaryPaise } : {}),
       },
       include: { coach: { include: { user: { select: { name: true, avatarUrl: true, phone: true } } } } },
     })
     if (data.isActive === false) {
       await prisma.academy.update({ where: { id: academyId }, data: { totalCoaches: { decrement: 1 } } })
     }
-    return updated
+    return { ...updated, coachProfileId: updated.coachId, user: updated.coach.user }
   }
 
   async addCoachToBatch(academyId: string, userId: string, batchId: string, coachId: string) {
@@ -255,6 +271,20 @@ export class AcademyService {
     })
   }
 
+  async searchCoachByPhone(academyId: string, userId: string, phone: string) {
+    await this.verifyOwnership(academyId, userId)
+    const normalizedPhone = normalizePhone(phone)
+    const coachUser = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+      include: { coachProfile: true },
+    })
+    if (!coachUser || !coachUser.coachProfile) return null
+    return {
+      userName: coachUser.name,
+      coachProfileId: coachUser.coachProfile.id,
+    }
+  }
+
   async listCoaches(academyId: string, userId: string) {
     await this.verifyOwnership(academyId, userId)
     const rows = await prisma.academyCoach.findMany({
@@ -270,6 +300,17 @@ export class AcademyService {
       coachProfileId: r.coachId,
       user: r.coach.user,
     }))
+  }
+
+  async deleteBatch(academyId: string, userId: string, batchId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const batch = await prisma.batch.findFirst({ where: { id: batchId, academyId } })
+    if (!batch) throw Errors.notFound('Batch')
+    await prisma.batchSchedule.updateMany({ where: { batchId }, data: { isActive: false } })
+    await prisma.academyEnrollment.updateMany({ where: { batchId }, data: { isActive: false } })
+    await prisma.feeStructure.updateMany({ where: { batchId, academyId }, data: { isActive: false } })
+    await prisma.batch.delete({ where: { id: batchId } })
+    await prisma.academy.update({ where: { id: academyId }, data: { totalBatches: { decrement: 1 } } })
   }
 
   async updateBatch(academyId: string, userId: string, batchId: string, data: any) {

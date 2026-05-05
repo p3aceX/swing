@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'providers/auth_provider.dart';
 import 'shell.dart';
+import 'features/home/home_provider.dart';
 import 'features/auth/splash_screen.dart';
 import 'features/auth/phone_screen.dart';
 import 'features/auth/name_screen.dart';
@@ -41,7 +42,7 @@ class _RouterNotifier extends ChangeNotifier {
     final path   = state.uri.path;
     final onAuth = _authPaths.contains(path);
     if (!isAuth && !onAuth) return '/phone';
-    if (isAuth && (path == '/phone' || path == '/splash')) return '/home';
+    if (isAuth && path == '/phone') return '/home';
     return null;
   }
 }
@@ -119,7 +120,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/play/create-team',
-        builder: (_, _) => const host.HostCreateTeamScreen(),
+        builder: (ctx, _) {
+          final container = ProviderScope.containerOf(ctx);
+          final homeAsync = container.read(homeProvider);
+          final academyId = homeAsync.maybeWhen(
+            data: (d) => d.academy['id'] as String?,
+            orElse: () => null,
+          );
+          return host.HostCreateTeamScreen(
+            academyId: academyId,
+            onCreated: (teamId) {
+              // Pop the create screen then navigate to the new team's detail
+              GoRouter.of(ctx).pop();
+              GoRouter.of(ctx).push('/play/teams/${Uri.encodeComponent(teamId)}');
+            },
+          );
+        },
       ),
       GoRoute(
         path: '/play/teams/:teamId',
@@ -190,7 +206,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/announcements',
         builder: (_, _) => const AnnouncementListScreen(),
         routes: [
-          GoRoute(path: 'create', builder: (_, _) => const CreateAnnouncementScreen()),
+          GoRoute(path: 'create', builder: (_, state) => CreateAnnouncementScreen(existing: state.extra as Map<String, dynamic>?)),
         ],
       ),
       GoRoute(path: '/inventory', builder: (_, _) => const InventoryListScreen()),

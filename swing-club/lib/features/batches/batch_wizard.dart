@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../shared/widgets.dart';
 import 'batch_provider.dart';
+import '../coaches/coach_provider.dart';
 
 const _kNavy  = Color(0xFF071B3D);
 const _kBlue  = Color(0xFF0057C8);
@@ -56,9 +57,9 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
   final List<String> _deletedSlotIds = [];
 
   // Step 3 — Fees
+  final _regFeeCtrl    = TextEditingController();
   final _monthlyCtrl   = TextEditingController();
   final _yearlyCtrl    = TextEditingController();
-  final _trialFeeCtrl  = TextEditingController();
   final _trialDaysCtrl = TextEditingController();
   int _dueDay = 1;
 
@@ -75,7 +76,11 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
     super.initState();
     if (widget.existing != null) _prefillFromExisting(widget.existing!);
     if (_isEdit) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _loadSchedules());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadSchedules();
+        _loadCoaches();
+        _loadFees();
+      });
     }
   }
 
@@ -106,8 +111,8 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
         _dueDay = (f['dueDayOfMonth'] as num?)?.toInt() ?? 1;
       } else if (freq == 'ANNUAL') {
         _yearlyCtrl.text = '$amount';
-      } else if (freq == 'ONE_TIME') {
-        _trialFeeCtrl.text = '$amount';
+      } else if (freq == 'REGISTRATION') {
+        _regFeeCtrl.text = '$amount';
       }
     }
   }
@@ -133,12 +138,58 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
     } catch (_) {}
   }
 
+  Future<void> _loadCoaches() async {
+    try {
+      final batch = await ref.read(batchDetailProvider(widget.batchId!).future);
+      if (!mounted) return;
+      final rawCoaches = (batch['coaches'] as List? ?? []).cast<Map<String, dynamic>>();
+      if (rawCoaches.isEmpty) return;
+      setState(() {
+        _coaches.clear();
+        for (final c in rawCoaches) {
+          final user = (c['user'] as Map?)?.cast<String, dynamic>() ?? {};
+          _coaches.add(_CoachEntry(
+            phone:          user['phone'] as String? ?? '',
+            name:           user['name']  as String? ?? '',
+            role:           c['isHeadCoach'] == true ? 'Head Coach' : 'Batting Coach',
+            isExisting:     true,
+            coachProfileId: c['coachProfileId'] as String? ?? c['id'] as String?,
+          ));
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadFees() async {
+    try {
+      final batch = await ref.read(batchDetailProvider(widget.batchId!).future);
+      if (!mounted) return;
+      final fees = (batch['feeStructures'] as List? ?? []).cast<Map<String, dynamic>>();
+      if (fees.isEmpty) return;
+      setState(() {
+        for (final f in fees) {
+          final freq   = f['frequency'] as String? ?? '';
+          final amount = ((f['amountPaise'] as num? ?? 0) / 100).round();
+          if (freq == 'MONTHLY') {
+            _monthlyCtrl.text = '$amount';
+            _dueDay = (f['dueDayOfMonth'] as num?)?.toInt() ?? 1;
+          } else if (freq == 'ANNUAL') {
+            _yearlyCtrl.text = '$amount';
+          } else if (freq == 'REGISTRATION') {
+            _regFeeCtrl.text = '$amount';
+          }
+        }
+      });
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _page.dispose();
     _nameCtrl.dispose();    _descCtrl.dispose();
+    _regFeeCtrl.dispose();
     _monthlyCtrl.dispose(); _yearlyCtrl.dispose();
-    _trialFeeCtrl.dispose(); _trialDaysCtrl.dispose();
+    _trialDaysCtrl.dispose();
     super.dispose();
   }
 
@@ -170,7 +221,8 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
       } else {
         await _finishCreate();
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[Batch] finish error: $e\n$st');
       if (mounted) showSnack(context, 'Failed: ${e.toString().replaceAll('Exception:', '').trim()}');
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -178,39 +230,44 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
   }
 
   Future<void> _finishCreate() async {
-    final batchId = await ref.read(batchesProvider.notifier).create({
+    final batchPayload = {
       'name':        _nameCtrl.text.trim(),
       'sport':       'CRICKET',
       if (_ageGroup != null) 'ageGroup': _ageGroup,
       'maxStudents': _maxStudents,
       if (_descCtrl.text.trim().isNotEmpty) 'description': _descCtrl.text.trim(),
-    });
+    };
+    debugPrint('[Batch] create payload: $batchPayload');
+
+    final batchId = await ref.read(batchesProvider.notifier).create(batchPayload);
+    debugPrint('[Batch] created id: $batchId');
 
     for (final slot in _slots) {
-      await ref.read(batchesProvider.notifier).addSchedule(batchId, slot.toMap());
+      final sp = slot.toMap();
+      debugPrint('[Batch] schedule payload: $sp');
+      await ref.read(batchesProvider.notifier).addSchedule(batchId, sp);
     }
 
+    final regFee = int.tryParse(_regFeeCtrl.text.trim());
+    if (regFee != null && regFee > 0) {
+      final fp = {'name': 'Registration Fee', 'amountPaise': regFee * 100, 'frequency': 'REGISTRATION'};
+      debugPrint('[Batch] fee payload: $fp');
+      await ref.read(batchesProvider.notifier).createFeeStructure(batchId, fp);
+    }
     final monthly = int.tryParse(_monthlyCtrl.text.trim());
     if (monthly != null && monthly > 0) {
-      await ref.read(batchesProvider.notifier).createFeeStructure(batchId, {
-        'name': 'Monthly Fee', 'amountPaise': monthly * 100,
-        'frequency': 'MONTHLY', 'dueDayOfMonth': _dueDay,
-      });
+      final fp = {'name': 'Monthly Fee', 'amountPaise': monthly * 100, 'frequency': 'MONTHLY', 'dueDayOfMonth': _dueDay};
+      debugPrint('[Batch] fee payload: $fp');
+      await ref.read(batchesProvider.notifier).createFeeStructure(batchId, fp);
     }
     final yearly = int.tryParse(_yearlyCtrl.text.trim());
     if (yearly != null && yearly > 0) {
-      await ref.read(batchesProvider.notifier).createFeeStructure(batchId, {
-        'name': 'Yearly Fee', 'amountPaise': yearly * 100, 'frequency': 'ANNUAL',
-      });
-    }
-    final trialFee = int.tryParse(_trialFeeCtrl.text.trim());
-    if (trialFee != null && trialFee > 0) {
-      await ref.read(batchesProvider.notifier).createFeeStructure(batchId, {
-        'name': 'Trial Fee (${_trialDaysCtrl.text.trim().isNotEmpty ? "${_trialDaysCtrl.text.trim()} days" : "trial"})',
-        'amountPaise': trialFee * 100, 'frequency': 'ONE_TIME',
-      });
+      final fp = {'name': 'Yearly Fee', 'amountPaise': yearly * 100, 'frequency': 'ANNUAL'};
+      debugPrint('[Batch] fee payload: $fp');
+      await ref.read(batchesProvider.notifier).createFeeStructure(batchId, fp);
     }
 
+    debugPrint('[Batch] coaches: ${_coaches.map((c) => "phone=${c.phone} name=${c.name} role=${c.role} existing=${c.isExisting}").toList()}');
     await _saveNewCoaches(batchId);
 
     if (mounted) {
@@ -272,9 +329,9 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kIvory,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: _kIvory,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         leading: IconButton(icon: const Icon(Icons.close_rounded), onPressed: _back),
         title: Text(_isEdit ? 'Edit Batch' : 'New Batch'),
         actions: [
@@ -307,8 +364,9 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
                   onDeleteExisting: (id) => _deletedSlotIds.add(id),
                 ),
                 _Step3Fees(
+                  regFeeCtrl: _regFeeCtrl,
                   monthlyCtrl: _monthlyCtrl, yearlyCtrl: _yearlyCtrl,
-                  trialFeeCtrl: _trialFeeCtrl, trialDaysCtrl: _trialDaysCtrl,
+                  trialDaysCtrl: _trialDaysCtrl,
                   dueDay: _dueDay, onDueDay: (v) => setState(() => _dueDay = v),
                 ),
                 _Step4Coaches(
@@ -345,6 +403,8 @@ class _StepBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final divColor = cs.outlineVariant;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
       child: Row(
@@ -355,22 +415,22 @@ class _StepBar extends StatelessWidget {
             child: Row(
               children: [
                 if (i > 0)
-                  Expanded(child: Container(height: 2, color: done ? _kNavy : const Color(0xFFE0DED6))),
+                  Expanded(child: Container(height: 2, color: done ? cs.onSurface : divColor)),
                 Column(
                   children: [
                     Container(
                       width: 28, height: 28,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: (active || done) ? _kNavy : const Color(0xFFE0DED6),
+                        color: (active || done) ? cs.onSurface : divColor,
                       ),
                       child: Center(
                         child: done
-                            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                            ? Icon(Icons.check_rounded, size: 14, color: cs.surface)
                             : Text('${i + 1}',
                                 style: TextStyle(
                                   fontSize: 12, fontWeight: FontWeight.w700,
-                                  color: active ? Colors.white : Colors.grey,
+                                  color: active ? cs.surface : cs.onSurface.withValues(alpha: 0.4),
                                 )),
                       ),
                     ),
@@ -378,12 +438,12 @@ class _StepBar extends StatelessWidget {
                     Text(_labels[i],
                         style: TextStyle(
                           fontSize: 10, fontWeight: FontWeight.w600,
-                          color: active ? _kNavy : Colors.grey,
+                          color: active ? cs.onSurface : cs.onSurface.withValues(alpha: 0.45),
                         )),
                   ],
                 ),
                 if (i < _labels.length - 1)
-                  Expanded(child: Container(height: 2, color: done ? _kNavy : const Color(0xFFE0DED6))),
+                  Expanded(child: Container(height: 2, color: done ? cs.onSurface : divColor)),
               ],
             ),
           );
@@ -409,9 +469,9 @@ class _NavBar extends StatelessWidget {
     final isLast = step == 3;
     return Container(
       padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF4F2EB),
-        border: Border(top: BorderSide(color: Color(0xFFE0DED6), width: 0.5)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: 0.5)),
       ),
       child: Row(
         children: [
@@ -419,12 +479,12 @@ class _NavBar extends StatelessWidget {
             child: OutlinedButton(
               onPressed: onBack,
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFE0DED6)),
+                side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 minimumSize: const Size(0, 52),
               ),
               child: Text(step == 0 ? 'Cancel' : 'Back',
-                  style: const TextStyle(color: _kNavy, fontWeight: FontWeight.w700)),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w700)),
             ),
           ),
           const SizedBox(width: 12),
@@ -495,11 +555,12 @@ class _Step1Basics extends StatelessWidget {
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFECEAE3),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text('$maxStudents',
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _kNavy)),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900,
+                        color: Theme.of(context).colorScheme.onSurface)),
               ),
             ),
             IconButton(
@@ -577,11 +638,39 @@ class _Step2ScheduleState extends State<_Step2Schedule> {
   void dispose() { _noteCtrl.dispose(); super.dispose(); }
 
   Future<void> _pickTime(bool isStart) async {
-    final t = await showTimePicker(
-      context: context,
-      initialTime: isStart ? _start : _end,
-    );
-    if (t != null) setState(() => isStart ? _start = t : _end = t);
+    // For end picker: if _end is before _start, open picker at start+90min so
+    // the correct AM/PM period is pre-selected (e.g. start=6pm → end opens at 7:30pm)
+    TimeOfDay initial;
+    if (isStart) {
+      initial = _start;
+    } else {
+      final sm = _start.hour * 60 + _start.minute;
+      final em = _end.hour   * 60 + _end.minute;
+      if (em <= sm) {
+        final s = sm + 90;
+        initial = TimeOfDay(hour: (s ~/ 60) % 24, minute: s % 60);
+      } else {
+        initial = _end;
+      }
+    }
+
+    final t = await showTimePicker(context: context, initialTime: initial);
+    if (t == null) return;
+
+    setState(() {
+      if (isStart) {
+        _start = t;
+        // Auto-push end time if it's now before or equal to start
+        final sm = t.hour * 60 + t.minute;
+        final em = _end.hour * 60 + _end.minute;
+        if (em <= sm) {
+          final s = sm + 90;
+          _end = TimeOfDay(hour: (s ~/ 60) % 24, minute: s % 60);
+        }
+      } else {
+        _end = t;
+      }
+    });
   }
 
   void _add() {
@@ -628,13 +717,18 @@ class _Step2ScheduleState extends State<_Step2Schedule> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
-                      color: sel ? _kNavy : const Color(0xFFECEAE3),
+                      color: sel
+                          ? Theme.of(context).colorScheme.onSurface
+                          : Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(12),
-                      border: sel ? null : Border.all(color: const Color(0xFFD0CEC7)),
+                      border: sel ? null : Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant),
                     ),
                     child: Text(_kDays[i],
                         style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13,
-                            color: sel ? Colors.white : Colors.grey)),
+                            color: sel
+                                ? Theme.of(context).colorScheme.surface
+                                : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6))),
                   ),
                 ),
               );
@@ -711,15 +805,18 @@ class _Step2ScheduleState extends State<_Step2Schedule> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         decoration: BoxDecoration(
-          color: const Color(0xFFECEAE3),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+            Text(label, style: TextStyle(fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+                fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
-            Text('$h:$m $period', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _kNavy)),
+            Text('$h:$m $period', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800,
+                color: Theme.of(context).colorScheme.onSurface)),
           ],
         ),
       ),
@@ -730,13 +827,14 @@ class _Step2ScheduleState extends State<_Step2Schedule> {
 // ── Step 3: Fees ──────────────────────────────────────────────────────────────
 
 class _Step3Fees extends StatelessWidget {
-  final TextEditingController monthlyCtrl, yearlyCtrl, trialFeeCtrl, trialDaysCtrl;
+  final TextEditingController regFeeCtrl, monthlyCtrl, yearlyCtrl, trialDaysCtrl;
   final int dueDay;
   final ValueChanged<int> onDueDay;
 
   const _Step3Fees({
+    required this.regFeeCtrl,
     required this.monthlyCtrl, required this.yearlyCtrl,
-    required this.trialFeeCtrl, required this.trialDaysCtrl,
+    required this.trialDaysCtrl,
     required this.dueDay, required this.onDueDay,
   });
 
@@ -750,6 +848,15 @@ class _Step3Fees extends StatelessWidget {
           child: Text('All fields are optional. You can set fees later from batch details.',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
+
+        _sectionLabel('Registration Fee'),
+        const SizedBox(height: 4),
+        const Text('One-time fee charged on admission',
+            style: TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 8),
+        _rupeeField(regFeeCtrl, 'Amount (one-time)'),
+
+        const SizedBox(height: 20),
         _sectionLabel('Monthly Fee'),
         _rupeeField(monthlyCtrl, 'Amount per month'),
         const SizedBox(height: 8),
@@ -767,24 +874,26 @@ class _Step3Fees extends StatelessWidget {
             const Text(' of month', style: TextStyle(fontSize: 13, color: Colors.grey)),
           ],
         ),
+
         const SizedBox(height: 20),
         _sectionLabel('Yearly Fee'),
         _rupeeField(yearlyCtrl, 'Amount per year'),
+
         const SizedBox(height: 20),
         _sectionLabel('Trial Period'),
-        Row(
-          children: [
-            Expanded(child: _rupeeField(trialFeeCtrl, 'Trial fee')),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: trialDaysCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(hintText: 'Days (e.g. 7)'),
-              ),
-            ),
-          ],
+        const SizedBox(height: 4),
+        const Text('Trials are free — just set how many days',
+            style: TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: trialDaysCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            prefixText: '  ',
+            hintText: 'Trial duration in days (e.g. 7)',
+            suffixText: 'days',
+          ),
         ),
       ],
     );
@@ -797,6 +906,7 @@ class _Step3Fees extends StatelessWidget {
     decoration: InputDecoration(prefixText: '₹  ', hintText: hint),
   );
 }
+
 
 // ── Step 4: Coaches (multi) ───────────────────────────────────────────────────
 
@@ -812,94 +922,74 @@ class _Step4Coaches extends ConsumerStatefulWidget {
 }
 
 class _Step4CoachesState extends ConsumerState<_Step4Coaches> {
-  final _phoneCtrl = TextEditingController();
-  final _nameCtrl  = TextEditingController();
+  final _searchCtrl = TextEditingController();
+  String _query = '';
   String _role = 'Head Coach';
-  Map<String, dynamic>? _foundCoach;
-  bool _coachNotFound = false;
-  bool _searching     = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(() => setState(() => _query = _searchCtrl.text.trim().toLowerCase()));
+  }
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _nameCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _search() async {
-    final phone = _phoneCtrl.text.trim();
-    if (phone.length < 10) { showSnack(context, 'Enter a valid phone number'); return; }
-    setState(() { _searching = true; _foundCoach = null; _coachNotFound = false; });
-    try {
-      final result = await ref.read(batchesProvider.notifier).lookupCoach(phone);
-      setState(() {
-        if (result != null) {
-          _foundCoach        = result;
-          _nameCtrl.text     = result['userName'] as String? ?? '';
-        } else {
-          _coachNotFound = true;
-        }
-      });
-    } catch (_) {
-      setState(() => _coachNotFound = true);
-    } finally {
-      setState(() => _searching = false);
-    }
-  }
+  void _addCoach(Map<String, dynamic> academyCoach) {
+    final user = (academyCoach['user'] as Map?)?.cast<String, dynamic>() ?? {};
+    final phone = user['phone'] as String? ?? '';
+    final name  = user['name']  as String? ?? '';
+    final cpId  = academyCoach['coachProfileId'] as String?
+        ?? academyCoach['coachId'] as String?
+        ?? academyCoach['id'] as String?;
 
-  void _addToList() {
-    final phone = _phoneCtrl.text.trim();
-    if (phone.length < 10) { showSnack(context, 'Enter and search a phone number first'); return; }
-    if (_foundCoach == null && !_coachNotFound) { showSnack(context, 'Tap Search first'); return; }
-    if (_coachNotFound && _nameCtrl.text.trim().isEmpty) { showSnack(context, 'Enter coach name'); return; }
-
-    final tail = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
-    if (widget.coaches.any((c) => c.phone.endsWith(tail))) {
-      showSnack(context, 'This coach is already added');
+    if (widget.coaches.any((c) =>
+        (phone.isNotEmpty && c.phone.isNotEmpty && c.phone.endsWith(phone.length >= 10 ? phone.substring(phone.length - 10) : phone)) ||
+        (cpId != null && c.coachProfileId == cpId))) {
+      showSnack(context, 'Already added');
       return;
     }
 
     widget.onAdd(_CoachEntry(
       phone:          phone,
-      name:           _nameCtrl.text.trim(),
+      name:           name,
       role:           _role,
-      foundCoach:     _foundCoach,
-      coachProfileId: _foundCoach?['coachProfileId'] as String?,
+      isExisting:     false,
+      coachProfileId: cpId,
+      foundCoach:     {'userName': name, 'coachProfileId': cpId},
     ));
-
-    setState(() {
-      _phoneCtrl.clear();
-      _nameCtrl.clear();
-      _role          = 'Head Coach';
-      _foundCoach    = null;
-      _coachNotFound = false;
-    });
+    _searchCtrl.clear();
   }
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final allCoaches = ref.watch(coachesProvider);
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       children: [
         const Padding(
-          padding: EdgeInsets.only(bottom: 20),
-          child: Text('You can assign multiple coaches. Optional — add more later from batch details.',
+          padding: EdgeInsets.only(bottom: 16),
+          child: Text('Assign coaches from your academy. Optional — add more later.',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
 
-        // ── Assigned coaches list ──────────────────────────────────────────
+        // ── Assigned coaches ───────────────────────────────────────────────
         if (widget.coaches.isNotEmpty) ...[
-          _sectionLabel('Assigned Coaches  (${widget.coaches.length})'),
+          _sectionLabel('Assigned  (${widget.coaches.length})'),
           ...List.generate(widget.coaches.length, (i) {
-            final c       = widget.coaches[i];
+            final c = widget.coaches[i];
             final initial = c.name.isNotEmpty ? c.name[0].toUpperCase() : '?';
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: cs.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE0DED6)),
               ),
               child: Row(
                 children: [
@@ -915,143 +1005,134 @@ class _Step4CoachesState extends ConsumerState<_Step4Coaches> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(c.name.isNotEmpty ? c.name : c.phone,
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: _kNavy)),
-                        Text(c.role, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: cs.onSurface)),
+                        Text(c.role,
+                            style: TextStyle(fontSize: 12, color: cs.onSurface.withValues(alpha: 0.55))),
                       ],
                     ),
                   ),
-                  if (c.isExisting)
-                    Container(
-                      margin: const EdgeInsets.only(right: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('Assigned',
-                          style: TextStyle(fontSize: 10, color: Colors.green.shade700, fontWeight: FontWeight.w700)),
-                    ),
                   IconButton(
-                    icon: Icon(
-                      c.isExisting ? Icons.person_remove_outlined : Icons.close_rounded,
-                      size: 18, color: Colors.grey,
-                    ),
-                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.close_rounded, size: 18, color: Colors.red.shade400),
                     onPressed: () => widget.onRemove(i),
                   ),
                 ],
               ),
             );
           }),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
         ],
 
-        // ── Add coach form ─────────────────────────────────────────────────
-        _sectionLabel('Add a Coach'),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (_) => setState(() { _foundCoach = null; _coachNotFound = false; }),
-                decoration: const InputDecoration(
-                  hintText: '10-digit mobile number',
-                  counterText: '',
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              height: 54,
-              child: ElevatedButton(
-                onPressed: _searching ? null : _search,
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(80, 54),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: _searching
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Search'),
-              ),
-            ),
-          ],
+        // ── Role for next addition ─────────────────────────────────────────
+        _sectionLabel('Role'),
+        DropdownButtonFormField<String>(
+          value: _role,
+          items: _kRoles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+          onChanged: (v) => setState(() => _role = v!),
+          decoration: const InputDecoration(isDense: true),
         ),
+        const SizedBox(height: 16),
 
-        if (_foundCoach != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0057C8).withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                const CircleAvatar(radius: 18, backgroundColor: _kBlue,
-                    child: Icon(Icons.person_rounded, color: Colors.white, size: 18)),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_foundCoach!['userName'] as String? ?? 'Coach',
-                        style: const TextStyle(fontWeight: FontWeight.w700, color: _kNavy)),
-                    Text('Coach found ✓',
-                        style: TextStyle(fontSize: 12, color: Colors.green.shade700)),
-                  ],
-                ),
-              ],
-            ),
+        // ── Search academy coaches ─────────────────────────────────────────
+        _sectionLabel('Add from Academy'),
+        TextField(
+          controller: _searchCtrl,
+          decoration: const InputDecoration(
+            hintText: 'Search by name or phone',
+            prefixIcon: Icon(Icons.search_rounded),
           ),
-        ],
+        ),
+        const SizedBox(height: 8),
 
-        if (_coachNotFound) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Text(
-              'Coach not found. Enter their name below to create a new coach account.',
-              style: TextStyle(fontSize: 13, color: Colors.orange),
-            ),
+        allCoaches.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
           ),
-          const SizedBox(height: 12),
-          _sectionLabel('Coach Name *'),
-          TextField(
-            controller: _nameCtrl,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'Full name'),
-          ),
-        ],
+          error: (_, __) => const SizedBox.shrink(),
+          data: (coaches) {
+            final active = coaches.where((c) => c['isActive'] != false).toList();
+            final assignedIds = widget.coaches
+                .map((c) => c.coachProfileId)
+                .whereType<String>()
+                .toSet();
 
-        if (_foundCoach != null || _coachNotFound) ...[
-          const SizedBox(height: 20),
-          _sectionLabel('Role'),
-          ..._kRoles.map((r) => RadioListTile<String>(
-            value: r, groupValue: _role,
-            title: Text(r, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            activeColor: _kNavy,
-            dense: true,
-            onChanged: (v) => setState(() => _role = v!),
-          )),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.person_add_rounded),
-            label: const Text('Add to List'),
-            onPressed: _addToList,
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: _kBlue),
-              foregroundColor: _kBlue,
-              minimumSize: const Size(double.infinity, 50),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-        ],
+            final filtered = active.where((c) {
+              final cpId = c['coachProfileId'] as String?
+                  ?? c['coachId'] as String?
+                  ?? c['id'] as String?;
+              if (cpId != null && assignedIds.contains(cpId)) return false;
+              if (_query.isEmpty) return true;
+              final user  = (c['user'] as Map?)?.cast<String, dynamic>() ?? {};
+              final name  = (user['name']  as String? ?? '').toLowerCase();
+              final phone = (user['phone'] as String? ?? '').toLowerCase();
+              return name.contains(_query) || phone.contains(_query);
+            }).toList();
+
+            if (active.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('No coaches in your academy yet. Add them from the Coaches screen.',
+                    style: TextStyle(fontSize: 13, color: cs.onSurface.withValues(alpha: 0.5))),
+              );
+            }
+            if (filtered.isEmpty && _query.isNotEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('No match found.',
+                    style: TextStyle(fontSize: 13, color: cs.onSurface.withValues(alpha: 0.5))),
+              );
+            }
+            return Column(
+              children: filtered.map((c) {
+                final user    = (c['user'] as Map?)?.cast<String, dynamic>() ?? {};
+                final name    = user['name']  as String? ?? '—';
+                final phone   = user['phone'] as String? ?? '';
+                final role    = c['role'] as String?
+                    ?? (c['isHeadCoach'] == true ? 'Head Coach' : 'Coach');
+                final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                return GestureDetector(
+                  onTap: () => _addCoach(c),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: _kBlue.withValues(alpha: 0.1),
+                          child: Text(initial,
+                              style: const TextStyle(fontWeight: FontWeight.w800,
+                                  color: _kBlue, fontSize: 14)),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name, style: TextStyle(fontWeight: FontWeight.w700,
+                                  fontSize: 14, color: cs.onSurface)),
+                              Text(role, style: TextStyle(fontSize: 12,
+                                  color: cs.onSurface.withValues(alpha: 0.55))),
+                              if (phone.isNotEmpty)
+                                Text(phone, style: TextStyle(fontSize: 11,
+                                    color: cs.onSurface.withValues(alpha: 0.4))),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.add_circle_outline_rounded,
+                            size: 22, color: _kBlue.withValues(alpha: 0.8)),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            );
+          },
+        ),
       ],
     );
   }

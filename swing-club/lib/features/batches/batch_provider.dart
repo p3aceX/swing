@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_client.dart';
 import '../../providers/academy_provider.dart';
@@ -27,6 +28,13 @@ class BatchesNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     final s = await ref.read(academyProvider.future);
     await ref.read(apiClientProvider)
         .patch('/academy/${s.academyId}/batches/$batchId', data: payload);
+    ref.invalidateSelf();
+  }
+
+  Future<void> deleteBatch(String batchId) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider)
+        .delete('/academy/${s.academyId}/batches/$batchId');
     ref.invalidateSelf();
   }
 
@@ -79,27 +87,17 @@ class BatchesNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   Future<Map<String, dynamic>?> lookupCoach(String phone) async {
     final s = await ref.read(academyProvider.future);
     try {
+      debugPrint('[Coach] lookup phone=$phone academyId=${s.academyId}');
       final res = await ref.read(apiClientProvider)
-          .get('/academy/${s.academyId}/coaches');
+          .get('/academy/${s.academyId}/coaches', params: {'phone': phone});
+      debugPrint('[Coach] response: ${res.data}');
       final data = res.data['data'];
-      final list = data is List
-          ? data.cast<Map<String, dynamic>>()
-          : data is Map && data['items'] != null
-              ? (data['items'] as List).cast<Map<String, dynamic>>()
-              : <Map<String, dynamic>>[];
-      final tail = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
-      for (final coach in list) {
-        final user = (coach['user'] as Map?)?.cast<String, dynamic>() ?? {};
-        final userPhone = user['phone'] as String? ?? '';
-        if (userPhone.endsWith(tail)) {
-          return {
-            'userName': user['name'] as String? ?? '',
-            'coachProfileId': coach['coachProfileId'] as String? ?? coach['id'] as String? ?? '',
-          };
-        }
-      }
-    } catch (_) {}
-    return null;
+      if (data == null) return null;
+      return (data as Map).cast<String, dynamic>();
+    } catch (e) {
+      debugPrint('[Coach] error: $e');
+      return null;
+    }
   }
 }
 

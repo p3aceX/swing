@@ -1,245 +1,243 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/constants.dart';
-import '../../core/api_client.dart';
-import '../../providers/academy_provider.dart';
 import '../../shared/widgets.dart';
 import 'coach_provider.dart';
 
-class CoachDetailScreen extends ConsumerStatefulWidget {
-  final String coachId;
+const _kNavy = Color(0xFF071B3D);
+const _kBlue = Color(0xFF0057C8);
 
+const _kRoles = ['Head Coach', 'Batting Coach', 'Bowling Coach', 'Fielding Coach',
+    'Wicket-keeping Coach', 'Fitness Coach'];
+
+class CoachDetailScreen extends ConsumerWidget {
+  final String coachId;
   const CoachDetailScreen({super.key, required this.coachId});
 
   @override
-  ConsumerState<CoachDetailScreen> createState() => _CoachDetailScreenState();
-}
-
-class _CoachDetailScreenState extends ConsumerState<CoachDetailScreen> {
-  Map<String, dynamic>? _coachData;
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _isLoading = true);
-    try {
-      final academyState = await ref.read(academyProvider.future);
-      final res = await ref
-          .read(apiClientProvider)
-          .get('/academy/${academyState.academyId}/coaches/${widget.coachId}');
-      setState(() => _coachData = Map<String, dynamic>.from(res.data['data'] as Map));
-    } catch (_) {
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final user = _coachData?['user'] as Map<String, dynamic>? ?? {};
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(coachDetailProvider(coachId));
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text(user['name'] as String? ?? 'Coach'),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+        title: async.maybeWhen(
+          data: (d) => Text(
+            (d['user'] as Map?)?.cast<String, dynamic>()?['name'] as String? ?? 'Coach',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+          ),
+          orElse: () => const Text('Coach'),
+        ),
         actions: [
-          if (_coachData != null)
+          if (async.hasValue)
             TextButton(
-              onPressed: _deactivate,
-              child: const Text('Deactivate', style: TextStyle(color: Colors.red)),
+              onPressed: () => _deactivate(context, ref),
+              child: const Text('Remove', style: TextStyle(color: Colors.red)),
             ),
         ],
       ),
-      body: _isLoading
-          ? loadingBody()
-          : _coachData == null
-              ? errorBody(Exception('Failed to load'), _load)
-              : _CoachBody(
-                  coach: _coachData!,
-                  coachId: widget.coachId,
-                  onSetupComp: _showCompSheet,
-                ),
+      body: async.when(
+        loading: loadingBody,
+        error: (e, _) => errorBody(e, () => ref.invalidate(coachDetailProvider(coachId))),
+        data: (coach) => _Body(coach: coach, coachId: coachId),
+      ),
     );
   }
 
-  Future<void> _deactivate() async {
-    try {
-      await ref.read(coachesProvider.notifier).updateCoach(widget.coachId, {'isActive': false});
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) showSnack(context, 'Failed to deactivate');
-    }
-  }
-
-  void _showCompSheet() {
-    showModalBottomSheet(
+  Future<void> _deactivate(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => _CompensationSheet(coachId: widget.coachId),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Coach'),
+        content: const Text('Remove this coach from your academy?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
+    if (confirmed == true) {
+      try {
+        await ref.read(coachesProvider.notifier).updateCoach(coachId, {'isActive': false});
+        if (context.mounted) Navigator.pop(context);
+      } catch (_) {
+        if (context.mounted) showSnack(context, 'Failed to remove coach');
+      }
+    }
   }
 }
 
-class _CoachBody extends StatelessWidget {
+class _Body extends ConsumerWidget {
   final Map<String, dynamic> coach;
   final String coachId;
-  final VoidCallback onSetupComp;
-
-  const _CoachBody({required this.coach, required this.coachId, required this.onSetupComp});
+  const _Body({required this.coach, required this.coachId});
 
   @override
-  Widget build(BuildContext context) {
-    final user = coach['user'] as Map<String, dynamic>? ?? {};
-    final batches = (coach['batches'] as List? ?? []).cast<Map<String, dynamic>>();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user    = (coach['user'] as Map?)?.cast<String, dynamic>() ?? {};
+    final name    = user['name'] as String? ?? '—';
+    final phone   = user['phone'] as String? ?? '';
+    final role    = coach['role'] as String? ?? (coach['isHeadCoach'] == true ? 'Head Coach' : 'Coach');
+    final salary  = coach['salaryPaise'] as int?;
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final cs = Theme.of(context).colorScheme;
 
     return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
       children: [
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (user['bio'] != null) ...[
-                Text(user['bio'] as String,
-                    style: const TextStyle(color: Colors.grey, fontSize: 14)),
-                const SizedBox(height: 12),
-              ],
-              if (user['specializations'] != null)
-                Text('Specializations: ${user['specializations']}',
-                    style: const TextStyle(fontSize: 14)),
-              if (user['experienceYears'] != null) ...[
-                const SizedBox(height: 4),
-                Text('Experience: ${user['experienceYears']} years',
-                    style: const TextStyle(fontSize: 14)),
-              ],
-              if (coach['isHeadCoach'] == true) ...[
-                const SizedBox(height: 8),
-                statusBadge('HEAD COACH'),
-              ],
-            ],
-          ),
+        // ── Profile header ──────────────────────────────────────────────────
+        Row(
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundColor: const Color(0xFF0057C8).withValues(alpha: 0.1),
+              child: Text(initial,
+                  style: const TextStyle(color: _kBlue, fontWeight: FontWeight.w800, fontSize: 22)),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
+                  if (phone.isNotEmpty)
+                    Text(phone,
+                        style: TextStyle(fontSize: 13, color: cs.onSurface.withValues(alpha: 0.55))),
+                ],
+              ),
+            ),
+          ],
         ),
-        const Divider(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-          child: Text('Assigned Batches',
-              style: const TextStyle(fontSize: 13, color: Colors.grey,
-                  fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+        const SizedBox(height: 24),
+
+        // ── Info tiles ──────────────────────────────────────────────────────
+        _InfoTile(label: 'Role', value: role),
+        _InfoTile(
+          label: 'Monthly Salary',
+          value: salary != null ? '₹${(salary / 100).toStringAsFixed(0)}' : 'Not set',
         ),
-        if (batches.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-            child: Text('No batches assigned', style: TextStyle(color: Colors.grey)),
-          )
-        else
-          ...batches.map((b) => Column(children: [
-                ListTile(
-                  dense: true,
-                  title: Text(b['name'] as String? ?? '—'),
-                ),
-                const Divider(),
-              ])),
-        ListTile(
-          title: const Text('Set Up Compensation'),
-          leading: const Icon(Icons.payments_outlined),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: onSetupComp,
-        ),
+        const SizedBox(height: 24),
+
+        // ── Edit section ────────────────────────────────────────────────────
+        Text('Update Details',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                color: cs.onSurface.withValues(alpha: 0.5), letterSpacing: 0.5)),
+        const SizedBox(height: 12),
+        _EditForm(coach: coach, coachId: coachId),
       ],
     );
   }
 }
 
-class _CompensationSheet extends ConsumerStatefulWidget {
-  final String coachId;
-
-  const _CompensationSheet({required this.coachId});
+class _InfoTile extends StatelessWidget {
+  final String label;
+  final String value;
+  const _InfoTile({required this.label, required this.value});
 
   @override
-  ConsumerState<_CompensationSheet> createState() => _CompensationSheetState();
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Expanded(child: Text(label,
+              style: TextStyle(fontSize: 13, color: cs.onSurface.withValues(alpha: 0.55),
+                  fontWeight: FontWeight.w500))),
+          Text(value,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: cs.onSurface)),
+        ],
+      ),
+    );
+  }
 }
 
-class _CompensationSheetState extends ConsumerState<_CompensationSheet> {
-  String _compType = kCompensationTypes.first;
-  String _payoutCycle = kPayoutCycles.first;
-  final _amountCtrl = TextEditingController();
-  bool _isLoading = false;
+class _EditForm extends ConsumerStatefulWidget {
+  final Map<String, dynamic> coach;
+  final String coachId;
+  const _EditForm({required this.coach, required this.coachId});
+
+  @override
+  ConsumerState<_EditForm> createState() => _EditFormState();
+}
+
+class _EditFormState extends ConsumerState<_EditForm> {
+  late String _role;
+  late TextEditingController _salaryCtrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _role = widget.coach['role'] as String?
+        ?? (widget.coach['isHeadCoach'] == true ? 'Head Coach' : _kRoles.first);
+    if (!_kRoles.contains(_role)) _role = _kRoles.first;
+    final salary = widget.coach['salaryPaise'] as int?;
+    _salaryCtrl = TextEditingController(
+        text: salary != null ? (salary ~/ 100).toString() : '');
+  }
 
   @override
   void dispose() {
-    _amountCtrl.dispose();
+    _salaryCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
-    setState(() => _isLoading = true);
+    setState(() => _saving = true);
     try {
-      final academyState = await ref.read(academyProvider.future);
-      await ref.read(apiClientProvider).post('/payroll/compensation', data: {
-        'coachId': widget.coachId,
-        'academyId': academyState.academyId,
-        'compensationType': _compType,
-        'amount': (double.tryParse(_amountCtrl.text) ?? 0) * 100,
-        'payoutCycle': _payoutCycle,
+      final salary = int.tryParse(_salaryCtrl.text.trim());
+      await ref.read(coachesProvider.notifier).updateCoach(widget.coachId, {
+        'role': _role,
+        'isHeadCoach': _role == 'Head Coach',
+        if (salary != null) 'salaryPaise': salary * 100,
       });
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) showSnack(context, 'Failed to save compensation');
+      ref.invalidate(coachDetailProvider(widget.coachId));
+      if (mounted) showSnack(context, 'Updated');
+    } catch (_) {
+      if (mounted) showSnack(context, 'Failed to update');
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20, right: 20, top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Compensation Setup',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            value: _compType,
-            decoration: const InputDecoration(labelText: 'Compensation Type'),
-            items: kCompensationTypes
-                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                .toList(),
-            onChanged: (v) => setState(() => _compType = v!),
+    return Column(
+      children: [
+        DropdownButtonFormField<String>(
+          value: _role,
+          decoration: const InputDecoration(labelText: 'Role'),
+          items: _kRoles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+          onChanged: (v) => setState(() => _role = v!),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _salaryCtrl,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Monthly Salary (₹)',
+            prefixText: '₹ ',
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _amountCtrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Amount (₹)', prefixText: '₹ '),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(height: 20, width: 20,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Text('Save Changes'),
           ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: _payoutCycle,
-            decoration: const InputDecoration(labelText: 'Payout Cycle'),
-            items: kPayoutCycles
-                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                .toList(),
-            onChanged: (v) => setState(() => _payoutCycle = v!),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _isLoading ? null : _save,
-            child: const Text('Save Compensation'),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

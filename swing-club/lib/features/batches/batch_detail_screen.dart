@@ -392,20 +392,21 @@ class _AddScheduleSheetState extends ConsumerState<_AddScheduleSheet> {
             spacing: 6,
             children: List.generate(7, (i) {
               final selected = _selectedDays.contains(i);
+              final cs = Theme.of(context).colorScheme;
               return GestureDetector(
                 onTap: () => setState(() =>
                     selected ? _selectedDays.remove(i) : _selectedDays.add(i)),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: selected ? const Color(0xFF071B3D) : const Color(0xFFECEAE3),
+                    color: selected ? cs.onSurface : cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(kDayLabels[i],
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: selected ? Colors.white : Colors.grey,
+                        color: selected ? cs.surface : cs.onSurface.withValues(alpha: 0.6),
                       )),
                 ),
               );
@@ -486,6 +487,7 @@ class _StudentsTabState extends ConsumerState<_StudentsTab> {
     final filtered = _filtered;
     final visible  = filtered.take(_shown).toList();
     final total    = _enrollments.length;
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -502,8 +504,8 @@ class _StudentsTabState extends ConsumerState<_StudentsTab> {
                   style: const TextStyle(fontSize: 14),
                   decoration: InputDecoration(
                     hintText: 'Search by name or phone…',
-                    hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
-                    prefixIcon: const Icon(Icons.search_rounded, size: 20, color: Colors.grey),
+                    hintStyle: TextStyle(fontSize: 14, color: cs.onSurface.withValues(alpha: 0.4)),
+                    prefixIcon: Icon(Icons.search_rounded, size: 20, color: cs.onSurface.withValues(alpha: 0.4)),
                     suffixIcon: _query.isNotEmpty
                         ? GestureDetector(
                             onTap: () => setState(() {
@@ -511,22 +513,22 @@ class _StudentsTabState extends ConsumerState<_StudentsTab> {
                               _query = '';
                               _shown = _pageSize;
                             }),
-                            child: const Icon(Icons.close_rounded, size: 18, color: Colors.grey),
+                            child: Icon(Icons.close_rounded, size: 18, color: cs.onSurface.withValues(alpha: 0.4)),
                           )
                         : null,
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(vertical: 10),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFFE0DED6))),
+                        borderSide: BorderSide(color: cs.outlineVariant)),
                     enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFFE0DED6))),
+                        borderSide: BorderSide(color: cs.outlineVariant)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFF071B3D))),
+                        borderSide: BorderSide(color: cs.primary)),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: cs.surfaceContainerHighest,
                   ),
                 ),
               ),
@@ -534,15 +536,15 @@ class _StudentsTabState extends ConsumerState<_StudentsTab> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF071B3D),
+                  color: cs.onSurface,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   _query.isEmpty
                       ? '$total'
                       : '${filtered.length}/$total',
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                  style: TextStyle(
+                      color: cs.surface, fontWeight: FontWeight.w800, fontSize: 13),
                 ),
               ),
             ]),
@@ -714,6 +716,7 @@ class _BatchPaymentsTabState extends ConsumerState<_BatchPaymentsTab> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(batchPaymentsProvider(widget.batchId));
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -724,11 +727,11 @@ class _BatchPaymentsTabState extends ConsumerState<_BatchPaymentsTab> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Row(
               children: [
-                _chip('All',      0),
+                _chip(context, 'All',      0),
                 const SizedBox(width: 8),
-                _chip('Received', 1),
+                _chip(context, 'Received', 1),
                 const SizedBox(width: 8),
-                _chip('Pending',  2),
+                _chip(context, 'Pending',  2),
                 const Spacer(),
                 state.maybeWhen(
                   data: (p) {
@@ -736,13 +739,13 @@ class _BatchPaymentsTabState extends ConsumerState<_BatchPaymentsTab> {
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF071B3D),
+                        color: cs.onSurface,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         '${shown.length}',
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                        style: TextStyle(
+                            color: cs.surface, fontWeight: FontWeight.w800, fontSize: 13),
                       ),
                     );
                   },
@@ -786,14 +789,15 @@ class _BatchPaymentsTabState extends ConsumerState<_BatchPaymentsTab> {
     );
   }
 
-  Widget _chip(String label, int index) {
+  Widget _chip(BuildContext context, String label, int index) {
     final selected = _filter == index;
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: () => setState(() => _filter = index),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF071B3D) : const Color(0xFFECEAE3),
+          color: selected ? cs.onSurface : cs.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
@@ -801,7 +805,7 @@ class _BatchPaymentsTabState extends ConsumerState<_BatchPaymentsTab> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: selected ? Colors.white : Colors.grey,
+            color: selected ? cs.surface : cs.onSurface.withValues(alpha: 0.6),
           ),
         ),
       ),

@@ -1042,6 +1042,8 @@ model AcademyCoach {
   academyId   String
   coachId     String
   isHeadCoach Boolean  @default(false)
+  role        String?
+  salaryPaise Int?
   joinedAt    DateTime @default(now())
   isActive    Boolean  @default(true)
 
