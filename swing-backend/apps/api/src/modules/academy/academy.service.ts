@@ -1,4 +1,4 @@
-import { prisma, UserRole } from '@swing/db'
+import { prisma, UserRole, PaymentStatus } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { getPaginationParams, buildPaginationMeta, normalizePhone } from '@swing/utils'
 
@@ -402,6 +402,11 @@ export class AcademyService {
     if (data.feeAmountPaise !== undefined) enrollUpdate.feeAmountPaise = data.feeAmountPaise
     if (data.feeFrequency !== undefined) enrollUpdate.feeFrequency = data.feeFrequency
     if (data.feeStatus !== undefined) enrollUpdate.feeStatus = data.feeStatus
+    if (data.enrollmentStatus !== undefined) {
+      enrollUpdate.enrollmentStatus = data.enrollmentStatus
+      if (data.enrollmentStatus === 'INACTIVE') enrollUpdate.isActive = false
+    }
+    if (data.isTrial !== undefined) enrollUpdate.isTrial = data.isTrial
     if (data.notes !== undefined) enrollUpdate.notes = data.notes
     if (Object.keys(enrollUpdate).length > 0) {
       await prisma.academyEnrollment.update({ where: { id: enrollmentId }, data: enrollUpdate })
@@ -721,6 +726,161 @@ export class AcademyService {
         cost: data.cost, notes: data.notes,
       },
     })
+  }
+
+  // ── Expenses ──────────────────────────────────────────────────────────────
+
+  async listExpenses(academyId: string, userId: string, filters: { from?: string; to?: string; category?: string }) {
+    await this.verifyOwnership(academyId, userId)
+    const where: any = { academyId }
+    if (filters.from || filters.to) {
+      where.date = {}
+      if (filters.from) where.date.gte = new Date(filters.from)
+      if (filters.to)   where.date.lte = new Date(filters.to)
+    }
+    if (filters.category) where.category = filters.category
+    const items = await prisma.academyExpense.findMany({ where, orderBy: { date: 'desc' } })
+    return { items }
+  }
+
+  async createExpense(academyId: string, userId: string, data: { category: string; description: string; amountPaise: number; date: string; payee?: string; receiptUrl?: string }) {
+    const ownerProfile = await prisma.academyOwnerProfile.findUnique({ where: { userId } })
+    if (!ownerProfile) throw Errors.forbidden()
+    const academy = await prisma.academy.findFirst({ where: { id: academyId, ownerId: ownerProfile.id } })
+    if (!academy) throw Errors.forbidden()
+    return prisma.academyExpense.create({
+      data: {
+        academyId,
+        createdBy: ownerProfile.id,
+        category: data.category as any,
+        description: data.description,
+        amountPaise: data.amountPaise,
+        date: new Date(data.date),
+        payee: data.payee || null,
+        receiptUrl: data.receiptUrl || null,
+      },
+    })
+  }
+
+  async updateExpense(academyId: string, userId: string, expenseId: string, data: { category?: string; description?: string; amountPaise?: number; date?: string; payee?: string; receiptUrl?: string }) {
+    await this.verifyOwnership(academyId, userId)
+    const expense = await prisma.academyExpense.findFirst({ where: { id: expenseId, academyId } })
+    if (!expense) throw Errors.notFound('Expense')
+    return prisma.academyExpense.update({
+      where: { id: expenseId },
+      data: {
+        ...(data.category    !== undefined ? { category: data.category as any } : {}),
+        ...(data.description !== undefined ? { description: data.description }  : {}),
+        ...(data.amountPaise !== undefined ? { amountPaise: data.amountPaise }  : {}),
+        ...(data.date        !== undefined ? { date: new Date(data.date) }      : {}),
+        ...(data.payee       !== undefined ? { payee: data.payee }              : {}),
+        ...(data.receiptUrl  !== undefined ? { receiptUrl: data.receiptUrl }    : {}),
+      },
+    })
+  }
+
+  async deleteExpense(academyId: string, userId: string, expenseId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const expense = await prisma.academyExpense.findFirst({ where: { id: expenseId, academyId } })
+    if (!expense) throw Errors.notFound('Expense')
+    await prisma.academyExpense.delete({ where: { id: expenseId } })
+  }
+
+  async getFinanceSummary(academyId: string, userId: string, year: number, month: number) {
+    await this.verifyOwnership(academyId, userId)
+    const from = new Date(year, month - 1, 1)
+    const to   = new Date(year, month, 1)
+
+    const [revenueAgg, expensesAgg, expenseRows] = await Promise.all([
+      prisma.feePayment.aggregate({
+        where: { academyId, paidAt: { gte: from, lt: to }, status: PaymentStatus.COMPLETED },
+        _sum: { amountPaise: true },
+      }),
+      prisma.academyExpense.aggregate({
+        where: { academyId, date: { gte: from, lt: to } },
+        _sum: { amountPaise: true },
+      }),
+      prisma.academyExpense.findMany({
+        where: { academyId, date: { gte: from, lt: to } },
+        select: { category: true, amountPaise: true },
+      }),
+    ])
+
+    const revenuePaise  = revenueAgg._sum?.amountPaise  ?? 0
+    const expensesPaise = expensesAgg._sum?.amountPaise ?? 0
+
+    const expenseBreakdown: Record<string, number> = {}
+    for (const row of expenseRows) {
+      expenseBreakdown[row.category] = (expenseBreakdown[row.category] ?? 0) + row.amountPaise
+    }
+
+    return { revenuePaise, expensesPaise, netPaise: revenuePaise - expensesPaise, expenseBreakdown }
+  }
+
+  // ── Inventory (update / delete) ───────────────────────────────────────────
+
+  async updateInventoryItem(academyId: string, userId: string, itemId: string, data: { name?: string; category?: string; quantity?: number; condition?: string; notes?: string; isAssigned?: boolean; assignedTo?: string }) {
+    await this.verifyOwnership(academyId, userId)
+    const item = await prisma.inventoryItem.findFirst({ where: { id: itemId, academyId } })
+    if (!item) throw Errors.notFound('Inventory item')
+    return prisma.inventoryItem.update({
+      where: { id: itemId },
+      data: {
+        ...(data.name       !== undefined ? { name: data.name }               : {}),
+        ...(data.category   !== undefined ? { category: data.category }       : {}),
+        ...(data.quantity   !== undefined ? { quantity: data.quantity }       : {}),
+        ...(data.condition  !== undefined ? { condition: data.condition as any } : {}),
+        ...(data.notes      !== undefined ? { notes: data.notes }             : {}),
+        ...(data.isAssigned !== undefined ? { isAssigned: data.isAssigned }   : {}),
+        ...(data.assignedTo !== undefined ? { assignedTo: data.assignedTo, assignedAt: data.assignedTo ? new Date() : null } : {}),
+      },
+    })
+  }
+
+  async deleteInventoryItem(academyId: string, userId: string, itemId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const item = await prisma.inventoryItem.findFirst({ where: { id: itemId, academyId } })
+    if (!item) throw Errors.notFound('Inventory item')
+    await prisma.inventoryItem.delete({ where: { id: itemId } })
+  }
+
+  // ── Announcements (list / update / delete) ────────────────────────────────
+
+  async listAnnouncements(academyId: string, userId: string, page: number, limit: number) {
+    await this.verifyOwnership(academyId, userId)
+    const { skip } = getPaginationParams({ page, limit })
+    const [items, total] = await Promise.all([
+      prisma.announcement.findMany({
+        where: { academyId },
+        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.announcement.count({ where: { academyId } }),
+    ])
+    return { items, meta: buildPaginationMeta(total, page, limit) }
+  }
+
+  async updateAnnouncement(academyId: string, userId: string, announcementId: string, data: { title?: string; body?: string; isPinned?: boolean; targetGroup?: string }) {
+    await this.verifyOwnership(academyId, userId)
+    const announcement = await prisma.announcement.findFirst({ where: { id: announcementId, academyId } })
+    if (!announcement) throw Errors.notFound('Announcement')
+    return prisma.announcement.update({
+      where: { id: announcementId },
+      data: {
+        ...(data.title       !== undefined ? { title: data.title }             : {}),
+        ...(data.body        !== undefined ? { body: data.body }               : {}),
+        ...(data.isPinned    !== undefined ? { isPinned: data.isPinned }       : {}),
+        ...(data.targetGroup !== undefined ? { targetGroup: data.targetGroup } : {}),
+      },
+    })
+  }
+
+  async deleteAnnouncement(academyId: string, userId: string, announcementId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const announcement = await prisma.announcement.findFirst({ where: { id: announcementId, academyId } })
+    if (!announcement) throw Errors.notFound('Announcement')
+    await prisma.announcement.delete({ where: { id: announcementId } })
   }
 
   private async verifyOwnership(academyId: string, userId: string) {

@@ -219,6 +219,108 @@ export async function academyRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data: await svc.addInventoryItem(id, user.userId, request.body) })
   })
 
+  // ── Expenses ──────────────────────────────────────────────────────────────
+
+  const expenseBodySchema = z.object({
+    category:    z.enum(['SALARY','EQUIPMENT','MAINTENANCE','INFRASTRUCTURE','MARKETING','UTILITIES','OTHER']),
+    description: z.string().min(1),
+    amountPaise: z.number().int().positive(),
+    date:        z.string().datetime(),
+    payee:       z.string().optional(),
+    receiptUrl:  z.string().url().optional(),
+  })
+
+  app.get('/:id/expenses', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const q = z.object({ from: z.string().optional(), to: z.string().optional(), category: z.string().optional() }).parse(request.query)
+    return reply.send({ success: true, data: await svc.listExpenses(id, user.userId, q) })
+  })
+
+  app.post('/:id/expenses', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = expenseBodySchema.parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.createExpense(id, user.userId, body) })
+  })
+
+  app.patch('/:id/expenses/:expenseId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, expenseId } = request.params as { id: string; expenseId: string }
+    const body = expenseBodySchema.partial().parse(request.body)
+    return reply.send({ success: true, data: await svc.updateExpense(id, user.userId, expenseId, body) })
+  })
+
+  app.delete('/:id/expenses/:expenseId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, expenseId } = request.params as { id: string; expenseId: string }
+    await svc.deleteExpense(id, user.userId, expenseId)
+    return reply.send({ success: true, data: { message: 'Expense deleted' } })
+  })
+
+  app.get('/:id/finance-summary', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const now = new Date()
+    const q = z.object({
+      year:  z.coerce.number().int().optional(),
+      month: z.coerce.number().int().min(1).max(12).optional(),
+    }).parse(request.query)
+    return reply.send({ success: true, data: await svc.getFinanceSummary(id, user.userId, q.year ?? now.getFullYear(), q.month ?? now.getMonth() + 1) })
+  })
+
+  // ── Inventory update / delete ─────────────────────────────────────────────
+
+  app.patch('/:id/inventory/:itemId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, itemId } = request.params as { id: string; itemId: string }
+    const body = z.object({
+      name:       z.string().optional(),
+      category:   z.string().optional(),
+      quantity:   z.number().int().min(0).optional(),
+      condition:  z.string().optional(),
+      notes:      z.string().optional(),
+      isAssigned: z.boolean().optional(),
+      assignedTo: z.string().optional(),
+    }).parse(request.body)
+    return reply.send({ success: true, data: await svc.updateInventoryItem(id, user.userId, itemId, body) })
+  })
+
+  app.delete('/:id/inventory/:itemId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, itemId } = request.params as { id: string; itemId: string }
+    await svc.deleteInventoryItem(id, user.userId, itemId)
+    return reply.send({ success: true, data: { message: 'Item deleted' } })
+  })
+
+  // ── Announcements GET / PATCH / DELETE ────────────────────────────────────
+
+  app.get('/:id/announcements', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const q = request.query as { page?: string; limit?: string }
+    return reply.send({ success: true, data: await svc.listAnnouncements(id, user.userId, Number(q.page) || 1, Number(q.limit) || 20) })
+  })
+
+  app.patch('/:id/announcements/:announcementId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, announcementId } = request.params as { id: string; announcementId: string }
+    const body = z.object({
+      title:       z.string().optional(),
+      body:        z.string().optional(),
+      isPinned:    z.boolean().optional(),
+      targetGroup: z.string().optional(),
+    }).parse(request.body)
+    return reply.send({ success: true, data: await svc.updateAnnouncement(id, user.userId, announcementId, body) })
+  })
+
+  app.delete('/:id/announcements/:announcementId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, announcementId } = request.params as { id: string; announcementId: string }
+    await svc.deleteAnnouncement(id, user.userId, announcementId)
+    return reply.send({ success: true, data: { message: 'Announcement deleted' } })
+  })
+
   app.patch('/:id/batches/:batchId', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id, batchId } = request.params as { id: string; batchId: string }

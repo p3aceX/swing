@@ -1031,6 +1031,7 @@ model Academy {
   sessionTypeConfigs   SessionTypeConfig[]
   skillAreas           SkillArea[]
   watchFlags           WatchFlag[]
+  expenses             AcademyExpense[]
 
   @@index([businessAccountId])
   @@index([city, isVerified])
@@ -2180,6 +2181,15 @@ model Team {
   academyId           String?
   coachId             String?
   arenaId             String?
+  // Identity & branding
+  motto               String?
+  homeGroundName      String?
+  foundedYear         Int?
+  // Format & structure
+  ageGroup            String?   // OPEN | U19 | U23 | U30 | VETERANS
+  format              String?   // T20 | ODI | TEST | ALL
+  skillLevel          String?   // BEGINNER | INTERMEDIATE | ADVANCED | PROFESSIONAL
+  isPublic            Boolean   @default(true)
   isActive            Boolean   @default(true)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -2652,11 +2662,17 @@ model MatchmakingMatch {
   slotTime             String
   date                 DateTime @db.Date
   format               String
-  status               String   @default("pending_confirm")
+  status               String   @default("pending_payment")
   confirmDeadline      DateTime
   teamAConfirmed       Boolean  @default(false)
   teamBConfirmed       Boolean  @default(false)
+  teamAPaid            Boolean  @default(false)
+  teamBPaid            Boolean  @default(false)
+  teamAPaymentId       String?
+  teamBPaymentId       String?
   paymentAmountPerTeam Int
+  groundFeePaise       Int      @default(0)
+  remainingFeePaise    Int      @default(0)
   bookingId            String?
   createdAt            DateTime @default(now())
 
@@ -4349,4 +4365,37 @@ model NutritionRecipe {
 
   @@index([nutritionItemId])
   @@map("nutrition_recipes")
+}
+
+// ============================================================
+// SECTION — ACADEMY EXPENSES
+// ============================================================
+
+enum ExpenseCategory {
+  SALARY
+  EQUIPMENT
+  MAINTENANCE
+  INFRASTRUCTURE
+  MARKETING
+  UTILITIES
+  OTHER
+}
+
+model AcademyExpense {
+  id          String          @id @default(cuid())
+  academyId   String
+  createdBy   String
+  category    ExpenseCategory
+  description String
+  amountPaise Int
+  date        DateTime
+  payee       String?
+  receiptUrl  String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  academy Academy @relation(fields: [academyId], references: [id])
+
+  @@index([academyId])
+  @@index([date])
 }
