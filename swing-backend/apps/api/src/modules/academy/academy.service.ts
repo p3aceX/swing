@@ -534,19 +534,58 @@ export class AcademyService {
       id: session.id,
       scheduledAt: session.scheduledAt,
       sessionType: session.sessionType,
+      locationName: session.locationName,
       status: session.isCancelled
         ? 'CANCELLED'
         : session.isCompleted
           ? 'COMPLETED'
           : 'SCHEDULED',
       durationMins: session.durationMins,
+      batch: session.batch ? { id: session.batch.id, name: session.batch.name } : null,
       batchName: session.batch?.name ?? null,
+      coach: { name: session.coach.user.name, avatarUrl: session.coach.user.avatarUrl },
       coachName: session.coach.user.name,
       coachAvatar: session.coach.user.avatarUrl,
       presentCount: session.attendances.filter(att => att.status === 'PRESENT').length,
       absentCount: session.attendances.filter(att => att.status === 'ABSENT').length,
       totalStudents: session.attendances.length,
     }))
+  }
+
+  async getSessionDetail(academyId: string, userId: string, sessionId: string) {
+    await this.verifyAcademyAccess(academyId, userId)
+    const session = await prisma.practiceSession.findFirst({
+      where: { id: sessionId, academyId },
+      include: {
+        batch: { select: { id: true, name: true } },
+        coach: { include: { user: { select: { name: true, avatarUrl: true } } } },
+        attendances: {
+          include: {
+            playerProfile: { include: { user: { select: { name: true } } } },
+          },
+        },
+      },
+    })
+    if (!session) throw Errors.notFound('Session')
+
+    return {
+      id: session.id,
+      scheduledAt: session.scheduledAt,
+      sessionType: session.sessionType,
+      locationName: session.locationName,
+      status: session.isCancelled
+        ? 'CANCELLED'
+        : session.isCompleted
+          ? 'COMPLETED'
+          : 'SCHEDULED',
+      durationMins: session.durationMins,
+      batch: session.batch ? { id: session.batch.id, name: session.batch.name } : null,
+      coach: { name: session.coach.user.name, avatarUrl: session.coach.user.avatarUrl },
+      attendance: session.attendances.map(a => ({
+        status: a.status,
+        user: { name: a.playerProfile.user.name },
+      })),
+    }
   }
 
   async getAttendanceReport(
