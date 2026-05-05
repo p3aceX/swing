@@ -179,4 +179,12 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       throw err
     }
   })
+
+  // Arena owner: cancel (delete) a matchmaking match at their venue
+  app.delete('/matches/:matchId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { matchId } = request.params as { matchId: string }
+    const data = await svc.cancelMatchAsArenaOwner(user.userId, matchId)
+    return reply.send({ success: true, data })
+  })
 }

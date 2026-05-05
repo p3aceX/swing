@@ -2217,4 +2217,72 @@ export class MatchmakingService {
 
     return { processed, skipped, errors }
   }
+
+  async cancelMatchAsArenaOwner(userId: string, matchId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+
+    const unit = await prisma.arenaUnit.findUnique({
+      where: { id: match.groundId },
+      include: { arena: true },
+    })
+    if (!unit || unit.arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    if (match.status === 'cancelled') {
+      return { status: 'cancelled' }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.matchmakingMatch.update({
+        where: { id: matchId },
+        data: { status: 'cancelled' },
+      })
+      await tx.matchmakingLobby.updateMany({
+        where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
+        data: { status: 'searching', matchId: null },
+      })
+      if ((match as any).bookingId) {
+        await tx.slotBooking.update({
+          where: { id: (match as any).bookingId },
+          data: { status: 'CANCELLED' },
+        })
+      }
+      if ((match as any).linkedMatchId) {
+        await tx.match.update({
+          where: { id: (match as any).linkedMatchId },
+          data: { status: 'CANCELLED' as any },
+        })
+      }
+    })
+
+    this.notifyMatchCancelledByOwner(matchId, unit.arena.name).catch(() => undefined)
+    return { status: 'cancelled' }
+  }
+
+  private async notifyMatchCancelledByOwner(matchId: string, arenaName: string) {
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) return
+    const [lobbyA, lobbyB] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } }),
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId } }),
+    ])
+    for (const lobby of [lobbyA, lobbyB]) {
+      if (!lobby?.playerId) continue
+      const profile = await prisma.playerProfile.findUnique({ where: { id: lobby.playerId }, select: { userId: true } })
+      if (!profile?.userId) continue
+      await notificationService.createNotification(profile.userId, {
+        type: 'mm_match_cancelled',
+        title: 'Match Cancelled',
+        body: `Your match at ${arenaName} has been cancelled by the arena.`,
+        entityType: 'match',
+        entityId: matchId,
+        data: { lobbyId: lobby.id },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+  }
 }
