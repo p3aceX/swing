@@ -648,18 +648,22 @@ export class MatchmakingService {
     const endMins = this.timeToMinutes(pick.slotTime) + 120
     const endTime = this.minutesToTime(endMins)
 
+    const durationMins = this.formatDurationMins(lobby.format as MatchmakingFormat)
+    const totalAmountPaise = Math.round(unit.pricePerHourPaise * durationMins / 60)
+
     const booking = await prisma.slotBooking.create({
       data: {
         arenaId,
         unitId: unit.id,
-        bookedById: owner.id,
+        bookedById: lobby.playerId,
         date,
         startTime: pick.slotTime,
         endTime,
-        durationMins: 120,
+        durationMins,
         format: lobby.format as any,
-        totalAmountPaise: Math.round(unit.pricePerHourPaise * 2),
-        totalPricePaise: Math.round(unit.pricePerHourPaise * 2),
+        totalAmountPaise,
+        totalPricePaise: totalAmountPaise,
+        baseAmountPaise: totalAmountPaise,
         status: 'HELD',
         isOfflineBooking: true,
         createdByOwnerId: owner.id,

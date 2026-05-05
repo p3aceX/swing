@@ -496,7 +496,14 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
         );
       }
     } catch (e) {
-      setState(() { _error = 'Something went wrong. Please try again.'; _loading = false; });
+      String msg = 'Something went wrong. Please try again.';
+      if (e is Exception) {
+        final s = e.toString();
+        final match = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(s);
+        if (match != null) msg = match.group(1)!;
+        else if (s.length < 200) msg = s;
+      }
+      setState(() { _error = msg; _loading = false; });
     }
   }
 
@@ -679,7 +686,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                     : const Text(
-                        'Confirm & Search for Rival',
+                        'Confirm & Assign a Team',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 15,
