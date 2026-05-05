@@ -315,16 +315,19 @@ class _MatchDetailSheetState extends ConsumerState<_MatchDetailSheet> {
     });
     try {
       final dio = ref.read(hostDioProvider);
-      await dio.post(
+      debugPrint('[markPaid] POST /matchmaking/matches/${widget.match.matchId}/mark-paid lobbyId=$lobbyId');
+      final resp = await dio.post(
         '/matchmaking/matches/${widget.match.matchId}/mark-paid',
         data: {'lobbyId': lobbyId},
       );
+      debugPrint('[markPaid] response: ${resp.statusCode} ${resp.data}');
       if (mounted) {
         ref.invalidate(arenaMatchesProvider(widget.arenaId));
         Navigator.pop(context);
       }
     } catch (e) {
-      String msg = 'Could not mark as paid. Try again.';
+      debugPrint('[markPaid] ERROR: $e');
+      String msg = e.toString();
       final s = e.toString();
       final m = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(s);
       if (m != null) msg = m.group(1)!;

@@ -169,7 +169,14 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const user = (request as any).user as { userId: string }
     const { matchId } = request.params as { matchId: string }
     const body = z.object({ lobbyId: z.string() }).parse(request.body)
-    const data = await svc.markMatchPaidOffline(user.userId, matchId, body.lobbyId)
-    return reply.send({ success: true, data })
+    console.log('[mark-paid] userId=%s matchId=%s lobbyId=%s', user.userId, matchId, body.lobbyId)
+    try {
+      const data = await svc.markMatchPaidOffline(user.userId, matchId, body.lobbyId)
+      console.log('[mark-paid] success:', data)
+      return reply.send({ success: true, data })
+    } catch (err: any) {
+      console.error('[mark-paid] ERROR code=%s msg=%s', err.code, err.message, err)
+      throw err
+    }
   })
 }
