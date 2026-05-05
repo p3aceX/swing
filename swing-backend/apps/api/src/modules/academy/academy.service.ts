@@ -257,13 +257,19 @@ export class AcademyService {
 
   async listCoaches(academyId: string, userId: string) {
     await this.verifyOwnership(academyId, userId)
-    return prisma.academyCoach.findMany({
+    const rows = await prisma.academyCoach.findMany({
       where: { academyId, isActive: true },
       include: {
         coach: { include: { user: { select: { name: true, avatarUrl: true, phone: true } } } },
       },
       orderBy: { id: 'asc' },
     })
+    // Flatten user to top level so clients can read coach.user directly
+    return rows.map(r => ({
+      ...r,
+      coachProfileId: r.coachId,
+      user: r.coach.user,
+    }))
   }
 
   async updateBatch(academyId: string, userId: string, batchId: string, data: any) {
