@@ -490,7 +490,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
         widget.onAccepted();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Split booking created — searching for rival team'),
+            content: Text('Slot locked — now searching for a rival team'),
             backgroundColor: Color(0xFF059669),
           ),
         );
@@ -531,19 +531,24 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'Accept Team',
-            style: TextStyle(
+          Text(
+            lobby.teamName,
+            style: const TextStyle(
               color: Color(0xFF111827),
               fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: 2),
+          const Text(
+            'Team willing to play',
+            style: TextStyle(color: Color(0xFF059669), fontSize: 13, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 4),
           Text(
             multiSlot
-                ? 'This team requested ${slots.length} slots. Choose which one to confirm.'
-                : 'This will create a split booking for the requested slot.',
+                ? 'They requested ${slots.length} time slots — pick one to lock in.'
+                : 'Confirm the slot to start searching for a rival team.',
             style: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
           ),
           const SizedBox(height: 20),
@@ -560,7 +565,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
           const SizedBox(height: 20),
           // Slot selector
           const Text(
-            'CONFIRM SLOT',
+            'PICK A SLOT TO OFFER',
             style: TextStyle(
               color: Color(0xFF9CA3AF),
               fontSize: 11,
@@ -674,7 +679,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                     : const Text(
-                        'Confirm Slot',
+                        'Confirm & Search for Rival',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 15,
