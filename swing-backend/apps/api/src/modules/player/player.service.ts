@@ -430,15 +430,21 @@ export class PlayerService {
     const myTeamNames = playerTeams.map((t) => t.name);
 
     // If this profile's user is also an arena owner, surface matches that
-    // were booked at any of their arenas. SlotBooking has no back-relation
-    // to Match, so we collect SlotBooking ids for owned arenas first, then
-    // include Match.slotBookingId IN that list.
+    // were created via the matchmaking flow at any of their arenas.
+    //   1. Find arenas the user owns.
+    //   2. Find arenaUnit ids in those arenas.
+    //   3. Find MatchmakingMatch ids whose groundId is in those units.
+    //   4. Include cricket Match where matchmakingId IN that list.
+    // Also collect SlotBooking ids owned by these arenas for non-matchmaking
+    // bookings (some flows do set Match.slotBookingId).
     const profileForUser = await prisma.playerProfile.findUnique({
       where: { id: profileId },
       select: { userId: true },
     });
     let ownedArenaSlotBookingIds: string[] = [];
+    let ownedArenaMmMatchIds: string[] = [];
     let ownedArenaIds: string[] = [];
+    let ownedUnitIds: string[] = [];
     if (profileForUser?.userId) {
       const owner = await prisma.arenaOwnerProfile.findUnique({
         where: { userId: profileForUser.userId },
@@ -451,17 +457,32 @@ export class PlayerService {
         });
         ownedArenaIds = arenas.map((a) => a.id);
         if (ownedArenaIds.length > 0) {
-          const bookings = await prisma.slotBooking.findMany({
-            where: { arenaId: { in: ownedArenaIds } },
-            select: { id: true },
-          });
+          const [bookings, units] = await Promise.all([
+            prisma.slotBooking.findMany({
+              where: { arenaId: { in: ownedArenaIds } },
+              select: { id: true },
+            }),
+            prisma.arenaUnit.findMany({
+              where: { arenaId: { in: ownedArenaIds } },
+              select: { id: true },
+            }),
+          ]);
           ownedArenaSlotBookingIds = bookings.map((b) => b.id);
+          ownedUnitIds = units.map((u) => u.id);
+          if (ownedUnitIds.length > 0) {
+            const mmMatches = await prisma.matchmakingMatch.findMany({
+              where: { groundId: { in: ownedUnitIds } },
+              select: { id: true },
+            });
+            ownedArenaMmMatchIds = mmMatches.map((m) => m.id);
+          }
         }
       }
     }
     console.log(
       `[matchHistory] profileId=${profileId} userId=${profileForUser?.userId ?? 'none'} `
-        + `ownedArenas=${ownedArenaIds.length} slotBookings=${ownedArenaSlotBookingIds.length} `
+        + `ownedArenas=${ownedArenaIds.length} units=${ownedUnitIds.length} `
+        + `slotBookings=${ownedArenaSlotBookingIds.length} mmMatches=${ownedArenaMmMatchIds.length} `
         + `myTeams=${myTeamNames.length}`,
     );
 
@@ -499,6 +520,9 @@ export class PlayerService {
               : []),
             ...(ownedArenaSlotBookingIds.length > 0
               ? [{ slotBookingId: { in: ownedArenaSlotBookingIds } }]
+              : []),
+            ...(ownedArenaMmMatchIds.length > 0
+              ? [{ matchmakingId: { in: ownedArenaMmMatchIds } }]
               : []),
           ],
         },
