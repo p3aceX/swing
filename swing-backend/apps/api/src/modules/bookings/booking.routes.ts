@@ -210,6 +210,36 @@ export async function bookingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data: await svc.createSplitBooking(user.userId, arenaId, body) })
   })
 
+  // ─── Owner: booking detail with payments ledger ──────────────────────────
+  app.get('/:id/detail', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    return reply.send({ success: true, data: await svc.getOwnerBookingDetail(user.userId, id) })
+  })
+
+  // ─── Owner: add a part-payment ────────────────────────────────────────────
+  app.post('/:id/payments', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = z.object({
+      amountPaise: z.number().int().min(1),
+      paymentMode: z.enum(['CASH', 'UPI', 'CARD', 'BANK_TRANSFER']),
+      payerName: z.string().min(1),
+      payerTeamId: z.string().optional(),
+      payerPhone: z.string().optional(),
+      reference: z.string().optional(),
+      notes: z.string().optional(),
+    }).parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.addBookingPayment(user.userId, id, body) })
+  })
+
+  // ─── Owner: delete a part-payment ────────────────────────────────────────
+  app.delete('/:id/payments/:paymentId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, paymentId } = request.params as { id: string; paymentId: string }
+    return reply.send({ success: true, data: await svc.deleteBookingPayment(user.userId, id, paymentId) })
+  })
+
   // ─── Owner: mark booking as paid ────────────────────────────────────────
   app.post('/:id/mark-paid', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }

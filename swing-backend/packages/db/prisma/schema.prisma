@@ -2539,12 +2539,32 @@ model SlotBooking {
   addons             SlotBookingAddon[]
   payment            Payment?
   monthlyPass        MonthlyPass?       @relation(fields: [monthlyPassId], references: [id])
+  bookingPayments    BookingPayment[]
 
   @@index([arenaId, date, status])
   @@index([unitId, date])
   @@index([monthlyPassId])
   @@index([guestUserId])
   @@index([guestPlayerProfileId])
+}
+
+model BookingPayment {
+  id               String   @id @default(cuid())
+  bookingId        String
+  amountPaise      Int
+  paymentMode      String   // CASH | UPI | CARD | BANK_TRANSFER
+  payerName        String
+  payerTeamId      String?
+  payerPhone       String?
+  recordedByOwnerId String
+  recordedAt       DateTime @default(now())
+  reference        String?
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  booking SlotBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
 }
 
 model SlotBookingAddon {

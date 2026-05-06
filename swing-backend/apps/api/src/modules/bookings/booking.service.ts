@@ -922,15 +922,23 @@ export class BookingService {
     const where: any = { arenaId, status: { notIn: ['HELD'] } }
     if (date) where.date = this.startOfDay(date)
 
-    return prisma.slotBooking.findMany({
+    const rows = await prisma.slotBooking.findMany({
       where,
       include: {
         unit: true,
         bookedBy: { include: { user: { select: { name: true, phone: true, email: true } } } },
         payment: true,
+        bookingPayments: { orderBy: { recordedAt: 'desc' }, take: 1 },
+        _count: { select: { bookingPayments: true } },
       },
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     })
+    return rows.map((r) => ({
+      ...r,
+      paymentsCount: r._count.bookingPayments,
+      lastPaymentAt: r.bookingPayments[0]?.recordedAt ?? null,
+      paidAmountPaise: r.bookingPayments.reduce((s, p) => s + p.amountPaise, 0),
+    }))
   }
 
   // ─── Player: busy slots for an arena (no sensitive data) ────────────────
@@ -982,8 +990,11 @@ export class BookingService {
       unitId: true,
       isOfflineBooking: true,
       paymentMode: true,
+      bookingSource: true,
       unit: { select: { name: true } },
       bookedBy: { include: { user: { select: { name: true, phone: true } } } },
+      _count: { select: { bookingPayments: true } },
+      bookingPayments: { orderBy: { recordedAt: 'desc' as const }, take: 1, select: { recordedAt: true, amountPaise: true } },
     }
 
     // Checked-in = collection realized — filter by paidAt so a future booking
@@ -1011,7 +1022,16 @@ export class BookingService {
       select: bookingSelect,
       orderBy: { date: 'desc' },
     })
-    return { checkedInBookings, pendingBookings }
+    const mapRow = (r: any) => ({
+      ...r,
+      paymentsCount: r._count?.bookingPayments ?? 0,
+      lastPaymentAt: r.bookingPayments?.[0]?.recordedAt ?? null,
+      paidAmountPaise: r.bookingPayments?.reduce((s: number, p: any) => s + p.amountPaise, 0) ?? 0,
+    })
+    return {
+      checkedInBookings: checkedInBookings.map(mapRow),
+      pendingBookings: pendingBookings.map(mapRow),
+    }
   }
 
   // ─── Player: cancel booking ───────────────────────────────────────────────
@@ -1087,6 +1107,98 @@ export class BookingService {
       where: { id: bookingId },
       data: { status: 'CHECKED_IN', checkedInAt: new Date() },
     })
+  }
+
+  // ─── Owner: get booking detail with payments ──────────────────────────────
+
+  async getOwnerBookingDetail(userId: string, bookingId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const booking = await prisma.slotBooking.findUnique({
+      where: { id: bookingId },
+      include: {
+        arena: true,
+        unit: true,
+        bookedBy: { include: { user: { select: { name: true, phone: true } } } },
+        bookingPayments: { orderBy: { recordedAt: 'asc' } },
+      },
+    })
+    if (!booking) throw Errors.notFound('Booking')
+    if (booking.arena.ownerId !== owner.id) throw Errors.forbidden()
+    return booking
+  }
+
+  // ─── Owner: add a part-payment to a booking ───────────────────────────────
+
+  async addBookingPayment(userId: string, bookingId: string, data: {
+    amountPaise: number
+    paymentMode: string
+    payerName: string
+    payerTeamId?: string
+    payerPhone?: string
+    reference?: string
+    notes?: string
+  }) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const booking = await prisma.slotBooking.findUnique({
+      where: { id: bookingId },
+      include: { arena: true, bookingPayments: true },
+    })
+    if (!booking) throw Errors.notFound('Booking')
+    if (booking.arena.ownerId !== owner.id) throw Errors.forbidden()
+    if (booking.status === 'CANCELLED') {
+      throw new AppError('INVALID_STATE', 'Cannot add payment to a cancelled booking', 400)
+    }
+
+    const existingTotal = booking.bookingPayments.reduce((s, p) => s + p.amountPaise, 0)
+    const newTotal = existingTotal + data.amountPaise
+
+    const payment = await prisma.bookingPayment.create({
+      data: {
+        bookingId,
+        amountPaise: data.amountPaise,
+        paymentMode: data.paymentMode,
+        payerName: data.payerName,
+        payerTeamId: data.payerTeamId,
+        payerPhone: data.payerPhone,
+        recordedByOwnerId: owner.id,
+        reference: data.reference,
+        notes: data.notes,
+      },
+    })
+
+    // If total payments now cover the full amount, auto-confirm + set paidAt
+    if (newTotal >= booking.totalAmountPaise && booking.status !== 'CONFIRMED' && booking.status !== 'CHECKED_IN') {
+      await prisma.slotBooking.update({
+        where: { id: bookingId },
+        data: { status: 'CONFIRMED', paidAt: new Date(), paymentMode: data.paymentMode },
+      })
+    }
+
+    return payment
+  }
+
+  // ─── Owner: delete a part-payment ────────────────────────────────────────
+
+  async deleteBookingPayment(userId: string, bookingId: string, paymentId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const booking = await prisma.slotBooking.findUnique({
+      where: { id: bookingId },
+      include: { arena: true },
+    })
+    if (!booking) throw Errors.notFound('Booking')
+    if (booking.arena.ownerId !== owner.id) throw Errors.forbidden()
+
+    const payment = await prisma.bookingPayment.findUnique({ where: { id: paymentId } })
+    if (!payment || payment.bookingId !== bookingId) throw Errors.notFound('Payment')
+
+    await prisma.bookingPayment.delete({ where: { id: paymentId } })
+    return { deleted: true }
   }
 
   // ─── Player: check-in (self) ─────────────────────────────────────────────
