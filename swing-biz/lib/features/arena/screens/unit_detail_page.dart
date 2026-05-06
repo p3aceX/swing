@@ -7,7 +7,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:go_router/go_router.dart';
+
 import '../../../core/api/api_client.dart';
+import '../../../core/router/app_router.dart';
 import '../../../core/utils/image_compressor.dart';
 import '../services/arena_profile_providers.dart';
 import '../../bookings/presentation/bookings_page.dart';
@@ -1053,14 +1056,9 @@ class _BookingsTab extends StatelessWidget {
   final VoidCallback onRefresh;
 
   void _openDetail(BuildContext context, ArenaReservation booking) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => BookingDetailSheet(booking: booking, arenaName: arena.name, arenaId: arena.id),
-    ).then((_) => onRefresh());
+    context
+        .push(AppRoutes.bookingDetailPath(booking.id))
+        .then((_) => onRefresh());
   }
 
   void _openAddBooking(BuildContext context) {

@@ -14,14 +14,44 @@ import '../../../core/router/app_router.dart';
 import '../../../core/utils/image_compressor.dart';
 import '../services/arena_profile_providers.dart';
 
-// ─── Color palette ───────────────────────────────────────────────────────────
-const _bg = Color(0xFFF3F4F6);
-const _surface = Color(0xFFFFFFFF);
-const _line = Color(0xFFE1E5EA);
-const _text = Color(0xFF0D1117);
-const _muted = Color(0xFF6E7685);
-const _accent = Color(0xFF059669);
-const _deep = Color(0xFF064E3B);
+// ─── Color palette (theme-driven) ────────────────────────────────────────────
+class _C {
+  const _C({
+    required this.bg,
+    required this.surface,
+    required this.line,
+    required this.text,
+    required this.muted,
+    required this.accent,
+    required this.deep,
+    required this.onAccent,
+  });
+
+  final Color bg;
+  final Color surface;
+  final Color line;
+  final Color text;
+  final Color muted;
+  final Color accent;
+  final Color deep;
+  final Color onAccent;
+
+  factory _C.of(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    return _C(
+      bg: s.surface,
+      surface: s.surfaceContainerHighest,
+      line: s.outline,
+      text: s.onSurface,
+      muted: s.onSurface.withValues(alpha: 0.6),
+      accent: s.primary,
+      deep: s.secondary,
+      onAccent: s.onPrimary,
+    );
+  }
+}
+
+late _C _c;
 
 void _arenaUploadLog(String message, [Object? error, StackTrace? stackTrace]) {
   if (!kDebugMode) return;
@@ -81,8 +111,8 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
         data: form,
         options: Options(
           contentType: 'multipart/form-data',
-          sendTimeout: const Duration(seconds: 30),
-          receiveTimeout: const Duration(seconds: 30),
+          sendTimeout: Duration(seconds: 30),
+          receiveTimeout: Duration(seconds: 30),
         ),
         onSendProgress: (sent, total) =>
             _arenaUploadLog('unit upload progress sent=$sent total=$total'),
@@ -105,7 +135,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: _bg,
+      backgroundColor: _c.bg,
       builder: (context) => UnitEditorSheet(
         arenaId: arena.id,
         unit: unit,
@@ -122,16 +152,16 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Remove unit?'),
+        title: Text('Remove unit?'),
         content: Text('${unit.name} will be hidden from booking setup.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
+            child: Text('Remove'),
           ),
         ],
       ),
@@ -146,7 +176,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       ref.invalidate(ownedArenasProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Unit removed')));
+          .showSnackBar(SnackBar(content: Text('Unit removed')));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -159,8 +189,8 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: _surface,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: _c.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => const _ArenaHelpSheet(),
@@ -174,7 +204,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: _bg,
+      backgroundColor: _c.bg,
       builder: (_) =>
           ArenaDetailSheet(arena: arena, startEditing: startEditing),
     );
@@ -182,6 +212,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final arenaAsync = widget.arenaId == null
         ? ref.watch(arenaDetailProvider)
         : ref.watch(arenaDetailByIdProvider(widget.arenaId!));
@@ -198,9 +229,9 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
     }
 
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: _c.bg,
       body: arenaAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => Center(child: CircularProgressIndicator()),
         error: (error, _) => _ErrorState(message: '$error'),
         data: (arena) {
           if (arena == null) return const _EmptyState();
@@ -209,13 +240,13 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
             slivers: [
               // ── AppBar ──────────────────────────────────────────────────
               SliverAppBar(
-                backgroundColor: _bg,
-                foregroundColor: _text,
+                backgroundColor: _c.bg,
+                foregroundColor: _c.text,
                 pinned: true,
                 elevation: 0,
                 scrolledUnderElevation: 1,
                 leading: IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded, color: _text),
+                  icon: Icon(Icons.arrow_back_rounded, color: _c.text),
                   onPressed: () => context.canPop()
                       ? context.pop()
                       : context.go(AppRoutes.dashboard),
@@ -225,9 +256,9 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(arena.name,
-                        style: const TextStyle(color: _text, fontSize: 17, fontWeight: FontWeight.w900)),
+                        style: TextStyle(color: _c.text, fontSize: 17, fontWeight: FontWeight.w900)),
                     if (loc.isNotEmpty)
-                      Text(loc, style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500)),
+                      Text(loc, style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w500)),
                   ],
                 ),
                 actions: [
@@ -235,15 +266,15 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
                     padding: const EdgeInsets.only(right: 12),
                     child: FilledButton.icon(
                       onPressed: () => _openUnitSheet(arena),
-                      icon: const Icon(Icons.add_rounded, size: 16),
-                      label: const Text('Add Unit'),
+                      icon: Icon(Icons.add_rounded, size: 16),
+                      label: Text('Add Unit'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: _deep,
-                        foregroundColor: Colors.white,
+                        backgroundColor: _c.accent,
+                        foregroundColor: _c.onAccent,
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                        textStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
@@ -254,28 +285,28 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
               // ── Arena info strip ────────────────────────────────────────
               SliverToBoxAdapter(
                 child: Container(
-                  color: _surface,
+                  color: _c.surface,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(children: [
-                    const Icon(Icons.schedule_rounded, size: 13, color: _muted),
-                    const SizedBox(width: 5),
+                    Icon(Icons.schedule_rounded, size: 13, color: _c.muted),
+                    SizedBox(width: 5),
                     Text('${arena.openTime} – ${arena.closeTime}',
-                        style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+                        style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
                     if (arena.sports.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      const Icon(Icons.sports_cricket_rounded, size: 13, color: _muted),
-                      const SizedBox(width: 5),
+                      SizedBox(width: 12),
+                      Icon(Icons.sports_cricket_rounded, size: 13, color: _c.muted),
+                      SizedBox(width: 5),
                       Expanded(
                         child: Text(
                           arena.sports.map((s) => s[0].toUpperCase() + s.substring(1).toLowerCase()).join(' · '),
                           maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ] else
-                      const Spacer(),
+                      Spacer(),
                     Text('${arena.units.length} units',
-                        style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+                        style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
@@ -284,7 +315,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
                 sliver: SliverToBoxAdapter(
-                  child: Text('Units', style: const TextStyle(color: _text, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                  child: Text('Units', style: TextStyle(color: _c.text, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
                 ),
               ),
 
@@ -297,35 +328,35 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.add_box_outlined,
-                            size: 52, color: _muted),
-                        const SizedBox(height: 16),
-                        const Text('No units yet',
+                        Icon(Icons.add_box_outlined,
+                            size: 52, color: _c.muted),
+                        SizedBox(height: 16),
+                        Text('No units yet',
                             style: TextStyle(
-                                color: _text,
+                                color: _c.text,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800),
                             textAlign: TextAlign.center),
-                        const SizedBox(height: 8),
-                        const Text(
+                        SizedBox(height: 8),
+                        Text(
                           'Add your first unit — a cricket net, full ground, or any bookable space.',
                           style: TextStyle(
-                              color: _muted, fontSize: 14, height: 1.6),
+                              color: _c.muted, fontSize: 14, height: 1.6),
                           textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 28),
+                        SizedBox(height: 28),
                         FilledButton.icon(
                           onPressed: () => _openUnitSheet(arena),
-                          icon: const Icon(Icons.add_rounded),
-                          label: const Text('Add Unit'),
+                          icon: Icon(Icons.add_rounded),
+                          label: Text('Add Unit'),
                           style: FilledButton.styleFrom(
-                            backgroundColor: _deep,
-                            foregroundColor: Colors.white,
+                            backgroundColor: _c.accent,
+                            foregroundColor: _c.onAccent,
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 28, vertical: 14),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10)),
-                            textStyle: const TextStyle(
+                            textStyle: TextStyle(
                                 fontSize: 15, fontWeight: FontWeight.w700),
                           ),
                         ),
@@ -338,7 +369,7 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
                   sliver: SliverList.separated(
                     itemCount: arena.units.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (_, __) => SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final unit = arena.units[index];
                       return _UnitCard(
@@ -526,8 +557,8 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
           data: form,
           options: Options(
             contentType: 'multipart/form-data',
-            sendTimeout: const Duration(seconds: 30),
-            receiveTimeout: const Duration(seconds: 30),
+            sendTimeout: Duration(seconds: 30),
+            receiveTimeout: Duration(seconds: 30),
           ),
           onSendProgress: (sent, total) =>
               _arenaUploadLog('arena upload progress sent=$sent total=$total'),
@@ -614,7 +645,7 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
       if (!mounted) return;
       setState(() => _editing = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Arena updated')));
+          .showSnackBar(SnackBar(content: Text('Arena updated')));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -626,6 +657,7 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     const tabs = ['Details', 'Location', 'Photos', 'Facilities', 'Share'];
     return Padding(
@@ -642,25 +674,25 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
             child: Column(
               children: [
                 // Drag handle
-                const SizedBox(height: 10),
+                SizedBox(height: 10),
                 Center(
                     child: Container(
                         width: 36,
                         height: 4,
                         decoration: BoxDecoration(
-                            color: _line,
+                            color: _c.line,
                             borderRadius: BorderRadius.circular(2)))),
-                const SizedBox(height: 14),
+                SizedBox(height: 14),
                 // Header
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 8, 0),
                   child: Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Arena Details',
                           style: TextStyle(
-                              color: _text,
+                              color: _c.text,
                               fontSize: 19,
                               fontWeight: FontWeight.w900),
                         ),
@@ -673,29 +705,29 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
                                     _reset();
                                     _editing = false;
                                   }),
-                          child: const Text('Cancel'),
+                          child: Text('Cancel'),
                         ),
-                      const SizedBox(width: 4),
+                      SizedBox(width: 4),
                       IconButton(
                           onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close_rounded)),
+                          icon: Icon(Icons.close_rounded)),
                     ],
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: 6),
                 // Tab bar
                 TabBar(
                   isScrollable: true,
                   tabAlignment: TabAlignment.start,
-                  labelColor: _deep,
-                  unselectedLabelColor: _muted,
-                  labelStyle: const TextStyle(
+                  labelColor: _c.deep,
+                  unselectedLabelColor: _c.muted,
+                  labelStyle: TextStyle(
                       fontWeight: FontWeight.w800, fontSize: 13),
-                  unselectedLabelStyle: const TextStyle(
+                  unselectedLabelStyle: TextStyle(
                       fontWeight: FontWeight.w600, fontSize: 13),
-                  indicatorColor: _deep,
+                  indicatorColor: _c.deep,
                   indicatorSize: TabBarIndicatorSize.label,
-                  dividerColor: _line,
+                  dividerColor: _c.line,
                   tabs: tabs.map((t) => Tab(text: t)).toList(),
                 ),
                 // Tab content
@@ -716,25 +748,25 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
                     top: false,
                     child: Container(
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                      decoration: const BoxDecoration(
-                          color: _bg,
-                          border: Border(top: BorderSide(color: _line))),
+                      decoration: BoxDecoration(
+                          color: _c.bg,
+                          border: Border(top: BorderSide(color: _c.line))),
                       child: FilledButton(
                         onPressed: _saving ? null : _saveArena,
                         style: FilledButton.styleFrom(
-                          backgroundColor: _deep,
-                          foregroundColor: Colors.white,
+                          backgroundColor: _c.accent,
+                          foregroundColor: _c.onAccent,
                           minimumSize: const Size.fromHeight(52),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         ),
                         child: _saving
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white))
-                            : const Text('Save Arena'),
+                            : Text('Save Arena'),
                       ),
                     ),
                   ),
@@ -771,14 +803,14 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: _surface,
+          fillColor: _c.surface,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-          border: _inputBorder(_line),
-          enabledBorder: _inputBorder(_line),
-          focusedBorder: _inputBorder(_accent),
-          errorBorder: _inputBorder(const Color(0xFFD92D20)),
-          focusedErrorBorder: _inputBorder(const Color(0xFFD92D20)),
+          border: _inputBorder(_c.line),
+          enabledBorder: _inputBorder(_c.line),
+          focusedBorder: _inputBorder(_c.accent),
+          errorBorder: _inputBorder(Color(0xFFD92D20)),
+          focusedErrorBorder: _inputBorder(Color(0xFFD92D20)),
         ),
       ),
     );
@@ -794,19 +826,19 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
             width: 116,
             child: Text(
               label,
-              style: const TextStyle(
-                color: _muted,
+              style: TextStyle(
+                color: _c.muted,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           Expanded(
             child: Text(
               value.trim().isEmpty ? 'Not set' : value,
-              style: const TextStyle(
-                color: _text,
+              style: TextStyle(
+                color: _c.text,
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
                 height: 1.35,
@@ -838,6 +870,7 @@ class _UnitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final typeLabel =
         _fallback(unit.unitTypeLabel).replaceAll('Not set', unit.unitType);
     final isGround = unit.isGround;
@@ -852,7 +885,7 @@ class _UnitCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: _surface,
+          color: _c.surface,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -875,17 +908,17 @@ class _UnitCard extends StatelessWidget {
                               unit.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: _text,
+                              style: TextStyle(
+                                color: _c.text,
                                 fontSize: 15,
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
-                            const SizedBox(height: 3),
+                            SizedBox(height: 3),
                             Text(
                               typeLabel,
-                              style: const TextStyle(
-                                color: _muted,
+                              style: TextStyle(
+                                color: _c.muted,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -894,9 +927,9 @@ class _UnitCard extends StatelessWidget {
                         ),
                       ),
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert_rounded,
-                            color: _muted, size: 20),
-                        color: _surface,
+                        icon: Icon(Icons.more_vert_rounded,
+                            color: _c.muted, size: 20),
+                        color: _c.surface,
                         onSelected: (value) {
                           if (value == 'edit') onEdit();
                           if (value == 'delete') onDelete();
@@ -910,31 +943,31 @@ class _UnitCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: 10),
                   // price + slot row (hidden for nets — per-hour is meaningless)
                   if (basePrice != null)
                     Row(
                       children: [
                         Text(
                           basePrice,
-                          style: const TextStyle(
-                            color: _text,
+                          style: TextStyle(
+                            color: _c.text,
                             fontSize: 15,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        SizedBox(width: 10),
                         Text(
                           '· ${unit.minSlotMins ~/ 60}h min slot',
-                          style: const TextStyle(
-                            color: _muted,
+                          style: TextStyle(
+                            color: _c.muted,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
-                  if (basePrice != null) const SizedBox(height: 10),
+                  if (basePrice != null) SizedBox(height: 10),
                   // chip row
                   Wrap(
                     spacing: 7,
@@ -979,15 +1012,15 @@ class _UnitCard extends StatelessWidget {
                         _SmallPill('${unit.addons.length} add-ons'),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12),
                   // action buttons
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: onTap,
-                          icon: const Icon(Icons.tune_rounded, size: 15),
-                          label: const Text(
+                          icon: Icon(Icons.tune_rounded, size: 15),
+                          label: Text(
                             'Manage Unit',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
@@ -995,8 +1028,8 @@ class _UnitCard extends StatelessWidget {
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: _text,
-                            side: BorderSide(color: _line),
+                            foregroundColor: _c.text,
+                            side: BorderSide(color: _c.line),
                             padding:
                                 const EdgeInsets.symmetric(vertical: 10),
                             shape: RoundedRectangleBorder(
@@ -1005,21 +1038,21 @@ class _UnitCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: 8),
                       Expanded(
                         child: OutlinedButton(
                           onPressed: onEdit,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: _accent,
+                            foregroundColor: _c.accent,
                             side: BorderSide(
-                                color: _accent.withValues(alpha: 0.4)),
+                                color: _c.accent.withValues(alpha: 0.4)),
                             padding:
                                 const EdgeInsets.symmetric(vertical: 10),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
+                          child: Text(
                             'Edit Unit',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
@@ -1048,18 +1081,19 @@ class _SmallPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
       decoration: BoxDecoration(
-        color: highlight ? _accent.withValues(alpha: 0.08) : _bg,
+        color: highlight ? _c.accent.withValues(alpha: 0.08) : _c.bg,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-            color: highlight ? _accent.withValues(alpha: 0.3) : _line),
+            color: highlight ? _c.accent.withValues(alpha: 0.3) : _c.line),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: highlight ? _accent : _text,
+          color: highlight ? _c.accent : _c.text,
           fontSize: 12,
           fontWeight: FontWeight.w800,
         ),
@@ -1071,7 +1105,7 @@ class _SmallPill extends StatelessWidget {
 // ─── Unit editor sheet ───────────────────────────────────────────────────────
 
 class UnitEditorSheet extends ConsumerStatefulWidget {
-  const UnitEditorSheet({
+  UnitEditorSheet({
     super.key,
     required this.arenaId,
     this.unit,
@@ -1420,6 +1454,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     final isLastStep = _step == _maxStep;
     return Padding(
@@ -1440,8 +1475,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                     Expanded(
                       child: Text(
                         _editing ? 'Edit unit' : 'Add units',
-                        style: const TextStyle(
-                          color: _text,
+                        style: TextStyle(
+                          color: _c.text,
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
                         ),
@@ -1449,7 +1484,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(context, false),
-                      icon: const Icon(Icons.close_rounded),
+                      icon: Icon(Icons.close_rounded),
                     ),
                   ],
                 ),
@@ -1469,9 +1504,9 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 top: false,
                 child: Container(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                  decoration: const BoxDecoration(
-                    color: _bg,
-                    border: Border(top: BorderSide(color: _line)),
+                  decoration: BoxDecoration(
+                    color: _c.bg,
+                    border: Border(top: BorderSide(color: _c.line)),
                   ),
                   child: Row(
                     children: [
@@ -1480,16 +1515,16 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                           child: OutlinedButton(
                             onPressed: _saving ? null : _back,
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: _deep,
+                              foregroundColor: _c.deep,
                               minimumSize: const Size.fromHeight(52),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
                               ),
                             ),
-                            child: const Text('Back'),
+                            child: Text('Back'),
                           ),
                         ),
-                      if (_step > 0) const SizedBox(width: 10),
+                      if (_step > 0) SizedBox(width: 10),
                       Expanded(
                         flex: 2,
                         child: FilledButton(
@@ -1499,15 +1534,15 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                                   ? _save
                                   : _next,
                           style: FilledButton.styleFrom(
-                            backgroundColor: _deep,
-                            foregroundColor: Colors.white,
+                            backgroundColor: _c.accent,
+                            foregroundColor: _c.onAccent,
                             minimumSize: const Size.fromHeight(52),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
                           ),
                           child: _saving
-                              ? const SizedBox(
+                              ? SizedBox(
                                   width: 18,
                                   height: 18,
                                   child:
@@ -1563,13 +1598,13 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           },
         ),
         if (_unitType == 'CRICKET_NET') ...[
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Surface types',
-                  style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15),
+                  style: TextStyle(color: _c.text, fontWeight: FontWeight.w800, fontSize: 15),
                 ),
               ),
               if (_netVariants.length < _NetVariantDraft._surfaceOptions.length)
@@ -1584,16 +1619,16 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                     });
                   },
                   style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  child: const Text('Add all', style: TextStyle(color: _accent, fontSize: 13, fontWeight: FontWeight.w700)),
+                  child: Text('Add all', style: TextStyle(color: _c.accent, fontSize: 13, fontWeight: FontWeight.w700)),
                 ),
             ],
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           // Multi-select surface chips
           Row(
             children: [
               for (final (t, l) in _NetVariantDraft._surfaceOptions) ...[
-                if (t != _NetVariantDraft._surfaceOptions.first.$1) const SizedBox(width: 8),
+                if (t != _NetVariantDraft._surfaceOptions.first.$1) SizedBox(width: 8),
                 Expanded(
                   child: GestureDetector(
                     onTap: () {
@@ -1612,12 +1647,12 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                       return Container(
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         decoration: BoxDecoration(
-                          color: selected ? _accent : _surface,
+                          color: selected ? _c.accent : _c.surface,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: selected ? _accent : _line),
+                          border: Border.all(color: selected ? _c.accent : _c.line),
                         ),
                         alignment: Alignment.center,
-                        child: Text(l, style: TextStyle(color: selected ? Colors.white : _text, fontWeight: FontWeight.w700, fontSize: 14)),
+                        child: Text(l, style: TextStyle(color: selected ? Colors.white : _c.text, fontWeight: FontWeight.w700, fontSize: 14)),
                       );
                     }),
                   ),
@@ -1627,9 +1662,9 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           ),
           // Config rows for selected variants
           if (_netVariants.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             for (var i = 0; i < _netVariants.length; i++) ...[
-              if (i > 0) const SizedBox(height: 8),
+              if (i > 0) SizedBox(height: 8),
               _NetVariantRow(
                 draft: _netVariants[i],
                 onRemove: () => setState(() { _netVariants[i].dispose(); _netVariants.removeAt(i); }),
@@ -1639,18 +1674,18 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           ],
         ],
         if (_canHaveParent) ...[
-          const SizedBox(height: 20),
-          const Text(
+          SizedBox(height: 20),
+          Text(
             'Part of ground',
             style: TextStyle(
-                color: _text, fontWeight: FontWeight.w800, fontSize: 15),
+                color: _c.text, fontWeight: FontWeight.w800, fontSize: 15),
           ),
-          const SizedBox(height: 4),
-          const Text(
+          SizedBox(height: 4),
+          Text(
             'If this unit shares the ground with a Full ground unit, link them so bookings block each other.',
-            style: TextStyle(color: _muted, fontSize: 12),
+            style: TextStyle(color: _c.muted, fontSize: 12),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           _ParentUnitPicker(
             arenaId: widget.arenaId,
             currentUnitId: widget.unit?.id,
@@ -1660,29 +1695,29 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         ],
         // Global floodlights only shown for non-net units or nets with no variants
         if (_unitType != 'CRICKET_NET' || _netVariants.isEmpty) ...[
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Floodlights', style: TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 15)),
-                    Text('Available for night play', style: TextStyle(color: _muted, fontSize: 12)),
+                    Text('Floodlights', style: TextStyle(color: _c.text, fontWeight: FontWeight.w800, fontSize: 15)),
+                    Text('Available for night play', style: TextStyle(color: _c.muted, fontSize: 12)),
                   ],
                 ),
               ),
               Switch(
                 value: _hasFloodlights,
                 onChanged: (v) => setState(() => _hasFloodlights = v),
-                activeThumbColor: _accent,
+                activeThumbColor: _c.accent,
               ),
             ],
           ),
         ],
         // Quantity only shown for non-net units (net variants handle count per type)
         if (!_editing && !_isNetsWithVariants) ...[
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           _QuantityStepper(
             value: _quantity,
             onChanged: (v) => setState(() => _quantity = v),
@@ -1709,11 +1744,11 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         const _LargeStepTitle('Schedule'),
         Row(
           children: [
-            const Text('All day (24 hrs)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _text)),
-            const Spacer(),
+            Text('All day (24 hrs)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _c.text)),
+            Spacer(),
             Switch.adaptive(
               value: _allDay,
-              activeColor: _accent,
+              activeColor: _c.accent,
               onChanged: (v) => setState(() {
                 _allDay = v;
                 if (v) {
@@ -1736,7 +1771,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 controller: _openTimeCtrl,
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: _TimePickerField(
                 label: 'Close time',
@@ -1745,16 +1780,16 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             ),
           ],
         ),
-        const SizedBox(height: 6),
-        const Text(
+        SizedBox(height: 6),
+        Text(
           'Operating days',
           style: TextStyle(
-            color: _text,
+            color: _c.text,
             fontWeight: FontWeight.w800,
             fontSize: 15,
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -1775,29 +1810,29 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 });
               },
               label: Text(d.$2),
-              backgroundColor: _surface,
-              selectedColor: _deep,
-              checkmarkColor: _accent,
+              backgroundColor: _c.surface,
+              selectedColor: _c.deep,
+              checkmarkColor: _c.accent,
               labelStyle: TextStyle(
-                color: selected ? Colors.white : _text,
+                color: selected ? Colors.white : _c.text,
                 fontWeight: FontWeight.w800,
               ),
-              side: BorderSide(color: selected ? _deep : _line),
+              side: BorderSide(color: selected ? _c.deep : _c.line),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             );
           }).toList(),
         ),
-        const SizedBox(height: 20),
-        const Text(
+        SizedBox(height: 20),
+        Text(
           'Min slot duration',
           style: TextStyle(
-            color: _text,
+            color: _c.text,
             fontWeight: FontWeight.w800,
             fontSize: 15,
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         _SegmentedOptions(
           value: _slotMins.toString(),
           options: _isGround
@@ -1818,21 +1853,21 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           }),
         ),
         if (_isGround) ...[
-          const SizedBox(height: 20),
-          const Text(
+          SizedBox(height: 20),
+          Text(
             'Turnaround between sessions',
             style: TextStyle(
-              color: _text,
+              color: _c.text,
               fontWeight: FontWeight.w800,
               fontSize: 15,
             ),
           ),
-          const SizedBox(height: 4),
-          const Text(
+          SizedBox(height: 4),
+          Text(
             'Extra gap after each session before the next can start',
-            style: TextStyle(color: _muted, fontSize: 12),
+            style: TextStyle(color: _c.muted, fontSize: 12),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           _SegmentedOptions(
             value: _breatherMins.toString(),
             options: const [
@@ -1844,7 +1879,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             ],
             onChanged: (v) => setState(() => _breatherMins = int.parse(v)),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           _SlotPreview(
             openCtrl: _openTimeCtrl,
             closeCtrl: _closeTimeCtrl,
@@ -1862,12 +1897,12 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       children: [
         const _LargeStepTitle('Pricing'),
         const _SectionLabel('Weekend Pricing'),
-        const SizedBox(height: 4),
-        const Text(
+        SizedBox(height: 4),
+        Text(
           'Apply a premium rate on Saturdays and Sundays.',
-          style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
+          style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         _SegmentedOptions(
           value: _weekendMultiplier == 1.0 ? '1.0' : _weekendMultiplier.toString(),
           options: const [
@@ -1879,20 +1914,20 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
           onChanged: (v) => setState(() => _weekendMultiplier = double.parse(v)),
         ),
         if (_weekendMultiplier != 1.0) ...[
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(
             'Weekend rate: ${(_weekendMultiplier * 100 - 100).toStringAsFixed(0)}% premium on all variants',
-            style: const TextStyle(color: _accent, fontSize: 12, fontWeight: FontWeight.w600),
+            style: TextStyle(color: _c.accent, fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
-        const SizedBox(height: 28),
+        SizedBox(height: 28),
         const _SectionLabel('Monthly Pass'),
-        const SizedBox(height: 4),
-        const Text(
+        SizedBox(height: 4),
+        Text(
           'Set a monthly pass rate per net type. Leave blank to disable for that type.',
-          style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
+          style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w500, height: 1.5),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         for (final v in _netVariants) ...[
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -1905,9 +1940,9 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 filled: true,
                 fillColor: Colors.white,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _c.line)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _c.line)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _c.deep, width: 1.4)),
               ),
             ),
           ),
@@ -1962,7 +1997,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                   keyboardType: TextInputType.number,
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(
                 child: _SheetField(
                   label: 'Full day (₹)',
@@ -1988,18 +2023,18 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                   Text(
                     'Bulk pricing',
                     style: TextStyle(
-                      color: _showBulkPricing ? _accent : _muted,
+                      color: _showBulkPricing ? _c.accent : _c.muted,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  SizedBox(width: 4),
                   Icon(
                     _showBulkPricing
                         ? Icons.expand_less_rounded
                         : Icons.expand_more_rounded,
                     size: 18,
-                    color: _muted,
+                    color: _c.muted,
                   ),
                 ],
               ),
@@ -2015,7 +2050,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                     keyboardType: TextInputType.number,
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: _SheetField(
                     label: '8 hr (₹)',
@@ -2032,16 +2067,16 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             ),
           ],
         ],
-        const SizedBox(height: 20),
-        const Text(
+        SizedBox(height: 20),
+        Text(
           'Weekend pricing',
           style: TextStyle(
-            color: _text,
+            color: _c.text,
             fontWeight: FontWeight.w800,
             fontSize: 15,
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         _SegmentedOptions(
           value:
               _weekendMultiplier == 1.0 ? '1.0' : _weekendMultiplier.toString(),
@@ -2055,7 +2090,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               setState(() => _weekendMultiplier = double.parse(v)),
         ),
         if (wkndRows.isNotEmpty) ...[
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Wrap(
             spacing: 12,
             runSpacing: 4,
@@ -2063,8 +2098,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               for (final (label, paise) in wkndRows)
                 Text(
                   'Weekend $label: ${_money(paise)}',
-                  style: const TextStyle(
-                    color: _accent,
+                  style: TextStyle(
+                    color: _c.accent,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -2072,72 +2107,72 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             ],
           ),
         ],
-        const SizedBox(height: 24),
+        SizedBox(height: 24),
         const _SectionLabel('Bulk / Multi-Day Booking'),
-        const SizedBox(height: 4),
-        const Text(
+        SizedBox(height: 4),
+        Text(
           'Offer a special daily rate when customers book multiple consecutive days.',
           style: TextStyle(
-              color: _muted,
+              color: _c.muted,
               fontSize: 12,
               fontWeight: FontWeight.w500,
               height: 1.5),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
                 'Offer bulk rate',
                 style: TextStyle(
-                    color: _text, fontSize: 14, fontWeight: FontWeight.w700),
+                    color: _c.text, fontSize: 14, fontWeight: FontWeight.w700),
               ),
             ),
             Switch(
               value: _bulkEnabled,
               onChanged: (v) => setState(() => _bulkEnabled = v),
-              activeThumbColor: _accent,
+              activeThumbColor: _c.accent,
             ),
           ],
         ),
         if (_bulkEnabled) ...[
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Min days to unlock',
                   style: TextStyle(
-                      color: _text, fontSize: 13, fontWeight: FontWeight.w700),
+                      color: _c.text, fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),
               IconButton(
                 onPressed: _minBulkDays > 2
                     ? () => setState(() => _minBulkDays--)
                     : null,
-                icon: const Icon(Icons.remove_rounded),
-                color: _text,
+                icon: Icon(Icons.remove_rounded),
+                color: _c.text,
               ),
               SizedBox(
                 width: 32,
                 child: Text(
                   '$_minBulkDays',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: _text, fontSize: 15, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                      color: _c.text, fontSize: 15, fontWeight: FontWeight.w800),
                 ),
               ),
               IconButton(
                 onPressed: _minBulkDays < 30
                     ? () => setState(() => _minBulkDays++)
                     : null,
-                icon: const Icon(Icons.add_rounded),
-                color: _text,
+                icon: Icon(Icons.add_rounded),
+                color: _c.text,
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           TextField(
             controller: _bulkRateCtrl,
             keyboardType: TextInputType.number,
@@ -2151,16 +2186,16 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _line)),
+                  borderSide: BorderSide(color: _c.line)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _line)),
+                  borderSide: BorderSide(color: _c.line)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _deep, width: 1.4)),
+                  borderSide: BorderSide(color: _c.deep, width: 1.4)),
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Builder(builder: (context) {
             final bulkRate = int.tryParse(_bulkRateCtrl.text.trim()) ?? 0;
             if (bulkRate <= 0) return const SizedBox.shrink();
@@ -2175,18 +2210,18 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             return Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: _accent.withValues(alpha: 0.08),
+                color: _c.accent.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(children: [
-                const Icon(Icons.trending_down_rounded,
-                    size: 16, color: _accent),
-                const SizedBox(width: 8),
+                Icon(Icons.trending_down_rounded,
+                    size: 16, color: _c.accent),
+                SizedBox(width: 8),
                 Expanded(
                     child: Text(
                   'Customer saves ₹$saving/day vs normal rate. Good for events & tournaments.',
-                  style: const TextStyle(
-                      color: _accent,
+                  style: TextStyle(
+                      color: _c.accent,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       height: 1.4),
@@ -2197,36 +2232,36 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
         ],
         // Monthly pass — nets only
         if (!_isGround) ...[
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
           const _SectionLabel('Monthly Pass'),
-          const SizedBox(height: 4),
-          const Text(
+          SizedBox(height: 4),
+          Text(
             'Let customers lock a recurring time slot for the whole month.',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
                 height: 1.5),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Offer monthly pass',
                   style: TextStyle(
-                      color: _text, fontSize: 14, fontWeight: FontWeight.w700),
+                      color: _c.text, fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
               Switch(
                 value: _monthlyPassEnabled,
                 onChanged: (v) => setState(() => _monthlyPassEnabled = v),
-                activeThumbColor: _accent,
+                activeThumbColor: _c.accent,
               ),
             ],
           ),
           if (_monthlyPassEnabled) ...[
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             TextField(
               controller: _monthlyPassRateCtrl,
               keyboardType: TextInputType.number,
@@ -2239,13 +2274,13 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _line)),
+                    borderSide: BorderSide(color: _c.line)),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _line)),
+                    borderSide: BorderSide(color: _c.line)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _deep, width: 1.4)),
+                    borderSide: BorderSide(color: _c.deep, width: 1.4)),
               ),
             ),
           ],
@@ -2259,11 +2294,11 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _LargeStepTitle('Booking Rules'),
-        const Text(
+        Text(
           'Override arena defaults for this unit. Leave blank to inherit arena settings.',
-          style: TextStyle(color: _muted, fontSize: 13, height: 1.5),
+          style: TextStyle(color: _c.muted, fontSize: 13, height: 1.5),
         ),
-        const SizedBox(height: 24),
+        SizedBox(height: 24),
         _RuleCard(
           icon: Icons.payments_outlined,
           title: 'Advance payment',
@@ -2274,7 +2309,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             keyboardType: TextInputType.number,
           ),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         _RuleCard(
           icon: Icons.event_available_outlined,
           title: 'Advance booking window',
@@ -2285,7 +2320,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             keyboardType: TextInputType.number,
           ),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         _RuleCard(
           icon: Icons.cancel_outlined,
           title: 'Cancellation window',
@@ -2296,7 +2331,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             keyboardType: TextInputType.number,
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
       ],
     );
   }
@@ -2314,7 +2349,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             onToggle: (val) => setState(() => _stdAddonEnabled[type] = val),
           ),
         if (_addons.isNotEmpty) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: 4),
           for (var i = 0; i < _addons.length; i++)
             _AddonEditor(
               draft: _addons[i],
@@ -2325,11 +2360,11 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               },
             ),
         ],
-        const SizedBox(height: 4),
+        SizedBox(height: 4),
         TextButton.icon(
           onPressed: () => setState(() => _addons.add(_AddonDraft())),
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('Custom add-on'),
+          icon: Icon(Icons.add_rounded),
+          label: Text('Custom add-on'),
         ),
       ],
     );
@@ -2411,6 +2446,7 @@ class _SlotPreviewState extends State<_SlotPreview> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final slots = _computeSlots();
     if (slots.isEmpty) return const SizedBox.shrink();
     return Column(
@@ -2418,13 +2454,13 @@ class _SlotPreviewState extends State<_SlotPreview> {
       children: [
         Text(
           'Slot preview · ${slots.length} session${slots.length == 1 ? '' : 's'}',
-          style: const TextStyle(
-            color: _muted,
+          style: TextStyle(
+            color: _c.muted,
             fontSize: 12,
             fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -2433,14 +2469,14 @@ class _SlotPreviewState extends State<_SlotPreview> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: _deep.withValues(alpha: 0.08),
+                      color: _c.deep.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _deep.withValues(alpha: 0.2)),
+                      border: Border.all(color: _c.deep.withValues(alpha: 0.2)),
                     ),
                     child: Text(
                       s,
-                      style: const TextStyle(
-                        color: _deep,
+                      style: TextStyle(
+                        color: _c.deep,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
@@ -2470,12 +2506,13 @@ class _RuleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
       decoration: BoxDecoration(
-        color: _surface,
+        color: _c.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _line),
+        border: Border.all(color: _c.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2487,31 +2524,31 @@ class _RuleCard extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: _bg,
+                  color: _c.bg,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, size: 18, color: _deep),
+                child: Icon(icon, size: 18, color: _c.deep),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title,
-                        style: const TextStyle(
-                            color: _text,
+                        style: TextStyle(
+                            color: _c.text,
                             fontSize: 14,
                             fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 2),
+                    SizedBox(height: 2),
                     Text(subtitle,
-                        style: const TextStyle(
-                            color: _muted, fontSize: 12, height: 1.4)),
+                        style: TextStyle(
+                            color: _c.muted, fontSize: 12, height: 1.4)),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           child,
         ],
       ),
@@ -2529,6 +2566,7 @@ class _StepDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       children: List.generate(count, (index) {
         final active = index <= activeIndex;
@@ -2537,7 +2575,7 @@ class _StepDots extends StatelessWidget {
             height: 4,
             margin: EdgeInsets.only(right: index == count - 1 ? 0 : 6),
             decoration: BoxDecoration(
-              color: active ? _deep : _line,
+              color: active ? _c.deep : _c.line,
               borderRadius: BorderRadius.circular(999),
             ),
           ),
@@ -2562,6 +2600,7 @@ class _ParentUnitPicker extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     final arenasAsync = ref.watch(ownedArenasProvider);
     final arenas = arenasAsync.valueOrNull ?? [];
     final arena = arenas.cast<ArenaListing?>().firstWhere(
@@ -2573,9 +2612,9 @@ class _ParentUnitPicker extends ConsumerWidget {
         .toList();
 
     if (grounds.isEmpty) {
-      return const Text(
+      return Text(
         'No Full ground units found. Add a Full ground unit first.',
-        style: TextStyle(color: _muted, fontSize: 12),
+        style: TextStyle(color: _c.muted, fontSize: 12),
       );
     }
 
@@ -2593,10 +2632,10 @@ class _ParentUnitPicker extends ConsumerWidget {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: selected ? const Color(0xFFF0FDF4) : Colors.white,
+              color: selected ? Color(0xFFF0FDF4) : Colors.white,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: selected ? _accent : _line,
+                color: selected ? _c.accent : _c.line,
                 width: selected ? 1.5 : 1,
               ),
             ),
@@ -2607,13 +2646,13 @@ class _ParentUnitPicker extends ConsumerWidget {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected ? _accent : _text,
+                    color: selected ? _c.accent : _c.text,
                   ),
                 ),
               ),
               if (selected)
-                const Icon(Icons.check_circle_rounded,
-                    size: 18, color: _accent),
+                Icon(Icons.check_circle_rounded,
+                    size: 18, color: _c.accent),
             ]),
           ),
         );
@@ -2629,12 +2668,13 @@ class _LargeStepTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Text(
         title,
-        style: const TextStyle(
-          color: _text,
+        style: TextStyle(
+          color: _c.text,
           fontSize: 18,
           fontWeight: FontWeight.w900,
         ),
@@ -2656,6 +2696,7 @@ class _SegmentedOptions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -2665,14 +2706,14 @@ class _SegmentedOptions extends StatelessWidget {
           selected: selected,
           onSelected: (_) => onChanged(option.$1),
           label: Text(option.$2),
-          backgroundColor: _surface,
-          selectedColor: _deep,
-          checkmarkColor: _accent,
+          backgroundColor: _c.surface,
+          selectedColor: _c.deep,
+          checkmarkColor: _c.accent,
           labelStyle: TextStyle(
-            color: selected ? Colors.white : _text,
+            color: selected ? Colors.white : _c.text,
             fontWeight: FontWeight.w800,
           ),
-          side: BorderSide(color: selected ? _deep : _line),
+          side: BorderSide(color: selected ? _c.deep : _c.line),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
       }).toList(),
@@ -2697,6 +2738,7 @@ class _SheetField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: TextFormField(
@@ -2709,14 +2751,14 @@ class _SheetField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: _surface,
+          fillColor: _c.surface,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-          border: _inputBorder(_line),
-          enabledBorder: _inputBorder(_line),
-          focusedBorder: _inputBorder(_accent),
-          errorBorder: _inputBorder(const Color(0xFFD92D20)),
-          focusedErrorBorder: _inputBorder(const Color(0xFFD92D20)),
+          border: _inputBorder(_c.line),
+          enabledBorder: _inputBorder(_c.line),
+          focusedBorder: _inputBorder(_c.accent),
+          errorBorder: _inputBorder(Color(0xFFD92D20)),
+          focusedErrorBorder: _inputBorder(Color(0xFFD92D20)),
         ),
       ),
     );
@@ -2752,6 +2794,7 @@ class _TimePickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (context, val, _) {
@@ -2763,34 +2806,34 @@ class _TimePickerField extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
-                color: _surface,
+                color: _c.surface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: hasValue ? _deep : _line),
+                border: Border.all(color: hasValue ? _c.deep : _c.line),
               ),
               child: Row(
                 children: [
                   Icon(Icons.schedule_rounded,
-                      size: 16, color: hasValue ? _deep : _muted),
-                  const SizedBox(width: 8),
+                      size: 16, color: hasValue ? _c.deep : _c.muted),
+                  SizedBox(width: 8),
                   Expanded(
                     child: Text(label,
-                        style: const TextStyle(
-                            color: _muted,
+                        style: TextStyle(
+                            color: _c.muted,
                             fontSize: 13,
                             fontWeight: FontWeight.w600)),
                   ),
                   Text(
                     hasValue ? val.text : '--:--',
                     style: TextStyle(
-                      color: hasValue ? _text : _muted,
+                      color: hasValue ? _c.text : _c.muted,
                       fontSize: 18,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.5,
                     ),
                   ),
-                  const SizedBox(width: 2),
+                  SizedBox(width: 2),
                   Icon(Icons.expand_more_rounded,
-                      size: 18, color: hasValue ? _deep : _muted),
+                      size: 18, color: hasValue ? _c.deep : _c.muted),
                 ],
               ),
             ),
@@ -2847,9 +2890,10 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
-      decoration: const BoxDecoration(
-        color: _surface,
+      decoration: BoxDecoration(
+        color: _c.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
@@ -2860,7 +2904,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: _line,
+              color: _c.line,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -2868,10 +2912,10 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
             padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text('Select time',
                       style: TextStyle(
-                          color: _text,
+                          color: _c.text,
                           fontSize: 18,
                           fontWeight: FontWeight.w900)),
                 ),
@@ -2881,18 +2925,18 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                     Navigator.pop(context);
                   },
                   style: TextButton.styleFrom(
-                    foregroundColor: _accent,
+                    foregroundColor: _c.accent,
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   ),
-                  child: const Text('Done',
+                  child: Text('Done',
                       style:
                           TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           SizedBox(
             height: 200,
             child: Stack(
@@ -2902,7 +2946,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                   height: 52,
                   margin: const EdgeInsets.symmetric(horizontal: 24),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: _c.surface,
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
@@ -2914,7 +2958,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                         itemExtent: 52,
                         perspective: 0.002,
                         diameterRatio: 2.0,
-                        physics: const FixedExtentScrollPhysics(),
+                        physics: FixedExtentScrollPhysics(),
                         onSelectedItemChanged: (i) => setState(() => _hour = i),
                         childDelegate: ListWheelChildBuilderDelegate(
                           childCount: 24,
@@ -2924,7 +2968,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                               child: Text(
                                 i.toString().padLeft(2, '0'),
                                 style: TextStyle(
-                                  color: sel ? _text : _muted,
+                                  color: sel ? _c.text : _c.muted,
                                   fontSize: sel ? 28 : 22,
                                   fontWeight:
                                       sel ? FontWeight.w900 : FontWeight.w400,
@@ -2935,9 +2979,9 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                         ),
                       ),
                     ),
-                    const Text(':',
+                    Text(':',
                         style: TextStyle(
-                            color: _text,
+                            color: _c.text,
                             fontSize: 28,
                             fontWeight: FontWeight.w900)),
                     Expanded(
@@ -2946,7 +2990,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                         itemExtent: 52,
                         perspective: 0.002,
                         diameterRatio: 2.0,
-                        physics: const FixedExtentScrollPhysics(),
+                        physics: FixedExtentScrollPhysics(),
                         onSelectedItemChanged: (i) =>
                             setState(() => _minute = _mins[i]),
                         childDelegate: ListWheelChildBuilderDelegate(
@@ -2957,7 +3001,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                               child: Text(
                                 _mins[i].toString().padLeft(2, '0'),
                                 style: TextStyle(
-                                  color: sel ? _text : _muted,
+                                  color: sel ? _c.text : _c.muted,
                                   fontSize: sel ? 28 : 22,
                                   fontWeight:
                                       sel ? FontWeight.w900 : FontWeight.w400,
@@ -2973,7 +3017,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
               ],
             ),
           ),
-          const SafeArea(
+          SafeArea(
             top: false,
             child: SizedBox(height: 12),
           ),
@@ -2998,6 +3042,7 @@ class _UnitPhotoPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return _Panel(
       children: [
         Row(
@@ -3006,13 +3051,13 @@ class _UnitPhotoPicker extends StatelessWidget {
             TextButton.icon(
               onPressed: uploading || photos.length >= 3 ? null : onAdd,
               icon: uploading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.upload_rounded),
-              label: const Text('Upload'),
+                  : Icon(Icons.upload_rounded),
+              label: Text('Upload'),
             ),
           ],
         ),
@@ -3024,7 +3069,7 @@ class _UnitPhotoPicker extends StatelessWidget {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: photos.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              separatorBuilder: (_, __) => SizedBox(width: 10),
               itemBuilder: (context, index) {
                 final url = photos[index];
                 return Stack(
@@ -3039,8 +3084,8 @@ class _UnitPhotoPicker extends StatelessWidget {
                         errorBuilder: (_, __, ___) => Container(
                           width: 120,
                           height: 96,
-                          color: _line,
-                          child: const Icon(Icons.broken_image_outlined),
+                          color: _c.line,
+                          child: Icon(Icons.broken_image_outlined),
                         ),
                       ),
                     ),
@@ -3051,13 +3096,13 @@ class _UnitPhotoPicker extends StatelessWidget {
                         onTap: () => onRemove(url),
                         child: Container(
                           padding: const EdgeInsets.all(5),
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             color: Colors.black54,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.close_rounded,
-                            color: Colors.white,
+                            color: _c.surface,
                             size: 15,
                           ),
                         ),
@@ -3081,13 +3126,14 @@ class _QuantityStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       children: [
-        const Expanded(
+        Expanded(
           child: Text(
             'Total Units',
             style: TextStyle(
-              color: _text,
+              color: _c.text,
               fontWeight: FontWeight.w800,
               fontSize: 15,
             ),
@@ -3095,16 +3141,16 @@ class _QuantityStepper extends StatelessWidget {
         ),
         IconButton(
           onPressed: value > 1 ? () => onChanged(value - 1) : null,
-          icon: const Icon(Icons.remove_rounded),
-          color: _text,
+          icon: Icon(Icons.remove_rounded),
+          color: _c.text,
         ),
         SizedBox(
           width: 36,
           child: Text(
             '$value',
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _text,
+            style: TextStyle(
+              color: _c.text,
               fontWeight: FontWeight.w900,
               fontSize: 20,
             ),
@@ -3112,8 +3158,8 @@ class _QuantityStepper extends StatelessWidget {
         ),
         IconButton(
           onPressed: value < 20 ? () => onChanged(value + 1) : null,
-          icon: const Icon(Icons.add_rounded),
-          color: _text,
+          icon: Icon(Icons.add_rounded),
+          color: _c.text,
         ),
       ],
     );
@@ -3135,6 +3181,7 @@ class _AddonToggleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Column(
@@ -3148,8 +3195,8 @@ class _AddonToggleTile extends StatelessWidget {
                   children: [
                     Text(
                       label,
-                      style: const TextStyle(
-                        color: _text,
+                      style: TextStyle(
+                        color: _c.text,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -3159,7 +3206,7 @@ class _AddonToggleTile extends StatelessWidget {
               Switch(
                 value: enabled,
                 onChanged: onToggle,
-                activeThumbColor: _accent,
+                activeThumbColor: _c.accent,
               ),
             ],
           ),
@@ -3186,16 +3233,17 @@ class _AddonEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: _Panel(
         children: [
           Row(
             children: [
-              const Expanded(child: _SectionLabel('Addon')),
+              Expanded(child: _SectionLabel('Addon')),
               IconButton(
                 onPressed: onRemove,
-                icon: const Icon(Icons.close_rounded),
+                icon: Icon(Icons.close_rounded),
               ),
             ],
           ),
@@ -3205,7 +3253,7 @@ class _AddonEditor extends StatelessWidget {
               Expanded(
                 child: _SheetField(label: 'Type', controller: draft.addonType),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(
                 child: _SheetField(
                   label: 'Charge',
@@ -3278,55 +3326,56 @@ class _NetVariantRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: _bg,
+        color: _c.bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _line),
+        border: Border.all(color: _c.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header: surface label
-          Text(draft.label, style: const TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 14)),
-          const SizedBox(height: 10),
+          Text(draft.label, style: TextStyle(color: _c.text, fontWeight: FontWeight.w800, fontSize: 14)),
+          SizedBox(height: 10),
           Row(
             children: [
               // Count stepper
-              const Text('Count', style: TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
-              const SizedBox(width: 8),
+              Text('Count', style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
+              SizedBox(width: 8),
               GestureDetector(
                 onTap: draft.count > 1 ? () { draft.count--; onChanged(); } : null,
                 child: Container(
                   width: 26, height: 26,
-                  decoration: BoxDecoration(color: _surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _line)),
-                  child: Icon(Icons.remove, size: 14, color: draft.count > 1 ? _text : _muted),
+                  decoration: BoxDecoration(color: _c.surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _c.line)),
+                  child: Icon(Icons.remove, size: 14, color: draft.count > 1 ? _c.text : _c.muted),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text('${draft.count}', style: const TextStyle(color: _text, fontWeight: FontWeight.w700, fontSize: 15)),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
+              Text('${draft.count}', style: TextStyle(color: _c.text, fontWeight: FontWeight.w700, fontSize: 15)),
+              SizedBox(width: 8),
               GestureDetector(
                 onTap: () { draft.count++; onChanged(); },
                 child: Container(
                   width: 26, height: 26,
-                  decoration: BoxDecoration(color: _surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _line)),
-                  child: const Icon(Icons.add, size: 14, color: _text),
+                  decoration: BoxDecoration(color: _c.surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: _c.line)),
+                  child: Icon(Icons.add, size: 14, color: _c.text),
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: 12),
               // Price field
               Expanded(
                 child: TextFormField(
                   controller: draft.priceCtrl,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: _text, fontSize: 13),
-                  decoration: const InputDecoration(
+                  style: TextStyle(color: _c.text, fontSize: 13),
+                  decoration: InputDecoration(
                     hintText: 'Price/hr',
-                    hintStyle: TextStyle(color: _muted, fontSize: 12),
+                    hintStyle: TextStyle(color: _c.muted, fontSize: 12),
                     prefixText: '₹ ',
-                    prefixStyle: TextStyle(color: _muted, fontSize: 13),
+                    prefixStyle: TextStyle(color: _c.muted, fontSize: 13),
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
                     border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
@@ -3335,19 +3384,19 @@ class _NetVariantRow extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           // Floodlights toggle
           Row(
             children: [
-              const Icon(Icons.lightbulb_outline_rounded, size: 16, color: _muted),
-              const SizedBox(width: 6),
-              const Expanded(child: Text('Floodlights', style: TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600))),
+              Icon(Icons.lightbulb_outline_rounded, size: 16, color: _c.muted),
+              SizedBox(width: 6),
+              Expanded(child: Text('Floodlights', style: TextStyle(color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600))),
               SizedBox(
                 height: 24,
                 child: Switch(
                   value: draft.hasFloodlights,
                   onChanged: (v) { draft.hasFloodlights = v; onChanged(); },
-                  activeThumbColor: _accent,
+                  activeThumbColor: _c.accent,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
@@ -3416,13 +3465,14 @@ class _Panel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _surface,
+        color: _c.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _line),
+        border: Border.all(color: _c.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3439,12 +3489,13 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         title,
-        style: const TextStyle(
-          color: _muted,
+        style: TextStyle(
+          color: _c.muted,
           fontSize: 11,
           fontWeight: FontWeight.w900,
           letterSpacing: 0.9,
@@ -3461,10 +3512,11 @@ class _StaticText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Text(
       text,
-      style: const TextStyle(
-        color: _muted,
+      style: TextStyle(
+        color: _c.muted,
         fontSize: 13,
         fontWeight: FontWeight.w600,
         height: 1.45,
@@ -3480,6 +3532,7 @@ class _ArenaHelpSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
           24, 16, 24, 24 + MediaQuery.of(context).viewInsets.bottom),
@@ -3493,43 +3546,43 @@ class _ArenaHelpSheet extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                  color: _line, borderRadius: BorderRadius.circular(2)),
+                  color: _c.line, borderRadius: BorderRadius.circular(2)),
             ),
           ),
-          const SizedBox(height: 20),
-          const Text(
+          SizedBox(height: 20),
+          Text(
             'How it works',
             style: TextStyle(
-                color: _text, fontSize: 18, fontWeight: FontWeight.w900),
+                color: _c.text, fontSize: 18, fontWeight: FontWeight.w900),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           _HelpItem(
             icon: Icons.stadium_rounded,
-            iconColor: _deep,
-            iconBg: const Color(0xFFD1FAE5),
+            iconColor: _c.deep,
+            iconBg: Color(0xFFD1FAE5),
             title: 'Arena',
             body:
                 'Your venue on Swing. Set up the name, location, sports, and operating hours. Players search and discover your arena to make bookings.',
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           _HelpItem(
             icon: Icons.grid_view_rounded,
-            iconColor: const Color(0xFF0EA5E9),
-            iconBg: const Color(0xFFE0F2FE),
+            iconColor: Color(0xFF0EA5E9),
+            iconBg: Color(0xFFE0F2FE),
             title: 'Unit',
             body:
                 'A bookable court or space inside your arena — e.g. "Court 1", "Turf A", "Net 2". Each unit has its own slot timings, pricing, and photos. Players pick a unit when they book.',
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           _HelpItem(
             icon: Icons.calendar_month_rounded,
-            iconColor: const Color(0xFF7C3AED),
-            iconBg: const Color(0xFFEDE9FE),
+            iconColor: Color(0xFF7C3AED),
+            iconBg: Color(0xFFEDE9FE),
             title: 'Booking',
             body:
                 'A confirmed time slot reservation by a player for one of your units. You can view upcoming and past bookings, check payment status, and manage check-ins from the Bookings tab.',
           ),
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
         ],
       ),
     );
@@ -3553,6 +3606,7 @@ class _HelpItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3563,20 +3617,20 @@ class _HelpItem extends StatelessWidget {
               BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
           child: Icon(icon, color: iconColor, size: 22),
         ),
-        const SizedBox(width: 14),
+        SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title,
-                  style: const TextStyle(
-                      color: _text,
+                  style: TextStyle(
+                      color: _c.text,
                       fontSize: 14,
                       fontWeight: FontWeight.w800)),
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
               Text(body,
-                  style: const TextStyle(
-                      color: _muted,
+                  style: TextStyle(
+                      color: _c.muted,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       height: 1.45)),
@@ -3595,13 +3649,14 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
           'Could not load arena.\n$message',
           textAlign: TextAlign.center,
-          style: const TextStyle(color: _muted),
+          style: TextStyle(color: _c.muted),
         ),
       ),
     );
@@ -3613,13 +3668,14 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    _c = _C.of(context);
+    return Center(
       child: Padding(
         padding: EdgeInsets.all(24),
         child: Text(
           'Arena details are not available yet.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: _muted),
+          style: TextStyle(color: _c.muted),
         ),
       ),
     );
@@ -3645,6 +3701,7 @@ class _DetailsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final p = parent;
     final dayLabels = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return ListView(
@@ -3690,20 +3747,20 @@ class _DetailsTab extends StatelessWidget {
                       }
                     });
                   },
-                  selectedColor: _accent.withValues(alpha: 0.15),
-                  checkmarkColor: _accent,
+                  selectedColor: _c.accent.withValues(alpha: 0.15),
+                  checkmarkColor: _c.accent,
                   side: BorderSide(
-                      color: p._operatingDays.contains(day) ? _accent : _line),
+                      color: p._operatingDays.contains(day) ? _c.accent : _c.line),
                   labelStyle: TextStyle(
-                    color: p._operatingDays.contains(day) ? _accent : _text,
+                    color: p._operatingDays.contains(day) ? _c.accent : _c.text,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
-                  backgroundColor: _surface,
+                  backgroundColor: _c.surface,
                 ),
             ],
           ),
-        const SizedBox(height: 4),
+        SizedBox(height: 4),
       ],
     );
   }
@@ -3717,6 +3774,7 @@ class _LocationTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final p = parent;
     return ListView(
       controller: scrollCtrl,
@@ -3748,6 +3806,7 @@ class _PhotosTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final p = parent;
     final urls = p._photoUrls;
     return ListView(
@@ -3756,17 +3815,17 @@ class _PhotosTab extends StatelessWidget {
       children: [
         Text(
           'Photos (${urls.length}/3)',
-          style: const TextStyle(
-              color: _muted,
+          style: TextStyle(
+              color: _c.muted,
               fontSize: 12,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.5),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         GridView.count(
           crossAxisCount: 3,
           shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+          physics: NeverScrollableScrollPhysics(),
           mainAxisSpacing: 8,
           crossAxisSpacing: 8,
           children: [
@@ -3778,7 +3837,7 @@ class _PhotosTab extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                     child: Image.network(urls[i],
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(color: _line)),
+                        errorBuilder: (_, __, ___) => Container(color: _c.line)),
                   ),
                   if (p._editing)
                     Positioned(
@@ -3792,8 +3851,8 @@ class _PhotosTab extends StatelessWidget {
                           decoration: BoxDecoration(
                               color: Colors.black54,
                               borderRadius: BorderRadius.circular(6)),
-                          child: const Icon(Icons.close_rounded,
-                              color: Colors.white, size: 14),
+                          child: Icon(Icons.close_rounded,
+                              color: _c.surface, size: 14),
                         ),
                       ),
                     ),
@@ -3804,25 +3863,25 @@ class _PhotosTab extends StatelessWidget {
                 onTap: p._uploading ? null : p._pickAndUploadPhotos,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: _surface,
+                    color: _c.surface,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _line, style: BorderStyle.solid),
+                    border: Border.all(color: _c.line, style: BorderStyle.solid),
                   ),
                   child: p._uploading
-                      ? const Center(
+                      ? Center(
                           child: SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2)))
-                      : const Column(
+                      : Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(Icons.add_photo_alternate_rounded,
-                                color: _muted, size: 26),
+                                color: _c.muted, size: 26),
                             SizedBox(height: 4),
                             Text('Add',
                                 style: TextStyle(
-                                    color: _muted,
+                                    color: _c.muted,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700)),
                           ],
@@ -3835,12 +3894,12 @@ class _PhotosTab extends StatelessWidget {
           Container(
             height: 100,
             decoration: BoxDecoration(
-                color: _surface,
+                color: _c.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _line)),
-            child: const Center(
+                border: Border.all(color: _c.line)),
+            child: Center(
                 child: Text('No photos added',
-                    style: TextStyle(color: _muted, fontSize: 13))),
+                    style: TextStyle(color: _c.muted, fontSize: 13))),
           ),
       ],
     );
@@ -3855,6 +3914,7 @@ class _FacilitiesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final p = parent;
     final amenities = [
       (
@@ -3898,7 +3958,7 @@ class _FacilitiesTab extends StatelessWidget {
       controller: scrollCtrl,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       itemCount: amenities.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, color: _line),
+      separatorBuilder: (_, __) => Divider(height: 1, color: _c.line),
       itemBuilder: (_, i) {
         final (icon, label, getter, setter) = amenities[i];
         final enabled = getter();
@@ -3909,25 +3969,25 @@ class _FacilitiesTab extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: enabled ? _accent.withValues(alpha: 0.1) : _bg,
+              color: enabled ? _c.accent.withValues(alpha: 0.1) : _c.bg,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, size: 18, color: enabled ? _accent : _muted),
+            child: Icon(icon, size: 18, color: enabled ? _c.accent : _c.muted),
           ),
           title: Text(label,
               style: TextStyle(
-                  color: enabled ? _text : _muted,
+                  color: enabled ? _c.text : _c.muted,
                   fontWeight: FontWeight.w700,
                   fontSize: 14)),
           trailing: p._editing
               ? Switch(
                   value: enabled,
                   onChanged: setter,
-                  activeThumbColor: _accent,
+                  activeThumbColor: _c.accent,
                 )
               : Icon(
                   enabled ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                  color: enabled ? _accent : _line,
+                  color: enabled ? _c.accent : _c.line,
                   size: 20,
                 ),
         );
@@ -3943,12 +4003,13 @@ class _TabSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 8),
       child: Text(
         label.toUpperCase(),
-        style: const TextStyle(
-            color: _muted,
+        style: TextStyle(
+            color: _c.muted,
             fontSize: 11,
             fontWeight: FontWeight.w900,
             letterSpacing: 0.8),
@@ -4018,7 +4079,7 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
     final slug = _normaliseSlug(rawSlug);
     if (rawSlug.isNotEmpty && slug.length < 3) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
             content: Text('Custom link must be at least 3 letters or numbers')),
       );
       return;
@@ -4043,7 +4104,7 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
         _slugCtrl.text = updated.customSlug ?? '';
         _saved = true;
       });
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(Duration(seconds: 2));
       if (mounted) setState(() => _saved = false);
     } catch (e) {
       if (mounted) {
@@ -4059,7 +4120,7 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
   void _copyLink() {
     Clipboard.setData(ClipboardData(text: 'https://$_publicUrl'));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
           content: Text('Link copied!'), duration: Duration(seconds: 2)),
     );
   }
@@ -4070,28 +4131,29 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
       children: [
         // Public link display
         const _TabSectionLabel('Your Booking Link'),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           decoration: BoxDecoration(
-            color: _bg,
+            color: _c.bg,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: _line),
+            border: Border.all(color: _c.line),
           ),
           child: Row(
             children: [
-              const Icon(Icons.link_rounded, size: 16, color: _muted),
-              const SizedBox(width: 8),
+              Icon(Icons.link_rounded, size: 16, color: _c.muted),
+              SizedBox(width: 8),
               Expanded(
                 child: Text(
                   _publicUrl,
-                  style: const TextStyle(
-                    color: _text,
+                  style: TextStyle(
+                    color: _c.text,
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
@@ -4100,32 +4162,32 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
             ],
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         Row(
           children: [
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: _copyLink,
-                icon: const Icon(Icons.copy_rounded, size: 15),
-                label: const Text('Copy'),
+                icon: Icon(Icons.copy_rounded, size: 15),
+                label: Text('Copy'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: _text,
-                  side: const BorderSide(color: _line),
+                  foregroundColor: _c.text,
+                  side: BorderSide(color: _c.line),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: FilledButton.icon(
                 onPressed: _shareLink,
-                icon: const Icon(Icons.share_rounded, size: 15),
-                label: const Text('Share'),
+                icon: Icon(Icons.share_rounded, size: 15),
+                label: Text('Share'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: _deep,
-                  foregroundColor: Colors.white,
+                  backgroundColor: _c.accent,
+                  foregroundColor: _c.onAccent,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8)),
@@ -4134,52 +4196,52 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
             ),
           ],
         ),
-        const SizedBox(height: 28),
+        SizedBox(height: 28),
 
         // Custom slug
         const _TabSectionLabel('Custom Link'),
-        const SizedBox(height: 4),
-        const Text(
+        SizedBox(height: 4),
+        Text(
           'Set a short name so customers can remember your link easily.',
           style: TextStyle(
-              color: _muted,
+              color: _c.muted,
               fontSize: 12,
               fontWeight: FontWeight.w500,
               height: 1.5),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 14),
               child: Text(
                 'swingcricketapp.com/',
                 style: TextStyle(
-                    color: _muted, fontSize: 13, fontWeight: FontWeight.w600),
+                    color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600),
               ),
             ),
             Expanded(
               child: TextField(
                 controller: _slugCtrl,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: _text),
+                style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: _c.text),
                 decoration: InputDecoration(
                   hintText: 'your-arena-name',
-                  hintStyle: const TextStyle(color: _muted, fontSize: 13),
+                  hintStyle: TextStyle(color: _c.muted, fontSize: 13),
                   filled: true,
-                  fillColor: _surface,
+                  fillColor: _c.surface,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _line)),
+                      borderSide: BorderSide(color: _c.line)),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _line)),
+                      borderSide: BorderSide(color: _c.line)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _deep, width: 1.4)),
+                      borderSide: BorderSide(color: _c.deep, width: 1.4)),
                 ),
                 onChanged: (value) => setState(() {
                   _saved = false;
@@ -4189,24 +4251,24 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         FilledButton(
           onPressed: _saving ? null : _saveSlug,
           style: FilledButton.styleFrom(
-            backgroundColor: _saved ? Colors.green : _deep,
-            foregroundColor: Colors.white,
+            backgroundColor: _saved ? Colors.green : _c.accent,
+            foregroundColor: _c.onAccent,
             padding: const EdgeInsets.symmetric(vertical: 13),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: _saving
-              ? const SizedBox(
+              ? SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : Text(_saved ? 'Saved!' : 'Save Custom Link',
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                  style: TextStyle(fontWeight: FontWeight.w700)),
         ),
       ],
     );

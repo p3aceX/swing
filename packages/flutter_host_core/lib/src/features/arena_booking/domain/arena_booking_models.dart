@@ -481,6 +481,45 @@ class AvailabilitySlot {
   }
 }
 
+class BookingPayment {
+  const BookingPayment({
+    required this.id,
+    required this.bookingId,
+    required this.amountPaise,
+    required this.paymentMode,
+    required this.payerName,
+    required this.recordedAt,
+    this.payerTeamId,
+    this.payerPhone,
+    this.reference,
+    this.notes,
+  });
+
+  final String id;
+  final String bookingId;
+  final int amountPaise;
+  final String paymentMode;
+  final String payerName;
+  final DateTime recordedAt;
+  final String? payerTeamId;
+  final String? payerPhone;
+  final String? reference;
+  final String? notes;
+
+  factory BookingPayment.fromJson(Map<String, dynamic> json) => BookingPayment(
+        id: '${json['id'] ?? ''}',
+        bookingId: '${json['bookingId'] ?? ''}',
+        amountPaise: _intValue(json['amountPaise']),
+        paymentMode: '${json['paymentMode'] ?? 'CASH'}',
+        payerName: '${json['payerName'] ?? ''}',
+        recordedAt: _dateOrNull(json['recordedAt']) ?? DateTime.now(),
+        payerTeamId: _stringOrNull(json['payerTeamId']),
+        payerPhone: _stringOrNull(json['payerPhone']),
+        reference: _stringOrNull(json['reference']),
+        notes: _stringOrNull(json['notes']),
+      );
+}
+
 class ArenaReservation {
   const ArenaReservation({
     required this.id,
@@ -507,6 +546,11 @@ class ArenaReservation {
     this.cancellationReason,
     this.advancePaise = 0,
     this.netVariantType,
+    this.bookingSource,
+    this.paymentsCount = 0,
+    this.lastPaymentAt,
+    this.paidAmountPaise = 0,
+    this.bookingPayments = const [],
   });
 
   final String id;
@@ -533,9 +577,19 @@ class ArenaReservation {
   final String? cancellationReason;
   final int advancePaise;
   final String? netVariantType;
+  final String? bookingSource;
+  final int paymentsCount;
+  final DateTime? lastPaymentAt;
+  final int paidAmountPaise;
+  final List<BookingPayment> bookingPayments;
+
+  bool get isSplit => bookingSource == 'SPLIT';
+
+  int get effectivePaidPaise =>
+      paymentsCount > 0 ? paidAmountPaise : advancePaise;
 
   int get balancePaise =>
-      (totalAmountPaise - advancePaise).clamp(0, totalAmountPaise);
+      (totalAmountPaise - effectivePaidPaise).clamp(0, totalAmountPaise);
   bool get hasBalance => balancePaise > 0 && paidAt == null;
 
   String get displayName =>
@@ -549,6 +603,7 @@ class ArenaReservation {
     final bookedBy = (json['bookedBy'] as Map?)?.cast<String, dynamic>();
     final user = (bookedBy?['user'] as Map?)?.cast<String, dynamic>();
     final unit = (json['unit'] as Map?)?.cast<String, dynamic>();
+    final rawPayments = json['bookingPayments'] as List? ?? const [];
     return ArenaReservation(
       id: '${json['id'] ?? ''}',
       status: '${json['status'] ?? 'PENDING_PAYMENT'}'.trim(),
@@ -575,6 +630,14 @@ class ArenaReservation {
       cancellationReason: _stringOrNull(json['cancellationReason']),
       advancePaise: _intValue(json['advancePaise']),
       netVariantType: _stringOrNull(json['netVariantType']),
+      bookingSource: _stringOrNull(json['bookingSource']),
+      paymentsCount: _intValue(json['paymentsCount']),
+      lastPaymentAt: _dateOrNull(json['lastPaymentAt']),
+      paidAmountPaise: _intValue(json['paidAmountPaise']),
+      bookingPayments: rawPayments
+          .whereType<Map>()
+          .map((e) => BookingPayment.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
     );
   }
 }

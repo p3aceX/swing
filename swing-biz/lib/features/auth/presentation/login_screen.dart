@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
-import '../../../core/auth/token_storage.dart';
 import '../controller/auth_controller.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -92,26 +91,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const _AuthLogoMark(size: 156),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 20),
                     Text(
-                      'Swing Arena',
+                      'Login',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineMedium?.copyWith(
                         color: const Color(0xFF101828),
                         height: 1,
                         letterSpacing: -0.8,
                         fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Manage bookings, slots and check-ins from your owner console.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Color(0xFF667085),
-                        fontSize: 14,
-                        height: 1.45,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 28),
@@ -129,30 +117,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ],
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.all(22),
+                        padding: const EdgeInsets.all(24),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
-                              'Sign in with mobile',
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                color: const Color(0xFF101828),
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
                             const Text(
-                              'Use the number linked with your arena owner account.',
+                              'Mobile number',
                               style: TextStyle(
-                                color: Color(0xFF667085),
-                                fontSize: 13,
-                                height: 1.45,
-                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF101828),
+                                fontSize: 18,
+                                height: 1.2,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.3,
                               ),
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
                             TextField(
                               controller: _phoneCtrl,
                               keyboardType: TextInputType.phone,
@@ -216,11 +195,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         strokeWidth: 2,
                                         color: Colors.white,
                                       ),
-                                    )
+                                  )
                                   : const Text('Send OTP'),
                             ),
-                            const SizedBox(height: 16),
-                            const _SecureNote(),
+                            const SizedBox(height: 14),
+                            const _TermsNotice(),
                           ],
                         ),
                       ),
@@ -248,49 +227,29 @@ class _AuthLogoMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Container(
+      child: SizedBox(
         width: size,
         height: size,
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFF0F2F5)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 24,
-              offset: Offset(0, 12),
-            ),
-          ],
-        ),
         child: Image.asset('assets/logo/logo.png', fit: BoxFit.contain),
       ),
     );
   }
 }
 
-class _SecureNote extends StatelessWidget {
-  const _SecureNote();
+class _TermsNotice extends StatelessWidget {
+  const _TermsNotice();
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
-      children: [
-        Icon(Icons.lock_outline_rounded, size: 16, color: Color(0xFF667085)),
-        SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'OTP protected access for verified arena teams.',
-            style: TextStyle(
-              color: Color(0xFF667085),
-              fontSize: 12,
-              height: 1.35,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
+    return const Text(
+      'By continuing, you accept the Terms & Conditions.',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: Color(0xFF667085),
+        fontSize: 12,
+        height: 1.4,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 }

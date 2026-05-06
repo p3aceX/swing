@@ -20,13 +20,13 @@ import '../../arena/services/arena_profile_providers.dart';
 
 const _googlePlacesKey = 'AIzaSyDpJ1S4JYO-jVA6BgzxM1LYjdSvrSrTkTo';
 
-const _bg = Color(0xFFF3F4F6);
-const _surface = Color(0xFFFFFFFF);
-const _line = Color(0xFFE1E5EA);
-const _text = Color(0xFF0D1117);
-const _muted = Color(0xFF6E7685);
-const _accent = Color(0xFF059669);
-const _deep = Color(0xFF064E3B);
+const _bg = Color(0xFFFFFFFF);
+const _surface = Color(0xFFF6F7F9);
+const _line = Color(0xFFEDEEF2);
+const _text = Color(0xFF0B0B0F);
+const _muted = Color(0xFF6B7280);
+const _accent = Color(0xFFF43F5E);
+const _deep = Color(0xFF9F1239);
 
 class CreateArenaScreen extends ConsumerStatefulWidget {
   const CreateArenaScreen({super.key});
@@ -349,7 +349,13 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bg,
-      appBar: AppBar(title: const Text('Add Arena'), leading: IconButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: _saving ? null : _back)),
+      appBar: AppBar(
+        title: const Text('Add Arena'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: _saving ? null : _back,
+        ),
+      ),
       body: SafeArea(
         child: Column(children: [
           _ProgressHeader(step: _step, steps: _steps),
@@ -420,7 +426,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: const Color(0xFFF0FDF8), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFBBF7D0))),
+                    decoration: BoxDecoration(color: const Color(0xFFFFF1F2), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFFBCFE8))),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       const Text('Location details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _accent)),
                       const SizedBox(height: 10),
@@ -554,8 +560,8 @@ class _ChoiceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final bg = locked ? const Color(0xFFF9FAFB) : (selected ? _deep : _surface);
     final borderColor = locked ? _line : (selected ? _deep : _line);
-    final iconColor = locked ? const Color(0xFFCBD5E0) : (selected ? Colors.white : _deep);
-    final labelColor = locked ? const Color(0xFFB0B8C4) : (selected ? Colors.white : _text);
+    final iconColor = locked ? const Color(0xFFC5C7CF) : (selected ? Colors.white : _deep);
+    final labelColor = locked ? const Color(0xFF9CA3AF) : (selected ? Colors.white : _text);
 
     return Material(
       color: bg,
@@ -578,7 +584,7 @@ class _ChoiceTile extends StatelessWidget {
                   Icon(icon, color: iconColor, size: 28),
                   const Spacer(),
                   if (locked)
-                    const Icon(Icons.lock_rounded, size: 15, color: Color(0xFFCBD5E0)),
+                    const Icon(Icons.lock_rounded, size: 15, color: Color(0xFFC5C7CF)),
                 ],
               ),
               Row(
@@ -589,7 +595,7 @@ class _ChoiceTile extends StatelessWidget {
                       children: [
                         Text(title, style: TextStyle(color: labelColor, fontSize: 15, fontWeight: FontWeight.w900)),
                         if (locked)
-                          const Text('Coming soon', style: TextStyle(color: Color(0xFFB0B8C4), fontSize: 11, fontWeight: FontWeight.w600)),
+                          const Text('Coming soon', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
@@ -676,11 +682,11 @@ class _FacilitiesStep extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: _surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _deep),
-            ),
-            child: Row(children: [
+            color: _surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _deep),
+          ),
+          child: Row(children: [
               const Icon(Icons.schedule_rounded, size: 15, color: _accent),
               const SizedBox(width: 8),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

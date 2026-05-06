@@ -1,35 +1,27 @@
-import 'dart:convert';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../../../core/auth/me_providers.dart';
-import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
 import '../../arena/screens/arena_profile_page.dart';
 import '../../arena/services/arena_profile_providers.dart';
 import '../../../core/notifications/notifications_screen.dart';
-import '../../bookings/presentation/bookings_page.dart';
+import '../../bookings/presentation/bookings_page.dart' as bookings;
 import '../../payments/presentation/payments_page.dart';
 import '../../play/presentation/biz_play_tab.dart';
+import 'app_drawer.dart';
 
-// ─── Home tab providers ───────────────────────────────────────────────────────
+// ─── Dashboard tab + home providers ──────────────────────────────────────────
+
+/// Currently-selected tab in [DashboardScreen]. Exposed so the side drawer can
+/// jump directly to a tab (e.g. Payments).
+final dashboardTabIndexProvider = StateProvider<int>((ref) => 0);
 
 final _homeArenaProvider = StateProvider<String?>((ref) => null);
-final _graphRangeProvider = StateProvider<String>((ref) => 'Month');
-
-final _homeTodayBookingsProvider = FutureProvider.autoDispose
-    .family<List<ArenaReservation>, String>((ref, arenaId) async {
-  final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-  return ref
-      .watch(hostArenaBookingRepositoryProvider)
-      .listArenaBookings(arenaId, date: today);
-});
 
 final _homeAllBookingsProvider = FutureProvider.autoDispose
     .family<List<ArenaReservation>, String>((ref, arenaId) async {
@@ -40,50 +32,52 @@ final _homeAllBookingsProvider = FutureProvider.autoDispose
 
 final _homeTodayAvailabilityProvider = FutureProvider.autoDispose
     .family<Map<String, List<AvailabilitySlot>>, String>((ref, arenaId) async {
-  return ref
-      .watch(hostArenaBookingRepositoryProvider)
-      .fetchAvailability(arenaId: arenaId, date: DateTime.now());
-});
-
-final _homeDateBookingsProvider = FutureProvider.autoDispose
-    .family<List<ArenaReservation>, ({String arenaId, String date})>(
-        (ref, input) async {
-  return ref
-      .watch(hostArenaBookingRepositoryProvider)
-      .listArenaBookings(input.arenaId, date: input.date);
-});
-
-final _homeMonthPaymentsProvider = FutureProvider.autoDispose
-    .family<ArenaPaymentsData, String>((ref, arenaId) async {
-  final now = DateTime.now();
-  final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-  return ref
-      .watch(hostArenaBookingRepositoryProvider)
-      .fetchArenaPayments(arenaId, month: month);
-});
-
-final _homeMonthSummaryProvider = FutureProvider.autoDispose
-    .family<Map<String, ArenaDaySummary>, String>((ref, arenaId) async {
-  final now = DateTime.now();
-  final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-  return ref
-      .watch(hostArenaBookingRepositoryProvider)
-      .fetchMonthSummary(arenaId, month);
-});
-
-final _homeYearSummaryProvider = FutureProvider.autoDispose
-    .family<List<(String, int)>, String>((ref, arenaId) async {
-  final repo = ref.watch(hostArenaBookingRepositoryProvider);
-  final now = DateTime.now();
-  final results = <(String, int)>[];
-  for (int i = 5; i >= 0; i--) {
-    final d = DateTime(now.year, now.month - i);
-    final monthKey = '${d.year}-${d.month.toString().padLeft(2, '0')}';
-    final summary = await repo.fetchMonthSummary(arenaId, monthKey);
-    final total = summary.values.fold(0, (s, e) => s + e.revenuePaise);
-    results.add((DateFormat('MMM').format(d), total));
+  try {
+    return await ref
+        .watch(hostArenaBookingRepositoryProvider)
+        .fetchAvailability(arenaId: arenaId, date: DateTime.now());
+  } catch (error, stackTrace) {
+    debugPrint(
+      '[dashboard] availability load failed for arena=$arenaId: $error',
+    );
+    debugPrintStack(stackTrace: stackTrace);
+    return const {};
   }
-  return results;
+});
+
+final _homeMonthSummaryProvider = FutureProvider.autoDispose.family<
+    Map<String, ArenaDaySummary>,
+    ({String arenaId, String month})>((ref, key) async {
+  try {
+    return await ref
+        .watch(hostArenaBookingRepositoryProvider)
+        .fetchMonthSummary(key.arenaId, key.month);
+  } catch (error, stackTrace) {
+    debugPrint(
+      '[dashboard] month summary load failed for arena=${key.arenaId} month=${key.month}: $error',
+    );
+    debugPrintStack(stackTrace: stackTrace);
+    return const {};
+  }
+});
+
+final _homeMonthPaymentsProvider = FutureProvider.autoDispose.family<
+    ArenaPaymentsData,
+    ({String arenaId, String month})>((ref, key) async {
+  try {
+    return await ref
+        .watch(hostArenaBookingRepositoryProvider)
+        .fetchArenaPayments(key.arenaId, month: key.month);
+  } catch (error, stackTrace) {
+    debugPrint(
+      '[dashboard] month payments load failed for arena=${key.arenaId} month=${key.month}: $error',
+    );
+    debugPrintStack(stackTrace: stackTrace);
+    return const ArenaPaymentsData(
+      checkedInBookings: [],
+      pendingBookings: [],
+    );
+  }
 });
 
 AsyncValue<List<T>> _combineAsyncLists<T>(List<AsyncValue<List<T>>> values) {
@@ -93,71 +87,50 @@ AsyncValue<List<T>> _combineAsyncLists<T>(List<AsyncValue<List<T>>> values) {
   return AsyncValue.data(values.expand((v) => v.value ?? <T>[]).toList());
 }
 
-AsyncValue<ArenaPaymentsData> _combinePayments(
+AsyncValue<ArenaPaymentsData> _combineAsyncPaymentData(
   List<AsyncValue<ArenaPaymentsData>> values,
 ) {
   if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
   final error = values.where((v) => v.hasError).firstOrNull;
   if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
-
-  final rows = values.map((v) => v.value).whereType<ArenaPaymentsData>();
-  return AsyncValue.data(
-    ArenaPaymentsData(
-      checkedInBookings: rows.expand((r) => r.checkedInBookings).toList(),
-      pendingBookings: rows.expand((r) => r.pendingBookings).toList(),
-    ),
+  final combined = values.fold(
+    const ArenaPaymentsData(checkedInBookings: [], pendingBookings: []),
+    (acc, v) {
+      final data = v.value ??
+          const ArenaPaymentsData(checkedInBookings: [], pendingBookings: []);
+      return ArenaPaymentsData(
+        checkedInBookings: [...acc.checkedInBookings, ...data.checkedInBookings],
+        pendingBookings: [...acc.pendingBookings, ...data.pendingBookings],
+      );
+    },
   );
+  return AsyncValue.data(combined);
 }
 
-AsyncValue<Map<String, ArenaDaySummary>> _combineSummaries(
+AsyncValue<Map<String, ArenaDaySummary>> _combineAsyncSummaryMaps(
   List<AsyncValue<Map<String, ArenaDaySummary>>> values,
 ) {
   if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
   final error = values.where((v) => v.hasError).firstOrNull;
   if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
 
-  final combined = <String, ArenaDaySummary>{};
+  final merged = <String, ArenaDaySummary>{};
   for (final value in values) {
-    for (final entry
-        in (value.value ?? const <String, ArenaDaySummary>{}).entries) {
-      final current = combined[entry.key];
-      combined[entry.key] = ArenaDaySummary(
+    final map = value.value ?? const <String, ArenaDaySummary>{};
+    for (final entry in map.entries) {
+      final current = merged[entry.key];
+      merged[entry.key] = ArenaDaySummary(
         count: (current?.count ?? 0) + entry.value.count,
         revenuePaise: (current?.revenuePaise ?? 0) + entry.value.revenuePaise,
       );
     }
   }
-  return AsyncValue.data(combined);
+  return AsyncValue.data(merged);
 }
 
-AsyncValue<List<(String, int)>> _combineYearSummaries(
-  List<AsyncValue<List<(String, int)>>> values,
-) {
-  if (values.any((v) => v.isLoading)) return const AsyncValue.loading();
-  final error = values.where((v) => v.hasError).firstOrNull;
-  if (error != null) return AsyncValue.error(error.error!, error.stackTrace!);
-
-  final labels = <String>[];
-  final totals = <String, int>{};
-  for (final value in values) {
-    for (final row in value.value ?? const <(String, int)>[]) {
-      if (!totals.containsKey(row.$1)) labels.add(row.$1);
-      totals[row.$1] = (totals[row.$1] ?? 0) + row.$2;
-    }
-  }
-  return AsyncValue.data(
-      labels.map((label) => (label, totals[label] ?? 0)).toList());
-}
-
-class DashboardScreen extends ConsumerStatefulWidget {
+class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
-  @override
-  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
-}
 
-class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  int _index = 0;
-  void _setIndex(int i) => setState(() => _index = i);
   static const _navItems = [
     _NavItem(Icons.home_rounded, Icons.home_outlined, 'Home'),
     _NavItem(Icons.stadium_rounded, Icons.stadium_outlined, 'Arenas'),
@@ -168,8 +141,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     _NavItem(
         Icons.sports_cricket_rounded, Icons.sports_cricket_outlined, 'Play'),
   ];
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index = ref.watch(dashboardTabIndexProvider);
+    final scheme = Theme.of(context).colorScheme;
     final pages = [
       const _HomeTab(),
       const _ArenasTab(),
@@ -178,10 +154,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       const BizPlayTab(),
     ];
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(child: pages[_index]),
-      bottomNavigationBar:
-          _BottomNav(currentIndex: _index, items: _navItems, onTap: _setIndex),
+      backgroundColor: scheme.surface,
+      endDrawer: const AppDrawer(),
+      body: SafeArea(child: pages[index]),
+      bottomNavigationBar: _BottomNav(
+        currentIndex: index,
+        items: _navItems,
+        onTap: (i) =>
+            ref.read(dashboardTabIndexProvider.notifier).state = i,
+      ),
     );
   }
 }
@@ -200,25 +181,30 @@ class _BottomNav extends StatelessWidget {
   final ValueChanged<int> onTap;
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final bottom = MediaQuery.of(context).padding.bottom;
     return Container(
-      decoration: BoxDecoration(color: Colors.white, boxShadow: [
-        BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -4))
-      ]),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(top: BorderSide(color: scheme.outline, width: 1)),
+      ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(8, 0, 8, bottom),
+        padding: EdgeInsets.fromLTRB(8, 6, 8, 6 + bottom),
         child: Row(
-            children: List.generate(
-                items.length,
-                (i) => Expanded(
-                    child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => onTap(i),
-                        child: _NavTile(
-                            item: items[i], selected: i == currentIndex))))),
+          children: List.generate(
+            items.length,
+            (i) => Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onTap(i),
+                child: _NavTile(
+                  item: items[i],
+                  selected: i == currentIndex,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -230,39 +216,32 @@ class _NavTile extends StatelessWidget {
   final bool selected;
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
+    final scheme = Theme.of(context).colorScheme;
+    final muted = scheme.onSurface.withValues(alpha: 0.55);
+    return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-          color: Colors.transparent,
-          border: Border(
-              top: BorderSide(
-                  color: selected ? primary : Colors.transparent, width: 2.5))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(selected ? item.activeIcon : item.inactiveIcon,
-            size: 24, color: selected ? primary : const Color(0xFF98A2B3)),
-        const SizedBox(height: 5),
-        Text(item.label,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            selected ? item.activeIcon : item.inactiveIcon,
+            size: 24,
+            color: selected ? scheme.primary : muted,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            item.label,
             style: TextStyle(
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                color: selected ? primary : const Color(0xFF98A2B3),
-                letterSpacing: 0.2))
-      ]),
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              color: selected ? scheme.primary : muted,
+              letterSpacing: 0.1,
+            ),
+          ),
+        ],
+      ),
     );
   }
-}
-
-void _showProfileSheet(BuildContext context, WidgetRef ref) {
-  showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => const _ProfileSheet());
 }
 
 class _ProfileAvatar extends ConsumerWidget {
@@ -270,542 +249,35 @@ class _ProfileAvatar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final me = ref.watch(meProvider).valueOrNull;
+    final scheme = Theme.of(context).colorScheme;
     final initial = (me?.user.name ?? 'U').isNotEmpty
         ? (me?.user.name ?? 'U')[0].toUpperCase()
         : 'U';
     return Container(
-      width: 36,
-      height: 36,
+      width: 38,
+      height: 38,
       decoration: BoxDecoration(
-          color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(18)),
+        gradient: LinearGradient(
+          colors: [scheme.primary, scheme.primary.withValues(alpha: 0.7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
       alignment: Alignment.center,
-      child: Text(initial,
-          style: const TextStyle(
-              color: Color(0xFF101828),
-              fontSize: 14,
-              fontWeight: FontWeight.w800)),
-    );
-  }
-}
-
-class _ProfileSheet extends ConsumerStatefulWidget {
-  const _ProfileSheet();
-
-  @override
-  ConsumerState<_ProfileSheet> createState() => _ProfileSheetState();
-}
-
-class _ProfileSheetState extends ConsumerState<_ProfileSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _businessName = TextEditingController();
-  final _contactName = TextEditingController();
-  final _phone = TextEditingController();
-  final _email = TextEditingController();
-  final _address = TextEditingController();
-  final _city = TextEditingController();
-  final _state = TextEditingController();
-  final _pincode = TextEditingController();
-  final _gst = TextEditingController();
-  final _pan = TextEditingController();
-  final _beneficiaryName = TextEditingController();
-  final _accountNumber = TextEditingController();
-  final _ifsc = TextEditingController();
-  final _upi = TextEditingController();
-
-  bool _editMode = false;
-  bool _saving = false;
-  bool _fetchingPincode = false;
-  String? _loadedAccountId;
-
-  @override
-  void dispose() {
-    _businessName.dispose();
-    _contactName.dispose();
-    _phone.dispose();
-    _email.dispose();
-    _address.dispose();
-    _city.dispose();
-    _state.dispose();
-    _pincode.dispose();
-    _gst.dispose();
-    _pan.dispose();
-    _beneficiaryName.dispose();
-    _accountNumber.dispose();
-    _ifsc.dispose();
-    _upi.dispose();
-    super.dispose();
-  }
-
-  Future<void> _lookupPincode(String pincode) async {
-    if (pincode.length != 6) return;
-    setState(() => _fetchingPincode = true);
-    try {
-      final res = await http.get(
-        Uri.parse('https://api.postalpincode.in/pincode/$pincode'),
-      ).timeout(const Duration(seconds: 6));
-      if (!mounted) return;
-      final data = jsonDecode(res.body) as List;
-      if (data.isNotEmpty && data[0]['Status'] == 'Success') {
-        final offices = data[0]['PostOffice'] as List;
-        if (offices.isNotEmpty) {
-          final office = offices[0] as Map<String, dynamic>;
-          setState(() {
-            _city.text = office['District'] as String? ?? _city.text;
-            _state.text = office['State'] as String? ?? _state.text;
-          });
-        }
-      }
-    } catch (_) {
-      // silently ignore — user can fill manually
-    } finally {
-      if (mounted) setState(() => _fetchingPincode = false);
-    }
-  }
-
-  void _sync(BizMeResponse me) {
-    final b = me.businessAccount;
-    final key = b?.id ?? 'new:${me.user.id}';
-    if (_loadedAccountId == key) return;
-    _loadedAccountId = key;
-
-    // Fall back to first owned arena's location when business profile fields are empty
-    final arenas = ref.read(ownedArenasProvider).valueOrNull ?? [];
-    final a = arenas.isNotEmpty ? arenas.first : null;
-
-    _businessName.text = b?.businessName ?? a?.name ?? '';
-    _contactName.text = b?.contactName ?? me.user.name ?? '';
-    _phone.text = b?.phone ?? a?.phone ?? me.user.phone;
-    _email.text = b?.email ?? me.user.email ?? '';
-    _address.text = b?.address?.isNotEmpty == true ? b!.address! : (a?.address ?? '');
-    _city.text = b?.city?.isNotEmpty == true ? b!.city! : (a?.city ?? '');
-    _state.text = b?.state?.isNotEmpty == true ? b!.state! : (a?.state ?? '');
-    _pincode.text = b?.pincode?.isNotEmpty == true ? b!.pincode! : (a?.pincode ?? '');
-    _gst.text = b?.gstNumber ?? '';
-    _pan.text = b?.panNumber ?? '';
-    _beneficiaryName.text = b?.beneficiaryName ?? '';
-    _accountNumber.text = b?.accountNumber ?? '';
-    _ifsc.text = b?.ifscCode ?? '';
-    _upi.text = b?.upiId ?? '';
-  }
-
-  String? _required(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Required';
-    return null;
-  }
-
-  String? _optionalEmail(String? value) {
-    final text = value?.trim() ?? '';
-    if (text.isEmpty) return null;
-    if (!text.contains('@')) return 'Enter a valid email';
-    return null;
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
-    try {
-      await ref.read(hostBizRepositoryProvider).upsertBusinessDetails(
-            BusinessDetailsInput(
-              businessName: _businessName.text.trim(),
-              contactName: _contactName.text.trim(),
-              phone: _phone.text.trim(),
-              email: _email.text.trim(),
-              address: _address.text.trim(),
-              city: _city.text.trim(),
-              state: _state.text.trim(),
-              pincode: _pincode.text.trim(),
-              gstNumber: _gst.text.trim(),
-              panNumber: _pan.text.trim(),
-              beneficiaryName: _beneficiaryName.text.trim(),
-              accountNumber: _accountNumber.text.trim(),
-              ifscCode: _ifsc.text.trim().toUpperCase(),
-              upiId: _upi.text.trim(),
-            ),
-          );
-      ref.invalidate(meProvider);
-      if (!mounted) return;
-      setState(() {
-        _editMode = false;
-        _saving = false;
-        _loadedAccountId = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile updated')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update profile: $e')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final meAsync = ref.watch(meProvider);
-    final bottom = MediaQuery.of(context).padding.bottom;
-    final scheme = Theme.of(context).colorScheme;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.86,
-      minChildSize: 0.55,
-      maxChildSize: 0.95,
-      builder: (ctx, controller) => meAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('$e')),
-        data: (me) {
-          if (me == null) return const SizedBox();
-          _sync(me);
-          final b = me.businessAccount;
-          final title = b?.businessName ?? me.user.name ?? 'Business Profile';
-          final initial = title.isNotEmpty ? title[0].toUpperCase() : 'B';
-          return DefaultTabController(
-            length: 3,
-            child: Form(
-              key: _formKey,
-              child: ListView(
-                controller: controller,
-                padding: EdgeInsets.fromLTRB(20, 14, 20, 24 + bottom),
-                children: [
-                  Center(
-                      child: Container(
-                          width: 36,
-                          height: 4,
-                          margin: const EdgeInsets.only(bottom: 18),
-                          decoration: BoxDecoration(
-                              color: const Color(0xFFE5E7EB),
-                              borderRadius: BorderRadius.circular(2)))),
-                  Row(children: [
-                    Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                            color: scheme.primary,
-                            borderRadius: BorderRadius.circular(16)),
-                        alignment: Alignment.center,
-                        child: Text(initial,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900))),
-                    const SizedBox(width: 14),
-                    Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                          Text(title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Color(0xFF101828),
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900)),
-                          const SizedBox(height: 4),
-                          Text(me.user.phone,
-                              style: const TextStyle(
-                                  color: Color(0xFF667085),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600))
-                        ])),
-                    IconButton(
-                      style: IconButton.styleFrom(
-                        backgroundColor: const Color(0xFFF3F4F6),
-                        foregroundColor: _editMode
-                            ? const Color(0xFF667085)
-                            : scheme.primary,
-                      ),
-                      tooltip: _editMode ? 'Cancel' : 'Edit profile',
-                      onPressed: _saving
-                          ? null
-                          : () => setState(() => _editMode = !_editMode),
-                      icon: Icon(
-                          _editMode ? Icons.close_rounded : Icons.edit_rounded),
-                    ),
-                  ]),
-                  const SizedBox(height: 18),
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFF9FAFB),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE5E7EB))),
-                    child: TabBar(
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      dividerColor: Colors.transparent,
-                      indicator: BoxDecoration(
-                          color: scheme.primary,
-                          borderRadius:
-                              const BorderRadius.all(Radius.circular(10))),
-                      labelColor: scheme.onPrimary,
-                      unselectedLabelColor: const Color(0xFF667085),
-                      labelStyle: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w800),
-                      unselectedLabelStyle: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w700),
-                      tabs: const [
-                        Tab(text: 'Account'),
-                        Tab(text: 'Business'),
-                        Tab(text: 'Banking'),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 520,
-                    child: TabBarView(
-                      children: [
-                        _ProfileTabFields(children: [
-                          _ProfileTextField(
-                              controller: _contactName,
-                              label: 'Contact name',
-                              icon: Icons.person_outline_rounded,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _phone,
-                              label: 'Phone',
-                              icon: Icons.phone_outlined,
-                              keyboardType: TextInputType.phone,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _email,
-                              label: 'Email',
-                              icon: Icons.mail_outline_rounded,
-                              keyboardType: TextInputType.emailAddress,
-                              validator: _optionalEmail,
-                              enabled: _editMode),
-                        ]),
-                        _ProfileTabFields(children: [
-                          _ProfileTextField(
-                              controller: _businessName,
-                              label: 'Business name',
-                              icon: Icons.business_outlined,
-                              validator: _required,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _address,
-                              label: 'Address',
-                              icon: Icons.location_on_outlined,
-                              maxLines: 2,
-                              enabled: _editMode),
-                          Row(children: [
-                            Expanded(
-                                child: _ProfileTextField(
-                                    controller: _city,
-                                    label: 'City',
-                                    icon: Icons.location_city_outlined,
-                                    enabled: _editMode)),
-                            const SizedBox(width: 10),
-                            Expanded(
-                                child: _ProfileTextField(
-                                    controller: _state,
-                                    label: 'State',
-                                    icon: Icons.map_outlined,
-                                    enabled: _editMode)),
-                          ]),
-                          Row(children: [
-                            Expanded(
-                                child: _ProfileTextField(
-                                    controller: _pincode,
-                                    label: 'Pincode',
-                                    icon: Icons.pin_drop_outlined,
-                                    keyboardType: TextInputType.number,
-                                    enabled: _editMode,
-                                    onChanged: _editMode ? _lookupPincode : null,
-                                    suffixIcon: _fetchingPincode
-                                        ? const Padding(
-                                            padding: EdgeInsets.all(12),
-                                            child: SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
-                                            ),
-                                          )
-                                        : null)),
-                          ]),
-                          _ProfileTextField(
-                              controller: _gst,
-                              label: 'GST',
-                              icon: Icons.receipt_long_outlined,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _pan,
-                              label: 'PAN',
-                              icon: Icons.credit_card_outlined,
-                              enabled: _editMode),
-                        ]),
-                        _ProfileTabFields(children: [
-                          _ProfileTextField(
-                              controller: _beneficiaryName,
-                              label: 'Beneficiary name',
-                              icon: Icons.badge_outlined,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _accountNumber,
-                              label: 'Account number',
-                              icon: Icons.account_balance_outlined,
-                              keyboardType: TextInputType.number,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _ifsc,
-                              label: 'IFSC',
-                              icon: Icons.domain_verification_outlined,
-                              enabled: _editMode),
-                          _ProfileTextField(
-                              controller: _upi,
-                              label: 'UPI',
-                              icon: Icons.qr_code_2_rounded,
-                              enabled: _editMode),
-                        ]),
-                      ],
-                    ),
-                  ),
-                  if (_editMode) ...[
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: _saving ? null : _save,
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.check_rounded),
-                      label: Text(_saving ? 'Saving...' : 'Save profile'),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  _SheetActionRow(
-                      icon: Icons.logout_rounded,
-                      label: 'Logout',
-                      destructive: true,
-                      onTap: () => ref
-                          .read(sessionControllerProvider.notifier)
-                          .signOut()),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _ProfileTabFields extends StatelessWidget {
-  const _ProfileTabFields({required this.children});
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 16, 14, 4),
-        children: [
-          ...children.expand((child) => [child, const SizedBox(height: 12)]),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileTextField extends StatelessWidget {
-  const _ProfileTextField({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    required this.enabled,
-    this.keyboardType,
-    this.validator,
-    this.maxLines = 1,
-    this.onChanged,
-    this.suffixIcon,
-  });
-
-  final TextEditingController controller;
-  final String label;
-  final IconData icon;
-  final bool enabled;
-  final TextInputType? keyboardType;
-  final String? Function(String?)? validator;
-  final int maxLines;
-  final ValueChanged<String>? onChanged;
-  final Widget? suffixIcon;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return TextFormField(
-      controller: controller,
-      enabled: enabled,
-      keyboardType: keyboardType,
-      validator: validator,
-      maxLines: maxLines,
-      onChanged: onChanged,
-      style: const TextStyle(
-          color: Color(0xFF101828), fontSize: 14, fontWeight: FontWeight.w700),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(
-            color: Color(0xFF667085), fontWeight: FontWeight.w700),
-        prefixIcon: Icon(icon,
-            size: 19,
-            color: enabled ? scheme.primary : const Color(0xFF98A2B3)),
-        suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: enabled ? Colors.white : const Color(0xFFF9FAFB),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFFE1E5EA)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: scheme.primary, width: 1.5),
-        ),
-        disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+      child: Text(
+        initial,
+        style: TextStyle(
+          color: scheme.onPrimary,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
   }
 }
 
-class _SheetActionRow extends StatelessWidget {
-  const _SheetActionRow(
-      {required this.icon,
-      required this.label,
-      required this.onTap,
-      this.destructive = false});
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool destructive;
-  @override
-  Widget build(BuildContext context) {
-    final color =
-        destructive ? const Color(0xFFD92D20) : const Color(0xFF101828);
-    return GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(children: [
-              Icon(icon, size: 20, color: color),
-              const SizedBox(width: 12),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700, color: color))
-            ])));
-  }
-}
+// ─── Home tab ────────────────────────────────────────────────────────────────
 
 class _HomeTab extends ConsumerWidget {
   const _HomeTab();
@@ -829,6 +301,53 @@ class _HomeTab extends ConsumerWidget {
               .map((a) => ref.watch(_homeAllBookingsProvider(a.id)))
               .toList(),
         );
+        final now = DateTime.now();
+        final currentMonthKey = DateFormat('yyyy-MM').format(now);
+        final previousMonthKey = DateFormat('yyyy-MM')
+            .format(DateTime(now.year, now.month - 1, 1));
+        final currentMonthSummary = _combineAsyncSummaryMaps([
+          ...selectedArenas.map(
+            (a) => ref.watch(
+              _homeMonthSummaryProvider((arenaId: a.id, month: currentMonthKey)),
+            ),
+          ),
+        ]);
+        final previousMonthSummary = _combineAsyncSummaryMaps([
+          ...selectedArenas.map(
+            (a) => ref.watch(
+              _homeMonthSummaryProvider(
+                (arenaId: a.id, month: previousMonthKey),
+              ),
+            ),
+          ),
+        ]);
+        final trendSummary = _combineAsyncSummaryMaps([
+          ...selectedArenas.map(
+            (a) => ref.watch(
+              _homeMonthSummaryProvider(
+                (arenaId: a.id, month: currentMonthKey),
+              ),
+            ),
+          ),
+          ...selectedArenas.map(
+            (a) => ref.watch(
+              _homeMonthSummaryProvider(
+                (arenaId: a.id, month: previousMonthKey),
+              ),
+            ),
+          ),
+        ]);
+        final currentMonthPayments = _combineAsyncPaymentData(
+          selectedArenas
+              .map(
+                (a) => ref.watch(
+                  _homeMonthPaymentsProvider(
+                    (arenaId: a.id, month: currentMonthKey),
+                  ),
+                ),
+              )
+              .toList(),
+        );
         final todayAvailability = _combineAsyncLists(
           selectedArenas
               .map((a) => ref
@@ -838,7 +357,7 @@ class _HomeTab extends ConsumerWidget {
               .toList(),
         );
         return Container(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           child: Column(
             children: [
               _HeroHeader(businessName: businessName, ref: ref),
@@ -852,23 +371,18 @@ class _HomeTab extends ConsumerWidget {
                       onSelected: (id) =>
                           ref.read(_homeArenaProvider.notifier).state = id,
                     ),
-                    _HomeMetricStrip(
-                      bookingsAsync: allBookings,
+                    _TodaySection(
+                      currentMonthSummaryAsync: currentMonthSummary,
+                      previousMonthSummaryAsync: previousMonthSummary,
+                      currentMonthPaymentsAsync: currentMonthPayments,
                       slotsAsync: todayAvailability,
                     ),
-                    _HomeGraphTabs(arenas: selectedArenas),
-                    const SizedBox(height: 28),
-                    const Center(
-                      child: Text(
-                        'Welcome to Swing Biz',
-                        style: TextStyle(
-                          color: Color(0xFF98A2B3),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 28),
+                    _BookingsSummaryCard(bookingsAsync: allBookings),
+                    const _ThinDivider(),
+                    _BookingsTrendSection(summaryAsync: currentMonthSummary),
+                    const _ThinDivider(),
+                    _SlotsDonutSection(slotsAsync: todayAvailability),
+                    const SizedBox(height: 32),
                   ],
                 ),
               ),
@@ -876,75 +390,6 @@ class _HomeTab extends ConsumerWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _HomeGraphTabs extends ConsumerWidget {
-  const _HomeGraphTabs({required this.arenas});
-
-  final List<ArenaListing> arenas;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final allBookings = _combineAsyncLists(
-      arenas.map((a) => ref.watch(_homeAllBookingsProvider(a.id))).toList(),
-    );
-
-    return DefaultTabController(
-      length: 2,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Booking vs Revenue',
-                style: TextStyle(
-                  color: Color(0xFF101828),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'All booking history grouped by date',
-                style: TextStyle(
-                  color: Color(0xFF667085),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0,
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 260,
-                child: allBookings.when(
-                  loading: () => const _ChartLoading(),
-                  error: (e, _) => const _ChartMessage('Could not load graph'),
-                  data: (bookings) =>
-                      _BookingRevenueLineChart(bookings: bookings),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -962,44 +407,53 @@ class _HomeArenaFilter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final items = <({String? id, String label})>[
       (id: null, label: 'All'),
       ...arenas.map((arena) => (id: arena.id, label: arena.name)),
     ];
     return SizedBox(
-      height: 46,
+      height: 40,
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
         scrollDirection: Axis.horizontal,
         itemCount: items.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 22),
         itemBuilder: (context, index) {
           final item = items[index];
           final selected = item.id == selectedArenaId;
-          return ChoiceChip(
-            selected: selected,
-            label: Text(
-              item.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          return GestureDetector(
+            onTap: () => onSelected(item.id),
+            behavior: HitTestBehavior.opaque,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  item.label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight:
+                        selected ? FontWeight.w800 : FontWeight.w600,
+                    letterSpacing: -0.1,
+                    color: selected
+                        ? scheme.primary
+                        : scheme.onSurface.withValues(alpha: 0.55),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  height: 2.5,
+                  width: selected ? 22 : 0,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ],
             ),
-            showCheckmark: false,
-            onSelected: (_) => onSelected(item.id),
-            selectedColor: Theme.of(context).colorScheme.primary,
-            backgroundColor: const Color(0xFFF9FAFB),
-            side: BorderSide(
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : const Color(0xFFE5E7EB),
-            ),
-            labelStyle: TextStyle(
-              color: selected ? Colors.white : const Color(0xFF667085),
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0,
-            ),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           );
         },
       ),
@@ -1007,342 +461,609 @@ class _HomeArenaFilter extends StatelessWidget {
   }
 }
 
-class _HomeMetricStrip extends StatelessWidget {
-  const _HomeMetricStrip({
-    required this.bookingsAsync,
-    required this.slotsAsync,
-  });
-
-  final AsyncValue<List<ArenaReservation>> bookingsAsync;
-  final AsyncValue<List<AvailabilitySlot>> slotsAsync;
-
+class _ThinDivider extends StatelessWidget {
+  const _ThinDivider();
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      child: bookingsAsync.isLoading || slotsAsync.isLoading
-          ? const Row(
-              children: [
-                Expanded(child: _MetricSkeleton()),
-                SizedBox(width: 12),
-                Expanded(child: _MetricSkeleton()),
-              ],
-            )
-          : bookingsAsync.hasError || slotsAsync.hasError
-              ? const Row(
-                  children: [
-                    Expanded(
-                      child: _HomeMetricBox(
-                        title: 'Checked In / Bookings',
-                        value: '--',
-                        subtitle: 'All time',
-                        icon: Icons.done_all_rounded,
-                        background: Color(0xFFEAFBF3),
-                        accent: Color(0xFF059669),
-                      ),
-                    ),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: _HomeMetricBox(
-                        title: 'Booked Slots / Total',
-                        value: '--',
-                        subtitle: 'Today',
-                        icon: Icons.event_available_rounded,
-                        background: Color(0xFFEFF6FF),
-                        accent: Color(0xFF2563EB),
-                      ),
-                    ),
-                  ],
-                )
-              : Builder(builder: (context) {
-                  final bookings =
-                      bookingsAsync.value ?? const <ArenaReservation>[];
-                  final slots = slotsAsync.value ?? const <AvailabilitySlot>[];
-                  final active = bookings.where(_isActiveBooking).toList();
-                  final checkedIn = active.where((b) {
-                    final status = b.status.toUpperCase();
-                    return status == 'CHECKED_IN' || status == 'COMPLETED';
-                  }).length;
-                  final totalSlots = slots.length;
-                  final bookedSlots =
-                      slots.where((slot) => !slot.available).length;
-                  return Row(
-                    children: [
-                      Expanded(
-                        child: _HomeMetricBox(
-                          title: 'Checked In / Bookings',
-                          value: '$checkedIn/${active.length}',
-                          subtitle: 'All time',
-                          icon: Icons.done_all_rounded,
-                          background: const Color(0xFFEAFBF3),
-                          accent: const Color(0xFF059669),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _HomeMetricBox(
-                          title: 'Booked Slots / Total',
-                          value: '$bookedSlots/$totalSlots',
-                          subtitle: 'Today',
-                          icon: Icons.event_available_rounded,
-                          background: const Color(0xFFEFF6FF),
-                          accent: const Color(0xFF2563EB),
-                        ),
-                      ),
-                    ],
-                  );
-                }),
+    return Container(
+      height: 1,
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      color: Theme.of(context).colorScheme.outline,
     );
   }
 }
 
-class _BookingRevenueLineChart extends StatelessWidget {
-  const _BookingRevenueLineChart({required this.bookings});
+// ─── Today section ───────────────────────────────────────────────────────────
 
+class _TodaySection extends StatelessWidget {
+  const _TodaySection({
+    required this.currentMonthSummaryAsync,
+    required this.previousMonthSummaryAsync,
+    required this.currentMonthPaymentsAsync,
+    required this.slotsAsync,
+  });
+  final AsyncValue<Map<String, ArenaDaySummary>> currentMonthSummaryAsync;
+  final AsyncValue<Map<String, ArenaDaySummary>> previousMonthSummaryAsync;
+  final AsyncValue<ArenaPaymentsData> currentMonthPaymentsAsync;
+  final AsyncValue<List<AvailabilitySlot>> slotsAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'THIS MONTH',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.6,
+              color: scheme.onSurface.withValues(alpha: 0.5),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (currentMonthSummaryAsync.isLoading ||
+              previousMonthSummaryAsync.isLoading ||
+              currentMonthPaymentsAsync.isLoading ||
+              slotsAsync.isLoading)
+            const _BlockSkeleton(height: 92)
+          else if (currentMonthSummaryAsync.hasError ||
+              previousMonthSummaryAsync.hasError ||
+              currentMonthPaymentsAsync.hasError)
+            Text('Could not load',
+                style: Theme.of(context).textTheme.bodyMedium)
+          else
+            _buildContent(
+              context,
+              currentMonthSummaryAsync.value ?? const {},
+              previousMonthSummaryAsync.value ?? const {},
+              currentMonthPaymentsAsync.value ??
+                  const ArenaPaymentsData(
+                    checkedInBookings: [],
+                    pendingBookings: [],
+                  ),
+              slotsAsync.value ?? const [],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContent(
+    BuildContext context,
+    Map<String, ArenaDaySummary> currentMonthSummary,
+    Map<String, ArenaDaySummary> previousMonthSummary,
+    ArenaPaymentsData currentMonthPayments,
+    List<AvailabilitySlot> slots,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final today = DateTime.now();
+    final monthKey = DateFormat('yyyy-MM').format(today);
+    final currentSummary = currentMonthSummary.values.fold<int>(
+      0,
+      (sum, day) => sum + day.count,
+    );
+    final currentRevenuePaise = currentMonthSummary.values.fold<int>(
+      0,
+      (sum, day) => sum + day.revenuePaise,
+    );
+    final previousRevenuePaise = previousMonthSummary.values.fold<int>(
+      0,
+      (sum, day) => sum + day.revenuePaise,
+    );
+    final delta = previousRevenuePaise <= 0
+        ? null
+        : (((currentRevenuePaise - previousRevenuePaise) /
+                previousRevenuePaise) *
+            100);
+    final checkedIn = currentMonthPayments.checkedInBookings.length;
+    final pendingCollectionsPaise = currentMonthPayments.totalBalancePaise;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _KpiGrid(
+          items: [
+            _KpiCard(
+              label: 'Revenue this month',
+              value: '₹${_compactAmount(currentRevenuePaise / 100)}',
+              helper: delta == null
+                  ? 'vs last month unavailable'
+                  : '${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(0)}% vs last month',
+              accent: scheme.primary,
+            ),
+            _KpiCard(
+              label: 'Bookings this month',
+              value: currentSummary.toString(),
+              helper: 'Confirmed bookings in $monthKey',
+              accent: const Color(0xFF2563EB),
+            ),
+            _KpiCard(
+              label: 'Check-ins',
+              value: '$checkedIn',
+              helper: 'Checked in this month',
+              accent: const Color(0xFF059669),
+            ),
+            _KpiCard(
+              label: 'Pending collections',
+              value: '₹${_compactAmount(pendingCollectionsPaise / 100)}',
+              helper: 'Outstanding from this month',
+              accent: const Color(0xFFF97316),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _KpiGrid extends StatelessWidget {
+  const _KpiGrid({required this.items});
+  final List<_KpiCard> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = width >= 520 ? 3 : 2;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final item in items)
+              SizedBox(
+                width: (width - ((columns - 1) * 12)) / columns,
+                child: item,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({
+    required this.label,
+    required this.value,
+    required this.helper,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final String helper;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: scheme.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(Icons.auto_graph_rounded, size: 18, color: accent),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.6,
+              color: scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            helper,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface.withValues(alpha: 0.55),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Recent bookings (horizontal carousel) ───────────────────────────────────
+
+class _BookingsSummaryCard extends ConsumerWidget {
+  const _BookingsSummaryCard({required this.bookingsAsync});
+  final AsyncValue<List<ArenaReservation>> bookingsAsync;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 6, 0, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Recent bookings',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    ref
+                        .read(bookings.bookingsInnerTabProvider.notifier)
+                        .state = 1; // Bookings sub-tab
+                    ref.read(dashboardTabIndexProvider.notifier).state = 2;
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 2),
+                    child: Text(
+                      'See all',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 116,
+            child: bookingsAsync.when(
+              loading: () => const _RecentBookingsSkeleton(),
+              error: (_, __) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'Could not load bookings',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              data: (bookings) => _RecentBookingsCarousel(bookings: bookings),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentBookingsCarousel extends StatelessWidget {
+  const _RecentBookingsCarousel({required this.bookings});
   final List<ArenaReservation> bookings;
 
   @override
   Widget build(BuildContext context) {
-    final grouped = <String, List<ArenaReservation>>{};
-    for (final booking in bookings) {
-      final date = booking.bookingDate;
-      if (date == null) continue;
-      final key = DateFormat('yyyy-MM-dd').format(date);
-      grouped.putIfAbsent(key, () => <ArenaReservation>[]).add(booking);
-    }
-    final keys = grouped.keys.toList()..sort();
-    if (keys.isEmpty) {
-      return const _ChartMessage('No bookings yet');
-    }
-    final days = keys.map((key) {
-      return (
-        day: DateTime.parse(key),
-        bookings: grouped[key] ?? const <ArenaReservation>[]
-      );
-    }).toList();
-    final bookingCounts = days
-        .map((row) => row.bookings.where(_isActiveBooking).length.toDouble())
-        .toList();
-    final revenue = days.map((row) {
-      return row.bookings
-              .where(_countsAsRevenue)
-              .fold<int>(0, (sum, booking) => sum + booking.totalAmountPaise) /
-          100;
-    }).toList();
-    final collected = days.map((row) {
-      return row.bookings.fold<int>(
-            0,
-            (sum, booking) =>
-                sum +
-                (booking.isPaid
-                    ? booking.totalAmountPaise
-                    : booking.advancePaise),
-          ) /
-          100;
-    }).toList();
-    final totalBookings =
-        bookingCounts.fold<int>(0, (sum, count) => sum + count.toInt());
-    final totalRevenue = days.fold<int>(0, (sum, row) {
-      return sum +
-          row.bookings.where(_countsAsRevenue).fold<int>(
-              0, (daySum, booking) => daySum + booking.totalAmountPaise);
-    });
-    final totalCollected = days.fold<int>(0, (sum, row) {
-      return sum +
-          row.bookings.fold<int>(
-            0,
-            (daySum, booking) =>
-                daySum +
-                (booking.isPaid
-                    ? booking.totalAmountPaise
-                    : booking.advancePaise),
-          );
-    });
-    final maxBookings = bookingCounts.fold<double>(
-        0, (max, value) => value > max ? value : max);
-    final maxRevenue =
-        revenue.fold<double>(0, (max, value) => value > max ? value : max);
-    final maxCollected =
-        collected.fold<double>(0, (max, value) => value > max ? value : max);
-    if (maxBookings == 0 && maxRevenue == 0 && maxCollected == 0) {
-      return const _ChartMessage('No active booking data yet');
-    }
-
-    List<FlSpot> normalizedSpots(List<double> values, double maxValue) {
-      return List.generate(values.length, (index) {
-        final normalized =
-            maxValue == 0 ? 0.0 : (values[index] / maxValue) * 100;
-        return FlSpot(index.toDouble(), normalized);
+    final now = DateTime.now();
+    final sorted = [...bookings.where((b) => b.bookingDate != null)]
+      ..sort((a, b) {
+        final aDelta = a.bookingDate!.difference(now).abs();
+        final bDelta = b.bookingDate!.difference(now).abs();
+        return aDelta.compareTo(bDelta);
       });
+    final recent = sorted.take(3).toList();
+
+    if (recent.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Text(
+          'No bookings yet',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      );
     }
 
-    final bookingSpots = normalizedSpots(bookingCounts, maxBookings);
-    final revenueSpots = normalizedSpots(revenue, maxRevenue);
-    final collectedSpots = normalizedSpots(collected, maxCollected);
-    final primary = Theme.of(context).colorScheme.primary;
-    const blue = Color(0xFF2563EB);
-    const amber = Color(0xFFF59E0B);
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      itemCount: recent.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 12),
+      itemBuilder: (_, i) => _RecentBookingCard(booking: recent[i]),
+    );
+  }
+}
 
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _TrendTotal(
-                label: 'Bookings',
-                value: totalBookings.toString(),
-                color: primary,
+class _RecentBookingCard extends StatelessWidget {
+  const _RecentBookingCard({required this.booking});
+  final ArenaReservation booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final status = booking.status.toUpperCase();
+    // Tapping opens the booking detail page
+    final ({Color fg, Color bg, String label}) badge;
+    switch (status) {
+      case 'CHECKED_IN':
+      case 'COMPLETED':
+        badge = (
+          fg: const Color(0xFF059669),
+          bg: const Color(0xFF059669).withValues(alpha: 0.14),
+          label: 'Paid',
+        );
+      case 'CANCELLED':
+      case 'CANCELLED_BY_OWNER':
+        badge = (
+          fg: scheme.error,
+          bg: scheme.error.withValues(alpha: 0.14),
+          label: 'Cancelled',
+        );
+      case 'HELD':
+        badge = (
+          fg: scheme.onSurface.withValues(alpha: 0.65),
+          bg: scheme.onSurface.withValues(alpha: 0.10),
+          label: 'Held',
+        );
+      default:
+        badge = (
+          fg: scheme.primary,
+          bg: scheme.primary.withValues(alpha: 0.14),
+          label: 'Confirmed',
+        );
+    }
+
+    final dateLabel = DateFormat('d MMM').format(booking.bookingDate!);
+    final timeLabel = '${booking.startTime}–${booking.endTime}';
+
+    return GestureDetector(
+      onTap: () =>
+          context.push(AppRoutes.bookingDetailPath(booking.id)),
+      child: Container(
+      width: 220,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  booking.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.1,
+                    color: scheme.onSurface,
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _TrendTotal(
-                label: 'Revenue',
-                value: '₹${_compactAmount(totalRevenue / 100)}',
-                color: blue,
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: badge.bg,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  badge.label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: badge.fg,
+                    letterSpacing: 0.2,
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _TrendTotal(
-                label: 'Collected',
-                value: '₹${_compactAmount(totalCollected / 100)}',
-                color: amber,
+            ],
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              Icon(Icons.calendar_today_rounded,
+                  size: 12,
+                  color: scheme.onSurface.withValues(alpha: 0.55)),
+              const SizedBox(width: 5),
+              Text(
+                dateLabel,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface.withValues(alpha: 0.75),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            _TrendLegend(color: primary, label: 'Bookings'),
-            const SizedBox(width: 14),
-            const _TrendLegend(color: blue, label: 'Revenue'),
-            const SizedBox(width: 14),
-            const _TrendLegend(color: amber, label: 'Collected'),
-            const Spacer(),
-            const Text(
-              'Shape comparison',
+              const SizedBox(width: 12),
+              Icon(Icons.access_time_rounded,
+                  size: 12,
+                  color: scheme.onSurface.withValues(alpha: 0.55)),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  timeLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface.withValues(alpha: 0.75),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (booking.unitName != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              booking.unitName!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  color: Color(0xFF98A2B3),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface.withValues(alpha: 0.55),
+              ),
             ),
           ],
+        ],
+      ),
+    ),
+    );
+  }
+}
+
+class _RecentBookingsSkeleton extends StatelessWidget {
+  const _RecentBookingsSkeleton();
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      itemCount: 3,
+      separatorBuilder: (_, __) => const SizedBox(width: 12),
+      itemBuilder: (_, __) => Container(
+        width: 220,
+        decoration: BoxDecoration(
+          color: scheme.outline.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(16),
         ),
-        const SizedBox(height: 10),
-        Expanded(
-          child: LineChart(
-            LineChartData(
-              minX: 0,
-              maxX: (days.length - 1).toDouble(),
-              minY: 0,
-              maxY: 110,
-              lineTouchData: LineTouchData(
-                touchTooltipData: LineTouchTooltipData(
-                  getTooltipColor: (_) => const Color(0xFF101828),
-                  getTooltipItems: (spots) => spots.map((spot) {
-                    final index = spot.x.round().clamp(0, days.length - 1);
-                    final text = switch (spot.barIndex) {
-                      0 => '${bookingCounts[index].toInt()} bookings',
-                      1 => '₹${_compactAmount(revenue[index])} revenue',
-                      _ => '₹${_compactAmount(collected[index])} collected',
-                    };
-                    return LineTooltipItem(
-                      text,
-                      const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800),
-                    );
-                  }).toList(),
-                ),
-              ),
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                getDrawingHorizontalLine: (_) => const FlLine(
-                  color: Color(0xFFF2F4F7),
-                  strokeWidth: 1,
-                ),
-              ),
-              titlesData: FlTitlesData(
-                leftTitles:
-                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles:
-                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles:
-                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 26,
-                    interval:
-                        days.length > 7 ? (days.length / 6).ceilToDouble() : 1,
-                    getTitlesWidget: (value, meta) {
-                      final index = value.toInt();
-                      if (index < 0 || index >= days.length) {
-                        return const SizedBox.shrink();
-                      }
-                      final label = days.length <= 7
-                          ? DateFormat('E').format(days[index].day)
-                          : DateFormat('d MMM').format(days[index].day);
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          label,
-                          style: const TextStyle(
-                            color: Color(0xFF98A2B3),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: bookingSpots,
-                  isCurved: true,
-                  color: primary,
-                  barWidth: 3,
-                  isStrokeCapRound: true,
-                  dotData: const FlDotData(show: false),
-                  belowBarData: BarAreaData(
-                    show: true,
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        primary.withValues(alpha: 0.18),
-                        primary.withValues(alpha: 0),
-                      ],
+      ),
+    );
+  }
+}
+
+// ─── Bookings + Revenue combo chart ──────────────────────────────────────────
+
+class _BookingsTrendSection extends StatelessWidget {
+  const _BookingsTrendSection({required this.summaryAsync});
+  final AsyncValue<Map<String, ArenaDaySummary>> summaryAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Bookings & Revenue',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        color: scheme.onSurface,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Last 7 days',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-                LineChartBarData(
-                  spots: revenueSpots,
-                  isCurved: true,
-                  color: blue,
-                  barWidth: 3,
-                  isStrokeCapRound: true,
-                  dotData: const FlDotData(show: false),
-                  dashArray: const [8, 4],
-                ),
-                LineChartBarData(
-                  spots: collectedSpots,
-                  isCurved: true,
-                  color: amber,
-                  barWidth: 3,
-                  isStrokeCapRound: true,
-                  dotData: const FlDotData(show: false),
-                  dashArray: const [3, 4],
-                ),
-              ],
+              ),
+              _LegendChip(
+                color: scheme.primary.withValues(alpha: 0.55),
+                label: 'Bookings',
+                square: true,
+              ),
+              const SizedBox(width: 12),
+              _LegendChip(
+                color: scheme.onSurface,
+                label: 'Revenue',
+                square: false,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            height: 220,
+            child: summaryAsync.when(
+              loading: () => const _ChartLoading(),
+              error: (e, _) => const _ChartMessage('Could not load graph'),
+              data: (summary) => _BookingsRevenueComboChart(summary: summary),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendChip extends StatelessWidget {
+  const _LegendChip({
+    required this.color,
+    required this.label,
+    required this.square,
+  });
+  final Color color;
+  final String label;
+  final bool square;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: square ? 10 : 14,
+          height: square ? 10 : 3,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius:
+                BorderRadius.circular(square ? 2.5 : 2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: scheme.onSurface.withValues(alpha: 0.7),
           ),
         ),
       ],
@@ -1350,85 +1071,394 @@ class _BookingRevenueLineChart extends StatelessWidget {
   }
 }
 
-class _TrendTotal extends StatelessWidget {
-  const _TrendTotal({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
+class _BookingsRevenueComboChart extends StatelessWidget {
+  const _BookingsRevenueComboChart({required this.summary});
+  final Map<String, ArenaDaySummary> summary;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.12)),
+    final scheme = Theme.of(context).colorScheme;
+    final today = DateTime.now();
+    final days = List.generate(
+      7,
+      (i) => DateTime(today.year, today.month, today.day - (6 - i)),
+    );
+
+    final bookingCounts = <double>[];
+    final revenue = <double>[];
+    for (final d in days) {
+      final daily = summary[DateFormat('yyyy-MM-dd').format(d)];
+      bookingCounts.add((daily?.count ?? 0).toDouble());
+      revenue.add((daily?.revenuePaise ?? 0) / 100);
+    }
+
+    final maxBookings =
+        bookingCounts.fold<double>(0, (m, v) => v > m ? v : m);
+    final maxRevenue = revenue.fold<double>(0, (m, v) => v > m ? v : m);
+    if (maxBookings == 0 && maxRevenue == 0) {
+      return const _ChartMessage('No data yet');
+    }
+
+    const maxY = 110.0;
+    double normBooking(double v) =>
+        maxBookings == 0 ? 0 : (v / maxBookings) * 100;
+    double normRevenue(double v) =>
+        maxRevenue == 0 ? 0 : (v / maxRevenue) * 100;
+
+    final lineColor = scheme.onSurface;
+
+    final commonTitles = FlTitlesData(
+      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      rightTitles:
+          const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      bottomTitles: AxisTitles(
+        sideTitles: SideTitles(
+          showTitles: true,
+          reservedSize: 30,
+          interval: 1,
+          getTitlesWidget: (value, meta) {
+            final i = value.toInt();
+            if (i < 0 || i >= days.length) return const SizedBox();
+            final d = days[i];
+            final isToday = d.day == today.day &&
+                d.month == today.month &&
+                d.year == today.year;
+            return Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                DateFormat('E').format(d),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight:
+                      isToday ? FontWeight.w900 : FontWeight.w700,
+                  color: isToday
+                      ? scheme.primary
+                      : scheme.onSurface.withValues(alpha: 0.5),
+                ),
+              ),
+            );
+          },
+        ),
       ),
+    );
+
+    final barChart = BarChart(
+      BarChartData(
+        maxY: maxY,
+        minY: 0,
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        alignment: BarChartAlignment.spaceAround,
+        titlesData: commonTitles,
+        barTouchData: BarTouchData(
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipColor: (_) => scheme.onSurface,
+            tooltipRoundedRadius: 10,
+            tooltipPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            getTooltipItem: (group, _, rod, __) {
+              final i = group.x;
+              final d = days[i];
+              return BarTooltipItem(
+                '${DateFormat('EEE, d MMM').format(d)}\n'
+                '${bookingCounts[i].toInt()} bookings · '
+                '₹${_compactAmount(revenue[i])}',
+                TextStyle(
+                  color: scheme.surface,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              );
+            },
+          ),
+        ),
+        barGroups: List.generate(days.length, (i) {
+          final d = days[i];
+          final isToday = d.day == today.day &&
+              d.month == today.month &&
+              d.year == today.year;
+          return BarChartGroupData(
+            x: i,
+            barRods: [
+              BarChartRodData(
+                toY: normBooking(bookingCounts[i]),
+                width: 22,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(8)),
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: isToday
+                      ? [
+                          scheme.primary,
+                          scheme.primary.withValues(alpha: 0.7),
+                        ]
+                      : [
+                          scheme.primary.withValues(alpha: 0.55),
+                          scheme.primary.withValues(alpha: 0.25),
+                        ],
+                ),
+                backDrawRodData: BackgroundBarChartRodData(
+                  show: true,
+                  toY: maxY,
+                  color: scheme.surfaceContainerHighest,
+                ),
+              ),
+            ],
+          );
+        }),
+      ),
+    );
+
+    final spots = List.generate(
+      days.length,
+      (i) => FlSpot(i.toDouble(), normRevenue(revenue[i])),
+    );
+
+    final lineChart = LineChart(
+      LineChartData(
+        minX: 0,
+        maxX: (days.length - 1).toDouble(),
+        minY: 0,
+        maxY: maxY,
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        titlesData: const FlTitlesData(show: false),
+        lineTouchData: const LineTouchData(enabled: false),
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.4,
+            preventCurveOverShooting: true,
+            barWidth: 3,
+            isStrokeCapRound: true,
+            color: lineColor,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                final isLast = index == spots.length - 1;
+                return FlDotCirclePainter(
+                  radius: isLast ? 5 : 3.5,
+                  color: scheme.surface,
+                  strokeWidth: isLast ? 3 : 2,
+                  strokeColor: lineColor,
+                );
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  lineColor.withValues(alpha: 0.10),
+                  lineColor.withValues(alpha: 0),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Stack(
+      children: [
+        barChart,
+        Padding(
+          // line chart gets extra horizontal padding so the line sits in the
+          // middle of each bar's slot rather than at the edges
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 30),
+          child: IgnorePointer(child: lineChart),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Slots donut ─────────────────────────────────────────────────────────────
+
+class _SlotsDonutSection extends StatelessWidget {
+  const _SlotsDonutSection({required this.slotsAsync});
+  final AsyncValue<List<AvailabilitySlot>> slotsAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0)),
-          const SizedBox(height: 3),
-          Text(value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: Color(0xFF101828),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0)),
+          Text(
+            'Slot utilization',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+              color: scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Today across selected arenas',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            height: 180,
+            child: slotsAsync.when(
+              loading: () => const _ChartLoading(),
+              error: (e, _) => const _ChartMessage('Could not load'),
+              data: (slots) => _SlotsDonut(slots: slots),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _TrendLegend extends StatelessWidget {
-  const _TrendLegend({required this.color, required this.label});
-
-  final Color color;
-  final String label;
+class _SlotsDonut extends StatelessWidget {
+  const _SlotsDonut({required this.slots});
+  final List<AvailabilitySlot> slots;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (slots.isEmpty) return const _ChartMessage('No slots today');
+    final total = slots.length;
+    final booked = slots.where((s) => !s.available).length;
+    final available = total - booked;
+    final pct = total == 0 ? 0 : (booked / total * 100).round();
     return Row(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        SizedBox(
+          width: 160,
+          height: 160,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              PieChart(
+                PieChartData(
+                  startDegreeOffset: -90,
+                  sectionsSpace: 3,
+                  centerSpaceRadius: 52,
+                  sections: [
+                    PieChartSectionData(
+                      value: booked.toDouble().clamp(0.0001, double.infinity),
+                      color: scheme.primary,
+                      radius: 22,
+                      showTitle: false,
+                    ),
+                    PieChartSectionData(
+                      value:
+                          available.toDouble().clamp(0.0001, double.infinity),
+                      color: scheme.surfaceContainerHighest,
+                      radius: 22,
+                      showTitle: false,
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$pct%',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -1,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  Text('booked',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ],
+          ),
         ),
-        const SizedBox(width: 6),
-        Text(label,
-            style: const TextStyle(
-                color: Color(0xFF667085),
-                fontSize: 11,
-                fontWeight: FontWeight.w800)),
+        const SizedBox(width: 24),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _LegendRow(
+                color: scheme.primary,
+                label: 'Booked',
+                value: booked.toString(),
+              ),
+              const SizedBox(height: 16),
+              _LegendRow(
+                color: scheme.surfaceContainerHighest,
+                label: 'Available',
+                value: available.toString(),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 }
 
+class _LegendRow extends StatelessWidget {
+  const _LegendRow({
+    required this.color,
+    required this.label,
+    required this.value,
+  });
+  final Color color;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                  color: scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Helpers shared by home tab ──────────────────────────────────────────────
+
 class _ChartLoading extends StatelessWidget {
   const _ChartLoading();
-
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       alignment: Alignment.center,
@@ -1439,24 +1469,38 @@ class _ChartLoading extends StatelessWidget {
 
 class _ChartMessage extends StatelessWidget {
   const _ChartMessage(this.message);
-
   final String message;
-
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       alignment: Alignment.center,
       child: Text(
         message,
-        style: const TextStyle(
-          color: Color(0xFF98A2B3),
+        style: TextStyle(
+          color: scheme.onSurface.withValues(alpha: 0.55),
           fontSize: 13,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+}
+
+class _BlockSkeleton extends StatelessWidget {
+  const _BlockSkeleton({required this.height});
+  final double height;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
       ),
     );
   }
@@ -1483,188 +1527,74 @@ bool _countsAsRevenue(ArenaReservation booking) {
       booking.paidAt != null;
 }
 
-class _HomeMetricBox extends StatelessWidget {
-  const _HomeMetricBox({
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.background,
-    required this.accent,
-  });
-
-  final String title;
-  final String value;
-  final String subtitle;
-  final IconData icon;
-  final Color background;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 104,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [background, Colors.white],
-        ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: accent.withValues(alpha: 0.16)),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: accent, size: 19),
-              ),
-              const Spacer(),
-              Text(
-                value,
-                style: TextStyle(
-                  color: accent,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0,
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFF101828),
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0,
-            ),
-          ),
-          Text(
-            subtitle,
-            style: TextStyle(
-              color: accent.withValues(alpha: 0.72),
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricSkeleton extends StatelessWidget {
-  const _MetricSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 104,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(14),
-      ),
-    );
-  }
-}
-
 class _HeroHeader extends StatelessWidget {
   const _HeroHeader({required this.businessName, required this.ref});
   final String businessName;
   final WidgetRef ref;
 
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Text(
-              businessName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF101828),
-                  letterSpacing: -0.5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _greeting(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface.withValues(alpha: 0.55),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  businessName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 8),
-          _HeaderIconBtn(
-            icon: Icons.auto_awesome_rounded,
-            tooltip: "What's New",
-            onTap: () => _showWhatsNew(context),
-          ),
-          const SizedBox(width: 4),
           _NotificationBell(
             onTap: () => context
                 .push(AppRoutes.arenaNotifications)
                 .then((_) => ref.invalidate(bizUnreadCountProvider)),
           ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => _showProfileSheet(context, ref),
-            child: const _ProfileAvatar(),
+          const SizedBox(width: 6),
+          Builder(
+            builder: (ctx) => GestureDetector(
+              onTap: () => Scaffold.of(ctx).openEndDrawer(),
+              behavior: HitTestBehavior.opaque,
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: _ProfileAvatar(),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
-
-  void _showWhatsNew(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => const _WhatsNewSheet(),
-    );
-  }
-}
-
-class _HeaderIconBtn extends StatelessWidget {
-  const _HeaderIconBtn(
-      {required this.icon, required this.onTap, this.tooltip = ''});
-  final IconData icon;
-  final VoidCallback onTap;
-  final String tooltip;
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-        message: tooltip,
-        child: GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Icon(icon, size: 24, color: const Color(0xFF344054)),
-          ),
-        ),
-      );
 }
 
 class _NotificationBell extends ConsumerWidget {
@@ -1673,151 +1603,58 @@ class _NotificationBell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     final unreadAsync = ref.watch(bizUnreadCountProvider);
     final unread = unreadAsync.maybeWhen(data: (n) => n, orElse: () => 0);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.all(8),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Stack(
           clipBehavior: Clip.none,
+          alignment: Alignment.center,
           children: [
             Icon(
               unread > 0
                   ? Icons.notifications_rounded
                   : Icons.notifications_none_rounded,
-              size: 24,
-              color: const Color(0xFF344054),
+              size: 22,
+              color: scheme.onSurface.withValues(alpha: 0.85),
             ),
             if (unread > 0)
               Positioned(
-                top: -3,
-                right: -3,
+                top: 6,
+                right: 6,
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDC2626),
+                    color: scheme.error,
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: scheme.surface, width: 1.5),
                   ),
+                  constraints:
+                      const BoxConstraints(minWidth: 16, minHeight: 16),
+                  alignment: Alignment.center,
                   child: Text(
                     unread > 99 ? '99+' : '$unread',
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800),
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _WhatsNewSheet extends StatelessWidget {
-  const _WhatsNewSheet();
-
-  static const _items = [
-    (
-      Icons.calendar_month_rounded,
-      'Booking Check-ins',
-      'Collect payments at check-in — mark bookings paid on the spot.'
-    ),
-    (
-      Icons.layers_rounded,
-      'Unit Management',
-      'Add courts, nets and grounds with per-slot pricing and lead times.'
-    ),
-    (
-      Icons.link_rounded,
-      'Linked Units',
-      'Link nets inside a ground — booking the ground blocks linked nets automatically.'
-    ),
-    (
-      Icons.bar_chart_rounded,
-      'Revenue Dashboard',
-      'Monthly and daily revenue charts now live on the Home tab.'
-    ),
-    (
-      Icons.sports_rounded,
-      'Play Tab',
-      'Create and manage matches and tournaments directly from the app.'
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).padding.bottom;
-    return ListView(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + bottom),
-      children: [
-        Center(
-          child: Container(
-            width: 36,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 20),
-            decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
-                borderRadius: BorderRadius.circular(2)),
-          ),
-        ),
-        const Row(children: [
-          Icon(Icons.auto_awesome_rounded, size: 20, color: Color(0xFF101828)),
-          SizedBox(width: 10),
-          Text("What's New",
-              style: TextStyle(
-                  color: Color(0xFF101828),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900)),
-        ]),
-        const SizedBox(height: 4),
-        const Text('Latest updates to Swing Biz',
-            style: TextStyle(
-                color: Color(0xFF667085),
-                fontSize: 13,
-                fontWeight: FontWeight.w600)),
-        const SizedBox(height: 20),
-        ..._items.map((item) => Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFF7F8FA),
-                        borderRadius: BorderRadius.circular(10)),
-                    child:
-                        Icon(item.$1, size: 18, color: const Color(0xFF344054)),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(item.$2,
-                            style: const TextStyle(
-                                color: Color(0xFF101828),
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 2),
-                        Text(item.$3,
-                            style: const TextStyle(
-                                color: Color(0xFF667085),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                height: 1.4)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )),
-      ],
     );
   }
 }
@@ -1831,74 +1668,7 @@ class _ArenasTab extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 22, 16, 18),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Arenas',
-                        style: TextStyle(
-                            color: Color(0xFF101828),
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5)),
-                    SizedBox(height: 2),
-                    Text('Manage your venues',
-                        style: TextStyle(
-                            color: Color(0xFF667085),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: () => showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  backgroundColor: Colors.white,
-                  shape: const RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(20)),
-                  ),
-                  builder: (_) => const _ArenaHelpSheet(),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  child: const Icon(Icons.help_outline_rounded,
-                      color: Color(0xFF667085), size: 22),
-                ),
-              ),
-              const SizedBox(width: 4),
-              GestureDetector(
-                onTap: () => context.push(AppRoutes.createArena),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF101828),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.add_rounded, size: 16, color: Colors.white),
-                      SizedBox(width: 6),
-                      Text('Add Arena',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        const SizedBox(height: 16),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async => ref.refresh(ownedArenasProvider.future),
@@ -1918,36 +1688,12 @@ class _ArenasTab extends ConsumerWidget {
                       title: 'No arenas yet',
                       message:
                           'Add your first arena to start managing bookings.',
-                      action: GestureDetector(
-                        onTap: () => context.push(AppRoutes.createArena),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 22, vertical: 13),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF101828),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.add_rounded,
-                                  size: 18, color: Colors.white),
-                              SizedBox(width: 8),
-                              Text('Add Your First Arena',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800)),
-                            ],
-                          ),
-                        ),
-                      ),
                     ),
                   );
                 }
                 return ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   itemCount: arenas.length,
                   itemBuilder: (context, i) => Padding(
                     padding: const EdgeInsets.only(bottom: 14),
@@ -1956,6 +1702,34 @@ class _ArenasTab extends ConsumerWidget {
                 );
               },
             ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Builder(
+            builder: (context) {
+              final scheme = Theme.of(context).colorScheme;
+              return SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: FilledButton.icon(
+                  onPressed: () => context.push(AppRoutes.createArena),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.onSurface,
+                    foregroundColor: scheme.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 22),
+                  label: const Text(
+                    'Add Arena',
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],
@@ -2017,6 +1791,7 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
   @override
   Widget build(BuildContext context) {
     final arena = widget.arena;
+    final scheme = Theme.of(context).colorScheme;
     final loc = _joinNonEmpty([arena.city, arena.state]);
     final address = loc.isNotEmpty
         ? loc
@@ -2027,9 +1802,8 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFEAECF0), width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2068,22 +1842,25 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
                           Text(arena.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Color(0xFF101828),
+                              style: TextStyle(
+                                  color: scheme.onSurface,
                                   fontSize: 16,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: -0.2)),
                           const SizedBox(height: 4),
                           Row(children: [
-                            const Icon(Icons.location_on_outlined,
-                                size: 13, color: Color(0xFF98A2B3)),
+                            Icon(Icons.location_on_outlined,
+                                size: 13,
+                                color:
+                                    scheme.onSurface.withValues(alpha: 0.5)),
                             const SizedBox(width: 3),
                             Expanded(
                               child: Text(address,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: Color(0xFF667085),
+                                  style: TextStyle(
+                                      color: scheme.onSurface
+                                          .withValues(alpha: 0.65),
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600)),
                             ),
@@ -2099,8 +1876,9 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
                       )
                     else
                       PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert_rounded,
-                            color: Color(0xFFD0D5DD), size: 20),
+                        icon: Icon(Icons.more_vert_rounded,
+                            color: scheme.onSurface.withValues(alpha: 0.4),
+                            size: 20),
                         onSelected: (value) {
                           if (value == 'delete') _confirmDelete();
                         },
@@ -2141,7 +1919,7 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0xFFF2F4F7)),
+          Divider(height: 1, color: scheme.outline),
           // Action buttons
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -2155,7 +1933,7 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
-                      backgroundColor: const Color(0xFFF3F4F6),
+                      backgroundColor: scheme.surface,
                       builder: (_) => ArenaDetailSheet(
                         arena: arena,
                         startEditing: true,
@@ -2186,15 +1964,27 @@ class _ArenaInitialBox extends StatelessWidget {
   const _ArenaInitialBox(this.initial);
   final String initial;
   @override
-  Widget build(BuildContext context) => Container(
-        color: const Color(0xFF101828),
-        alignment: Alignment.center,
-        child: Text(initial,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w900)),
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [scheme.primary, scheme.primary.withValues(alpha: 0.7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: TextStyle(
+          color: scheme.onPrimary,
+          fontSize: 20,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
 }
 
 class _StatPill extends StatelessWidget {
@@ -2202,25 +1992,32 @@ class _StatPill extends StatelessWidget {
   final IconData icon;
   final String label;
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF7F8FA),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 12, color: const Color(0xFF667085)),
-            const SizedBox(width: 4),
-            Text(label,
-                style: const TextStyle(
-                    color: Color(0xFF667085),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700)),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final muted = scheme.onSurface.withValues(alpha: 0.65);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: muted),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CardAction extends StatelessWidget {
@@ -2237,8 +2034,9 @@ class _CardAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = filled ? const Color(0xFF101828) : const Color(0xFFF7F8FA);
-    final fg = filled ? Colors.white : const Color(0xFF344054);
+    final scheme = Theme.of(context).colorScheme;
+    final bg = filled ? scheme.onSurface : scheme.surface;
+    final fg = filled ? scheme.surface : scheme.onSurface;
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(10),
@@ -2252,9 +2050,14 @@ class _CardAction extends StatelessWidget {
             children: [
               Icon(icon, size: 15, color: fg),
               const SizedBox(width: 6),
-              Text(label,
-                  style: TextStyle(
-                      color: fg, fontSize: 13, fontWeight: FontWeight.w800)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ],
           ),
         ),
@@ -2266,7 +2069,7 @@ class _CardAction extends StatelessWidget {
 class _BookingsTab extends StatelessWidget {
   const _BookingsTab();
   @override
-  Widget build(BuildContext context) => const BookingsPage();
+  Widget build(BuildContext context) => const bookings.BookingsPage();
 }
 
 class _PaymentsTab extends StatelessWidget {
@@ -2276,155 +2079,41 @@ class _PaymentsTab extends StatelessWidget {
 }
 
 class _CenteredMessage extends StatelessWidget {
-  const _CenteredMessage(
-      {required this.title, required this.message, this.action});
+  const _CenteredMessage({required this.title, required this.message});
   final String title, message;
-  final Widget? action;
-  @override
-  Widget build(BuildContext context) => Center(
-      child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: Color(0xFF101828),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFF667085))),
-            if (action != null) ...[const SizedBox(height: 16), action!]
-          ])));
-}
-
-// ─── Arena help sheet ─────────────────────────────────────────────────────────
-
-class _ArenaHelpSheet extends StatelessWidget {
-  const _ArenaHelpSheet();
-
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-          24, 16, 24, 24 + MediaQuery.of(context).viewInsets.bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: const Color(0xFFE1E5EA),
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'How it works',
-            style: TextStyle(
-                color: Color(0xFF101828),
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontSize: 18,
-                fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 20),
-          const _HelpItem(
-            icon: Icons.stadium_rounded,
-            iconColor: Color(0xFF064E3B),
-            iconBg: Color(0xFFD1FAE5),
-            title: 'Arena',
-            body:
-                'Your venue on Swing. Set up the name, location, sports, and operating hours. Players search and discover your arena to make bookings.',
-          ),
-          const SizedBox(height: 16),
-          const _HelpItem(
-            icon: Icons.grid_view_rounded,
-            iconColor: Color(0xFF0EA5E9),
-            iconBg: Color(0xFFE0F2FE),
-            title: 'Unit',
-            body:
-                'A bookable court or space inside your arena — e.g. "Court 1", "Turf A", "Net 2". Each unit has its own slot timings, pricing, and photos. Players pick a unit when they book.',
-          ),
-          const SizedBox(height: 16),
-          const _HelpItem(
-            icon: Icons.calendar_month_rounded,
-            iconColor: Color(0xFF7C3AED),
-            iconBg: Color(0xFFEDE9FE),
-            title: 'Booking',
-            body:
-                'A confirmed time slot reservation by a player for one of your units. You can view upcoming and past bookings, check payment status, and manage check-ins from the Bookings tab.',
-          ),
-          const SizedBox(height: 24),
-        ],
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _HelpItem extends StatelessWidget {
-  const _HelpItem({
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-    required this.title,
-    required this.body,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBg;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-              color: iconBg, borderRadius: BorderRadius.circular(12)),
-          child: Icon(icon, color: iconColor, size: 22),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: const TextStyle(
-                      color: Color(0xFF101828),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800)),
-              const SizedBox(height: 4),
-              Text(body,
-                  style: const TextStyle(
-                      color: Color(0xFF667085),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      height: 1.45)),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 String _joinNonEmpty(List<String?> v, {String s = ', '}) => v
     .where((x) => x != null && x.trim().isNotEmpty)
     .map((x) => x!.trim())
     .join(s);
-int _toMins(String t) {
-  try {
-    final p = t.split(':').map(int.parse).toList();
-    return p[0] * 60 + p[1];
-  } catch (_) {
-    return 0;
-  }
-}

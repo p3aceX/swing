@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:pdf/pdf.dart';
@@ -14,17 +15,46 @@ import 'dart:io';
 import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
+import '../../../core/router/app_router.dart';
 import 'matchups_tab.dart';
 import 'split_booking_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
-const _bg = Color(0xFFF9FAFB);
-const _surface = Color(0xFFFFFFFF);
-const _border = Color(0xFFE5E7EB);
-const _accent = Color(0xFFF43F5E); // rose-500 / coral — matches AppTheme.light primary
-const _accentLight = Color(0xFFFFE4E6); // rose-100 — matches AppTheme indicatorTint
-const _text = Color(0xFF111827);
-const _muted = Color(0xFF6B7280);
+class _C {
+  const _C({
+    required this.bg,
+    required this.surface,
+    required this.border,
+    required this.text,
+    required this.muted,
+    required this.accent,
+    required this.accentLight,
+    required this.onAccent,
+  });
+  final Color bg;
+  final Color surface;
+  final Color border;
+  final Color text;
+  final Color muted;
+  final Color accent;
+  final Color accentLight;
+  final Color onAccent;
+  factory _C.of(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    return _C(
+      bg: s.surface,
+      surface: s.surfaceContainerHighest,
+      border: s.outline,
+      text: s.onSurface,
+      muted: s.onSurface.withValues(alpha: 0.6),
+      accent: s.primary,
+      accentLight: s.primary.withValues(alpha: 0.12),
+      onAccent: s.onPrimary,
+    );
+  }
+}
+
+late _C _c;
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
@@ -48,6 +78,10 @@ final _bookingsProvider =
   }
 });
 
+/// Inner tab on the Bookings page. 0=Match-Up Requests, 1=Bookings.
+/// Exposed so the home screen "See all" link can jump straight to Bookings.
+final bookingsInnerTabProvider = StateProvider<int>((ref) => 0);
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 class BookingsPage extends ConsumerWidget {
@@ -55,11 +89,12 @@ class BookingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     final arenasAsync = ref.watch(ownedArenasProvider);
 
     return arenasAsync.when(
       loading: () =>
-          const Center(child: CircularProgressIndicator(color: _accent)),
+          Center(child: CircularProgressIndicator(color: _c.accent)),
       error: (e, _) => _ErrorView(message: '$e'),
       data: (arenas) {
         if (arenas.isEmpty) return const _EmptyArenas();
@@ -71,7 +106,7 @@ class BookingsPage extends ConsumerWidget {
                 orElse: () => arenas.first);
 
         return Scaffold(
-          backgroundColor: _bg,
+          backgroundColor: _c.bg,
           body: _BookingsBody(arena: arena, arenas: arenas),
         );
       },
@@ -91,7 +126,6 @@ class _BookingsBody extends ConsumerStatefulWidget {
 }
 
 class _BookingsBodyState extends ConsumerState<_BookingsBody> {
-  int _tab = 0; // 0=MatchUp Requests  1=Bookings
   String _selectedFilter = 'All';
   String _selectedUnitId = 'All';
   late DateTime _calendarMonth;
@@ -106,17 +140,20 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final today = DateTime.now();
     final allBookingsAsync = ref.watch(_bookingsProvider);
+    final tab = ref.watch(bookingsInnerTabProvider);
 
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: _c.bg,
       body: Column(
         children: [
           // Big segmented tab header (replaces arena name + small tabs)
           _BigTabHeader(
-            selected: _tab,
-            onSelect: (i) => setState(() => _tab = i),
+            selected: tab,
+            onSelect: (i) =>
+                ref.read(bookingsInnerTabProvider.notifier).state = i,
             arena: widget.arena,
             arenas: widget.arenas,
           ),
@@ -124,8 +161,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           // Tab content
           Expanded(
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: _tab == 0
+              duration: Duration(milliseconds: 200),
+              child: tab == 0
                   ? _buildMatchUpRequestsTab()
                   : _buildBookingsTab(context, today, allBookingsAsync),
             ),
@@ -143,13 +180,15 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   child: FilledButton.icon(
                     onPressed: () => _showBookingTypeModal(context, today),
                     style: FilledButton.styleFrom(
-                      backgroundColor: _text,
-                      foregroundColor: Colors.white,
+                      backgroundColor:
+                          Theme.of(context).colorScheme.onSurface,
+                      foregroundColor:
+                          Theme.of(context).colorScheme.surface,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                     ),
-                    icon: const Icon(Icons.add_rounded, size: 22),
-                    label: const Text(
+                    icon: Icon(Icons.add_rounded, size: 22),
+                    label: Text(
                       'Book',
                       style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w700),
@@ -164,7 +203,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   Widget _buildBookingsTab(BuildContext context, DateTime today,
       AsyncValue<List<ArenaReservation>> allBookingsAsync) {
     return Column(
-      key: const ValueKey('bookings'),
+      key: ValueKey('bookings'),
       children: [
         // Status filter
         allBookingsAsync.when(
@@ -185,7 +224,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           ),
         ),
 
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
 
         // Unit filter
         _UnitFilterBar(
@@ -197,9 +236,9 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
 
         Expanded(
           child: allBookingsAsync.when(
-            loading: () => const Center(
+            loading: () => Center(
                 child:
-                    CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+                    CircularProgressIndicator(strokeWidth: 2, color: _c.accent)),
             error: (e, _) => _ErrorView(message: '$e'),
             data: (rawBookings) {
               final filtered = rawBookings.where((b) {
@@ -255,15 +294,15 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                           isFiltered: rawBookings.isNotEmpty,
                         )
                       : RefreshIndicator(
-                          color: _accent,
-                          backgroundColor: _surface,
+                          color: _c.accent,
+                          backgroundColor: _c.surface,
                           onRefresh: () =>
                               ref.refresh(_bookingsProvider.future),
                           child: GridView.builder(
                             padding:
                                 const EdgeInsets.fromLTRB(16, 8, 16, 16),
                             gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: 3,
                               crossAxisSpacing: 10,
                               mainAxisSpacing: 10,
@@ -308,8 +347,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   void _showBookingTypeModal(BuildContext context, DateTime today) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: _c.bg,
+      shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => SafeArea(
         child: Padding(
@@ -328,16 +367,16 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              const Text(
+              SizedBox(height: 20),
+              Text(
                 'New Booking',
                 style: TextStyle(
-                  color: _text,
+                  color: _c.text,
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               _BookingTypeOption(
                 icon: Icons.calendar_month_rounded,
                 title: 'Full Booking',
@@ -347,7 +386,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   _showAddBookingSheet(context, today);
                 },
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: 10),
               _BookingTypeOption(
                 icon: Icons.call_split_rounded,
                 title: 'Match-Up Request',
@@ -384,10 +423,10 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
       if (created == true) {
         ref.invalidate(_bookingsProvider);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content:
                 Text('Split booking created — lobby is now live for players'),
-            backgroundColor: _accent,
+            backgroundColor: _c.accent,
           ),
         );
       }
@@ -396,15 +435,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
 
   void _showBookingDetail(BuildContext context, ArenaReservation booking,
       String arenaName, String arenaId) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => BookingDetailSheet(
-          booking: booking, arenaName: arenaName, arenaId: arenaId),
-    ).then((_) {
+    context.push(AppRoutes.bookingDetailPath(booking.id)).then((_) {
       ref.invalidate(_bookingsProvider);
     });
   }
@@ -414,8 +445,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     final result = await showModalBottomSheet<_PaymentResult>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: _c.bg,
+      shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       builder: (_) => _CheckoutSheet(booking: booking),
     );
@@ -432,7 +463,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
               'Guest checked in · ${result.mode} ₹${(result.amountPaise / 100).toStringAsFixed(0)} recorded'),
-          backgroundColor: _accent,
+          backgroundColor: _c.accent,
         ));
       }
     } catch (e) {
@@ -449,8 +480,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: _surface,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: _c.surface,
+      shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _DateBookingsSheet(
         date: date,
@@ -487,9 +518,10 @@ class _BigTabHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     final top = MediaQuery.of(context).padding.top;
     return Container(
-      color: _bg,
+      color: _c.bg,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -503,7 +535,7 @@ class _BigTabHeader extends ConsumerWidget {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: arenas.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, __) => SizedBox(width: 8),
               itemBuilder: (_, i) {
                 if (i == 0) {
                   final active = arena == null;
@@ -511,21 +543,21 @@ class _BigTabHeader extends ConsumerWidget {
                     onTap: () =>
                         ref.read(_selectedArenaProvider.notifier).state = null,
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
+                      duration: Duration(milliseconds: 160),
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: active ? _accent : _surface,
+                        color: active ? _c.accent : _c.surface,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                            color: active ? _accent : _border),
+                            color: active ? _c.accent : _c.border),
                       ),
                       child: Text(
                         'All',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: active ? Colors.white : _muted,
+                          color: active ? Colors.white : _c.muted,
                         ),
                       ),
                     ),
@@ -537,28 +569,28 @@ class _BigTabHeader extends ConsumerWidget {
                   onTap: () =>
                       ref.read(_selectedArenaProvider.notifier).state = a.id,
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
+                    duration: Duration(milliseconds: 160),
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: active ? _accent : _surface,
+                      color: active ? _c.accent : _c.surface,
                       borderRadius: BorderRadius.circular(10),
                       border:
-                          Border.all(color: active ? _accent : _border),
+                          Border.all(color: active ? _c.accent : _c.border),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.stadium_rounded,
                             size: 13,
-                            color: active ? Colors.white : _muted),
-                        const SizedBox(width: 5),
+                            color: active ? Colors.white : _c.muted),
+                        SizedBox(width: 5),
                         Text(
                           a.name,
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
-                            color: active ? Colors.white : _muted,
+                            color: active ? Colors.white : _c.muted,
                           ),
                         ),
                       ],
@@ -568,7 +600,7 @@ class _BigTabHeader extends ConsumerWidget {
               },
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
 
           // Bookings / MatchUp Requests tab bar
           Padding(
@@ -576,7 +608,7 @@ class _BigTabHeader extends ConsumerWidget {
             child: Container(
               height: 44,
               decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
+                color: _c.border,
                 borderRadius: BorderRadius.circular(12),
               ),
               padding: const EdgeInsets.all(3),
@@ -604,8 +636,8 @@ class _BigTabHeader extends ConsumerWidget {
   void _showArenaPicker(BuildContext context, WidgetRef ref) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: _surface,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: _c.surface,
+      shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (_) => Container(
         padding: const EdgeInsets.all(24),
@@ -613,21 +645,21 @@ class _BigTabHeader extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Switch Arena',
               style: TextStyle(
-                  color: _text, fontSize: 18, fontWeight: FontWeight.w700),
+                  color: _c.text, fontSize: 18, fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             ...arenas.map(
               (a) => ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.stadium_rounded, color: _accent),
+                leading: Icon(Icons.stadium_rounded, color: _c.accent),
                 title: Text(a.name,
-                    style: const TextStyle(
-                        color: _text, fontWeight: FontWeight.w600)),
+                    style: TextStyle(
+                        color: _c.text, fontWeight: FontWeight.w600)),
                 trailing: a.id == arena?.id
-                    ? const Icon(Icons.check_rounded, color: _accent)
+                    ? Icon(Icons.check_rounded, color: _c.accent)
                     : null,
                 onTap: () {
                   ref
@@ -653,21 +685,22 @@ class _BigTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: Duration(milliseconds: 180),
           decoration: BoxDecoration(
-            color: active ? _accent : Colors.transparent,
+            color: active ? _c.accent : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
           alignment: Alignment.center,
           child: AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 180),
+            duration: Duration(milliseconds: 180),
             style: TextStyle(
-              color: active ? Colors.white : _muted,
+              color: active ? Colors.white : _c.muted,
               fontSize: 15,
               fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             ),
@@ -695,15 +728,16 @@ class _BookingTypeOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
+          color: _c.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _border),
+          border: Border.all(color: _c.border),
         ),
         child: Row(
           children: [
@@ -711,30 +745,30 @@ class _BookingTypeOption extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: _c.surface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _border),
+                border: Border.all(color: _c.border),
               ),
-              child: Icon(icon, color: _text, size: 20),
+              child: Icon(icon, color: _c.text, size: 20),
             ),
-            const SizedBox(width: 14),
+            SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                      style: const TextStyle(
-                          color: _text,
+                      style: TextStyle(
+                          color: _c.text,
                           fontSize: 14,
                           fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2),
                   Text(subtitle,
                       style:
-                          const TextStyle(color: _muted, fontSize: 12)),
+                          TextStyle(color: _c.muted, fontSize: 12)),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: _muted, size: 20),
+            Icon(Icons.chevron_right_rounded, color: _c.muted, size: 20),
           ],
         ),
       ),
@@ -760,6 +794,7 @@ class _MonthCalendar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final today = DateTime.now();
     final isCurrentMonth =
         month.year == today.year && month.month == today.month;
@@ -781,14 +816,14 @@ class _MonthCalendar extends StatelessWidget {
     const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
     return Container(
-      color: _surface,
+      color: _c.surface,
       child: Column(children: [
         // Collapsible grid
         AnimatedCrossFade(
-          duration: const Duration(milliseconds: 220),
+          duration: Duration(milliseconds: 220),
           crossFadeState:
               expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-          firstChild: const SizedBox(width: double.infinity),
+          firstChild: SizedBox(width: double.infinity),
           secondChild: Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             child: Column(children: [
@@ -797,23 +832,23 @@ class _MonthCalendar extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
                 child: Row(children: [
                   Text(DateFormat('MMMM yyyy').format(month),
-                      style: const TextStyle(
-                          color: _text,
+                      style: TextStyle(
+                          color: _c.text,
                           fontSize: 13,
                           fontWeight: FontWeight.w800)),
-                  const Spacer(),
+                  Spacer(),
                   GestureDetector(
                     onTap: () =>
                         onMonthChanged(DateTime(month.year, month.month - 1)),
-                    child: const Icon(Icons.chevron_left_rounded,
-                        color: _muted, size: 20),
+                    child: Icon(Icons.chevron_left_rounded,
+                        color: _c.muted, size: 20),
                   ),
-                  const SizedBox(width: 4),
+                  SizedBox(width: 4),
                   GestureDetector(
                     onTap: () =>
                         onMonthChanged(DateTime(month.year, month.month + 1)),
-                    child: const Icon(Icons.chevron_right_rounded,
-                        color: _muted, size: 20),
+                    child: Icon(Icons.chevron_right_rounded,
+                        color: _c.muted, size: 20),
                   ),
                 ]),
               ),
@@ -824,15 +859,15 @@ class _MonthCalendar extends StatelessWidget {
                     .map((d) => Expanded(
                           child: Center(
                             child: Text(d,
-                                style: const TextStyle(
-                                    color: _muted,
+                                style: TextStyle(
+                                    color: _c.muted,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w700)),
                           ),
                         ))
                     .toList(),
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
 
               // Week rows
               for (var w = 0; w < numWeeks; w++)
@@ -846,7 +881,7 @@ class _MonthCalendar extends StatelessWidget {
                     if (day < 1 ||
                         day > daysInMonth ||
                         (isCurrentMonth && day < today.day)) {
-                      return const Expanded(child: SizedBox(height: 38));
+                      return Expanded(child: SizedBox(height: 38));
                     }
 
                     final date = DateTime(month.year, month.month, day);
@@ -860,9 +895,9 @@ class _MonthCalendar extends StatelessWidget {
                         margin: const EdgeInsets.all(2),
                         decoration: BoxDecoration(
                           color: isToday
-                              ? _accent
+                              ? _c.accent
                               : count > 0
-                                  ? _accentLight
+                                  ? _c.accentLight
                                   : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -871,7 +906,7 @@ class _MonthCalendar extends StatelessWidget {
                           children: [
                             Text('$day',
                                 style: TextStyle(
-                                    color: isToday ? Colors.white : _text,
+                                    color: isToday ? Colors.white : _c.text,
                                     fontSize: 12,
                                     fontWeight: isToday
                                         ? FontWeight.w900
@@ -881,7 +916,7 @@ class _MonthCalendar extends StatelessWidget {
                                   style: TextStyle(
                                       color: isToday
                                           ? Colors.white.withValues(alpha: .85)
-                                          : _accent,
+                                          : _c.accent,
                                       fontSize: 9,
                                       fontWeight: FontWeight.w800)),
                           ],
@@ -894,8 +929,8 @@ class _MonthCalendar extends StatelessWidget {
           ),
         ),
 
-        const SizedBox(height: 8),
-        const Divider(height: 1, color: _border),
+        SizedBox(height: 8),
+        Divider(height: 1, color: _c.border),
       ]),
     );
   }
@@ -918,6 +953,7 @@ class _CompactCalendar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
     final today = DateTime.now();
     final isCurrentMonth =
@@ -936,8 +972,8 @@ class _CompactCalendar extends StatelessWidget {
               children: [
                 Text(
                   DateFormat('MMMM yyyy').format(month),
-                  style: const TextStyle(
-                      color: _text, fontSize: 18, fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                      color: _c.text, fontSize: 18, fontWeight: FontWeight.w900),
                 ),
                 Row(
                   children: [
@@ -945,7 +981,7 @@ class _CompactCalendar extends StatelessWidget {
                         Icons.chevron_left_rounded,
                         () => onMonthChanged(
                             DateTime(month.year, month.month - 1))),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12),
                     _NavBtn(
                         Icons.chevron_right_rounded,
                         () => onMonthChanged(
@@ -955,14 +991,14 @@ class _CompactCalendar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           SizedBox(
             height: 82,
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               scrollDirection: Axis.horizontal,
               itemCount: itemCount,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              separatorBuilder: (_, __) => SizedBox(width: 12),
               itemBuilder: (context, i) {
                 final day = startDay + i;
                 final date = DateTime(month.year, month.month, day);
@@ -974,27 +1010,27 @@ class _CompactCalendar extends StatelessWidget {
                 return GestureDetector(
                   onTap: () => onDateSelected(date),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: Duration(milliseconds: 200),
                     width: 54,
                     decoration: BoxDecoration(
                       color: sel
-                          ? _accent
+                          ? _c.accent
                           : (isToday
-                              ? _accent.withValues(alpha: .08)
-                              : _surface),
+                              ? _c.accent.withValues(alpha: .08)
+                              : _c.surface),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                           color: sel
-                              ? _accent
+                              ? _c.accent
                               : (isToday
-                                  ? _accent.withValues(alpha: .4)
-                                  : _border)),
+                                  ? _c.accent.withValues(alpha: .4)
+                                  : _c.border)),
                       boxShadow: sel
                           ? [
                               BoxShadow(
-                                color: _accent.withValues(alpha: 0.25),
+                                color: _c.accent.withValues(alpha: 0.25),
                                 blurRadius: 10,
-                                offset: const Offset(0, 4),
+                                offset: Offset(0, 4),
                               )
                             ]
                           : null,
@@ -1005,26 +1041,26 @@ class _CompactCalendar extends StatelessWidget {
                         Text(
                           DateFormat('EEE').format(date).toUpperCase(),
                           style: TextStyle(
-                              color: sel ? Colors.white : _muted,
+                              color: sel ? Colors.white : _c.muted,
                               fontSize: 10,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.5),
                         ),
-                        const SizedBox(height: 6),
+                        SizedBox(height: 6),
                         Text(
                           '$day',
                           style: TextStyle(
-                              color: sel ? Colors.white : _text,
+                              color: sel ? Colors.white : _c.text,
                               fontSize: 18,
                               fontWeight: FontWeight.w900),
                         ),
                         if (has) ...[
-                          const SizedBox(height: 6),
+                          SizedBox(height: 6),
                           Container(
                               width: 5,
                               height: 5,
                               decoration: BoxDecoration(
-                                  color: sel ? Colors.white : _accent,
+                                  color: sel ? Colors.white : _c.accent,
                                   shape: BoxShape.circle)),
                         ],
                       ],
@@ -1046,15 +1082,16 @@ class _NavBtn extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-            color: _surface,
+            color: _c.surface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _border)),
-        child: Icon(icon, color: _text, size: 18),
+            border: Border.all(color: _c.border)),
+        child: Icon(icon, color: _c.text, size: 18),
       ),
     );
   }
@@ -1063,7 +1100,7 @@ class _NavBtn extends StatelessWidget {
 // ─── Booking Tile ────────────────────────────────────────────────────────────
 
 class BookingCard extends StatefulWidget {
-  const BookingCard({
+  BookingCard({
     super.key,
     required this.booking,
     required this.onTap,
@@ -1084,6 +1121,7 @@ class BookingCard extends StatefulWidget {
 class _BookingCardState extends State<BookingCard> {
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final booking = widget.booking;
     final amount = booking.totalAmountPaise / 100;
     final needsCheckin =
@@ -1096,19 +1134,19 @@ class _BookingCardState extends State<BookingCard> {
         onTap: widget.onTap,
         child: Container(
           decoration: BoxDecoration(
-            color: _surface,
+            color: _c.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: needsCheckin
-                  ? _accent.withValues(alpha: 0.4)
+                  ? _c.accent.withValues(alpha: 0.4)
                   : widget.isNextUp
-                      ? _accent
-                      : _border,
+                      ? _c.accent
+                      : _c.border,
             ),
             boxShadow: [
               BoxShadow(
                 color:
-                    (needsCheckin || widget.isNextUp ? _accent : Colors.black)
+                    (needsCheckin || widget.isNextUp ? _c.accent : Colors.black)
                         .withValues(
                             alpha: needsCheckin
                                 ? 0.06
@@ -1116,7 +1154,7 @@ class _BookingCardState extends State<BookingCard> {
                                     ? 0.08
                                     : 0.03),
                 blurRadius: 12,
-                offset: const Offset(0, 4),
+                offset: Offset(0, 4),
               ),
             ],
           ),
@@ -1135,30 +1173,30 @@ class _BookingCardState extends State<BookingCard> {
                         Text(
                           booking.startTime,
                           style: TextStyle(
-                              color: isCancelled ? _muted : _text,
+                              color: isCancelled ? _c.muted : _c.text,
                               fontSize: 16,
                               fontWeight: FontWeight.w900,
                               decoration: isCancelled
                                   ? TextDecoration.lineThrough
                                   : null),
                         ),
-                        const SizedBox(height: 2),
+                        SizedBox(height: 2),
                         Text(
                           _durationLabel(_durationMins(
                               booking.startTime, booking.endTime)),
-                          style: const TextStyle(
-                              color: _muted,
+                          style: TextStyle(
+                              color: _c.muted,
                               fontSize: 11,
                               fontWeight: FontWeight.w700),
                         ),
                       ],
                     ),
-                    const SizedBox(width: 16),
+                    SizedBox(width: 16),
                     Container(
                         height: 36,
                         width: 1.5,
-                        color: _border.withValues(alpha: 0.5)),
-                    const SizedBox(width: 16),
+                        color: _c.border.withValues(alpha: 0.5)),
+                    SizedBox(width: 16),
                     // Guest + unit + status
                     Expanded(
                       child: Column(
@@ -1167,7 +1205,7 @@ class _BookingCardState extends State<BookingCard> {
                           Text(
                             booking.displayName,
                             style: TextStyle(
-                                color: isCancelled ? _muted : _text,
+                                color: isCancelled ? _c.muted : _c.text,
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
                                 decoration: isCancelled
@@ -1176,7 +1214,7 @@ class _BookingCardState extends State<BookingCard> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(height: 4),
+                          SizedBox(height: 4),
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: Row(
@@ -1191,8 +1229,8 @@ class _BookingCardState extends State<BookingCard> {
                                                 right: 8.0),
                                             child: Text(
                                               booking.unitName!,
-                                              style: const TextStyle(
-                                                  color: _muted,
+                                              style: TextStyle(
+                                                  color: _c.muted,
                                                   fontSize: 12,
                                                   fontWeight: FontWeight.w600),
                                             ),
@@ -1210,14 +1248,14 @@ class _BookingCardState extends State<BookingCard> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 6, vertical: 1),
                                     decoration: BoxDecoration(
-                                      color: _bg,
+                                      color: _c.bg,
                                       borderRadius: BorderRadius.circular(4),
-                                      border: Border.all(color: _border),
+                                      border: Border.all(color: _c.border),
                                     ),
                                     child: Text(
                                       arena.name.split(' ').first,
-                                      style: const TextStyle(
-                                          color: _accent,
+                                      style: TextStyle(
+                                          color: _c.accent,
                                           fontSize: 10,
                                           fontWeight: FontWeight.w800),
                                     ),
@@ -1226,8 +1264,8 @@ class _BookingCardState extends State<BookingCard> {
                                 _StatusBadge(
                                     label: booking.isPaid ? 'PAID' : 'UNPAID',
                                     color: booking.isPaid
-                                        ? _accent
-                                        : const Color(0xFFD97706)),
+                                        ? _c.accent
+                                        : Color(0xFFD97706)),
                               ],
                             ),
                           ),
@@ -1241,19 +1279,19 @@ class _BookingCardState extends State<BookingCard> {
                         Text(
                           '₹${amount.toStringAsFixed(0)}',
                           style: TextStyle(
-                              color: isCancelled ? _muted : _text,
+                              color: isCancelled ? _c.muted : _c.text,
                               fontSize: 17,
                               fontWeight: FontWeight.w900),
                         ),
                         if (booking.displayPhone.isNotEmpty) ...[
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8),
                           Row(
                             children: [
                               _QuickAction(
                                   Icons.phone_rounded,
                                   () => launchUrl(Uri.parse(
                                       'tel:${booking.displayPhone}'))),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8),
                               _QuickAction(
                                   Icons.chat_bubble_rounded,
                                   () => launchUrl(Uri.parse(
@@ -1269,7 +1307,7 @@ class _BookingCardState extends State<BookingCard> {
 
               // ── Check In CTA — only for CONFIRMED bookings
               if (needsCheckin) ...[
-                Container(height: 1, color: _accent.withValues(alpha: 0.15)),
+                Container(height: 1, color: _c.accent.withValues(alpha: 0.15)),
                 Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -1279,21 +1317,21 @@ class _BookingCardState extends State<BookingCard> {
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: Color(0xFFF0FDF6),
                         borderRadius:
                             BorderRadius.vertical(bottom: Radius.circular(19)),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
+                        children: [
                           Icon(Icons.payments_rounded,
-                              size: 16, color: _accent),
+                              size: 16, color: _c.accent),
                           SizedBox(width: 6),
                           Text(
                             'Record Payment',
                             style: TextStyle(
-                                color: _accent,
+                                color: _c.accent,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 0.2),
@@ -1319,6 +1357,7 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -1343,15 +1382,16 @@ class _QuickAction extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-            color: _bg,
+            color: _c.bg,
             shape: BoxShape.circle,
-            border: Border.all(color: _border)),
-        child: Icon(icon, color: _accent, size: 14),
+            border: Border.all(color: _c.border)),
+        child: Icon(icon, color: _c.accent, size: 14),
       ),
     );
   }
@@ -1368,6 +1408,7 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final filters = ['All', 'Confirmed', 'Paid', 'Cancelled'];
     return SizedBox(
       height: 40,
@@ -1375,7 +1416,7 @@ class _FilterBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         scrollDirection: Axis.horizontal,
         itemCount: filters.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => SizedBox(width: 8),
         itemBuilder: (context, i) {
           final f = filters[i];
           final count = counts[f] ?? 0;
@@ -1383,19 +1424,19 @@ class _FilterBar extends StatelessWidget {
           return GestureDetector(
             onTap: () => onSelect(f),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: sel ? _text : _surface,
+                color: sel ? _c.text : _c.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: sel ? _text : _border),
+                border: Border.all(color: sel ? _c.text : _c.border),
                 boxShadow: sel
                     ? [
                         BoxShadow(
-                          color: _text.withValues(alpha: 0.2),
+                          color: _c.text.withValues(alpha: 0.2),
                           blurRadius: 8,
-                          offset: const Offset(0, 4),
+                          offset: Offset(0, 4),
                         )
                       ]
                     : null,
@@ -1404,21 +1445,21 @@ class _FilterBar extends StatelessWidget {
                 children: [
                   Text(f,
                       style: TextStyle(
-                        color: sel ? Colors.white : _muted,
+                        color: sel ? Colors.white : _c.muted,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                       )),
-                  const SizedBox(width: 6),
+                  SizedBox(width: 6),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: sel ? Colors.white.withValues(alpha: 0.2) : _bg,
+                      color: sel ? Colors.white.withValues(alpha: 0.2) : _c.bg,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text('$count',
                         style: TextStyle(
-                          color: sel ? Colors.white : _accent,
+                          color: sel ? Colors.white : _c.accent,
                           fontSize: 10,
                           fontWeight: FontWeight.w900,
                         )),
@@ -1442,13 +1483,14 @@ class _UnitFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return SizedBox(
       height: 36,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         scrollDirection: Axis.horizontal,
         itemCount: units.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => SizedBox(width: 8),
         itemBuilder: (context, i) {
           final String id;
           final String label;
@@ -1464,20 +1506,20 @@ class _UnitFilterBar extends StatelessWidget {
           return GestureDetector(
             onTap: () => onSelect(id),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
+              duration: Duration(milliseconds: 160),
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: sel ? _accent : _surface,
+                color: sel ? _c.accent : _c.surface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: sel ? _accent : _border),
+                border: Border.all(color: sel ? _c.accent : _c.border),
               ),
               child: Text(
                 label,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
-                  color: sel ? Colors.white : _muted,
+                  color: sel ? Colors.white : _c.muted,
                 ),
               ),
             ),
@@ -1491,7 +1533,7 @@ class _UnitFilterBar extends StatelessWidget {
 // ─── Detail Sheet ────────────────────────────────────────────────────────────
 
 class BookingDetailSheet extends ConsumerStatefulWidget {
-  const BookingDetailSheet(
+  BookingDetailSheet(
       {super.key,
       required this.booking,
       required this.arenaName,
@@ -1530,7 +1572,7 @@ class _BookingDetailSheetState extends ConsumerState<BookingDetailSheet> {
 
   void _snack(String m, {bool err = false}) =>
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _bg));
+          SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _c.bg));
 
   Future<void> _sharePassImage() async {
     try {
@@ -1730,8 +1772,8 @@ _See you at the arena!_ 🏏
     final result = await showModalBottomSheet<_PaymentResult>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
+      backgroundColor: _c.bg,
+      shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       builder: (_) => _CheckoutSheet(booking: _booking),
     );
@@ -1774,6 +1816,7 @@ _See you at the arena!_ 🏏
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final repo = ref.read(hostArenaBookingRepositoryProvider);
     final statusColor = _statusColor(_booking.status);
     final duration =
@@ -1788,8 +1831,8 @@ _See you at the arena!_ 🏏
     return Container(
       padding: EdgeInsets.fromLTRB(
           20, 12, 20, MediaQuery.of(context).padding.bottom + 24),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF2F4F7),
+      decoration: BoxDecoration(
+        color: _c.border,
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
       child: Column(
@@ -1799,9 +1842,9 @@ _See you at the arena!_ 🏏
               width: 44,
               height: 5,
               decoration: BoxDecoration(
-                  color: const Color(0xFFD0D5DD),
+                  color: _c.border,
                   borderRadius: BorderRadius.circular(10))),
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
 
           // PREMIUM TICKET CARD (Capturable as Image)
           RepaintBoundary(
@@ -1809,7 +1852,7 @@ _See you at the arena!_ 🏏
             child: Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: _c.surface,
                 borderRadius: BorderRadius.circular(28),
                 boxShadow: const [
                   BoxShadow(
@@ -1830,16 +1873,16 @@ _See you at the arena!_ 🏏
                           Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
-                              color: _accent,
+                              color: _c.accent,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Icon(Icons.bolt_rounded,
-                                color: Colors.white, size: 14),
+                            child: Icon(Icons.bolt_rounded,
+                                color: _c.surface, size: 14),
                           ),
-                          const SizedBox(width: 10),
-                          const Text('SWING ARENA',
+                          SizedBox(width: 10),
+                          Text('SWING ARENA',
                               style: TextStyle(
-                                  color: Color(0xFF101828),
+                                  color: _c.text,
                                   fontSize: 14,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: 1.5)),
@@ -1849,84 +1892,84 @@ _See you at the arena!_ 🏏
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF2F4F7),
+                          color: _c.border,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFEAECF0)),
+                          border: Border.all(color: _c.border),
                         ),
-                        child: const Text('OFFICIAL PASS',
+                        child: Text('OFFICIAL PASS',
                             style: TextStyle(
-                                color: Color(0xFF667085),
+                                color: _c.muted,
                                 fontSize: 8,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: 0.5)),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
-                  const Divider(height: 1, color: Color(0xFFF2F4F7)),
-                  const SizedBox(height: 24),
+                  SizedBox(height: 24),
+                  Divider(height: 1, color: _c.border),
+                  SizedBox(height: 24),
 
-                  const Text('CUSTOMER',
+                  Text('CUSTOMER',
                       style: TextStyle(
-                          color: Color(0xFF98A2B3),
+                          color: _c.muted,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1.2)),
-                  const SizedBox(height: 6),
+                  SizedBox(height: 6),
                   Text(_booking.displayName.toUpperCase(),
-                      style: const TextStyle(
-                          color: Color(0xFF101828),
+                      style: TextStyle(
+                          color: _c.text,
                           fontSize: 24,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.5)),
 
-                  const SizedBox(height: 32),
+                  SizedBox(height: 32),
 
                   // TIME PATH
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(_booking.startTime,
-                          style: const TextStyle(
-                              color: Color(0xFF101828),
+                          style: TextStyle(
+                              color: _c.text,
                               fontSize: 16,
                               fontWeight: FontWeight.w800)),
                       Text(duration,
-                          style: const TextStyle(
-                              color: Color(0xFF101828),
+                          style: TextStyle(
+                              color: _c.text,
                               fontSize: 13,
                               fontWeight: FontWeight.w900)),
                       Text(_booking.endTime,
-                          style: const TextStyle(
-                              color: Color(0xFF101828),
+                          style: TextStyle(
+                              color: _c.text,
                               fontSize: 16,
                               fontWeight: FontWeight.w800)),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   Row(
                     children: [
-                      const CircleAvatar(
-                          radius: 3, backgroundColor: Color(0xFF101828)),
+                      CircleAvatar(
+                          radius: 3, backgroundColor: _c.text),
                       Expanded(
                           child: Container(
-                              height: 1.5, color: const Color(0xFF101828))),
+                              height: 1.5, color: _c.text)),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: Icon(Icons.sports_cricket_rounded,
-                            size: 20, color: _accent),
+                            size: 20, color: _c.accent),
                       ),
                       Expanded(
                           child: Container(
-                              height: 1.5, color: const Color(0xFFEAECF0))),
-                      const CircleAvatar(
+                              height: 1.5, color: _c.border)),
+                      CircleAvatar(
                           radius: 3,
-                          backgroundColor: Color(0xFFEAECF0),
+                          backgroundColor: _c.border,
                           child: CircleAvatar(
                               radius: 2, backgroundColor: Colors.white)),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -1934,14 +1977,14 @@ _See you at the arena!_ 🏏
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('ARENA',
+                            Text('ARENA',
                                 style: TextStyle(
-                                    color: Color(0xFF98A2B3),
+                                    color: _c.muted,
                                     fontSize: 9,
                                     fontWeight: FontWeight.w700)),
                             Text(widget.arenaName.toUpperCase(),
-                                style: const TextStyle(
-                                    color: Color(0xFF101828),
+                                style: TextStyle(
+                                    color: _c.text,
                                     fontSize: 16,
                                     fontWeight: FontWeight.w800)),
                           ],
@@ -1950,14 +1993,14 @@ _See you at the arena!_ 🏏
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text('UNIT/COURT',
+                          Text('UNIT/COURT',
                               style: TextStyle(
-                                  color: Color(0xFF98A2B3),
+                                  color: _c.muted,
                                   fontSize: 9,
                                   fontWeight: FontWeight.w700)),
                           Text(_booking.unitName?.toUpperCase() ?? 'GENERAL',
-                              style: const TextStyle(
-                                  color: Color(0xFF101828),
+                              style: TextStyle(
+                                  color: _c.text,
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800)),
                         ],
@@ -1965,25 +2008,25 @@ _See you at the arena!_ 🏏
                     ],
                   ),
 
-                  const SizedBox(height: 32),
-                  const Divider(height: 1, color: Color(0xFFF2F4F7)),
-                  const SizedBox(height: 24),
+                  SizedBox(height: 32),
+                  Divider(height: 1, color: _c.border),
+                  SizedBox(height: 24),
 
-                  const Text('BOOKING REFERENCE',
+                  Text('BOOKING REFERENCE',
                       style: TextStyle(
-                          color: Color(0xFF98A2B3),
+                          color: _c.muted,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1.2)),
-                  const SizedBox(height: 6),
+                  SizedBox(height: 6),
                   Text(shortId,
-                      style: const TextStyle(
-                          color: Color(0xFF101828),
+                      style: TextStyle(
+                          color: _c.text,
                           fontSize: 18,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 1.0)),
 
-                  const SizedBox(height: 32),
+                  SizedBox(height: 32),
 
                   // BOTTOM GRID
                   Row(
@@ -2008,7 +2051,7 @@ _See you at the arena!_ 🏏
             ),
           ),
 
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
 
           // QUICK ACTIONS
           if (_booking.displayPhone.isNotEmpty)
@@ -2022,31 +2065,31 @@ _See you at the arena!_ 🏏
                     label: 'Call',
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: _ActionTile(
                     onTap: _sendWhatsApp,
                     icon: Icons.chat_bubble_rounded,
                     label: 'WhatsApp',
-                    iconColor: const Color(0xFF25D366),
+                    iconColor: Color(0xFF25D366),
                   ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: _ActionTile(
                     onTap: _sharePassImage,
                     icon: Icons.badge_rounded,
                     label: 'Pass',
-                    iconColor: _accent,
+                    iconColor: _c.accent,
                   ),
                 ),
               ],
             ),
 
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
 
           if (_loading)
-            const CircularProgressIndicator(color: _accent)
+            CircularProgressIndicator(color: _c.accent)
           else ...[
             if (!_booking.isPaid && _booking.status != 'CANCELLED')
               Column(
@@ -2058,13 +2101,13 @@ _See you at the arena!_ 🏏
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFEF2F2),
+                          color: Color(0xFFFEF2F2),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFFEE2E2)),
+                          border: Border.all(color: Color(0xFFFEE2E2)),
                         ),
                         child: Text(
                             'BALANCE DUE: ₹${(remainingPaise / 100).toStringAsFixed(0)}',
-                            style: const TextStyle(
+                            style: TextStyle(
                                 color: Color(0xFFDC2626),
                                 fontWeight: FontWeight.w900,
                                 fontSize: 12,
@@ -2076,12 +2119,12 @@ _See you at the arena!_ 🏏
                     child: FilledButton(
                       onPressed: _recordPayment,
                       style: FilledButton.styleFrom(
-                        backgroundColor: _accent,
-                        foregroundColor: Colors.white,
+                        backgroundColor: _c.accent,
+                        foregroundColor: _c.onAccent,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text('Record Payment & Checkout'),
+                      child: Text('Record Payment & Checkout'),
                     ),
                   ),
                 ],
@@ -2091,18 +2134,18 @@ _See you at the arena!_ 🏏
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: 0.1),
+                  color: _c.accent.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _accent.withValues(alpha: 0.2)),
+                  border: Border.all(color: _c.accent.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.check_circle_rounded, color: _accent, size: 20),
-                    const SizedBox(width: 10),
-                    const Text('BOOKING SETTLED',
+                    Icon(Icons.check_circle_rounded, color: _c.accent, size: 20),
+                    SizedBox(width: 10),
+                    Text('BOOKING SETTLED',
                         style: TextStyle(
-                            color: _accent,
+                            color: _c.accent,
                             fontWeight: FontWeight.w900,
                             fontSize: 14,
                             letterSpacing: 1.0)),
@@ -2154,6 +2197,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final total = widget.booking.totalAmountPaise / 100;
     final advance = widget.booking.advancePaise / 100;
     final discount = (double.tryParse(_discountCtrl.text) ?? 0);
@@ -2176,37 +2220,37 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                        color: _border,
+                        color: _c.border,
                         borderRadius: BorderRadius.circular(2)))),
-            const SizedBox(height: 24),
-            const Text('Checkout',
+            SizedBox(height: 24),
+            Text('Checkout',
                 style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w900, color: _text)),
-            const SizedBox(height: 24),
+                    fontSize: 22, fontWeight: FontWeight.w900, color: _c.text)),
+            SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                  color: _bg,
+                  color: _c.bg,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _border)),
+                  border: Border.all(color: _c.border)),
               child: Column(
                 children: [
                   _CheckoutRow('Booking Total', '₹${total.toStringAsFixed(0)}'),
                   if (advance > 0) ...[
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
                     _CheckoutRow(
                         'Advance Paid', '- ₹${advance.toStringAsFixed(0)}',
-                        color: _accent),
+                        color: _c.accent),
                   ],
-                  const Divider(height: 32),
+                  Divider(height: 32),
                   Row(
                     children: [
-                      const Text('Discount (₹)',
+                      Text('Discount (₹)',
                           style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
-                              color: _muted)),
-                      const Spacer(),
+                              color: _c.muted)),
+                      Spacer(),
                       SizedBox(
                         width: 80,
                         child: TextField(
@@ -2214,9 +2258,9 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
                           keyboardType: TextInputType.number,
                           textAlign: TextAlign.right,
                           onChanged: (_) => _updateCalculations(),
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontWeight: FontWeight.w900, fontSize: 15),
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                               isDense: true,
                               border: InputBorder.none,
                               hintText: '0'),
@@ -2224,45 +2268,45 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
                       ),
                     ],
                   ),
-                  const Divider(height: 32),
+                  Divider(height: 32),
                   _CheckoutRow('Net Payable',
                       '₹${(_remainingPaise / 100 - discount).toStringAsFixed(0)}',
                       isTotal: true),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
-            const Text('AMOUNT TO COLLECT',
+            SizedBox(height: 32),
+            Text('AMOUNT TO COLLECT',
                 style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: _muted,
+                    color: _c.muted,
                     letterSpacing: 1.0)),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             TextField(
               controller: _amountCtrl,
               keyboardType: TextInputType.number,
-              style: const TextStyle(
-                  fontSize: 28, fontWeight: FontWeight.w900, color: _text),
+              style: TextStyle(
+                  fontSize: 28, fontWeight: FontWeight.w900, color: _c.text),
               decoration: InputDecoration(
                 prefixText: '₹ ',
-                prefixStyle: const TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.w900, color: _muted),
+                prefixStyle: TextStyle(
+                    fontSize: 28, fontWeight: FontWeight.w900, color: _c.muted),
                 filled: true,
-                fillColor: _bg,
+                fillColor: _c.bg,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
                     borderSide: BorderSide.none),
               ),
             ),
-            const SizedBox(height: 32),
-            const Text('PAYMENT MODE',
+            SizedBox(height: 32),
+            Text('PAYMENT MODE',
                 style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: _muted,
+                    color: _c.muted,
                     letterSpacing: 1.0)),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             Row(
               children: [
                 _ModeTile(
@@ -2270,17 +2314,17 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
                     label: 'CASH',
                     color: Colors.blue,
                     onTap: () => _done('CASH')),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 _ModeTile(
                     icon: Icons.qr_code_scanner_rounded,
                     label: 'UPI',
-                    color: const Color(0xFF6366F1),
+                    color: Color(0xFF6366F1),
                     onTap: () => _done('UPI')),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 _ModeTile(
                     icon: Icons.account_balance_rounded,
                     label: 'ONLINE',
-                    color: _accent,
+                    color: _c.accent,
                     onTap: () => _done('ONLINE')),
               ],
             ),
@@ -2307,19 +2351,20 @@ class _CheckoutRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       children: [
         Text(label,
             style: TextStyle(
                 fontSize: isTotal ? 15 : 13,
                 fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600,
-                color: isTotal ? _text : _muted)),
-        const Spacer(),
+                color: isTotal ? _c.text : _c.muted)),
+        Spacer(),
         Text(value,
             style: TextStyle(
                 fontSize: isTotal ? 20 : 15,
                 fontWeight: FontWeight.w900,
-                color: color ?? _text)),
+                color: color ?? _c.text)),
       ],
     );
   }
@@ -2338,15 +2383,16 @@ class _ModeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 20),
           decoration: BoxDecoration(
-            color: _bg,
+            color: _c.bg,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _border),
+            border: Border.all(color: _c.border),
           ),
           child: Column(
             children: [
@@ -2356,12 +2402,12 @@ class _ModeTile extends StatelessWidget {
                     color: color.withValues(alpha: .1), shape: BoxShape.circle),
                 child: Icon(icon, color: color, size: 24),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Text(label,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w900,
-                      color: _text,
+                      color: _c.text,
                       letterSpacing: 0.5)),
             ],
           ),
@@ -2386,24 +2432,25 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _c.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white),
         ),
         child: Column(
           children: [
-            Icon(icon, size: 20, color: iconColor ?? const Color(0xFF101828)),
-            const SizedBox(height: 4),
+            Icon(icon, size: 20, color: iconColor ?? _c.text),
+            SizedBox(height: 4),
             Text(label,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF101828))),
+                    color: _c.text)),
           ],
         ),
       ),
@@ -2424,18 +2471,19 @@ class _TicketStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(
-                color: Color(0xFF98A2B3),
+            style: TextStyle(
+                color: _c.muted,
                 fontSize: 9,
                 fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
+        SizedBox(height: 4),
         Text(value.toUpperCase(),
             style: TextStyle(
-                color: color ?? const Color(0xFF101828),
+                color: color ?? _c.text,
                 fontSize: 13,
                 fontWeight: isBold ? FontWeight.w900 : FontWeight.w800)),
       ],
@@ -2453,21 +2501,22 @@ class _DetailInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: _muted),
-        const SizedBox(width: 12),
+        Icon(icon, size: 18, color: _c.muted),
+        SizedBox(width: 12),
         Text(label,
-            style: const TextStyle(
-                color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
-        const SizedBox(width: 12),
+            style: TextStyle(
+                color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600)),
+        SizedBox(width: 12),
         Expanded(
           child: Text(
             value,
             textAlign: TextAlign.right,
             style: TextStyle(
-              color: _text,
+              color: _c.text,
               fontSize: 14,
               fontWeight: isBold ? FontWeight.w900 : FontWeight.w700,
             ),
@@ -2481,11 +2530,11 @@ class _DetailInfoRow extends StatelessWidget {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 Color _statusColor(String s) => switch (s.toUpperCase()) {
-      'CONFIRMED' => _accent,
+      'CONFIRMED' => _c.accent,
       'PENDING_PAYMENT' => Colors.orange,
       'CANCELLED' => Colors.red,
       'CHECKED_IN' => Colors.blue,
-      _ => _muted,
+      _ => _c.muted,
     };
 
 String _moneyShort(int p) {
@@ -2510,8 +2559,9 @@ class _EmptyArenas extends StatelessWidget {
   const _EmptyArenas();
   @override
   Widget build(BuildContext context) {
-    return const Center(
-        child: Text('No arenas found', style: TextStyle(color: _muted)));
+    _c = _C.of(context);
+    return Center(
+        child: Text('No arenas found', style: TextStyle(color: _c.muted)));
   }
 }
 
@@ -2522,6 +2572,7 @@ class _EmptyBookings extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
@@ -2531,40 +2582,40 @@ class _EmptyBookings extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                  color: _surface,
+                  color: _c.surface,
                   shape: BoxShape.circle,
-                  border: Border.all(color: _border)),
+                  border: Border.all(color: _c.border)),
               child: Icon(Icons.event_note_rounded,
-                  size: 36, color: _muted.withValues(alpha: .5)),
+                  size: 36, color: _c.muted.withValues(alpha: .5)),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             Text(
               isFiltered ? 'No matching bookings' : 'No bookings yet',
-              style: const TextStyle(
-                  color: _text, fontSize: 15, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                  color: _c.text, fontSize: 15, fontWeight: FontWeight.w800),
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Text(
               isFiltered
                   ? 'Try changing the filter above'
                   : 'Tap + to add your first booking',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                  color: _muted, fontSize: 13, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                  color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600),
             ),
             if (!isFiltered && onAdd != null) ...[
-              const SizedBox(height: 20),
+              SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: onAdd,
                   style: FilledButton.styleFrom(
-                    backgroundColor: _accent,
-                    foregroundColor: Colors.white,
+                    backgroundColor: _c.accent,
+                    foregroundColor: _c.onAccent,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Add New Booking'),
+                  child: Text('Add New Booking'),
                 ),
               ),
             ],
@@ -2607,6 +2658,7 @@ class _DateGroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final isToday = DateUtils.isSameDay(date, today);
     final isPast = date.isBefore(DateTime(today.year, today.month, today.day));
 
@@ -2641,12 +2693,12 @@ class _DateGroupCard extends StatelessWidget {
     final Color densityColor = isToday
         ? Colors.white.withValues(alpha: 0.85)
         : total == 0
-            ? const Color(0xFF9CA3AF)
+            ? _c.muted
             : total <= 2
-                ? const Color(0xFF059669)
+                ? Color(0xFF059669)
                 : total <= 4
-                    ? const Color(0xFFF59E0B)
-                    : const Color(0xFFDC2626);
+                    ? Color(0xFFF59E0B)
+                    : Color(0xFFDC2626);
 
     // Next booking countdown (today only)
     String? nextLabel;
@@ -2663,11 +2715,11 @@ class _DateGroupCard extends StatelessWidget {
     }
 
     // ── Colour tokens ──────────────────────────────────────────────────────
-    final Color bg = isToday ? _accent : isPast ? const Color(0xFFF5F6F8) : _surface;
-    final Color primaryText = isToday ? Colors.white : isPast ? const Color(0xFF6B7280) : _text;
-    final Color mutedText = isToday ? Colors.white.withValues(alpha: 0.65) : const Color(0xFF9CA3AF);
-    final Color barBg = isToday ? Colors.white.withValues(alpha: 0.25) : const Color(0xFFE5E7EB);
-    final Color barFill = isToday ? Colors.white : _accent;
+    final Color bg = isToday ? _c.accent : isPast ? Color(0xFFF5F6F8) : _c.surface;
+    final Color primaryText = isToday ? Colors.white : isPast ? _c.muted : _c.text;
+    final Color mutedText = isToday ? Colors.white.withValues(alpha: 0.65) : _c.muted;
+    final Color barBg = isToday ? Colors.white.withValues(alpha: 0.25) : _c.border;
+    final Color barFill = isToday ? Colors.white : _c.accent;
 
     return GestureDetector(
       onTap: onTap,
@@ -2676,9 +2728,9 @@ class _DateGroupCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(16),
-          border: isToday ? null : Border.all(color: const Color(0xFFE5E7EB), width: 1),
+          border: isToday ? null : Border.all(color: _c.border, width: 1),
           boxShadow: isToday
-              ? [BoxShadow(color: _accent.withValues(alpha: 0.28), blurRadius: 14, offset: const Offset(0, 5))]
+              ? [BoxShadow(color: _c.accent.withValues(alpha: 0.28), blurRadius: 14, offset: Offset(0, 5))]
               : null,
         ),
         child: Padding(
@@ -2696,12 +2748,12 @@ class _DateGroupCard extends StatelessWidget {
                       style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w700)),
                 ],
               ),
-              const SizedBox(height: 1),
+              SizedBox(height: 1),
 
               // ── Row 2: date number ──────────────────────────────────────
               Text(DateFormat('d').format(date),
                   style: TextStyle(color: primaryText, fontSize: 28, fontWeight: FontWeight.w900, height: 1.05)),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
 
               // ── Row 3: confirmed fill bar ───────────────────────────────
               ClipRRect(
@@ -2715,23 +2767,23 @@ class _DateGroupCard extends StatelessWidget {
                   ]),
                 ),
               ),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
 
               // ── Row 4: density label + time heat dots ───────────────────
               Row(
                 children: [
                   Text(densityLabel,
                       style: TextStyle(color: densityColor, fontSize: 9, fontWeight: FontWeight.w800)),
-                  const Spacer(),
+                  Spacer(),
                   // Morning / Afternoon / Evening dots
                   _HeatDot(active: hasMorning, isToday: isToday),
-                  const SizedBox(width: 2),
+                  SizedBox(width: 2),
                   _HeatDot(active: hasAfternoon, isToday: isToday),
-                  const SizedBox(width: 2),
+                  SizedBox(width: 2),
                   _HeatDot(active: hasEvening, isToday: isToday),
                 ],
               ),
-              const SizedBox(height: 5),
+              SizedBox(height: 5),
 
               // ── Row 5: paid revenue ─────────────────────────────────────
               Text(
@@ -2745,15 +2797,15 @@ class _DateGroupCard extends StatelessWidget {
 
               // ── Row 6: due amount ───────────────────────────────────────
               if (duePaise > 0 && paidPaise > 0) ...[
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text('${_fmt(duePaise)} due',
-                    style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 9, fontWeight: FontWeight.w700)),
+                    style: TextStyle(color: Color(0xFFF59E0B), fontSize: 9, fontWeight: FontWeight.w700)),
               ] else if (paidPaise == 0 && duePaise > 0) ...[
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text('Unpaid', style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w600)),
               ],
 
-              const SizedBox(height: 5),
+              SizedBox(height: 5),
 
               // ── Row 7: unit pills ───────────────────────────────────────
               if (unitNames.isNotEmpty)
@@ -2776,15 +2828,15 @@ class _DateGroupCard extends StatelessWidget {
 
               // ── Row 8: next booking (today only) ────────────────────────
               if (nextLabel != null) ...[
-                const SizedBox(height: 4),
+                SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.schedule_rounded, size: 9, color: Colors.white),
-                    const SizedBox(width: 3),
+                    Icon(Icons.schedule_rounded, size: 9, color: Colors.white),
+                    SizedBox(width: 3),
                     Expanded(
                       child: Text(nextLabel,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                              color: _c.surface, fontSize: 9, fontWeight: FontWeight.w700),
                           overflow: TextOverflow.ellipsis),
                     ),
                   ],
@@ -2793,7 +2845,7 @@ class _DateGroupCard extends StatelessWidget {
 
               // Empty state
               if (total == 0) ...[
-                const SizedBox(height: 4),
+                SizedBox(height: 4),
                 Text('Hold to add', style: TextStyle(color: mutedText, fontSize: 9, fontWeight: FontWeight.w600)),
               ],
             ],
@@ -2811,9 +2863,10 @@ class _HeatDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final color = active
-        ? (isToday ? Colors.white : _accent)
-        : (isToday ? Colors.white.withValues(alpha: 0.25) : const Color(0xFFE5E7EB));
+        ? (isToday ? Colors.white : _c.accent)
+        : (isToday ? Colors.white.withValues(alpha: 0.25) : _c.border);
     return Container(
       width: 5,
       height: 5,
@@ -2829,16 +2882,17 @@ class _UnitPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
-        color: isToday ? Colors.white.withValues(alpha: 0.2) : _accentLight,
+        color: isToday ? Colors.white.withValues(alpha: 0.2) : _c.accentLight,
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         name,
         style: TextStyle(
-            color: isToday ? Colors.white : _accent,
+            color: isToday ? Colors.white : _c.accent,
             fontSize: 8,
             fontWeight: FontWeight.w800),
         overflow: TextOverflow.ellipsis,
@@ -2866,9 +2920,10 @@ class _DateBookingsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final isToday = DateUtils.isSameDay(date, DateTime.now());
     final isTomorrow =
-        DateUtils.isSameDay(date, DateTime.now().add(const Duration(days: 1)));
+        DateUtils.isSameDay(date, DateTime.now().add(Duration(days: 1)));
     final dateLabel = isToday
         ? 'Today'
         : isTomorrow
@@ -2891,7 +2946,7 @@ class _DateBookingsSheet extends StatelessWidget {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-                color: _border, borderRadius: BorderRadius.circular(2)),
+                color: _c.border, borderRadius: BorderRadius.circular(2)),
           ),
           // Header
           Padding(
@@ -2904,37 +2959,37 @@ class _DateBookingsSheet extends StatelessWidget {
                     children: [
                       Text(
                         dateLabel,
-                        style: const TextStyle(
-                            color: _text,
+                        style: TextStyle(
+                            color: _c.text,
                             fontSize: 18,
                             fontWeight: FontWeight.w900),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4),
                       Row(children: [
                         Text(
                           '${bookings.length} booking${bookings.length == 1 ? '' : 's'}',
-                          style: const TextStyle(
-                              color: _muted,
+                          style: TextStyle(
+                              color: _c.muted,
                               fontSize: 13,
                               fontWeight: FontWeight.w600),
                         ),
                         if (revenue > 0) ...[
-                          const Text(' · ',
-                              style: TextStyle(color: _muted, fontSize: 13)),
+                          Text(' · ',
+                              style: TextStyle(color: _c.muted, fontSize: 13)),
                           Text(
                             '₹${revenue ~/ 100} total',
-                            style: const TextStyle(
-                                color: _muted,
+                            style: TextStyle(
+                                color: _c.muted,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600),
                           ),
                           if (collected < revenue) ...[
-                            const Text(' · ',
-                                style: TextStyle(color: _muted, fontSize: 13)),
+                            Text(' · ',
+                                style: TextStyle(color: _c.muted, fontSize: 13)),
                             Text(
                               '₹${collected ~/ 100} collected',
-                              style: const TextStyle(
-                                  color: _accent,
+                              style: TextStyle(
+                                  color: _c.accent,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700),
                             ),
@@ -2946,13 +3001,13 @@ class _DateBookingsSheet extends StatelessWidget {
                 ),
                 IconButton(
                   onPressed: () => Navigator.pop(ctx),
-                  icon: const Icon(Icons.close_rounded, color: _muted),
+                  icon: Icon(Icons.close_rounded, color: _c.muted),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          const Divider(height: 1, color: _border),
+          SizedBox(height: 8),
+          Divider(height: 1, color: _c.border),
           // Booking list
           Expanded(
             child: ListView.builder(
@@ -2992,8 +3047,9 @@ class _ErrorView extends StatelessWidget {
   final String message;
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Center(
-        child: Text(message, style: const TextStyle(color: Colors.red)));
+        child: Text(message, style: TextStyle(color: Colors.red)));
   }
 }
 
@@ -3030,7 +3086,7 @@ String _addMinutes(String time, int mins) {
 }
 
 class AddBookingSheet extends ConsumerStatefulWidget {
-  const AddBookingSheet(
+  AddBookingSheet(
       {super.key, required this.arena, required this.date, this.lockedUnitId});
   final ArenaListing arena;
   final DateTime date;
@@ -3451,9 +3507,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   Widget _stepTransition(Widget child, Animation<double> animation) {
     final isEntering = (child.key as ValueKey?)?.value == _step;
     final enterOffset =
-        _stepForward ? const Offset(1.0, 0) : const Offset(-1.0, 0);
+        _stepForward ? Offset(1.0, 0) : Offset(-1.0, 0);
     final exitOffset =
-        _stepForward ? const Offset(-1.0, 0) : const Offset(1.0, 0);
+        _stepForward ? Offset(-1.0, 0) : Offset(1.0, 0);
     final slide = Tween<Offset>(
       begin: isEntering ? enterOffset : exitOffset,
       end: Offset.zero,
@@ -3532,7 +3588,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
     // If today yields no slots (full-ground late in the day), advance to tomorrow
     if (slots.isEmpty && DateUtils.isSameDay(_selectedDate, DateTime.now())) {
-      final tomorrow = DateTime.now().add(const Duration(days: 1));
+      final tomorrow = DateTime.now().add(Duration(days: 1));
       final tomorrowSlots = _slotsForDate(tomorrow);
       if (tomorrowSlots.isNotEmpty) {
         _selectedDate = tomorrow;
@@ -3806,7 +3862,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(
                   'Skipped ${skipped.length} conflicting date(s): ${skipped.join(', ')}'),
-              backgroundColor: const Color(0xFFD97706),
+              backgroundColor: Color(0xFFD97706),
             ));
           }
         }
@@ -3846,7 +3902,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   void _snack(String m, {bool err = false}) =>
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _bg));
+          SnackBar(content: Text(m), backgroundColor: err ? Colors.red : _c.bg));
 
   Future<void> _selectStartDate() async {
     final today = DateTime.now();
@@ -3854,11 +3910,11 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       context: context,
       initialDate: _selectedDate,
       firstDate: today,
-      lastDate: today.add(const Duration(days: 90)),
+      lastDate: today.add(Duration(days: 90)),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
             colorScheme: ColorScheme.light(
-                primary: _accent, onPrimary: Colors.white, onSurface: _text)),
+                primary: _c.accent, onPrimary: Colors.white, onSurface: _c.text)),
         child: child!,
       ),
     );
@@ -3878,7 +3934,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       if (dayOffset >= 0 && _dateStripCtrl.hasClients) {
         _dateStripCtrl.animateTo(
           (dayOffset * 60.0).clamp(0, _dateStripCtrl.position.maxScrollExtent),
-          duration: const Duration(milliseconds: 300),
+          duration: Duration(milliseconds: 300),
           curve: Curves.easeInOut,
         );
       }
@@ -3890,11 +3946,11 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       context: context,
       initialDate: _endDate.isBefore(_selectedDate) ? _selectedDate : _endDate,
       firstDate: _selectedDate,
-      lastDate: _selectedDate.add(const Duration(days: 90)),
+      lastDate: _selectedDate.add(Duration(days: 90)),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
             colorScheme: ColorScheme.light(
-                primary: _accent, onPrimary: Colors.white, onSurface: _text)),
+                primary: _c.accent, onPrimary: Colors.white, onSurface: _c.text)),
         child: child!,
       ),
     );
@@ -3938,6 +3994,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final isLastStep = _step == _stepLabels.length - 1;
 
     // Progressive visibility gates
@@ -3950,21 +4007,21 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         : (_isFullDay || _selectedSlots.isNotEmpty);
 
     return Scaffold(
-      backgroundColor: _surface,
+      backgroundColor: _c.surface,
       appBar: AppBar(
-        backgroundColor: _surface,
+        backgroundColor: _c.surface,
         elevation: 0,
         leading: GestureDetector(
           onTap: _prevStep,
           child: Icon(
             _step == 0 ? Icons.close_rounded : Icons.arrow_back_rounded,
-            color: _text,
+            color: _c.text,
           ),
         ),
         title: Text(
           'Add Booking',
-          style: const TextStyle(
-              color: _text, fontSize: 18, fontWeight: FontWeight.w900),
+          style: TextStyle(
+              color: _c.text, fontSize: 18, fontWeight: FontWeight.w900),
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
@@ -4078,7 +4135,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               _loadAvailability();
             },
           )),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           Expanded(
               child: _BizTypeTile(
             icon: Icons.sports_cricket_rounded,
@@ -4088,18 +4145,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             onTap: () {},
           )),
         ]),
-        const SizedBox(height: 24),
+        SizedBox(height: 24),
       ],
 
       // Net types
       if (unit != null && unit.hasVariants) ...[
-        const Text('NET TYPE',
+        Text('NET TYPE',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         ...unit.netVariants.map((v) {
           final isSel = _netVariantType == v.type;
           return GestureDetector(
@@ -4111,54 +4168,54 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               _totalCtrl.clear();
             }),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
+              duration: Duration(milliseconds: 160),
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: isSel ? _accent : _bg,
+                color: isSel ? _c.accent : _c.bg,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: isSel ? _accent : _border, width: isSel ? 2 : 1),
+                    color: isSel ? _c.accent : _c.border, width: isSel ? 2 : 1),
               ),
               child: Row(children: [
                 Expanded(
                     child: Row(children: [
                   Text(v.label,
                       style: TextStyle(
-                          color: isSel ? Colors.white : _text,
+                          color: isSel ? Colors.white : _c.text,
                           fontWeight: FontWeight.w700,
                           fontSize: 14)),
                   if (v.count > 1) ...[
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: isSel
                             ? Colors.white.withValues(alpha: .2)
-                            : _border,
+                            : _c.border,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text('${v.count} nets',
                           style: TextStyle(
-                              color: isSel ? Colors.white : _muted,
+                              color: isSel ? Colors.white : _c.muted,
                               fontSize: 10,
                               fontWeight: FontWeight.w700)),
                     ),
                   ],
                   if (v.hasFloodlights) ...[
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Icon(Icons.wb_incandescent_rounded,
-                        size: 13, color: isSel ? Colors.white70 : _muted),
+                        size: 13, color: isSel ? Colors.white70 : _c.muted),
                   ],
                 ])),
                 if (v.pricePaise != null)
                   Text('₹${(v.pricePaise! / 100).toStringAsFixed(0)}/hr',
                       style: TextStyle(
-                          color: isSel ? Colors.white : _accent,
+                          color: isSel ? Colors.white : _c.accent,
                           fontWeight: FontWeight.w700,
                           fontSize: 13)),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Container(
                   width: 20,
                   height: 20,
@@ -4166,39 +4223,39 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                     color: isSel ? Colors.white : Colors.transparent,
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: isSel ? Colors.white : _border, width: 2),
+                        color: isSel ? Colors.white : _c.border, width: 2),
                   ),
                   child: isSel
-                      ? Icon(Icons.check_rounded, size: 12, color: _accent)
+                      ? Icon(Icons.check_rounded, size: 12, color: _c.accent)
                       : null,
                 ),
               ]),
             ),
           );
         }),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
       ],
 
       // Monthly pass toggle — shown when selected variant has a pass rate configured
       if (_variantHasPass) ...[
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: _isMonthlyPass ? _accentLight : _bg,
+            color: _isMonthlyPass ? _c.accentLight : _c.bg,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _isMonthlyPass ? _accent : _border),
+            border: Border.all(color: _isMonthlyPass ? _c.accent : _c.border),
           ),
           child: Row(children: [
-            Icon(Icons.card_membership_rounded, size: 18, color: _isMonthlyPass ? _accent : _muted),
-            const SizedBox(width: 10),
+            Icon(Icons.card_membership_rounded, size: 18, color: _isMonthlyPass ? _c.accent : _c.muted),
+            SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Monthly Pass', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _isMonthlyPass ? _accent : _text)),
-              Text('₹${(_mpVariantRate! / 100).toStringAsFixed(0)}/month · recurring slot', style: const TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w500)),
+              Text('Monthly Pass', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _isMonthlyPass ? _c.accent : _c.text)),
+              Text('₹${(_mpVariantRate! / 100).toStringAsFixed(0)}/month · recurring slot', style: TextStyle(fontSize: 12, color: _c.muted, fontWeight: FontWeight.w500)),
             ])),
             Switch.adaptive(
               value: _isMonthlyPass,
-              activeColor: _accent,
+              activeColor: _c.accent,
               onChanged: (v) => setState(() {
                 _isMonthlyPass = v;
                 _selectedSlots.clear();
@@ -4208,18 +4265,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             ),
           ]),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
       ],
 
       if (addons.isNotEmpty) ...[
-        const SizedBox(height: 12),
-        const Text('ADD-ONS',
+        SizedBox(height: 12),
+        Text('ADD-ONS',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         ...addons.map((a) {
           final isSel = _selectedAddons.contains(a);
           return GestureDetector(
@@ -4233,48 +4290,48 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: isSel ? _accent.withValues(alpha: .08) : _bg,
+                color: isSel ? _c.accent.withValues(alpha: .08) : _c.bg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: isSel ? _accent : _border),
+                border: Border.all(color: isSel ? _c.accent : _c.border),
               ),
               child: Row(children: [
                 Icon(
                     isSel
                         ? Icons.check_box_rounded
                         : Icons.check_box_outline_blank_rounded,
-                    color: isSel ? _accent : _muted,
+                    color: isSel ? _c.accent : _c.muted,
                     size: 20),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                     child: Text(a.name,
-                        style: const TextStyle(
-                            color: _text,
+                        style: TextStyle(
+                            color: _c.text,
                             fontWeight: FontWeight.w700,
                             fontSize: 13))),
                 Text('₹${(a.pricePaise / 100).toStringAsFixed(0)}/${a.unit}',
-                    style: const TextStyle(color: _muted, fontSize: 12)),
+                    style: TextStyle(color: _c.muted, fontSize: 12)),
               ]),
             ),
           );
         }),
       ] else ...[
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-              color: _bg,
+              color: _c.bg,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _border)),
-          child: const Row(children: [
-            Icon(Icons.arrow_forward_rounded, color: _muted, size: 16),
+              border: Border.all(color: _c.border)),
+          child: Row(children: [
+            Icon(Icons.arrow_forward_rounded, color: _c.muted, size: 16),
             SizedBox(width: 10),
             Text('Select date, duration and time on the next step',
                 style: TextStyle(
-                    color: _muted, fontSize: 13, fontWeight: FontWeight.w500)),
+                    color: _c.muted, fontSize: 13, fontWeight: FontWeight.w500)),
           ]),
         ),
       ],
-      const SizedBox(height: 24),
+      SizedBox(height: 24),
     ]);
   }
 
@@ -4308,13 +4365,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         onTap: () => _pickMpTime(context, isStart: isStart),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _border)),
+          decoration: BoxDecoration(color: _c.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _c.border)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.schedule_rounded, size: 16, color: _accent),
-            const SizedBox(width: 8),
+            Icon(Icons.schedule_rounded, size: 16, color: _c.accent),
+            SizedBox(width: 8),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: const TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
-              Text(time, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text)),
+              Text(label, style: TextStyle(fontSize: 11, color: _c.muted, fontWeight: FontWeight.w600)),
+              Text(time, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _c.text)),
             ]),
           ]),
         ),
@@ -4327,29 +4384,29 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           margin: const EdgeInsets.only(bottom: 20),
-          decoration: BoxDecoration(color: _accentLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: _accent.withValues(alpha: .3))),
+          decoration: BoxDecoration(color: _c.accentLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: _c.accent.withValues(alpha: .3))),
           child: Row(children: [
-            const Icon(Icons.card_membership_rounded, size: 16, color: _accent),
-            const SizedBox(width: 8),
-            Text('${variant.label} Monthly Pass', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _accent)),
-            const Spacer(),
-            Text('₹${(_mpVariantRate! ~/ 100)}/mo', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _accent)),
+            Icon(Icons.card_membership_rounded, size: 16, color: _c.accent),
+            SizedBox(width: 8),
+            Text('${variant.label} Monthly Pass', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _c.accent)),
+            Spacer(),
+            Text('₹${(_mpVariantRate! ~/ 100)}/mo', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _c.accent)),
           ]),
         ),
 
       // Time slot
-      const Text('RECURRING TIME SLOT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
-      const SizedBox(height: 10),
+      Text('RECURRING TIME SLOT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _c.muted, letterSpacing: 0.5)),
+      SizedBox(height: 10),
       Row(children: [
         timeChip('Start', _mpStartTime, isStart: true),
-        const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('–', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _muted))),
+        Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('–', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _c.muted))),
         timeChip('End', _mpEndTime, isStart: false),
       ]),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
 
       // Days of week
-      const Text('RECURRING DAYS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
-      const SizedBox(height: 10),
+      Text('RECURRING DAYS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _c.muted, letterSpacing: 0.5)),
+      SizedBox(height: 10),
       Wrap(spacing: 8, runSpacing: 8, children: days.map((d) {
         final sel = _mpDays.contains(d.$1);
         return GestureDetector(
@@ -4360,58 +4417,58 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: sel ? _accent : _bg,
+              color: sel ? _c.accent : _c.bg,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: sel ? _accent : _border),
+              border: Border.all(color: sel ? _c.accent : _c.border),
             ),
-            child: Text(d.$2, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: sel ? Colors.white : _text)),
+            child: Text(d.$2, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: sel ? Colors.white : _c.text)),
           ),
         );
       }).toList()),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
 
       // Date range
-      const Text('PASS DURATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
-      const SizedBox(height: 10),
+      Text('PASS DURATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _c.muted, letterSpacing: 0.5)),
+      SizedBox(height: 10),
       Row(children: [
         Expanded(child: GestureDetector(
           onTap: () async {
             final d = await showDatePicker(
               context: context,
               initialDate: _mpStartDate ?? DateTime.now(),
-              firstDate: DateTime.now().subtract(const Duration(days: 1)),
-              lastDate: DateTime.now().add(const Duration(days: 365)),
+              firstDate: DateTime.now().subtract(Duration(days: 1)),
+              lastDate: DateTime.now().add(Duration(days: 365)),
             );
             if (d != null) setState(() { _mpStartDate = d; if (_mpEndDate != null && _mpEndDate!.isBefore(d)) _mpEndDate = null; });
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _mpStartDate != null ? _accent : _border)),
+            decoration: BoxDecoration(color: _c.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _mpStartDate != null ? _c.accent : _c.border)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Start date', style: TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 2),
-              Text(_mpStartDate != null ? fmt(_mpStartDate!) : 'Pick date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _mpStartDate != null ? _text : _muted)),
+              Text('Start date', style: TextStyle(fontSize: 11, color: _c.muted, fontWeight: FontWeight.w600)),
+              SizedBox(height: 2),
+              Text(_mpStartDate != null ? fmt(_mpStartDate!) : 'Pick date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _mpStartDate != null ? _c.text : _c.muted)),
             ]),
           ),
         )),
-        const SizedBox(width: 10),
+        SizedBox(width: 10),
         Expanded(child: GestureDetector(
           onTap: () async {
             final d = await showDatePicker(
               context: context,
-              initialDate: _mpEndDate ?? (_mpStartDate ?? DateTime.now()).add(const Duration(days: 29)),
+              initialDate: _mpEndDate ?? (_mpStartDate ?? DateTime.now()).add(Duration(days: 29)),
               firstDate: _mpStartDate ?? DateTime.now(),
-              lastDate: DateTime.now().add(const Duration(days: 730)),
+              lastDate: DateTime.now().add(Duration(days: 730)),
             );
             if (d != null) setState(() => _mpEndDate = d);
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _mpEndDate != null ? _accent : _border)),
+            decoration: BoxDecoration(color: _c.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _mpEndDate != null ? _c.accent : _c.border)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('End date', style: TextStyle(fontSize: 11, color: _muted, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 2),
-              Text(_mpEndDate != null ? fmt(_mpEndDate!) : 'Pick date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _mpEndDate != null ? _text : _muted)),
+              Text('End date', style: TextStyle(fontSize: 11, color: _c.muted, fontWeight: FontWeight.w600)),
+              SizedBox(height: 2),
+              Text(_mpEndDate != null ? fmt(_mpEndDate!) : 'Pick date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _mpEndDate != null ? _c.text : _c.muted)),
             ]),
           ),
         )),
@@ -4445,19 +4502,19 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       // Count tabs (Turf 1, Turf 2 …) — shown when selected variant has count > 1
       if (countTabs.length > 1) ...[
-        const Text('NET',
+        Text('NET',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         SizedBox(
           height: 38,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: countTabs.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            separatorBuilder: (_, __) => SizedBox(width: 8),
             itemBuilder: (ctx, i) {
               final isSel = _variantInstanceIdx == i;
               final label = '${selectedVariant!.label} ${i + 1}';
@@ -4469,17 +4526,17 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                   _totalCtrl.clear();
                 }),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
+                  duration: Duration(milliseconds: 160),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: isSel ? _accent : _bg,
+                    color: isSel ? _c.accent : _c.bg,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: isSel ? _accent : _border),
+                    border: Border.all(color: isSel ? _c.accent : _c.border),
                   ),
                   child: Center(
                     child: Text(label,
                         style: TextStyle(
-                          color: isSel ? Colors.white : _text,
+                          color: isSel ? Colors.white : _c.text,
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
                         )),
@@ -4489,24 +4546,24 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             },
           ),
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
       ],
 
       // Date strip
-      const Text('DATE',
+      Text('DATE',
           style: TextStyle(
-              color: _muted,
+              color: _c.muted,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.5)),
-      const SizedBox(height: 12),
+      SizedBox(height: 12),
       SizedBox(
         height: 80,
         child: ListView.separated(
           controller: _dateStripCtrl,
           scrollDirection: Axis.horizontal,
           itemCount: stripDates.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          separatorBuilder: (_, __) => SizedBox(width: 8),
           itemBuilder: (ctx, i) {
             final d = stripDates[i];
             final isSel = DateUtils.isSameDay(d, _selectedDate);
@@ -4522,32 +4579,32 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 _loadAvailability();
               },
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                duration: Duration(milliseconds: 180),
                 width: 56,
                 decoration: BoxDecoration(
-                  color: isSel ? _accent : _bg,
+                  color: isSel ? _c.accent : _c.bg,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: isSel ? _accent : _border),
+                  border: Border.all(color: isSel ? _c.accent : _c.border),
                 ),
                 child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(i == 0 ? 'Today' : DateFormat('EEE').format(d),
                           style: TextStyle(
-                              color: isSel ? Colors.white : _muted,
+                              color: isSel ? Colors.white : _c.muted,
                               fontSize: i == 0 ? 9 : 10,
                               fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 2),
+                      SizedBox(height: 2),
                       Text('${d.day}',
                           style: TextStyle(
-                              color: isSel ? Colors.white : _text,
+                              color: isSel ? Colors.white : _c.text,
                               fontSize: 20,
                               fontWeight: FontWeight.w900)),
                       Text(DateFormat('MMM').format(d),
                           style: TextStyle(
                               color: isSel
                                   ? Colors.white.withValues(alpha: .8)
-                                  : _muted,
+                                  : _c.muted,
                               fontSize: 9,
                               fontWeight: FontWeight.w600)),
                     ]),
@@ -4556,20 +4613,20 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           },
         ),
       ),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
 
       // Duration stepper
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         decoration: BoxDecoration(
-            color: _bg,
+            color: _c.bg,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _border)),
+            border: Border.all(color: _c.border)),
         child: Row(children: [
-          const Text('Duration',
+          Text('Duration',
               style: TextStyle(
-                  color: _text, fontSize: 15, fontWeight: FontWeight.w700)),
-          const Spacer(),
+                  color: _c.text, fontSize: 15, fontWeight: FontWeight.w700)),
+          Spacer(),
           GestureDetector(
             onTap: dur > min
                 ? () {
@@ -4583,18 +4640,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                  color: dur > min ? _text : _border,
+                  color: dur > min ? _c.text : _c.border,
                   borderRadius: BorderRadius.circular(9)),
-              child: const Icon(Icons.remove_rounded,
-                  color: Colors.white, size: 17),
+              child: Icon(Icons.remove_rounded,
+                  color: _c.surface, size: 17),
             ),
           ),
           SizedBox(
             width: 72,
             child: Text(_durationLabel(dur),
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: _text, fontSize: 16, fontWeight: FontWeight.w900)),
+                style: TextStyle(
+                    color: _c.text, fontSize: 16, fontWeight: FontWeight.w900)),
           ),
           GestureDetector(
             onTap: dur < max
@@ -4609,48 +4666,48 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                  color: dur < max ? _text : _border,
+                  color: dur < max ? _c.text : _c.border,
                   borderRadius: BorderRadius.circular(9)),
               child:
-                  const Icon(Icons.add_rounded, color: Colors.white, size: 17),
+                  Icon(Icons.add_rounded, color: _c.surface, size: 17),
             ),
           ),
         ]),
       ),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
 
       // Time slot cards
-      const Text('START TIME',
+      Text('START TIME',
           style: TextStyle(
-              color: _muted,
+              color: _c.muted,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.5)),
-      const SizedBox(height: 10),
+      SizedBox(height: 10),
 
       if (_loadingAvail)
-        const Center(
+        Center(
             child: Padding(
           padding: EdgeInsets.symmetric(vertical: 28),
           child: SizedBox(
               width: 22,
               height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2, color: _accent)),
+              child: CircularProgressIndicator(strokeWidth: 2, color: _c.accent)),
         ))
       else if (_allDaySlots.isEmpty)
         Container(
           padding: const EdgeInsets.all(16),
           width: double.infinity,
           decoration: BoxDecoration(
-              color: _bg,
+              color: _c.bg,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _border)),
-          child: const Row(children: [
-            Icon(Icons.info_outline_rounded, color: _muted, size: 18),
+              border: Border.all(color: _c.border)),
+          child: Row(children: [
+            Icon(Icons.info_outline_rounded, color: _c.muted, size: 18),
             SizedBox(width: 10),
             Text('No slots available for this date.',
                 style: TextStyle(
-                    color: _muted, fontSize: 13, fontWeight: FontWeight.w600)),
+                    color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600)),
           ]),
         )
       else
@@ -4667,16 +4724,16 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           return GestureDetector(
             onTap: busy ? null : () => _onSlotTapped(time),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
+              duration: Duration(milliseconds: 180),
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
               decoration: BoxDecoration(
-                color: busy ? const Color(0xFFFEF2F2) : (isSel ? _accent : _bg),
+                color: busy ? Color(0xFFFEF2F2) : (isSel ? _c.accent : _c.bg),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: busy
-                      ? const Color(0xFFFCA5A5)
-                      : (isSel ? _accent : _border),
+                      ? Color(0xFFFCA5A5)
+                      : (isSel ? _c.accent : _c.border),
                   width: isSel ? 2 : 1,
                 ),
               ),
@@ -4685,13 +4742,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                     child: Text(_formatTimeRange(time, endTime),
                         style: TextStyle(
                           color: busy
-                              ? const Color(0xFFEF4444)
-                              : (isSel ? Colors.white : _text),
+                              ? Color(0xFFEF4444)
+                              : (isSel ? Colors.white : _c.text),
                           fontWeight: FontWeight.w800,
                           fontSize: 14,
                         ))),
                 if (busy)
-                  const Text('Booked',
+                  Text('Booked',
                       style: TextStyle(
                           color: Color(0xFFEF4444),
                           fontSize: 11,
@@ -4699,14 +4756,14 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 else if (slotPaise > 0)
                   Text('₹${(slotPaise / 100).toStringAsFixed(0)}',
                       style: TextStyle(
-                          color: isSel ? Colors.white : _accent,
+                          color: isSel ? Colors.white : _c.accent,
                           fontWeight: FontWeight.w900,
                           fontSize: 14)),
               ]),
             ),
           );
         })),
-      const SizedBox(height: 24),
+      SizedBox(height: 24),
     ]);
   }
 
@@ -4734,27 +4791,27 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         unit.bulkDayRatePaise != null;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text(
+      Text(
         'Select Court',
         style: TextStyle(
-            color: _text,
+            color: _c.text,
             fontSize: 22,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.5),
       ),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
 
       // No units configured
       if (units.isEmpty) ...[
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-              color: _border.withValues(alpha: 0.3),
+              color: _c.border.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(12)),
-          child: const Text(
+          child: Text(
             'No courts configured. Please add units in Arena Settings.',
             style: TextStyle(
-                color: _muted, fontSize: 14, fontWeight: FontWeight.w600),
+                color: _c.muted, fontSize: 14, fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -4781,7 +4838,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               _loadAvailability();
             },
           )),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           Expanded(
               child: _BizTypeTile(
             icon: Icons.sports_cricket_rounded,
@@ -4803,13 +4860,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           )),
         ]),
         if (selectedIsNet && netTypes.length > 1) ...[
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           SizedBox(
               height: 40,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: netTypes.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                separatorBuilder: (_, __) => SizedBox(width: 8),
                 itemBuilder: (ctx, i) {
                   final type = netTypes[i];
                   final isSel = _unit?.netType == type;
@@ -4826,17 +4883,17 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                       _loadAvailability();
                     },
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
+                      duration: Duration(milliseconds: 180),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
-                          color: isSel ? _accent : _bg,
+                          color: isSel ? _c.accent : _c.bg,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: isSel ? _accent : _border)),
+                          border: Border.all(color: isSel ? _c.accent : _c.border)),
                       child: Text(
                           '${type[0].toUpperCase()}${type.substring(1).toLowerCase()} ($count)',
                           style: TextStyle(
-                              color: isSel ? Colors.white : _text,
+                              color: isSel ? Colors.white : _c.text,
                               fontWeight: FontWeight.w700,
                               fontSize: 13)),
                     ),
@@ -4845,7 +4902,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               )),
         ],
         if (selectedIsNet && netTypes.length <= 1 && netUnits.length > 1) ...[
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           _SegmentPicker(
               options: netUnits.map((u) => (u.id, u.name)).toList(),
               selected: _unitId ?? '',
@@ -4878,31 +4935,31 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-              color: _accent.withValues(alpha: 0.08),
+              color: _c.accent.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _accent)),
+              border: Border.all(color: _c.accent)),
           child: Row(children: [
-            const Icon(Icons.sports_outlined, color: _accent, size: 20),
-            const SizedBox(width: 10),
+            Icon(Icons.sports_outlined, color: _c.accent, size: 20),
+            SizedBox(width: 10),
             Text(units.first.name,
-                style: const TextStyle(
-                    color: _text, fontSize: 15, fontWeight: FontWeight.w700)),
-            const Spacer(),
-            const Icon(Icons.check_circle_rounded, color: _accent, size: 18),
+                style: TextStyle(
+                    color: _c.text, fontSize: 15, fontWeight: FontWeight.w700)),
+            Spacer(),
+            Icon(Icons.check_circle_rounded, color: _c.accent, size: 18),
           ]),
         ),
       ],
 
       // Net variant picker — shown when selected unit has netVariants
       if (unit != null && unit.hasVariants) ...[
-        const SizedBox(height: 16),
-        const Text('SURFACE TYPE',
+        SizedBox(height: 16),
+        Text('SURFACE TYPE',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         Wrap(
           spacing: 8,
           children: [
@@ -4913,10 +4970,10 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: _netVariantType == v.type ? _accent : _surface,
+                    color: _netVariantType == v.type ? _c.accent : _c.surface,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                        color: _netVariantType == v.type ? _accent : _border),
+                        color: _netVariantType == v.type ? _c.accent : _c.border),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -4925,7 +4982,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                           style: TextStyle(
                               color: _netVariantType == v.type
                                   ? Colors.white
-                                  : _text,
+                                  : _c.text,
                               fontWeight: FontWeight.w700,
                               fontSize: 13)),
                       if (v.pricePaise != null)
@@ -4933,7 +4990,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                             style: TextStyle(
                                 color: _netVariantType == v.type
                                     ? Colors.white70
-                                    : _muted,
+                                    : _c.muted,
                                 fontSize: 11)),
                     ],
                   ),
@@ -4945,22 +5002,22 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
       // Duration — revealed after court selected, hidden when multi-day active
       AnimatedSize(
-        duration: const Duration(milliseconds: 300),
+        duration: Duration(milliseconds: 300),
         curve: Curves.easeInOut,
         child: (unit == null || _isMultiDay)
-            ? const SizedBox(width: double.infinity)
+            ? SizedBox(width: double.infinity)
             : Padding(
                 padding: const EdgeInsets.only(top: 24),
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('DURATION',
+                      Text('DURATION',
                           style: TextStyle(
-                              color: _muted,
+                              color: _c.muted,
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.5)),
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       Builder(builder: (ctx) {
                         final opts = _buildSlotOptions(unit,
                             pricePerHourOverride: _variantPricePerHour);
@@ -4988,16 +5045,16 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                                   _loadAvailability();
                                 },
                                 child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 160),
+                                  duration: Duration(milliseconds: 160),
                                   margin: EdgeInsets.only(
                                       right: i < opts.length - 1 ? 10 : 0),
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 22, vertical: 16),
                                   decoration: BoxDecoration(
-                                    color: sel ? _accent : _bg,
+                                    color: sel ? _c.accent : _c.bg,
                                     borderRadius: BorderRadius.circular(14),
                                     border: Border.all(
-                                        color: sel ? _accent : _border,
+                                        color: sel ? _c.accent : _c.border,
                                         width: sel ? 2 : 1),
                                   ),
                                   child: Column(
@@ -5005,15 +5062,15 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                                     children: [
                                       Text(opt.label,
                                           style: TextStyle(
-                                              color: sel ? Colors.white : _text,
+                                              color: sel ? Colors.white : _c.text,
                                               fontSize: 16,
                                               fontWeight: FontWeight.w900)),
-                                      const SizedBox(height: 4),
+                                      SizedBox(height: 4),
                                       Text(
                                           '₹${(opt.paise / 100).toStringAsFixed(0)}',
                                           style: TextStyle(
                                               color:
-                                                  sel ? Colors.white70 : _muted,
+                                                  sel ? Colors.white70 : _c.muted,
                                               fontSize: 12,
                                               fontWeight: FontWeight.w600)),
                                     ],
@@ -5030,21 +5087,21 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
       // Multi-Day toggle — lives outside the collapsed block so it stays visible
       if (unit != null && bulkAvailable) ...[
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         Row(children: [
-          const Expanded(child: Divider(color: _border)),
+          Expanded(child: Divider(color: _c.border)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text('or book multiple days',
-                style: const TextStyle(
-                    color: _muted,
+                style: TextStyle(
+                    color: _c.muted,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.3)),
           ),
-          const Expanded(child: Divider(color: _border)),
+          Expanded(child: Divider(color: _c.border)),
         ]),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         GestureDetector(
           onTap: () => setState(() {
             _isMultiDay = !_isMultiDay;
@@ -5058,34 +5115,34 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             }
           }),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: Duration(milliseconds: 200),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-                color: _isMultiDay ? _accent.withValues(alpha: .08) : _bg,
+                color: _isMultiDay ? _c.accent.withValues(alpha: .08) : _c.bg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _isMultiDay ? _accent : _border)),
+                border: Border.all(color: _isMultiDay ? _c.accent : _c.border)),
             child: Row(children: [
               Icon(Icons.date_range_rounded,
-                  color: _isMultiDay ? _accent : _muted, size: 18),
-              const SizedBox(width: 10),
+                  color: _isMultiDay ? _c.accent : _c.muted, size: 18),
+              SizedBox(width: 10),
               Expanded(
                   child: Text(
                       'Multi-Day · ₹${unit.bulkDayRatePaise! ~/ 100}/day for ${unit.minBulkDays}+ days',
                       style: TextStyle(
-                          color: _isMultiDay ? _accent : _text,
+                          color: _isMultiDay ? _c.accent : _c.text,
                           fontWeight: FontWeight.w700,
                           fontSize: 13))),
               Container(
                   width: 20,
                   height: 20,
                   decoration: BoxDecoration(
-                      color: _isMultiDay ? _accent : Colors.transparent,
+                      color: _isMultiDay ? _c.accent : Colors.transparent,
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: _isMultiDay ? _accent : _border, width: 2)),
+                          color: _isMultiDay ? _c.accent : _c.border, width: 2)),
                   child: _isMultiDay
-                      ? const Icon(Icons.check_rounded,
-                          color: Colors.white, size: 12)
+                      ? Icon(Icons.check_rounded,
+                          color: _c.surface, size: 12)
                       : null),
             ]),
           ),
@@ -5094,14 +5151,14 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
       // Add-ons
       if (unit != null && _unitAddons.isNotEmpty) ...[
-        const SizedBox(height: 20),
-        const Text('ADD-ONS',
+        SizedBox(height: 20),
+        Text('ADD-ONS',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         ..._unitAddons.map((a) {
           final isSel = _selectedAddons.contains(a);
           return GestureDetector(
@@ -5115,31 +5172,31 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                  color: isSel ? _accent.withValues(alpha: .08) : _bg,
+                  color: isSel ? _c.accent.withValues(alpha: .08) : _c.bg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isSel ? _accent : _border)),
+                  border: Border.all(color: isSel ? _c.accent : _c.border)),
               child: Row(children: [
                 Icon(
                     isSel
                         ? Icons.check_box_rounded
                         : Icons.check_box_outline_blank_rounded,
-                    color: isSel ? _accent : _muted,
+                    color: isSel ? _c.accent : _c.muted,
                     size: 20),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                     child: Text(a.name,
-                        style: const TextStyle(
-                            color: _text,
+                        style: TextStyle(
+                            color: _c.text,
                             fontWeight: FontWeight.w700,
                             fontSize: 13))),
                 Text('₹${(a.pricePaise / 100).toStringAsFixed(0)}/${a.unit}',
-                    style: const TextStyle(color: _muted, fontSize: 12)),
+                    style: TextStyle(color: _c.muted, fontSize: 12)),
               ]),
             ),
           );
         }),
       ],
-      const SizedBox(height: 24),
+      SizedBox(height: 24),
     ]);
   }
 
@@ -5150,13 +5207,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       final gridDates = List.generate(
           42, (i) => DateTime(today.year, today.month, today.day + i));
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Pick dates',
+        Text('Pick dates',
             style: TextStyle(
-                color: _text,
+                color: _c.text,
                 fontSize: 22,
                 fontWeight: FontWeight.w900,
                 letterSpacing: -0.5)),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         // Mode toggle
         Row(children: [
           _ModeChip(
@@ -5167,7 +5224,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                     _customDates.clear();
                     _syncPrice();
                   })),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           _ModeChip(
               label: 'Custom Dates',
               selected: _isCustomDates,
@@ -5181,7 +5238,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 _loadBusyDates();
               }),
         ]),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         if (!_isCustomDates) ...[
           Row(children: [
             Expanded(
@@ -5189,7 +5246,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                     label: 'START DATE',
                     date: _selectedDate,
                     onTap: _selectStartDate)),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Expanded(
                 child: _BizDateTile(
                     label: 'END DATE',
@@ -5198,7 +5255,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                     highlight: !_endDatePicked)),
           ]),
           if (_unit != null && _endDatePicked) ...[
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             _BizBulkRateInfo(unit: _unit!, days: _bulkDays),
           ],
         ] else ...[
@@ -5206,18 +5263,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             Expanded(
                 child: Text(
                     'Tap dates to select · ${_customDates.length} selected',
-                    style: const TextStyle(
-                        color: _muted,
+                    style: TextStyle(
+                        color: _c.muted,
                         fontSize: 13,
                         fontWeight: FontWeight.w600))),
             if (_loadingBusyMap)
-              const SizedBox(
+              SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: _accent)),
+                      strokeWidth: 2, color: _c.accent)),
           ]),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -5249,22 +5306,22 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                           });
                         },
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
+                    duration: Duration(milliseconds: 150),
                     width: 52,
                     height: 60,
                     decoration: BoxDecoration(
                       color: isBusy
-                          ? const Color(0xFFFEF2F2)
-                          : (isSel ? _accent : _bg),
+                          ? Color(0xFFFEF2F2)
+                          : (isSel ? _c.accent : _c.bg),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                           color: isBusy
-                              ? const Color(0xFFFCA5A5)
+                              ? Color(0xFFFCA5A5)
                               : (isSel
-                                  ? _accent
+                                  ? _c.accent
                                   : (isToday
-                                      ? _accent.withValues(alpha: .5)
-                                      : _border))),
+                                      ? _c.accent.withValues(alpha: .5)
+                                      : _c.border))),
                     ),
                     child: Stack(children: [
                       Center(
@@ -5274,26 +5331,26 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                             Text(DateFormat('EEE').format(d),
                                 style: TextStyle(
                                     color: isBusy
-                                        ? const Color(0xFFEF4444)
-                                        : (isSel ? Colors.white : _muted),
+                                        ? Color(0xFFEF4444)
+                                        : (isSel ? Colors.white : _c.muted),
                                     fontSize: 10,
                                     fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 2),
+                            SizedBox(height: 2),
                             Text('${d.day}',
                                 style: TextStyle(
                                     color: isBusy
-                                        ? const Color(0xFFEF4444)
-                                        : (isSel ? Colors.white : _text),
+                                        ? Color(0xFFEF4444)
+                                        : (isSel ? Colors.white : _c.text),
                                     fontSize: 16,
                                     fontWeight: FontWeight.w900)),
                             Text(DateFormat('MMM').format(d),
                                 style: TextStyle(
                                     color: isBusy
-                                        ? const Color(0xFFEF4444)
+                                        ? Color(0xFFEF4444)
                                             .withValues(alpha: .7)
                                         : (isSel
                                             ? Colors.white.withValues(alpha: .8)
-                                            : _muted),
+                                            : _c.muted),
                                     fontSize: 9,
                                     fontWeight: FontWeight.w600)),
                           ])),
@@ -5302,39 +5359,39 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                             top: 4,
                             right: 4,
                             child: Icon(Icons.block_rounded,
-                                size: 10, color: const Color(0xFFEF4444))),
+                                size: 10, color: Color(0xFFEF4444))),
                     ]),
                   ),
                 );
               }).toList()),
           if (_customDates.isNotEmpty) ...[
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: .08),
+                  color: _c.accent.withValues(alpha: .08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _accent.withValues(alpha: .3))),
+                  border: Border.all(color: _c.accent.withValues(alpha: .3))),
               child: Row(children: [
-                Icon(Icons.calculate_outlined, color: _accent, size: 18),
-                const SizedBox(width: 10),
+                Icon(Icons.calculate_outlined, color: _c.accent, size: 18),
+                SizedBox(width: 10),
                 Expanded(
                     child: Text(
                         '${_customDates.length} days × ₹${(_totalPaise ~/ _customDates.length / 100).toStringAsFixed(0)}/day',
                         style: TextStyle(
-                            color: _accent,
+                            color: _c.accent,
                             fontWeight: FontWeight.w700,
                             fontSize: 13))),
                 Text('₹${(_totalPaise / 100).toStringAsFixed(0)}',
                     style: TextStyle(
-                        color: _accent,
+                        color: _c.accent,
                         fontWeight: FontWeight.w900,
                         fontSize: 15)),
               ]),
             ),
           ],
         ],
-        const SizedBox(height: 24),
+        SizedBox(height: 24),
       ]);
     }
 
@@ -5347,30 +5404,30 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Pick a date',
+          Text('Pick a date',
               style: TextStyle(
-                  color: _text,
+                  color: _c.text,
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5)),
-          const SizedBox(height: 2),
+          SizedBox(height: 2),
           Text('${_durationLabel(_currentDurationMins)} · ${_unit?.name ?? ''}',
-              style: const TextStyle(
-                  color: _muted, fontSize: 13, fontWeight: FontWeight.w500)),
+              style: TextStyle(
+                  color: _c.muted, fontSize: 13, fontWeight: FontWeight.w500)),
         ])),
         GestureDetector(
           onTap: _selectStartDate,
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-                color: _bg,
+                color: _c.bg,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _border)),
-            child: Icon(Icons.calendar_month_rounded, color: _muted, size: 20),
+                border: Border.all(color: _c.border)),
+            child: Icon(Icons.calendar_month_rounded, color: _c.muted, size: 20),
           ),
         ),
       ]),
-      const SizedBox(height: 16),
+      SizedBox(height: 16),
 
       // Horizontal date strip
       SizedBox(
@@ -5379,7 +5436,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           controller: _dateStripCtrl,
           scrollDirection: Axis.horizontal,
           itemCount: stripDates.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          separatorBuilder: (_, __) => SizedBox(width: 8),
           itemBuilder: (ctx, i) {
             final d = stripDates[i];
             final isSel = d.year == _selectedDate.year &&
@@ -5396,12 +5453,12 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 _loadAvailability();
               },
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                duration: Duration(milliseconds: 180),
                 width: 52,
                 decoration: BoxDecoration(
-                  color: isSel ? _accent : _bg,
+                  color: isSel ? _c.accent : _c.bg,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: isSel ? _accent : _border),
+                  border: Border.all(color: isSel ? _c.accent : _c.border),
                 ),
                 child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -5409,15 +5466,15 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                       Text(
                         isToday ? 'Today' : DateFormat('EEE').format(d),
                         style: TextStyle(
-                            color: isSel ? Colors.white : _muted,
+                            color: isSel ? Colors.white : _c.muted,
                             fontSize: isToday ? 9 : 11,
                             fontWeight: FontWeight.w700),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4),
                       Text(
                         '${d.day}',
                         style: TextStyle(
-                            color: isSel ? Colors.white : _text,
+                            color: isSel ? Colors.white : _c.text,
                             fontSize: 18,
                             fontWeight: FontWeight.w900),
                       ),
@@ -5426,7 +5483,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                         style: TextStyle(
                             color: isSel
                                 ? Colors.white.withValues(alpha: .8)
-                                : _muted,
+                                : _c.muted,
                             fontSize: 10,
                             fontWeight: FontWeight.w600),
                       ),
@@ -5436,35 +5493,35 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           },
         ),
       ),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
 
       // Slot or full-day status
       if (_isFullDay) ...[
         if (_loadingAvail)
-          const Center(
+          Center(
               child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _accent))))
+                          strokeWidth: 2, color: _c.accent))))
         else if (_fullDayBusy)
           Container(
               padding: const EdgeInsets.all(16),
               width: double.infinity,
               decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
+                  color: Color(0xFFFEF2F2),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFFCA5A5))),
+                  border: Border.all(color: Color(0xFFFCA5A5))),
               child: Row(children: [
-                const Icon(Icons.block_rounded,
+                Icon(Icons.block_rounded,
                     color: Color(0xFFEF4444), size: 18),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                     child: Text(
                         'Already booked · $_fullDayOpen – $_fullDayClose',
-                        style: const TextStyle(
+                        style: TextStyle(
                             color: Color(0xFFEF4444),
                             fontSize: 13,
                             fontWeight: FontWeight.w700))),
@@ -5474,50 +5531,50 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               padding: const EdgeInsets.all(16),
               width: double.infinity,
               decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: .06),
+                  color: _c.accent.withValues(alpha: .06),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _accent.withValues(alpha: .3))),
+                  border: Border.all(color: _c.accent.withValues(alpha: .3))),
               child: Row(children: [
-                Icon(Icons.check_circle_rounded, color: _accent, size: 18),
-                const SizedBox(width: 12),
+                Icon(Icons.check_circle_rounded, color: _c.accent, size: 18),
+                SizedBox(width: 12),
                 Expanded(
                     child: Text('Available · $_fullDayOpen to $_fullDayClose',
                         style: TextStyle(
-                            color: _accent,
+                            color: _c.accent,
                             fontSize: 13,
                             fontWeight: FontWeight.w700))),
               ])),
       ] else ...[
-        const Text('SELECT START TIME',
+        Text('SELECT START TIME',
             style: TextStyle(
-                color: _muted,
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         if (_loadingAvail)
-          const Center(
+          Center(
               child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _accent))))
+                          strokeWidth: 2, color: _c.accent))))
         else if (_allDaySlots.isEmpty)
           Container(
               padding: const EdgeInsets.all(16),
               width: double.infinity,
               decoration: BoxDecoration(
-                  color: _bg,
+                  color: _c.bg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _border)),
+                  border: Border.all(color: _c.border)),
               child: Row(children: [
-                Icon(Icons.info_outline_rounded, color: _muted, size: 18),
-                const SizedBox(width: 12),
-                const Text('No slots available for this date.',
+                Icon(Icons.info_outline_rounded, color: _c.muted, size: 18),
+                SizedBox(width: 12),
+                Text('No slots available for this date.',
                     style: TextStyle(
-                        color: _muted,
+                        color: _c.muted,
                         fontSize: 13,
                         fontWeight: FontWeight.w600)),
               ]))
@@ -5536,32 +5593,32 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             durationMins: _currentDurationMins,
           ),
         if (_selectedSlots.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-                color: _accent.withValues(alpha: .08),
+                color: _c.accent.withValues(alpha: .08),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _accent.withValues(alpha: .25))),
+                border: Border.all(color: _c.accent.withValues(alpha: .25))),
             child: Row(children: [
-              Icon(Icons.schedule_rounded, color: _accent, size: 18),
-              const SizedBox(width: 12),
+              Icon(Icons.schedule_rounded, color: _c.accent, size: 18),
+              SizedBox(width: 12),
               Text('$_startTime → $_endTime',
                   style: TextStyle(
-                      color: _accent,
+                      color: _c.accent,
                       fontSize: 14,
                       fontWeight: FontWeight.w800)),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Text('· ${_durationLabel(_currentDurationMins)}',
-                  style: const TextStyle(
-                      color: _muted,
+                  style: TextStyle(
+                      color: _c.muted,
                       fontSize: 13,
                       fontWeight: FontWeight.w600)),
             ]),
           ),
         ],
       ],
-      const SizedBox(height: 24),
+      SizedBox(height: 24),
     ]);
   }
 
@@ -5579,30 +5636,30 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
           LengthLimitingTextInputFormatter(13),
         ],
-        style: const TextStyle(
-            color: _text, fontSize: 16, fontWeight: FontWeight.w700),
+        style: TextStyle(
+            color: _c.text, fontSize: 16, fontWeight: FontWeight.w700),
         decoration: InputDecoration(
           hintText: 'Guest mobile number',
           prefixIcon:
-              const Icon(Icons.phone_android_rounded, size: 18, color: _accent),
+              Icon(Icons.phone_android_rounded, size: 18, color: _c.accent),
           suffixIcon: _searchingUser
-              ? const Padding(
+              ? Padding(
                   padding: EdgeInsets.all(14),
                   child: SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _accent)))
+                          strokeWidth: 2, color: _c.accent)))
               : (_customerLookup?.exists == true || _foundGuest != null)
-                  ? const Icon(Icons.check_circle_rounded,
+                  ? Icon(Icons.check_circle_rounded,
                       color: Colors.green, size: 20)
                   : (_lookupDone &&
                           _normalisedLookupPhone(_phoneCtrl.text).length == 10)
-                      ? const Icon(Icons.person_add_rounded,
-                          color: _muted, size: 20)
+                      ? Icon(Icons.person_add_rounded,
+                          color: _c.muted, size: 20)
                       : null,
           filled: true,
-          fillColor: _bg,
+          fillColor: _c.bg,
           counterText: '',
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -5611,18 +5668,18 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               borderSide: BorderSide(
                   color: _hasSelectedGuest
                       ? Colors.green.withValues(alpha: .4)
-                      : _border)),
+                      : _c.border)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide(
-                  color: _hasSelectedGuest ? Colors.green : _accent,
+                  color: _hasSelectedGuest ? Colors.green : _c.accent,
                   width: 1.8)),
         ),
       ),
-      const SizedBox(height: 10),
+      SizedBox(height: 10),
       // Found guest card
       AnimatedSize(
-        duration: const Duration(milliseconds: 240),
+        duration: Duration(milliseconds: 240),
         curve: Curves.easeInOut,
         child: _hasSelectedGuest && _guestResultExpanded
             ? GestureDetector(
@@ -5650,41 +5707,41 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                                             _foundGuest!.name)[0]
                                         .toUpperCase()
                                     : '?',
-                                style: const TextStyle(
+                                style: TextStyle(
                                     color: Colors.green,
                                     fontWeight: FontWeight.w900,
                                     fontSize: 16)))),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12),
                     Expanded(
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                           Text(_customerLookup?.name ?? _foundGuest!.name,
-                              style: const TextStyle(
-                                  color: _text,
+                              style: TextStyle(
+                                  color: _c.text,
                                   fontWeight: FontWeight.w800,
                                   fontSize: 14)),
-                          const SizedBox(height: 2),
+                          SizedBox(height: 2),
                           Row(children: [
                             Text(
                                 _customerLookup?.exists == true
                                     ? 'Swing user selected'
                                     : '${_foundGuest!.totalBookings} booking${_foundGuest!.totalBookings != 1 ? "s" : ""}',
-                                style: const TextStyle(
-                                    color: _muted,
+                                style: TextStyle(
+                                    color: _c.muted,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600)),
                             if ((_foundGuest?.balanceDuePaise ?? 0) > 0) ...[
-                              const SizedBox(width: 6),
+                              SizedBox(width: 6),
                               Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                      color: const Color(0xFFFEF2F2),
+                                      color: Color(0xFFFEF2F2),
                                       borderRadius: BorderRadius.circular(6)),
                                   child: Text(
                                       '₹${(_foundGuest!.balanceDuePaise / 100).toStringAsFixed(0)} due',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           color: Color(0xFFEF4444),
                                           fontSize: 10,
                                           fontWeight: FontWeight.w800))),
@@ -5696,17 +5753,17 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                         child: Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
-                                color: _bg,
+                                color: _c.bg,
                                 borderRadius: BorderRadius.circular(8)),
-                            child: const Icon(Icons.close_rounded,
-                                color: _muted, size: 15))),
+                            child: Icon(Icons.close_rounded,
+                                color: _c.muted, size: 15))),
                   ]),
                 ))
-            : const SizedBox(width: double.infinity, height: 0),
+            : SizedBox(width: double.infinity, height: 0),
       ),
       // New customer name
       AnimatedSize(
-        duration: const Duration(milliseconds: 240),
+        duration: Duration(milliseconds: 240),
         curve: Curves.easeInOut,
         child: _showGuestNameInput
             ? Padding(
@@ -5720,15 +5777,15 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                               horizontal: 10, vertical: 5),
                           margin: const EdgeInsets.only(bottom: 10),
                           decoration: BoxDecoration(
-                              color: _accent.withValues(alpha: .08),
+                              color: _c.accent.withValues(alpha: .08),
                               borderRadius: BorderRadius.circular(8)),
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
                             Icon(Icons.person_add_rounded,
-                                size: 13, color: _accent),
-                            const SizedBox(width: 5),
+                                size: 13, color: _c.accent),
+                            SizedBox(width: 5),
                             Text('New customer',
                                 style: TextStyle(
-                                    color: _accent,
+                                    color: _c.accent,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700)),
                           ]),
@@ -5739,9 +5796,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                           icon: Icons.person_outline_rounded),
                     ]),
               )
-            : const SizedBox(width: double.infinity, height: 0),
+            : SizedBox(width: double.infinity, height: 0),
       ),
-      const SizedBox(height: 20),
+      SizedBox(height: 20),
       // Payment
       Row(children: [
         Expanded(
@@ -5750,7 +5807,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 controller: _totalCtrl,
                 keyboardType: TextInputType.number,
                 onChanged: (_) => setState(() => _totalEdited = true))),
-        const SizedBox(width: 12),
+        SizedBox(width: 12),
         Expanded(
             child: _FormTextField(
           label: _minAdvancePaise > 0
@@ -5761,7 +5818,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           onChanged: (_) => setState(() {}),
         )),
       ]),
-      const SizedBox(height: 16),
+      SizedBox(height: 16),
       _SegmentPicker(
           options: const [
             ('CASH', 'Cash'),
@@ -5770,12 +5827,12 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           ],
           selected: _paymentMode,
           onSelect: (m) => setState(() => _paymentMode = m)),
-      const SizedBox(height: 14),
+      SizedBox(height: 14),
       _FormTextField(
           label: 'Notes (optional)',
           controller: _notesCtrl,
           icon: Icons.notes_rounded),
-      const SizedBox(height: 24),
+      SizedBox(height: 24),
     ]);
   }
 
@@ -5823,6 +5880,7 @@ class _BookingStepBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(
           children: List.generate(labels.length * 2 - 1, (i) {
@@ -5832,34 +5890,34 @@ class _BookingStepBar extends StatelessWidget {
           return Expanded(
               child: Container(
             height: 2,
-            color: done ? _accent : _border,
+            color: done ? _c.accent : _c.border,
           ));
         }
         final idx = i ~/ 2;
         final done = idx < step;
         final current = idx == step;
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
+          duration: Duration(milliseconds: 300),
           width: current ? 24 : 8,
           height: 8,
           decoration: BoxDecoration(
-            color: done || current ? _accent : _border,
+            color: done || current ? _c.accent : _c.border,
             borderRadius: BorderRadius.circular(4),
           ),
         );
       })),
-      const SizedBox(height: 10),
+      SizedBox(height: 10),
       Row(children: [
         Text(labels[step].toUpperCase(),
-            style: const TextStyle(
-                color: _accent,
+            style: TextStyle(
+                color: _c.accent,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.0)),
-        const SizedBox(width: 8),
+        SizedBox(width: 8),
         Text('${step + 1} of ${labels.length}',
-            style: const TextStyle(
-                color: _muted, fontSize: 11, fontWeight: FontWeight.w600)),
+            style: TextStyle(
+                color: _c.muted, fontSize: 11, fontWeight: FontWeight.w600)),
       ]),
     ]);
   }
@@ -5879,24 +5937,25 @@ class _BookingActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+        duration: Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: enabled ? _accent : _border,
+          color: enabled ? _c.accent : _c.border,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Text(label,
               style: TextStyle(
-                  color: enabled ? Colors.white : _muted,
+                  color: enabled ? Colors.white : _c.muted,
                   fontWeight: FontWeight.w800,
                   fontSize: 15)),
           if (trailing != null) ...[
-            const SizedBox(width: 8),
-            Icon(trailing, size: 18, color: enabled ? Colors.white : _muted),
+            SizedBox(width: 8),
+            Icon(trailing, size: 18, color: enabled ? Colors.white : _c.muted),
           ],
         ]),
       ),
@@ -5919,38 +5978,39 @@ class _BizTypeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+        duration: Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: selected ? _accent : _bg,
+          color: selected ? _c.accent : _c.bg,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: selected ? _accent : _border),
+          border: Border.all(color: selected ? _c.accent : _c.border),
         ),
         child: Row(children: [
-          Icon(icon, size: 22, color: selected ? Colors.white : _muted),
-          const SizedBox(width: 10),
+          Icon(icon, size: 22, color: selected ? Colors.white : _c.muted),
+          SizedBox(width: 10),
           Expanded(
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                 Text(label,
                     style: TextStyle(
-                        color: selected ? Colors.white : _text,
+                        color: selected ? Colors.white : _c.text,
                         fontWeight: FontWeight.w800,
                         fontSize: 14)),
                 if (sublabel.isNotEmpty)
                   Text(sublabel,
                       style: TextStyle(
-                          color: selected ? Colors.white70 : _muted,
+                          color: selected ? Colors.white70 : _c.muted,
                           fontSize: 11,
                           fontWeight: FontWeight.w600)),
               ])),
           if (selected)
-            const Icon(Icons.check_circle_rounded,
-                color: Colors.white, size: 18),
+            Icon(Icons.check_circle_rounded,
+                color: _c.surface, size: 18),
         ]),
       ),
     );
@@ -5972,23 +6032,24 @@ class _BizBookingTypeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: selected ? _accent : _bg,
+          color: selected ? _c.accent : _c.bg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? _accent : _border),
+          border: Border.all(color: selected ? _c.accent : _c.border),
         ),
         child: Row(children: [
-          Icon(icon, size: 18, color: selected ? Colors.white : _muted),
-          const SizedBox(width: 8),
+          Icon(icon, size: 18, color: selected ? Colors.white : _c.muted),
+          SizedBox(width: 8),
           Expanded(
               child: Text(label,
                   style: TextStyle(
-                      color: selected ? Colors.white : _text,
+                      color: selected ? Colors.white : _c.text,
                       fontWeight: FontWeight.w800,
                       fontSize: 13))),
           if (badge != null)
@@ -5996,12 +6057,12 @@ class _BizBookingTypeTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color:
-                    selected ? Colors.white24 : _accent.withValues(alpha: .12),
+                    selected ? Colors.white24 : _c.accent.withValues(alpha: .12),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(badge!,
                   style: TextStyle(
-                      color: selected ? Colors.white : _accent,
+                      color: selected ? Colors.white : _c.accent,
                       fontSize: 9,
                       fontWeight: FontWeight.w800)),
             ),
@@ -6024,38 +6085,39 @@ class _BizDateTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+        duration: Duration(milliseconds: 200),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: highlight ? _accent.withValues(alpha: .06) : _bg,
+          color: highlight ? _c.accent.withValues(alpha: .06) : _c.bg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-              color: highlight ? _accent.withValues(alpha: .5) : _border),
+              color: highlight ? _c.accent.withValues(alpha: .5) : _c.border),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(
                 child: Text(label,
                     style: TextStyle(
-                        color: highlight ? _accent : _muted,
+                        color: highlight ? _c.accent : _c.muted,
                         fontSize: 10,
                         fontWeight: FontWeight.w700))),
             if (highlight)
               Icon(Icons.touch_app_rounded,
-                  size: 14, color: _accent.withValues(alpha: .6)),
+                  size: 14, color: _c.accent.withValues(alpha: .6)),
           ]),
-          const SizedBox(height: 4),
+          SizedBox(height: 4),
           Text(DateFormat('d MMM yyyy').format(date),
               style: TextStyle(
-                  color: highlight ? _accent : _text,
+                  color: highlight ? _c.accent : _c.text,
                   fontSize: 14,
                   fontWeight: FontWeight.w800)),
           Text(DateFormat('EEEE').format(date),
               style: TextStyle(
-                  color: highlight ? _accent.withValues(alpha: .7) : _muted,
+                  color: highlight ? _c.accent.withValues(alpha: .7) : _c.muted,
                   fontSize: 11,
                   fontWeight: FontWeight.w600)),
         ]),
@@ -6071,6 +6133,7 @@ class _BizBulkRateInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final hasBulkConfig =
         unit.minBulkDays != null && unit.bulkDayRatePaise != null;
     if (!hasBulkConfig) return const SizedBox.shrink();
@@ -6079,8 +6142,8 @@ class _BizBulkRateInfo extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
             'Add ${unit.minBulkDays! - days} more day${unit.minBulkDays! - days > 1 ? 's' : ''} to unlock bulk rate',
-            style: const TextStyle(
-                color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+            style: TextStyle(
+                color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
       );
     }
     final bulkTotal = (unit.bulkDayRatePaise! * days) ~/ 100;
@@ -6097,27 +6160,27 @@ class _BizBulkRateInfo extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.check_circle_rounded, size: 15, color: Colors.green),
-          const SizedBox(width: 6),
+          Icon(Icons.check_circle_rounded, size: 15, color: Colors.green),
+          SizedBox(width: 6),
           Text('Bulk rate unlocked — $days days',
-              style: const TextStyle(
+              style: TextStyle(
                   color: Colors.green,
                   fontSize: 13,
                   fontWeight: FontWeight.w800)),
         ]),
-        const SizedBox(height: 6),
+        SizedBox(height: 6),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('₹${unit.bulkDayRatePaise! ~/ 100}/day × $days days',
-              style: const TextStyle(
-                  color: _muted, fontSize: 12, fontWeight: FontWeight.w600)),
+              style: TextStyle(
+                  color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
           Text('₹$bulkTotal total',
-              style: const TextStyle(
-                  color: _text, fontSize: 13, fontWeight: FontWeight.w900)),
+              style: TextStyle(
+                  color: _c.text, fontSize: 13, fontWeight: FontWeight.w900)),
         ]),
         if (saving > 0) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: 4),
           Text('Save ₹$saving vs normal rate',
-              style: const TextStyle(
+              style: TextStyle(
                   color: Colors.green,
                   fontSize: 11,
                   fontWeight: FontWeight.w700)),
@@ -6144,16 +6207,17 @@ class _FormTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(
-                color: _muted,
+            style: TextStyle(
+                color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         TextField(
           controller: controller,
           keyboardType: keyboardType,
@@ -6162,23 +6226,23 @@ class _FormTextField extends StatelessWidget {
           inputFormatters: maxLength != null
               ? [LengthLimitingTextInputFormatter(maxLength)]
               : null,
-          style: const TextStyle(
-              color: _text, fontSize: 14, fontWeight: FontWeight.w700),
+          style: TextStyle(
+              color: _c.text, fontSize: 14, fontWeight: FontWeight.w700),
           decoration: InputDecoration(
             prefixIcon: icon != null
-                ? Icon(icon, size: 18, color: _accent.withValues(alpha: .5))
+                ? Icon(icon, size: 18, color: _c.accent.withValues(alpha: .5))
                 : null,
             filled: true,
-            fillColor: _surface,
+            fillColor: _c.surface,
             counterText: '',
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: _border)),
+                borderSide: BorderSide(color: _c.border)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: _accent, width: 1.6)),
+                borderSide: BorderSide(color: _c.accent, width: 1.6)),
           ),
         ),
       ],
@@ -6234,6 +6298,7 @@ class _StartTimeGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final selList = selected is List<String>
         ? selected as List<String>
         : [selected as String];
@@ -6253,12 +6318,12 @@ class _StartTimeGrid extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: sel ? _accent : (busy ? _bg : _surface),
+                  color: sel ? _c.accent : (busy ? _c.bg : _c.surface),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                       color: sel
-                          ? _accent
-                          : (busy ? _border.withValues(alpha: .3) : _border)),
+                          ? _c.accent
+                          : (busy ? _c.border.withValues(alpha: .3) : _c.border)),
                 ),
                 child: Row(
                   children: [
@@ -6266,8 +6331,8 @@ class _StartTimeGrid extends StatelessWidget {
                         size: 18,
                         color: sel
                             ? Colors.white
-                            : (busy ? _muted.withValues(alpha: .3) : _accent)),
-                    const SizedBox(width: 12),
+                            : (busy ? _c.muted.withValues(alpha: .3) : _c.accent)),
+                    SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -6277,8 +6342,8 @@ class _StartTimeGrid extends StatelessWidget {
                                   color: sel
                                       ? Colors.white
                                       : (busy
-                                          ? _muted.withValues(alpha: .3)
-                                          : _text),
+                                          ? _c.muted.withValues(alpha: .3)
+                                          : _c.text),
                                   fontSize: 13,
                                   fontWeight: FontWeight.w800,
                                   decoration: busy
@@ -6289,15 +6354,15 @@ class _StartTimeGrid extends StatelessWidget {
                                   color: sel
                                       ? Colors.white.withOpacity(0.8)
                                       : (busy
-                                          ? _muted.withValues(alpha: .25)
-                                          : _muted),
+                                          ? _c.muted.withValues(alpha: .25)
+                                          : _c.muted),
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
                     if (busy)
-                      const Icon(Icons.block_rounded, size: 16, color: _muted),
+                      Icon(Icons.block_rounded, size: 16, color: _c.muted),
                   ],
                 ),
               ),
@@ -6318,17 +6383,17 @@ class _StartTimeGrid extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                  color: sel ? _accent : (busy ? Colors.transparent : _surface),
+                  color: sel ? _c.accent : (busy ? Colors.transparent : _c.surface),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                       color: sel
-                          ? _accent
-                          : (busy ? _border.withValues(alpha: .3) : _border))),
+                          ? _c.accent
+                          : (busy ? _c.border.withValues(alpha: .3) : _c.border))),
               child: Text(_fmt12(t),
                   style: TextStyle(
                       color: sel
                           ? Colors.white
-                          : (busy ? _muted.withValues(alpha: .3) : _text),
+                          : (busy ? _c.muted.withValues(alpha: .3) : _c.text),
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       decoration: busy ? TextDecoration.lineThrough : null)),
@@ -6346,6 +6411,7 @@ class _SlotPicker extends StatelessWidget {
   final ValueChanged<int> onSelect;
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -6357,20 +6423,20 @@ class _SlotPicker extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                  color: sel ? _accent : _surface,
+                  color: sel ? _c.accent : _c.surface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: sel ? _accent : _border)),
+                  border: Border.all(color: sel ? _c.accent : _c.border)),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text(slots[i].label,
                     style: TextStyle(
-                        color: sel ? Colors.black : _text,
+                        color: sel ? Colors.black : _c.text,
                         fontSize: 13,
                         fontWeight: FontWeight.w800)),
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text(price,
                     style: TextStyle(
                         color:
-                            sel ? Colors.black.withValues(alpha: .6) : _muted,
+                            sel ? Colors.black.withValues(alpha: .6) : _c.muted,
                         fontSize: 11,
                         fontWeight: FontWeight.w600)),
               ]),
@@ -6388,19 +6454,20 @@ class _ModeChip extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? _accent : _bg,
+          color: selected ? _c.accent : _c.bg,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? _accent : _border),
+          border: Border.all(color: selected ? _c.accent : _c.border),
         ),
         child: Text(label,
             style: TextStyle(
-                color: selected ? Colors.black : _text,
+                color: selected ? Colors.black : _c.text,
                 fontSize: 13,
                 fontWeight: FontWeight.w700)),
       ),
@@ -6416,6 +6483,7 @@ class _SegmentPicker extends StatelessWidget {
   final ValueChanged<String> onSelect;
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -6426,12 +6494,12 @@ class _SegmentPicker extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                  color: sel ? _accent : _surface,
+                  color: sel ? _c.accent : _c.surface,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: sel ? _accent : _border)),
+                  border: Border.all(color: sel ? _c.accent : _c.border)),
               child: Text(o.$2,
                   style: TextStyle(
-                      color: sel ? Colors.black : _text,
+                      color: sel ? Colors.black : _c.text,
                       fontSize: 12,
                       fontWeight: FontWeight.w700)),
             ),

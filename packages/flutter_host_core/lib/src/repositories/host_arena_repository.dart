@@ -487,6 +487,44 @@ class HostArenaBookingRepository {
     final payload = data['data'] ?? data;
     return ArenaReservation.fromJson(Map<String, dynamic>.from(payload as Map));
   }
+
+  Future<ArenaReservation> getOwnerBookingDetail(String bookingId) async {
+    final response = await _dio.get(_paths.bookingDetail(bookingId));
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return ArenaReservation.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<BookingPayment> addBookingPayment(
+    String bookingId, {
+    required int amountPaise,
+    required String paymentMode,
+    required String payerName,
+    String? payerTeamId,
+    String? payerPhone,
+    String? reference,
+    String? notes,
+  }) async {
+    final response = await _dio.post(
+      _paths.bookingPayments(bookingId),
+      data: {
+        'amountPaise': amountPaise,
+        'paymentMode': paymentMode,
+        'payerName': payerName,
+        if (payerTeamId != null) 'payerTeamId': payerTeamId,
+        if (payerPhone != null) 'payerPhone': payerPhone,
+        if (reference != null) 'reference': reference,
+        if (notes != null) 'notes': notes,
+      },
+    );
+    final data = _extractMap(response.data);
+    final payload = data['data'] ?? data;
+    return BookingPayment.fromJson(Map<String, dynamic>.from(payload as Map));
+  }
+
+  Future<void> deleteBookingPayment(String bookingId, String paymentId) async {
+    await _dio.delete(_paths.bookingPaymentDelete(bookingId, paymentId));
+  }
 }
 
 class ArenaDaySummary {

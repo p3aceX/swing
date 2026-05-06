@@ -132,6 +132,10 @@ class HostPathConfig {
   String bookingCancelByOwner(String bookingId) => '/bookings/$bookingId/cancel-by-owner';
   String bookingCheckinByOwner(String bookingId) => '/bookings/$bookingId/checkin-by-owner';
   String bookingPaymentOrder(String bookingId) => '/bookings/$bookingId/payment-order';
+  String bookingDetail(String bookingId) => '/bookings/$bookingId/detail';
+  String bookingPayments(String bookingId) => '/bookings/$bookingId/payments';
+  String bookingPaymentDelete(String bookingId, String paymentId) =>
+      '/bookings/$bookingId/payments/$paymentId';
   String get verifyPayment => '/bookings/verify-payment';
 
   // ── Players ─────────────────────────────────────────────────────────────

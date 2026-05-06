@@ -55,7 +55,6 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
     final ctl = ref.read(authControllerProvider.notifier);
-    final maskedPhone = _maskPhone(auth.phone);
     final theme = Theme.of(context);
 
     ref.listen(authControllerProvider, (prev, next) {
@@ -105,30 +104,17 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const _AuthLogoMark(size: 144),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 20),
                     Text(
                       auth.step == AuthStep.name
                           ? 'Complete account'
-                          : 'Verify your number',
+                          : 'Verify OTP',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineMedium?.copyWith(
                         color: const Color(0xFF101828),
                         height: 1,
                         letterSpacing: -0.8,
                         fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      auth.step == AuthStep.name
-                          ? 'Add the owner name used by your arena team.'
-                          : 'Enter the 6-digit OTP sent to $maskedPhone.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xFF667085),
-                        fontSize: 14,
-                        height: 1.45,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 28),
@@ -146,7 +132,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                         ],
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.all(22),
+                        padding: const EdgeInsets.all(24),
                         child: auth.step == AuthStep.name
                             ? _nameFallback(auth, ctl)
                             : Column(
@@ -247,6 +233,8 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                                       ),
                                     ],
                                   ),
+                                  const SizedBox(height: 10),
+                                  const _TermsNotice(),
                                 ],
                               ),
                       ),
@@ -273,16 +261,6 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
             fontSize: 22,
             fontWeight: FontWeight.w900,
             letterSpacing: -0.4,
-          ),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'We still need your full name before creating your business account.',
-          style: TextStyle(
-            color: Color(0xFF667085),
-            fontSize: 13,
-            height: 1.45,
-            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 18),
@@ -315,17 +293,10 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                 )
               : const Text('Continue'),
         ),
+        const SizedBox(height: 14),
+        const _TermsNotice(),
       ],
     );
-  }
-
-  String _maskPhone(String phone) {
-    final digits = phone.characters
-        .where((c) => c.codeUnitAt(0) >= 48 && c.codeUnitAt(0) <= 57)
-        .join();
-    if (digits.length < 10) return phone;
-    final tail = digits.substring(digits.length - 4);
-    return '+91 ${digits.substring(0, 2)}****$tail';
   }
 
   String _timeLabel(int seconds) {
@@ -381,6 +352,24 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   }
 }
 
+class _TermsNotice extends StatelessWidget {
+  const _TermsNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'By continuing, you accept the Terms & Conditions.',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: Color(0xFF667085),
+        fontSize: 12,
+        height: 1.4,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+}
+
 class _AuthLogoMark extends StatelessWidget {
   const _AuthLogoMark({required this.size});
 
@@ -389,22 +378,9 @@ class _AuthLogoMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Container(
+      child: SizedBox(
         width: size,
         height: size,
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFF0F2F5)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 24,
-              offset: Offset(0, 12),
-            ),
-          ],
-        ),
         child: Image.asset('assets/logo/logo.png', fit: BoxFit.contain),
       ),
     );

@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/auth/session_controller.dart';
-import 'core/auth/token_storage.dart';
 import 'core/notifications/onesignal_service.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/theme_mode_controller.dart';
 
 class SwingBizApp extends ConsumerStatefulWidget {
   const SwingBizApp({super.key});
@@ -40,12 +40,15 @@ class _SwingBizAppState extends ConsumerState<SwingBizApp>
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(goRouterProvider);
+    final themeMode = ref.watch(themeModeControllerProvider);
     // Hand the router to OneSignal so tap-to-open works
     OneSignalService.instance.router = router;
     return MaterialApp.router(
       title: 'Swing Biz',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: themeMode,
       routerConfig: router,
     );
   }

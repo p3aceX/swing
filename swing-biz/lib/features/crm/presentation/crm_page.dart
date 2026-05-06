@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
-import '../../bookings/presentation/bookings_page.dart';
+import '../../../core/router/app_router.dart';
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
@@ -451,13 +452,9 @@ class _HistoryRow extends StatelessWidget {
     final hasBalance = balancePaise > 0;
 
     return GestureDetector(
-      onTap: () => showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (_) => BookingDetailSheet(booking: booking, arenaId: arena.id, arenaName: arena.name),
-      ).then((_) => onRefresh()),
+      onTap: () => context
+          .push(AppRoutes.bookingDetailPath(booking.id))
+          .then((_) => onRefresh()),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),

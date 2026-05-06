@@ -15,6 +15,7 @@ import '../../features/auth/presentation/welcome_screen.dart';
 import '../auth/me_providers.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/dashboard/presentation/coach_dashboard_screens.dart';
+import '../../features/profile/presentation/profile_page.dart';
 import '../../features/onboarding/presentation/business_details_screen.dart';
 import '../../features/onboarding/presentation/create_arena_screen.dart';
 import '../../features/arena/screens/arena_profile_page.dart';
@@ -24,6 +25,7 @@ import '../../features/create_match/presentation/biz_create_match_screen.dart';
 import '../../features/create_tournament/presentation/biz_create_tournament_screen.dart';
 import '../../features/play/presentation/biz_play_tab.dart';
 import '../notifications/notifications_screen.dart';
+import '../../features/bookings/presentation/booking_detail_page.dart';
 import 'router_refresh.dart';
 
 class AppRoutes {
@@ -37,6 +39,9 @@ class AppRoutes {
   static const createCoach = '/onboarding/coach';
   static const createArena = '/onboarding/arena';
   static const dashboard = '/dashboard';
+  static const profile = '/profile';
+  static const bookingDetail = '/bookings/:id';
+  static String bookingDetailPath(String id) => '/bookings/$id';
   static const coachHome = '/coach-home';
   static const coachSessions = '/coach-home/sessions';
   static const coachSchedule = '/coach-home/schedule';
@@ -153,6 +158,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           onOtp ||
           onRegister ||
           onBiometric;
+      final me = meAsync.valueOrNull;
+      final hasBusinessAccount = me?.businessAccount != null;
+      final businessOnboardingComplete =
+          me?.businessAccount?.onboardingComplete ?? false;
+      final needsBusinessDetails = !hasBusinessAccount || !businessOnboardingComplete;
+      final needsArenaSetup = me != null &&
+          me.businessStatus.arenaIds.isEmpty &&
+          me.businessStatus.managedArenaId == null;
 
       debugPrint(
         '[biz router] loc=$loc status=${session.status.name} role=${selectedRole?.name} '
@@ -180,18 +193,23 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
       if (onOtp && authFlow.needsBiometricEnrollment) return null;
 
-      if (onPublic) return AppRoutes.dashboard;
+      if (loggedIn && meAsync.isLoading) return null;
 
-      // New user with no arena yet — guide through onboarding
-      if (!meAsync.isLoading && meAsync.hasValue) {
-        final me = meAsync.valueOrNull;
-        if (me != null &&
-            me.businessStatus.arenaIds.isEmpty &&
-            me.businessStatus.managedArenaId == null) {
-          final onArenaSetup = loc == AppRoutes.createArena;
-          if (!onArenaSetup) return AppRoutes.createArena;
+      if (me != null) {
+        if (needsBusinessDetails) {
+          if (loc != AppRoutes.businessDetails) {
+            return AppRoutes.businessDetails;
+          }
+        } else if (needsArenaSetup) {
+          if (loc != AppRoutes.createArena) {
+            return AppRoutes.createArena;
+          }
+        } else if (onPublic) {
+          return AppRoutes.dashboard;
         }
       }
+
+      if (onPublic) return AppRoutes.dashboard;
 
       return null;
     },
@@ -229,6 +247,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.dashboard,
         builder: (_, __) => const DashboardScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.profile,
+        builder: (_, __) => const ProfilePage(),
+      ),
+      GoRoute(
+        path: AppRoutes.bookingDetail,
+        builder: (_, state) =>
+            BookingDetailPage(bookingId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: AppRoutes.coachHome,

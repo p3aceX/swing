@@ -3,6 +3,7 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/auth/session_controller.dart';
+import '../../../core/auth/me_providers.dart';
 import '../../../core/auth/two_factor_service.dart';
 import '../../../core/auth/biometric_service.dart';
 import '../../../core/auth/token_storage.dart';
@@ -17,6 +18,7 @@ class AuthFlowState {
     this.error,
     this.idToken, // Used to store temporary credentials or backend tokens
     this.pendingName,
+    this.pendingBusinessDetails,
     this.verificationId, // Stores the 2Factor Session ID
     this.needsBiometricEnrollment = false,
   });
@@ -27,6 +29,7 @@ class AuthFlowState {
   final String? error;
   final String? idToken;
   final String? pendingName;
+  final BusinessDetailsInput? pendingBusinessDetails;
   final String? verificationId;
   final bool needsBiometricEnrollment;
 
@@ -39,6 +42,8 @@ class AuthFlowState {
     String? idToken,
     String? pendingName,
     bool clearPendingName = false,
+    BusinessDetailsInput? pendingBusinessDetails,
+    bool clearPendingBusinessDetails = false,
     String? verificationId,
     bool clearVerificationId = false,
     bool? needsBiometricEnrollment,
@@ -51,6 +56,9 @@ class AuthFlowState {
         idToken: idToken ?? this.idToken,
         pendingName:
             clearPendingName ? null : (pendingName ?? this.pendingName),
+        pendingBusinessDetails: clearPendingBusinessDetails
+            ? null
+            : (pendingBusinessDetails ?? this.pendingBusinessDetails),
         verificationId: clearVerificationId
             ? null
             : (verificationId ?? this.verificationId),
@@ -157,6 +165,10 @@ class AuthController extends StateNotifier<AuthFlowState> {
     );
   }
 
+  void setPendingBusinessDetails(BusinessDetailsInput? details) {
+    state = state.copyWith(pendingBusinessDetails: details);
+  }
+
   Future<void> _exchangeWithBackend({
     required String phone,
     required String sessionId,
@@ -191,10 +203,32 @@ class AuthController extends StateNotifier<AuthFlowState> {
             refreshToken: result.refreshToken,
           );
 
+      final pendingDetails = state.pendingBusinessDetails;
+      if (pendingDetails != null) {
+        try {
+          await _ref.read(hostBizRepositoryProvider).upsertBusinessDetails(
+                pendingDetails,
+              );
+          _ref.invalidate(meProvider);
+        } catch (e) {
+          debugPrint('Auth: Failed to save pending business details: $e');
+          state = state.copyWith(
+            loading: false,
+            error: 'Business details need one quick retry from the profile page.',
+            clearPendingName: true,
+            clearVerificationId: true,
+            clearPendingBusinessDetails: true,
+            needsBiometricEnrollment: needsBio,
+          );
+          return;
+        }
+      }
+
       state = state.copyWith(
         loading: false,
         clearError: true,
         clearPendingName: true,
+        clearPendingBusinessDetails: true,
         clearVerificationId: true,
         needsBiometricEnrollment: needsBio,
       );
