@@ -717,6 +717,10 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
   Widget _buildReview(_Tokens t) {
     final s = _slot!;
     final dateStr = DateFormat('EEE, MMM d').format(_date);
+    final slotStr = '${s.displayStart} – ${s.displayEnd}';
+    final totalRupees = (s.totalAmountPaise / 100).toStringAsFixed(0);
+    final perTeamRupees = (s.halfPricePaise / 100).toStringAsFixed(0);
+
     return ListView(
       key: const ValueKey('review'),
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -725,40 +729,26 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         const SizedBox(height: 4),
         _ReviewRow(t: t, label: 'Arena', value: _arena!.name),
         _ReviewRow(t: t, label: 'Court', value: s.unitName),
-        _ReviewRow(t: t, label: 'When', value: '$dateStr  ·  ${s.displayStart} – ${s.displayEnd}'),
+        _ReviewRow(t: t, label: 'Date', value: dateStr),
+        _ReviewRow(t: t, label: 'Slot', value: slotStr),
         _ReviewRow(t: t, label: 'Format', value: '$_format  ·  ${_formatDurationLabel(_format)}'),
         _ReviewRow(t: t, label: 'Ball', value: _ballTypeLabel(_ballType ?? '')),
         _ReviewRow(t: t, label: 'Team', value: _team!.name),
         const SizedBox(height: 22),
-        _SectionLabel(t: t, label: 'COST'),
+        _SectionLabel(t: t, label: 'PAYMENT'),
         const SizedBox(height: 4),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Text(
-                  'Per team',
-                  style: TextStyle(
-                    color: t.muted,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-              Text(
-                '₹${(s.halfPricePaise / 100).toStringAsFixed(0)}',
-                style: TextStyle(
-                  color: t.text,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
-              ),
-            ],
-          ),
+        _MoneyRow(
+          t: t,
+          label: 'Final Ground Fee',
+          rupees: totalRupees,
+          emphasis: false,
         ),
-        Container(height: 0.5, color: t.hair),
+        _MoneyRow(
+          t: t,
+          label: 'Per Team Split',
+          rupees: perTeamRupees,
+          emphasis: true,
+        ),
         const SizedBox(height: 18),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1285,6 +1275,55 @@ class _ReviewRow extends StatelessWidget {
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MoneyRow extends StatelessWidget {
+  const _MoneyRow({
+    required this.t,
+    required this.label,
+    required this.rupees,
+    required this.emphasis,
+  });
+  final _Tokens t;
+  final String label;
+  final String rupees;
+  // emphasis = true → larger/bolder/coral amount (the per-team split is the
+  // number the owner cares about). false → standard subtle amount.
+  final bool emphasis;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.hair, width: 0.5)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: emphasis ? t.text : t.muted,
+                fontSize: emphasis ? 14 : 13,
+                fontWeight: emphasis ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+          Text(
+            '₹$rupees',
+            style: TextStyle(
+              color: emphasis ? t.accent : t.text,
+              fontSize: emphasis ? 22 : 15,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
             ),
           ),
         ],
