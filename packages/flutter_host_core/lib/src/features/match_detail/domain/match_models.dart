@@ -112,15 +112,15 @@ class PlayerMatch {
   /// per-ball check is server-side (Phase 2 bowling guard) — do not rely on
   /// this for security decisions, only for whether to show the score button.
   ///
-  /// `bowlingTeamId` should be the live innings's bowling team id, or null
+  /// `battingTeam` is the live innings's batting team ('A' or 'B'), or null
   /// before toss is taken.
-  bool canScoreNow({String? bowlingTeamId, String? teamAId, String? teamBId}) {
+  bool canScoreNow({String? battingTeam}) {
     if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
       return true;
     }
-    if (bowlingTeamId == null) return false; // pre-toss: nobody can score
-    if (myRole == 'captain-A' && bowlingTeamId == teamAId) return true;
-    if (myRole == 'captain-B' && bowlingTeamId == teamBId) return true;
+    if (battingTeam == null) return false; // pre-toss: nobody can score
+    if (myRole == 'captain-A' && battingTeam == 'B') return true;
+    if (myRole == 'captain-B' && battingTeam == 'A') return true;
     return false;
   }
 

@@ -108,13 +108,15 @@ class PlayerMatch {
   bool get isActiveScorer => myRole == 'scorer';
 
   /// UI hint — server-side bowling guard (Phase 2) is authoritative.
-  bool canScoreNow({String? bowlingTeamId, String? teamAId, String? teamBId}) {
+  /// `battingTeam` is the live innings's batting team ('A' or 'B'), or null
+  /// before toss / after match completion.
+  bool canScoreNow({String? battingTeam}) {
     if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
       return true;
     }
-    if (bowlingTeamId == null) return false;
-    if (myRole == 'captain-A' && bowlingTeamId == teamAId) return true;
-    if (myRole == 'captain-B' && bowlingTeamId == teamBId) return true;
+    if (battingTeam == null) return false;
+    if (myRole == 'captain-A' && battingTeam == 'B') return true;
+    if (myRole == 'captain-B' && battingTeam == 'A') return true;
     return false;
   }
 }
@@ -243,13 +245,13 @@ class MatchCenter {
   bool get isActiveScorerCenter => myRole == 'scorer';
 
   /// UI hint — server-side bowling guard is authoritative.
-  bool canScoreNowCenter({String? bowlingTeamId, String? teamAId, String? teamBId}) {
+  bool canScoreNowCenter({String? battingTeam}) {
     if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
       return true;
     }
-    if (bowlingTeamId == null) return false;
-    if (myRole == 'captain-A' && bowlingTeamId == teamAId) return true;
-    if (myRole == 'captain-B' && bowlingTeamId == teamBId) return true;
+    if (battingTeam == null) return false;
+    if (myRole == 'captain-A' && battingTeam == 'B') return true;
+    if (myRole == 'captain-B' && battingTeam == 'A') return true;
     return false;
   }
 }

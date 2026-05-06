@@ -545,6 +545,14 @@ class HostScoringController extends StateNotifier<HostScoringState> {
           );
           return false;
         }
+        if (code == 'NOT_BOWLING_CAPTAIN') {
+          state = state.copyWith(
+            isSubmitting: false,
+            error:
+                "Your team is batting — only the bowling captain or assigned scorer can record balls right now.",
+          );
+          return false;
+        }
       } else {
         print('[recordBall] ✗ error: $e');
       }
