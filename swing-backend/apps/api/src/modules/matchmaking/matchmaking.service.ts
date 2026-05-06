@@ -2861,34 +2861,45 @@ export class MatchmakingService {
 
     if (expired.length === 0) return { released: 0 }
 
-    let released = 0
+    const releasedDetails: { lobbyId: string; expiredInterestId: string }[] = []
     for (const lobby of expired) {
       try {
-        await prisma.$transaction(async (tx) => {
+        const released = await prisma.$transaction(async (tx) => {
           const fresh = await tx.matchmakingLobby.findUnique({
             where: { id: lobby.id },
             select: { status: true, lockedByInterestId: true, lockExpiresAt: true },
           })
-          if (!fresh) return
-          if (fresh.status !== 'searching') return
-          if (!fresh.lockedByInterestId) return
-          if ((fresh.lockExpiresAt ?? now) >= now) return
+          if (!fresh) return null
+          if (fresh.status !== 'searching') return null
+          if (!fresh.lockedByInterestId) return null
+          if ((fresh.lockExpiresAt ?? now) >= now) return null
 
+          const expiredInterestId = fresh.lockedByInterestId
           await tx.matchmakingInterest.updateMany({
-            where: { id: fresh.lockedByInterestId, status: 'locked' },
+            where: { id: expiredInterestId, status: 'locked' },
             data: { status: 'lock_expired' },
           })
           await tx.matchmakingLobby.update({
             where: { id: lobby.id },
             data: { lockedByInterestId: null, lockExpiresAt: null },
           })
-          released++
+          return expiredInterestId
         })
+        if (released) {
+          releasedDetails.push({ lobbyId: lobby.id, expiredInterestId: released })
+        }
       } catch (err: any) {
         console.error('[releaseExpiredInterestLocks] error', { lobbyId: lobby.id, err: err.message })
       }
     }
-    return { released }
+
+    // Fire notifications outside the per-lobby transactions.
+    for (const { lobbyId, expiredInterestId } of releasedDetails) {
+      this.notifyLockExpired(lobbyId, expiredInterestId)
+          .catch(() => undefined)
+    }
+
+    return { released: releasedDetails.length }
   }
 
   // ── Internal helpers (interest notifications) ──────────────────────────────
@@ -2913,6 +2924,66 @@ export class MatchmakingService {
       sendPush: true,
       audience: 'BIZ_OWNER',
     }).catch(() => undefined)
+  }
+
+  /// Lock expired without payment. Notify:
+  ///   • the team that held the lock ("you didn't pay in time")
+  ///   • all other still-interested teams ("the slot is open again")
+  private async notifyLockExpired(lobbyId: string, expiredInterestId: string) {
+    const [holder, others, lobby] = await Promise.all([
+      prisma.matchmakingInterest.findUnique({
+        where: { id: expiredInterestId },
+        include: {
+          player: { select: { userId: true } },
+          team: { select: { name: true } },
+        },
+      }),
+      prisma.matchmakingInterest.findMany({
+        where: {
+          lobbyId,
+          status: 'interested',
+          id: { not: expiredInterestId },
+        },
+        include: { player: { select: { userId: true } } },
+      }),
+      prisma.matchmakingLobby.findUnique({
+        where: { id: lobbyId },
+        include: { team: { select: { name: true } } },
+      }),
+    ])
+
+    const slotName =
+      `${lobby?.team?.name ?? ''} ${lobby?.format ?? ''}`.trim()
+
+    if (holder?.player?.userId) {
+      await notificationService.createNotification(holder.player.userId, {
+        type: 'mm_lock_expired',
+        title: "Lock expired",
+        body: slotName.length > 0
+          ? `Your payment didn't go through in time for ${slotName}. The slot is open again — be quicker next time.`
+          : "Your payment didn't go through in time. The slot is open again — be quicker next time.",
+        entityType: 'matchmaking_lobby',
+        entityId: lobbyId,
+        data: { lobbyId, interestId: expiredInterestId },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+
+    for (const o of others) {
+      const userId = (o.player as any)?.userId
+      if (!userId) continue
+      await notificationService.createNotification(userId, {
+        type: 'mm_slot_reopened',
+        title: 'Slot reopened',
+        body: 'The team that locked it didn\'t pay in time. You can try to lock it now.',
+        entityType: 'matchmaking_lobby',
+        entityId: lobbyId,
+        data: { lobbyId },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
   }
 
   private async notifyLosersOfSlotTaken(lobbyId: string, winnerInterestId: string) {
