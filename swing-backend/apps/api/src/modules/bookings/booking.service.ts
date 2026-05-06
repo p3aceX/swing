@@ -1126,7 +1126,73 @@ export class BookingService {
     })
     if (!booking) throw Errors.notFound('Booking')
     if (booking.arena.ownerId !== owner.id) throw Errors.forbidden()
-    return booking
+
+    // ── Matchmaking context ────────────────────────────────────────────────────
+    // For SPLIT bookings: find the lobby that created this booking
+    const splitLobby = booking.bookingSource === 'SPLIT'
+      ? await prisma.matchmakingLobby.findUnique({
+          where: { splitBookingId: bookingId },
+          include: { team: { select: { id: true, name: true, shortName: true, logoUrl: true } } },
+        })
+      : null
+
+    // Find any confirmed MatchmakingMatch referencing this booking
+    const mmMatch = await prisma.matchmakingMatch.findFirst({
+      where: { bookingId },
+    })
+
+    let matchInfo: {
+      matchId: string
+      format: string
+      ballType: string | null
+      status: string
+      teamAName: string
+      teamBName: string
+      teamAConfirmed: boolean
+      teamBConfirmed: boolean
+    } | null = null
+
+    if (mmMatch) {
+      // Resolve team names from both lobbies
+      const [lobbyA, lobbyB] = await Promise.all([
+        prisma.matchmakingLobby.findUnique({
+          where: { id: mmMatch.lobbyAId },
+          include: { team: { select: { name: true } } },
+        }),
+        prisma.matchmakingLobby.findUnique({
+          where: { id: mmMatch.lobbyBId },
+          include: { team: { select: { name: true } } },
+        }),
+      ])
+      const ballType = splitLobby?.ballType
+        ?? lobbyA?.ballType
+        ?? lobbyB?.ballType
+        ?? null
+      matchInfo = {
+        matchId: mmMatch.id,
+        format: mmMatch.format,
+        ballType,
+        status: mmMatch.status,
+        teamAName: lobbyA?.team?.name ?? 'Team A',
+        teamBName: lobbyB?.team?.name ?? 'Team B',
+        teamAConfirmed: mmMatch.teamAConfirmed,
+        teamBConfirmed: mmMatch.teamBConfirmed,
+      }
+    } else if (splitLobby) {
+      // Lobby exists but no match found yet — still searching
+      matchInfo = {
+        matchId: '',
+        format: splitLobby.format,
+        ballType: splitLobby.ballType ?? null,
+        status: splitLobby.status,
+        teamAName: splitLobby.team?.name ?? 'Your Team',
+        teamBName: '',
+        teamAConfirmed: false,
+        teamBConfirmed: false,
+      }
+    }
+
+    return { ...booking, matchInfo }
   }
 
   // ─── Owner: add a part-payment to a booking ───────────────────────────────
@@ -1482,7 +1548,11 @@ export class BookingService {
     if (!unit || unit.arenaId !== arenaId) throw Errors.notFound('Arena unit')
 
     const bookingDate = this.startOfDay(data.date)
-    const durationMins = 120
+    // Mirror the client-side _durationForFormat() in split_booking_sheet.dart
+    const formatDurationMap: Record<string, number> = {
+      T10: 240, T20: 240, ODI: 480, Test: 720, Custom: 240,
+    }
+    const durationMins = formatDurationMap[data.format] ?? 240
     const endMins = this.timeToMinutes(data.slotTime) + durationMins
     const endTime = this.minutesToTime(endMins)
     const pricePerTeamPaise = Math.floor(unit.pricePerHourPaise * (durationMins / 60) / 2)
