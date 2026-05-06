@@ -71,6 +71,7 @@ export class MatchmakingService {
     const units: UnitWithArena[] = await prisma.arenaUnit.findMany({
       where: {
         isActive: true,
+        sport: 'CRICKET',
         unitType: { in: GROUND_UNIT_TYPES },
         arena: {
           isActive: true,
@@ -113,7 +114,7 @@ export class MatchmakingService {
           })
         : Promise.resolve([]),
       arenaIds.length
-        ? Promise.all(arenaIds.map((arenaId) => arenaService.getPlayerSlots(arenaId, input.date, duration)))
+        ? Promise.all(arenaIds.map((arenaId) => arenaService.getPlayerSlots(arenaId, input.date, duration, { onlyCricketUnits: true })))
         : Promise.resolve([]),
     ])
     const opponentSet = new Set(opponentPicks.map((p) => `${p.groundId}:${p.slotTime}`))

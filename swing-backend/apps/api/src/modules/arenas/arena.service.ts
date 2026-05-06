@@ -678,7 +678,7 @@ export class ArenaService {
     })
   }
 
-  async getPlayerSlots(arenaId: string, date: string, durationMins: number) {
+  async getPlayerSlots(arenaId: string, date: string, durationMins: number, options: { onlyCricketUnits?: boolean } = {}) {
     const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
     if (!arena) throw Errors.notFound('Arena')
 
@@ -701,7 +701,15 @@ export class ArenaService {
     const leadTimeMins = (arena as any).bufferMins ?? 30
 
     const allUnits: any[] = await (prisma.arenaUnit as any).findMany({
-      where: { arenaId },
+      where: {
+        arenaId,
+        ...(options.onlyCricketUnits
+          ? {
+              sport: 'CRICKET',
+              unitType: { in: ['FULL_GROUND', 'HALF_GROUND', 'TURF', 'MULTI_SPORT', 'OTHER'] },
+            }
+          : {}),
+      },
     })
     const allUnitIds = allUnits.map((u: any) => u.id)
 
