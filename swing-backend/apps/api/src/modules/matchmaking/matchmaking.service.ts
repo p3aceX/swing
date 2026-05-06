@@ -1924,6 +1924,30 @@ export class MatchmakingService {
       where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
       data: { status: 'confirmed' },
     })
+
+    // Grant the arena owner OWNER role on the cricket Match. Without this row,
+    // resolveMatchRole returns null for the arena owner (matchmaking matches
+    // have scorerId=null and no slotBooking link), so they can't edit/start/
+    // delete from the player Play tab.
+    if (arenaOwnerProfileId) {
+      await tx.matchRole.upsert({
+        where: {
+          matchId_profileId_role: {
+            matchId: linkedMatch.id,
+            profileId: arenaOwnerProfileId,
+            role: 'OWNER',
+          },
+        },
+        update: {},
+        create: {
+          matchId: linkedMatch.id,
+          profileId: arenaOwnerProfileId,
+          role: 'OWNER',
+          grantedBy: arenaOwnerProfileId,
+        },
+      })
+    }
+
     return bookingId
   }
 
@@ -2342,6 +2366,27 @@ export class MatchmakingService {
           where: { id: match.id },
           data: { linkedMatchId: linkedMatch.id },
         })
+
+        // Grant arena owner OWNER role on the recreated cricket Match.
+        if (arenaOwnerProfileId) {
+          await prisma.matchRole.upsert({
+            where: {
+              matchId_profileId_role: {
+                matchId: linkedMatch.id,
+                profileId: arenaOwnerProfileId,
+                role: 'OWNER',
+              },
+            },
+            update: {},
+            create: {
+              matchId: linkedMatch.id,
+              profileId: arenaOwnerProfileId,
+              role: 'OWNER',
+              grantedBy: arenaOwnerProfileId,
+            },
+          })
+        }
+
         processed++
       } catch (err: any) {
         errors.push(`match ${match.id}: ${err.message}`)
