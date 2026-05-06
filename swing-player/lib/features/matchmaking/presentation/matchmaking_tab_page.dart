@@ -535,13 +535,22 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         if (!mounted) return;
         if (result.matchId != null) {
           ref.invalidate(mmOpenLobbiesProvider((date: null, format: null)));
+          // Match exists now — it lives under My MatchUps. The Create tab is
+          // for *creating a lobby*, not for showing post-payment confirmation
+          // screens. Reset Create to idle and jump to My MatchUps.
           setState(() {
-            _lobbyId = _activeInterestLobbyId;
-            _lobbyState = _LobbyState.confirmed;
+            _lobbyId = null;
+            _lobbyState = _LobbyState.idle;
+            _matchSummary = null;
+            _restoredPicks = [];
+            _tab = 2;
             _activeInterestId = null;
             _activeInterestLobbyId = null;
             _activeInterestRazorpayOrderId = null;
           });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('You won the slot! See My Match-Ups.')),
+          );
         } else {
           setState(() {
             _lobbyState = _LobbyState.idle;
@@ -565,6 +574,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     }
 
     // Legacy joinLobby → verifyMatchPayment flow.
+    // After payment, the match exists; route the user to My Match-Ups
+    // rather than rendering match-state UI inside the Create tab.
     try {
       await repo.verifyMatchPayment(
         razorpayPaymentId: response.paymentId ?? '',
@@ -572,32 +583,21 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         razorpaySignature: response.signature ?? '',
       );
       if (!mounted) return;
-      // Refresh match summary to get latest paid flags
-      final lobbyId = _lobbyId;
-      if (lobbyId != null) {
-        try {
-          final status = await repo.getLobbyStatus(lobbyId);
-          if (mounted && status.match != null) {
-            final match = status.match!;
-            if (match.myTeamPaid && match.opponentPaid) {
-              setState(() => _lobbyState = _LobbyState.confirmed);
-              return;
-            }
-            setState(() {
-              _matchSummary = match;
-              _lobbyState = _LobbyState.waitingOpponent;
-            });
-            _startPolling();
-            return;
-          }
-        } catch (_) {}
-      }
-      setState(() => _lobbyState = _LobbyState.waitingOpponent);
-      _startPolling();
+      _pollTimer?.cancel();
+      setState(() {
+        _lobbyId = null;
+        _lobbyState = _LobbyState.idle;
+        _matchSummary = null;
+        _restoredPicks = [];
+        _tab = 2;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Advance paid — see My Match-Ups.')),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _lobbyState = _LobbyState.matched;
+        _lobbyState = _LobbyState.idle;
         _error = 'Payment done but confirmation failed. Contact support.';
       });
     }
@@ -2749,26 +2749,33 @@ class _FindTab extends StatelessWidget {
             onLeave: onLeave,
             onInstantChallenge: onInstantChallenge,
           ),
+        // Post-match states (matched / confirming / waitingOpponent /
+        // confirmed) belong to *My Match-Ups*, not Create. The state machine
+        // can still land here on session-restore from older app builds; in
+        // that case render the idle Create UI so the player can start a
+        // fresh lobby. The match itself will surface in My Match-Ups via
+        // /matchmaking/matches independently of this state.
         _LobbyState.matched ||
         _LobbyState.confirming ||
-        _LobbyState.waitingOpponent =>
-          _MatchedFind(
-            key: const ValueKey('matched'),
+        _LobbyState.waitingOpponent ||
+        _LobbyState.confirmed =>
+          _IdleFind(
+            key: const ValueKey('idle-postmatch'),
             team: team,
             format: format,
+            ballType: ballType,
             date: date,
-            matchSummary: matchSummary,
-            confirming: lobbyState == _LobbyState.confirming,
-            waitingOpponent: lobbyState == _LobbyState.waitingOpponent,
-            onConfirm: onConfirm,
-            onDecline: onDecline,
-            onBack: onBack,
-          ),
-        _LobbyState.confirmed => _ConfirmedFind(
-            key: const ValueKey('confirmed'),
-            matchSummary: matchSummary,
-            team: team,
-            onDone: onDone,
+            picks: picks,
+            error: error,
+            loading: false,
+            onTeam: onTeam,
+            onFormat: onFormat,
+            onBallType: onBallType,
+            onDate: onDate,
+            onAddPick: onAddPick,
+            onRemovePick: onRemovePick,
+            onEnter: onEnter,
+            onInstantChallenge: onInstantChallenge,
           ),
       },
     );
