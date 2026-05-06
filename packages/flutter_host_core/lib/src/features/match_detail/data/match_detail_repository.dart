@@ -274,6 +274,13 @@ class HostMatchDetailRepository {
       }
       final seen = <String>{};
       final deduped = result.where((m) => seen.add(m.id)).toList();
+      debugPrint('[MyMatches] api items=${items.length} mapped=${result.length} '
+          'deduped=${deduped.length} path=${_paths.myMatches}');
+      for (final m in deduped) {
+        debugPrint('[MyMatches]   id=${m.id} title="${m.title}" '
+            'lifecycle=${m.lifecycle.name} section=${m.sectionType.name} '
+            'role=${m.myRole ?? "-"} involvesTeam=${m.involvesPlayerTeam}');
+      }
       final enriched = await Future.wait(deduped.map(_enrichWithPreview));
       return enriched;
     } catch (e) {
@@ -465,10 +472,6 @@ class HostMatchDetailRepository {
       stat['runs'], stat['balls'], stat['wickets'],
       stat['catches'], stat['overs'], stat['performanceScore'], stat['impactPoints'],
     ].any((v) => v != null);
-    final scoringOwnerIds = <String>{}
-      ..addAll(_collectScoringOwnerIds(raw))
-      ..addAll(_collectScoringOwnerIds(stat))
-      ..addAll(_collectScoringOwnerIds(match));
     final involvesPlayerTeam = playerSide == 'A' ||
         playerSide == 'B' ||
         _truthy(stat['isParticipant']) ||
@@ -547,14 +550,11 @@ class HostMatchDetailRepository {
       playerBalls: _intOrNull(stat['balls']),
       playerWickets: _intOrNull(stat['wickets']),
       playerCatches: _intOrNull(stat['catches']),
-      canScore: _hasScoringPermissionFlag(stat) || _hasScoringPermissionFlag(match),
-      scoringOwnerIds: scoringOwnerIds.toList(growable: false),
       involvesPlayerTeam: involvesPlayerTeam,
       ballType: _orNull(_firstNonEmpty([_str(match['ballType']), _str(match['ball_type'])])),
       scoreSummary: _buildMatchCardSummary(stat, match, playerTeamName, opponentTeamName),
       tossWinner: _buildTossSummary(match, firstTeam, secondTeam),
       tossDecision: null,
-      isMatchmaking: _str(match['matchmakingId']).isNotEmpty,
       myRole: _orNull(_str(raw['myRole'] ?? stat['myRole'])),
       playerTeamLogoUrl: switch (playerSide) {
         'A' => _orNull(_str(match['teamALogoUrl'])),
@@ -624,13 +624,6 @@ class HostMatchDetailRepository {
             scorecardRoot: scorecard,
           )
         : null;
-    final scoringOwnerIds = <String>{}
-      ..addAll(_collectScoringOwnerIds(merged))
-      ..addAll(_collectScoringOwnerIds(matchContainer))
-      ..addAll(_collectScoringOwnerIds(matchRoot))
-      ..addAll(_collectScoringOwnerIds(scorecard))
-      ..addAll(_collectScoringOwnerIds(previewRoot))
-      ..addAll(_collectScoringOwnerIds(playersRoot));
     final innings = _parseInnings(merged, teamAName: teamAName, teamBName: teamBName);
     final teamAScore = _resolveTeamScore(side: 'A', teamName: teamAName, root: merged, innings: innings);
     final teamBScore = _resolveTeamScore(side: 'B', teamName: teamBName, root: merged, innings: innings);
@@ -716,13 +709,7 @@ class HostMatchDetailRepository {
         teamAName: teamAName.isEmpty ? 'Team A' : teamAName,
         teamBName: teamBName.isEmpty ? 'Team B' : teamBName,
       ),
-      canScore: _hasScoringPermissionFlag(merged) ||
-          _hasScoringPermissionFlag(matchContainer) ||
-          _hasScoringPermissionFlag(matchRoot) ||
-          _hasScoringPermissionFlag(previewRoot) ||
-          _hasScoringPermissionFlag(playersRoot) ||
-          _hasScoringPermissionFlag(scorecard),
-      scoringOwnerIds: scoringOwnerIds.toList(growable: false),
+      myRole: _orNull(_str(matchRoot['myRole'] ?? merged['myRole'])),
     );
   }
 
@@ -1595,39 +1582,6 @@ class HostMatchDetailRepository {
     }
     return null;
   }
-  bool _hasScoringPermissionFlag(Map<String, dynamic> source) =>
-      _truthy(source['canScore']) || _truthy(source['isHost']) ||
-      _truthy(source['isScorer']) || _truthy(source['isOwner']) || _truthy(source['isManager']);
-
-  List<String> _collectScoringOwnerIds(Map<String, dynamic> source) {
-    final ids = <String>{};
-    void add(dynamic v) {
-      final s = '$v'.trim();
-      if (s.isNotEmpty && s != 'null') ids.add(s);
-    }
-    for (final k in const [
-      'scorerId', 'scorerProfileId', 'scorerPlayerId', 'hostId', 'hostProfileId', 'hostPlayerId',
-      'ownerId', 'ownerProfileId', 'ownerPlayerId', 'managerId', 'managerProfileId',
-      'organizerId', 'organizerProfileId', 'createdBy', 'createdById', 'createdByProfileId',
-      'createdByPlayerId', 'userId', 'playerId', 'profileId',
-    ]) { add(source[k]); }
-    for (final nested in [
-      _map(source['scorer']), _map(source['host']), _map(source['owner']),
-      _map(source['manager']), _map(source['createdByUser']), _map(source['createdBy']), _map(source['organizer']),
-    ]) {
-      add(nested['id']); add(nested['_id']); add(nested['profileId']);
-      add(nested['playerId']); add(nested['playerProfileId']); add(nested['userId']);
-    }
-    // Also collect from scoringOwnerIds array (set on tournament-generated matches)
-    for (final k in const ['scoringOwnerIds', 'ownerIds', 'scorerIds']) {
-      final list = source[k];
-      if (list is List) {
-        for (final v in list) { add(v); }
-      }
-    }
-    return ids.toList(growable: false);
-  }
-
   List<dynamic> _firstList(Map<String, dynamic> raw, List<String> keys) {
     for (final key in keys) {
       final v = raw[key];

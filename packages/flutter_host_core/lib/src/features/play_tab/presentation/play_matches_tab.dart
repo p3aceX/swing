@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -113,7 +114,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
         .toList();
     final teamMatches = all
         .where((m) => m.sectionType == MatchSectionType.tournament &&
-            (m.involvesPlayerTeam || m.canScore))
+            (m.involvesPlayerTeam || m.myRole != null))
         .toList();
 
     final sectionAll = _activeTabIndex == 0 ? individualMatches : teamMatches;
@@ -426,11 +427,12 @@ class _MatchList extends ConsumerWidget {
         itemCount: visible.length,
         itemBuilder: (_, i) {
           final m = visible[i];
-          if (m.canScore && m.lifecycle != MatchLifecycle.past) {
+          if ((m.canManage || m.isActiveScorer) && m.lifecycle != MatchLifecycle.past) {
             final canDelete = m.lifecycle != MatchLifecycle.live && m.canDelete;
             return _HostedMatchItem(
               match: m,
               callbacks: callbacks,
+              canManage: m.canManage,
               onDelete: canDelete
                   ? () async {
                       final confirmed = await showDialog<bool>(
@@ -475,14 +477,24 @@ class _MatchList extends ConsumerWidget {
   }
 
   List<PlayerMatch> _filtered(List<PlayerMatch> all) {
-    return all.where((m) {
+    final dropped = <String>[];
+    final kept = all.where((m) {
       if (teamOnly) {
         // Tournament tab: tournament matches where user's team is involved OR user is scorer
-        if (m.sectionType != MatchSectionType.tournament) return false;
-        if (!m.involvesPlayerTeam && !m.canScore) return false;
+        if (m.sectionType != MatchSectionType.tournament) {
+          dropped.add('${m.id}: not-tournament');
+          return false;
+        }
+        if (!m.involvesPlayerTeam && m.myRole == null) {
+          dropped.add('${m.id}: tournament-but-no-team-or-role');
+          return false;
+        }
       } else {
         // Individual tab: non-tournament matches only
-        if (m.sectionType != MatchSectionType.individual) return false;
+        if (m.sectionType != MatchSectionType.individual) {
+          dropped.add('${m.id}: not-individual');
+          return false;
+        }
       }
 
       final lifecycleOk = switch (filter) {
@@ -492,19 +504,42 @@ class _MatchList extends ConsumerWidget {
         2 => m.lifecycle == MatchLifecycle.past,
         _ => true,
       };
-      if (!lifecycleOk) return false;
+      if (!lifecycleOk) {
+        dropped.add('${m.id}: lifecycle=${m.lifecycle.name} filter=$filter');
+        return false;
+      }
 
-      if (venueFilter != null && m.venueLabel != venueFilter) return false;
-      if (opponentFilter != null && m.opponentTeamName != opponentFilter) return false;
-      if (formatFilter != null && m.formatLabel != formatFilter) return false;
+      if (venueFilter != null && m.venueLabel != venueFilter) {
+        dropped.add('${m.id}: venue!=$venueFilter');
+        return false;
+      }
+      if (opponentFilter != null && m.opponentTeamName != opponentFilter) {
+        dropped.add('${m.id}: opp!=$opponentFilter');
+        return false;
+      }
+      if (formatFilter != null && m.formatLabel != formatFilter) {
+        dropped.add('${m.id}: fmt!=$formatFilter');
+        return false;
+      }
 
       final q = searchQuery.trim().toLowerCase();
       if (q.isEmpty) return true;
-      return m.playerTeamName.toLowerCase().contains(q) ||
+      final matched = m.playerTeamName.toLowerCase().contains(q) ||
           m.opponentTeamName.toLowerCase().contains(q) ||
           m.title.toLowerCase().contains(q) ||
           (m.venueLabel?.toLowerCase().contains(q) ?? false);
-    }).toList()
+      if (!matched) dropped.add('${m.id}: search-miss');
+      return matched;
+    }).toList();
+    if (kDebugMode) {
+      debugPrint('[PlayFilter] tab=${teamOnly ? "tournament" : "individual"} '
+          'filter=$filter venue=$venueFilter opp=$opponentFilter fmt=$formatFilter '
+          'q="$searchQuery" → kept=${kept.length}/${all.length}');
+      for (final d in dropped.take(10)) {
+        debugPrint('[PlayFilter]   drop $d');
+      }
+    }
+    return kept
       ..sort((a, b) {
         final ar = _rank(a.lifecycle);
         final br = _rank(b.lifecycle);
@@ -535,29 +570,36 @@ class _HostedMatchItem extends StatelessWidget {
   const _HostedMatchItem({
     required this.match,
     required this.callbacks,
+    required this.canManage,
     this.onDelete,
   });
 
   final PlayerMatch match;
   final PlayTabCallbacks callbacks;
+  /// Owner or manager — can run setup/toss flow. Pure scorers get straight to scoring.
+  final bool canManage;
   final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final isLive = match.lifecycle == MatchLifecycle.live;
     final hasToss = (match.tossWinner ?? '').isNotEmpty;
+    // Scorer-only users always see the direct scoring CTA; managers see the full setup flow labels.
     final phaseColor = isLive
         ? context.success
-        : hasToss
-            ? context.sky
-            : context.warn;
-    final phaseLabel =
-        isLive ? 'RESUME SCORING' : hasToss ? 'START SCORING' : 'SET UP MATCH';
+        : canManage && !hasToss
+            ? context.warn
+            : context.sky;
+    final phaseLabel = isLive
+        ? 'RESUME SCORING'
+        : canManage && !hasToss
+            ? 'SET UP MATCH'
+            : 'START SCORING';
     final phaseIcon = isLive
         ? Icons.play_arrow_rounded
-        : hasToss
-            ? Icons.sports_cricket_rounded
-            : Icons.tune_rounded;
+        : canManage && !hasToss
+            ? Icons.tune_rounded
+            : Icons.sports_cricket_rounded;
 
     return InkWell(
       onTap: callbacks.onNavigateToMatch != null && match.id.isNotEmpty
@@ -636,7 +678,7 @@ class _HostedMatchItem extends StatelessWidget {
   void _onResume(BuildContext context) {
     final hasToss = (match.tossWinner ?? '').isNotEmpty;
     final isLive = match.lifecycle == MatchLifecycle.live;
-    if (!hasToss && !isLive && callbacks.onSetPlayingXI != null) {
+    if (canManage && !hasToss && !isLive && callbacks.onSetPlayingXI != null) {
       callbacks.onSetPlayingXI!(
         context,
         match.id,

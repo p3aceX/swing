@@ -438,6 +438,7 @@ export class PlayerService {
       select: { userId: true },
     });
     let ownedArenaSlotBookingIds: string[] = [];
+    let ownedArenaIds: string[] = [];
     if (profileForUser?.userId) {
       const owner = await prisma.arenaOwnerProfile.findUnique({
         where: { userId: profileForUser.userId },
@@ -448,16 +449,21 @@ export class PlayerService {
           where: { ownerId: owner.id },
           select: { id: true },
         });
-        const arenaIds = arenas.map((a) => a.id);
-        if (arenaIds.length > 0) {
+        ownedArenaIds = arenas.map((a) => a.id);
+        if (ownedArenaIds.length > 0) {
           const bookings = await prisma.slotBooking.findMany({
-            where: { arenaId: { in: arenaIds } },
+            where: { arenaId: { in: ownedArenaIds } },
             select: { id: true },
           });
           ownedArenaSlotBookingIds = bookings.map((b) => b.id);
         }
       }
     }
+    console.log(
+      `[matchHistory] profileId=${profileId} userId=${profileForUser?.userId ?? 'none'} `
+        + `ownedArenas=${ownedArenaIds.length} slotBookings=${ownedArenaSlotBookingIds.length} `
+        + `myTeams=${myTeamNames.length}`,
+    );
 
     const [statRows, directMatches] = await Promise.all([
       prisma.playerMatchStats.findMany({
@@ -499,6 +505,23 @@ export class PlayerService {
         orderBy: { scheduledAt: "desc" },
       }),
     ]);
+    console.log(
+      `[matchHistory] profileId=${profileId} statRows=${statRows.length} `
+        + `directMatches=${directMatches.length} `
+        + `direct.scheduled=${directMatches.filter((m) => m.status === 'SCHEDULED').length} `
+        + `direct.inProgress=${directMatches.filter((m) => m.status === 'IN_PROGRESS').length}`,
+    );
+    if (directMatches.length > 0) {
+      const sample = directMatches.slice(0, 3).map((m) => ({
+        id: m.id,
+        status: m.status,
+        scorerId: m.scorerId,
+        slotBookingId: m.slotBookingId,
+        teamAName: m.teamAName,
+        teamBName: m.teamBName,
+      }));
+      console.log(`[matchHistory] sample=${JSON.stringify(sample)}`);
+    }
 
     const statMatchIds = new Set(statRows.map((row) => row.matchId));
     const statItems = statRows.map((row) => ({
