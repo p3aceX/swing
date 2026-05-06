@@ -115,7 +115,6 @@ int _durationForFormat(String format) {
 String _formatDurationLabel(String format) {
   switch (format) {
     case 'T10':
-      return '~3 hrs';
     case 'T20':
       return '~4 hrs';
     case 'ODI':
@@ -363,6 +362,16 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
 
   bool get _canProceed => !_loading && _stepValid;
 
+  /// Whether there's a previous step to go back to. False on the very first
+  /// visible step (which is step 0 normally, or step 1 if arena was pre-set
+  /// from the calling page) — that case relies on the close X in the app bar.
+  bool get _hasInlineBack {
+    if (_loading) return false;
+    if (_step == 0) return false;
+    if (widget.arena != null && _step == 1) return false;
+    return true;
+  }
+
   void _back() {
     if (_step == 0) {
       Navigator.pop(context);
@@ -399,12 +408,12 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         backgroundColor: t.bg,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        // App bar always shows a close X — back navigation between steps lives
+        // in the bottom bar so the gesture is co-located with Continue.
         leading: IconButton(
-          icon: Icon(_step == 0 || (widget.arena != null && _step == 1)
-              ? Icons.close_rounded
-              : Icons.arrow_back_rounded),
+          icon: const Icon(Icons.close_rounded),
           color: t.text,
-          onPressed: _back,
+          onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           'Match-Up Request',
@@ -437,6 +446,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         error: _error,
         primaryLabel: _step == 5 ? 'Send Match-Up Request' : 'Continue',
         onPrimary: _proceed,
+        onBack: _hasInlineBack ? _back : null,
       ),
     );
   }
@@ -1284,6 +1294,7 @@ class _BottomBar extends StatelessWidget {
     required this.error,
     required this.primaryLabel,
     required this.onPrimary,
+    this.onBack,
   });
 
   final _Tokens t;
@@ -1292,9 +1303,11 @@ class _BottomBar extends StatelessWidget {
   final String? error;
   final String primaryLabel;
   final VoidCallback onPrimary;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
+    final showBack = onBack != null;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -1311,33 +1324,69 @@ class _BottomBar extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
               ),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: FilledButton(
-                onPressed: canProceed ? onPrimary : null,
-                style: FilledButton.styleFrom(
-                  backgroundColor: t.accent,
-                  foregroundColor: t.onAccent,
-                  disabledBackgroundColor: t.hair,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: loading
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: t.onAccent),
-                      )
-                    : Text(
-                        primaryLabel,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
+            Row(
+              children: [
+                if (showBack) ...[
+                  SizedBox(
+                    height: 52,
+                    child: OutlinedButton(
+                      onPressed: loading ? null : onBack,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: t.text,
+                        side: BorderSide(color: t.hair),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 22),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
-              ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.arrow_back_rounded, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            'Back',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: SizedBox(
+                    height: 52,
+                    child: FilledButton(
+                      onPressed: canProceed ? onPrimary : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: t.accent,
+                        foregroundColor: t.onAccent,
+                        disabledBackgroundColor: t.hair,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: loading
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: t.onAccent),
+                            )
+                          : Text(
+                              primaryLabel,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
