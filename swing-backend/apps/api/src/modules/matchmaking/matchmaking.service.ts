@@ -1802,7 +1802,11 @@ export class MatchmakingService {
         teamACaptainId: (lobbyA as any)?.playerId ?? null,
         teamBCaptainId: (lobbyB as any)?.playerId ?? null,
         scheduledAt,
-        scorerId: arenaOwnerProfileId ?? (lobbyA as any)?.playerId ?? null,
+        // For matchmaking matches we leave scorer unassigned at creation time:
+        // the arena owner already has venue-level authority via the biz app and
+        // pinning them here as scorerId leaks an "owner" match-role into the
+        // player app via the legacy match-role fallback (scorerId === self → owner).
+        scorerId: null,
         venueName: (unit as any)?.arena?.name ?? (unit as any)?.name ?? null,
         ballType: (lobbyA as any)?.ballType ?? null,
         matchmakingId: match.id,
@@ -2220,7 +2224,11 @@ export class MatchmakingService {
             teamACaptainId: (lobbyA as any)?.playerId ?? null,
             teamBCaptainId: (lobbyB as any)?.playerId ?? null,
             scheduledAt,
-            scorerId: arenaOwnerProfileId ?? (lobbyA as any)?.playerId ?? null,
+            // For matchmaking matches we leave scorer unassigned at creation time:
+        // the arena owner already has venue-level authority via the biz app and
+        // pinning them here as scorerId leaks an "owner" match-role into the
+        // player app via the legacy match-role fallback (scorerId === self → owner).
+        scorerId: null,
             venueName: (unit as any)?.arena?.name ?? (unit as any)?.name ?? null,
             ballType: (lobbyA as any)?.ballType ?? null,
             matchmakingId: match.id,
