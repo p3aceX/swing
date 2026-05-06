@@ -414,32 +414,59 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     setState(() {
       _lobbyState = _LobbyState.entering;
       _error = null;
+      _team = team;
+      _tab = 1;
     });
     try {
       final repo = ref.read(matchmakingRepositoryProvider);
-      final result = await repo.joinLobby(lobby.lobbyId, team.id);
+
+      // V2 first-to-pay flow:
+      //   1. Express interest (no match yet, just intent)
+      //   2. Try to acquire 120s lock + Razorpay order
+      //   3. Open Razorpay; payment-success handler routes through
+      //      verifyInterestPayment via the _activeInterest* fields below.
+      // Throws LOCK_TAKEN (409) if another team is currently paying.
+      final interest = await repo.expressInterest(lobby.lobbyId, team.id);
+      _mmLog('_instantChallenge → interest expressed id=${interest.interestId}');
+      final lock = await repo.lockAndPay(interest.interestId);
       _mmLog(
-          '_instantChallenge → join success lobbyId=${result.lobbyId} status=${result.status} match=${result.match?.matchId}');
+          '_instantChallenge → lock acquired order=${lock.razorpayOrderId} '
+          'amount=${lock.amountPaise} expires=${lock.lockExpiresAt}');
       if (!mounted) return;
-      setState(() {
-        _lobbyId = result.lobbyId;
-        _team = team;
-        _matchSummary = result.match;
-        _lobbyState = _LobbyState.matched;
-        _restoredPicks = [];
-        _tab = 1;
+      _activeInterestId = interest.interestId;
+      _activeInterestLobbyId = lobby.lobbyId;
+      _activeInterestRazorpayOrderId = lock.razorpayOrderId;
+      _razorpay.open({
+        'key': lock.razorpayKey,
+        'amount': lock.amountPaise,
+        'currency': lock.currency,
+        'name': 'Swing',
+        'description': 'Match-Up advance — locks the slot if you pay first',
+        'order_id': lock.razorpayOrderId,
       });
       ref.invalidate(mmOpenLobbiesProvider((date: null, format: null)));
     } catch (e, st) {
       _mmLog('_instantChallenge ERROR: $e\n$st');
       if (!mounted) return;
       final msg = _parseError(e);
+      // LOCK_TAKEN (409) → another team is currently paying. Their lock will
+      // expire in <=120s; the player can retry then. Their interest row
+      // already exists, so the system also notifies them if the slot reopens.
+      final isLockRace = msg.toLowerCase().contains('lock_taken') ||
+          msg.toLowerCase().contains('slot was taken') ||
+          msg.toLowerCase().contains('paying right now');
       setState(() {
         _lobbyState = _LobbyState.idle;
-        _error = msg;
+        _error = isLockRace
+            ? 'Another team is paying for this slot — try again in a minute.'
+            : msg;
         _tab = 1;
+        _activeInterestId = null;
+        _activeInterestLobbyId = null;
+        _activeInterestRazorpayOrderId = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_error ?? msg)));
     }
   }
 
@@ -2645,17 +2672,19 @@ class _IdleFind extends ConsumerStatefulWidget {
 }
 
 class _IdleFindState extends ConsumerState<_IdleFind> {
-  // 0=team  1=format  2=ball  3=date  4=ground
+  // 0=team  1=format  2=ball  3=date  4=arena  5=slot
   int _step = 0;
   int _maxStep = 0;
   int _customOvers = 20;
+  MmGround? _selectedArena;
 
   static const _sectionLabels = [
     'Select team',
     'Choose format',
     'Pick ball',
     'Choose date',
-    'Select slot'
+    'Pick arena',
+    'Pick slots',
   ];
 
   @override
@@ -2670,7 +2699,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
 
   void _advance() {
     if (!mounted) return;
-    final next = (_step + 1).clamp(0, 5);
+    final next = (_step + 1).clamp(0, _sectionLabels.length);
     setState(() {
       _step = next;
       if (next > _maxStep) _maxStep = next;
@@ -2700,6 +2729,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
             : widget.format.label,
         2 => widget.ballType != null ? _ballTypeLabel(widget.ballType!) : '—',
         3 => _dateLabel(widget.date),
+        4 => _selectedArena?.name ?? '—',
         _ => widget.picks.isEmpty
             ? 'No slots added'
             : '${widget.picks.length} slot${widget.picks.length > 1 ? "s" : ""}',
@@ -2739,13 +2769,14 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         widget.team != null &&
         widget.ballType != null &&
         !widget.loading;
-    final isReview = _step >= 5;
+    final isReview = _step >= _sectionLabels.length;
     final stepReady = switch (_step) {
       0 => widget.team != null,
       1 => true,
       2 => widget.ballType != null,
       3 => true,
-      4 => widget.picks.isNotEmpty,
+      4 => _selectedArena != null,
+      5 => widget.picks.isNotEmpty,
       _ => canEnter,
     };
 
@@ -2785,7 +2816,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                       child: SlideTransition(position: slide, child: child),
                     );
                   },
-                  child: _step < 5
+                  child: _step < _sectionLabels.length
                       ? _buildStepShell(context, teamsAsync)
                       : Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -3092,8 +3123,51 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
       1 => _buildFormatPicker(context),
       2 => _buildBallPicker(context),
       3 => _buildDatePicker(context),
-      _ => _buildGroundPicker(context),
+      4 => _buildArenaPicker(context),
+      _ => _buildSlotPicker(context),
     };
+  }
+
+  Widget _buildArenaPicker(BuildContext context) {
+    return _ArenaPickerStep(
+      date: widget.date,
+      format: widget.format,
+      customOvers: _customOvers,
+      selectedArena: _selectedArena,
+      onPickArena: (g) {
+        setState(() => _selectedArena = g);
+        _advance();
+      },
+    );
+  }
+
+  Widget _buildSlotPicker(BuildContext context) {
+    final arena = _selectedArena;
+    if (arena == null) {
+      // shouldn't normally happen — guardrail. Send user back.
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: GestureDetector(
+          onTap: () => _jumpTo(4),
+          behavior: HitTestBehavior.opaque,
+          child: Text(
+            'Pick an arena first →',
+            style: TextStyle(
+              color: context.accent,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      );
+    }
+    return _SlotStep(
+      arena: arena,
+      picks: widget.picks,
+      onAddPick: widget.onAddPick,
+      onRemovePick: widget.onRemovePick,
+      onChangeArena: () => _jumpTo(4),
+    );
   }
 
   Widget _buildTeamPicker(
@@ -3333,93 +3407,31 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
     );
   }
 
-  Widget _buildGroundPicker(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: _Step4Content(
-        date: widget.date,
-        format: widget.format,
-        customOvers: _customOvers,
-        ballType: widget.ballType,
-        ownTeam: widget.team,
-        picks: widget.picks,
-        onAddPick: widget.onAddPick,
-        onRemovePick: widget.onRemovePick,
-      ),
-    );
-  }
 }
 
-// ── Step 4 content: instant lobbies + manual ground picker ───────────────────
+// ── Step 4: Arena picker ─────────────────────────────────────────────────────
 
-class _Step4Content extends ConsumerStatefulWidget {
-  const _Step4Content({
+class _ArenaPickerStep extends ConsumerStatefulWidget {
+  const _ArenaPickerStep({
     required this.date,
     required this.format,
     required this.customOvers,
-    required this.ballType,
-    required this.ownTeam,
-    required this.picks,
-    required this.onAddPick,
-    required this.onRemovePick,
+    required this.selectedArena,
+    required this.onPickArena,
   });
 
   final DateTime date;
   final MatchFormat format;
   final int customOvers;
-  final String? ballType;
-  final MmTeam? ownTeam;
-  final List<MmGroundSlotPick> picks;
-  final ValueChanged<MmGroundSlotPick> onAddPick;
-  final ValueChanged<MmGroundSlotPick> onRemovePick;
+  final MmGround? selectedArena;
+  final ValueChanged<MmGround> onPickArena;
 
   @override
-  ConsumerState<_Step4Content> createState() => _Step4ContentState();
+  ConsumerState<_ArenaPickerStep> createState() => _ArenaPickerStepState();
 }
 
-class _Step4ContentState extends ConsumerState<_Step4Content>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-  late final Animation<double> _glow;
-  Timer? _refreshTimer;
-  String _groundQuery = '';
-  MmGround? _selectedGround;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    )..repeat(reverse: true);
-    _glow = Tween<double>(begin: 0.25, end: 0.85).animate(
-      CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
-    );
-    _refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
-      if (!mounted) return;
-      final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
-      ref.invalidate(mmOpenLobbiesProvider(
-          (date: dateStr, format: widget.format.apiValue)));
-    });
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    _refreshTimer?.cancel();
-    super.dispose();
-  }
-
-  String _prettyLabel(String value) {
-    return value
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .map((part) => part.isEmpty
-            ? part
-            : part[0].toUpperCase() +
-                (part.length > 1 ? part.substring(1).toLowerCase() : ''))
-        .join(' ');
-  }
+class _ArenaPickerStepState extends ConsumerState<_ArenaPickerStep> {
+  String _query = '';
 
   @override
   Widget build(BuildContext context) {
@@ -3433,36 +3445,15 @@ class _Step4ContentState extends ConsumerState<_Step4Content>
       )),
     );
 
-    final grounds = groundsAsync.valueOrNull ?? [];
-    final totalSlots = grounds.fold<int>(0, (sum, g) => sum + g.slots.length);
-    final hotSlots = grounds.fold<int>(
-        0, (sum, g) => sum + g.slots.where((s) => s.hasOpponent).length);
-    final availableSlots = totalSlots;
-    final notReadySlots = (totalSlots - hotSlots).clamp(0, totalSlots);
-    final activeGrounds = grounds.length;
-    final filteredGrounds = _groundQuery.isEmpty
-        ? grounds
-        : grounds.where((g) {
-            final q = _groundQuery.toLowerCase();
-            return g.name.toLowerCase().contains(q) ||
-                g.area.toLowerCase().contains(q);
-          }).toList();
-
     return groundsAsync.when(
       loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         child: LinearProgressIndicator(minHeight: 1.5),
       ),
-      error: (_, __) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: context.panel,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: context.stroke.withValues(alpha: 0.6)),
-        ),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Text(
-          'Could not load grounds for this date.',
+          'Could not load arenas for this date.',
           style: TextStyle(
             color: context.fgSub,
             fontSize: 13,
@@ -3470,28 +3461,23 @@ class _Step4ContentState extends ConsumerState<_Step4Content>
           ),
         ),
       ),
-      data: (_) {
+      data: (grounds) {
         if (grounds.isEmpty) {
-          return Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: context.panel,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: context.stroke.withValues(alpha: 0.55)),
-            ),
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'No grounds available on this date',
+                  'No arenas on this date',
                   style: TextStyle(
                     color: context.fg,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   'Choose another date or adjust your format.',
                   style: TextStyle(
@@ -3505,285 +3491,748 @@ class _Step4ContentState extends ConsumerState<_Step4Content>
           );
         }
 
+        final filtered = _query.isEmpty
+            ? grounds
+            : grounds.where((g) {
+                final q = _query.toLowerCase();
+                return g.name.toLowerCase().contains(q) ||
+                    g.area.toLowerCase().contains(q);
+              }).toList();
+
+        final totalSlots =
+            grounds.fold<int>(0, (sum, g) => sum + g.slots.length);
+        final hotSlots = grounds.fold<int>(0,
+            (sum, g) => sum + g.slots.where((s) => s.hasOpponent).length);
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: context.panel,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            _StepSearchBar(
+              hint: 'Search arena or area',
+              value: _query,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+            const SizedBox(height: 18),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
                 children: [
-                  const SizedBox(height: 4),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 2),
-                    child: Row(
-                      children: [
-                        Icon(Icons.search_rounded,
-                            size: 18, color: context.fgSub),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            onChanged: (value) =>
-                                setState(() => _groundQuery = value.trim()),
-                            textInputAction: TextInputAction.search,
-                            decoration: InputDecoration(
-                              hintText: 'Search ground or area',
-                              hintStyle: TextStyle(
-                                color: context.fgSub,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              border: InputBorder.none,
-                              isDense: true,
-                            ),
-                            style: TextStyle(
-                              color: context.fg,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        if (_groundQuery.isNotEmpty)
-                          GestureDetector(
-                            onTap: () => setState(() => _groundQuery = ''),
-                            behavior: HitTestBehavior.opaque,
-                            child: Icon(Icons.close_rounded,
-                                size: 18, color: context.fgSub),
-                          ),
-                      ],
-                    ),
+                  _MetricCell(
+                    value: grounds.length.toString(),
+                    label: 'arenas',
                   ),
-                  const SizedBox(height: 12),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _SimplePill(
-                          label: '$activeGrounds grounds',
-                          icon: Icons.stadium_rounded,
-                        ),
-                        const SizedBox(width: 8),
-                        _SimplePill(
-                          label: '$availableSlots units',
-                          icon: Icons.schedule_rounded,
-                        ),
-                        const SizedBox(width: 8),
-                        _SimplePill(
-                          label: '$notReadySlots pending',
-                          icon: Icons.hourglass_bottom_rounded,
-                        ),
-                      ],
-                    ),
+                  _DotSep(),
+                  _MetricCell(
+                    value: totalSlots.toString(),
+                    label: 'slots',
+                  ),
+                  _DotSep(),
+                  _MetricCell(
+                    value: hotSlots.toString(),
+                    label: 'match-ready',
+                    accent: true,
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              'Tap a ground to reveal its slots.',
-              style: TextStyle(
-                color: context.fgSub,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 10),
-            if (filteredGrounds.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: context.panel,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: context.stroke.withValues(alpha: 0.45),
-                  ),
-                ),
+            const SizedBox(height: 22),
+            if (filtered.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 18),
                 child: Text(
-                  'No grounds match this search.',
+                  'No arenas match "$_query".',
                   style: TextStyle(
                     color: context.fgSub,
-                    fontSize: 12,
+                    fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-              ),
-            ...filteredGrounds.map((g) {
-              final selected = _selectedGround?.id == g.id;
-              final groundName = _prettyLabel(g.name);
-              final groundArea =
-                  g.area.isNotEmpty ? _prettyLabel(g.area) : 'Cricket ground';
-              return Column(
-                children: [
-                  InkWell(
-                    onTap: () => setState(() {
-                      _selectedGround = selected ? null : g;
-                    }),
-                    borderRadius: BorderRadius.circular(14),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 2, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? context.accentBg.withValues(alpha: 0.08)
-                            : Colors.transparent,
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  groundName,
-                                  style: TextStyle(
-                                    color: context.fg,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  groundArea,
-                                  style: TextStyle(
-                                    color: context.fgSub,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            '${g.slots.length} slots',
-                            style: TextStyle(
-                              color: context.fgSub,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(
-                            selected
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            size: 18,
-                            color: context.fgSub,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (selected) ...[
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
-                      child: LayoutBuilder(
-                        builder: (_, constraints) {
-                          final slotWidth = (constraints.maxWidth - 10) / 2;
-                          return Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: g.slots.map((slot) {
-                              final picked = widget.picks.any((p) =>
-                                  p.slot.unitId == slot.unitId &&
-                                  p.slot.time == slot.time);
-                              final hot = slot.hasOpponent;
-                              return SizedBox(
-                                width: slotWidth,
-                                child: GestureDetector(
-                                  onTap: picked
-                                      ? null
-                                      : () => widget.onAddPick(
-                                            MmGroundSlotPick(
-                                              ground: g,
-                                              slot: slot,
-                                            ),
-                                          ),
-                                  behavior: HitTestBehavior.opaque,
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 140),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: picked
-                                          ? context.ctaBg.withValues(alpha: 0.08)
-                                          : hot
-                                              ? context.accent
-                                                  .withValues(alpha: 0.06)
-                                              : context.bg
-                                                  .withValues(alpha: 0.28),
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          slot.displayTime,
-                                          style: TextStyle(
-                                            color: picked
-                                                ? context.ctaBg
-                                                : hot
-                                                    ? context.accent
-                                                    : context.fg,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          picked
-                                              ? 'added'
-                                              : hot
-                                                  ? 'match ready'
-                                                  : 'open',
-                                          style: TextStyle(
-                                            color: picked
-                                                ? context.ctaBg.withValues(
-                                                    alpha: 0.75)
-                                                : context.fgSub,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          );
-                        },
-                      ),
-                    ),
-                  ] else
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Divider(
-                        height: 1,
-                        color: context.stroke.withValues(alpha: 0.12),
-                      ),
-                    ),
-                ],
-              );
-            }),
+              )
+            else
+              ...filtered.map((g) {
+                final hot = g.slots.where((s) => s.hasOpponent).length;
+                return _ArenaPickRow(
+                  arena: g,
+                  matchReadyCount: hot,
+                  selected: widget.selectedArena?.id == g.id,
+                  onTap: () => widget.onPickArena(g),
+                );
+              }),
           ],
         );
       },
+    );
+  }
+}
+
+class _ArenaPickRow extends StatelessWidget {
+  const _ArenaPickRow({
+    required this.arena,
+    required this.matchReadyCount,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final MmGround arena;
+  final int matchReadyCount;
+  final bool selected;
+  final VoidCallback onTap;
+
+  String _pretty(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .map((p) =>
+            p[0].toUpperCase() + (p.length > 1 ? p.substring(1).toLowerCase() : ''))
+        .join(' ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? context.bg : context.fg;
+    final fgSub =
+        selected ? context.bg.withValues(alpha: 0.7) : context.fgSub;
+    final hasMatch = matchReadyCount > 0;
+    final accentBar = selected
+        ? context.warn
+        : hasMatch
+            ? context.match
+            : Colors.transparent;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        color: selected ? context.fg : Colors.transparent,
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 3,
+              height: 70,
+              color: accentBar,
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _pretty(arena.name),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            arena.area.isNotEmpty
+                                ? _pretty(arena.area)
+                                : 'Cricket arena',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: fgSub,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 3,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: fgSub.withValues(alpha: 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${arena.slots.length} SLOT${arena.slots.length == 1 ? '' : 'S'}',
+                          style: TextStyle(
+                            color: fgSub,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        if (hasMatch && !selected) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 3,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: context.match,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '$matchReadyCount READY',
+                            style: TextStyle(
+                              color: context.match,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            selected
+                ? Icon(Icons.check_rounded, color: context.warn, size: 22)
+                : Icon(Icons.arrow_forward_rounded,
+                    color: context.fgSub, size: 18),
+            const SizedBox(width: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Step 5: Slot picker (slots for one arena) ────────────────────────────────
+
+class _SlotStep extends ConsumerStatefulWidget {
+  const _SlotStep({
+    required this.arena,
+    required this.picks,
+    required this.onAddPick,
+    required this.onRemovePick,
+    required this.onChangeArena,
+  });
+
+  final MmGround arena;
+  final List<MmGroundSlotPick> picks;
+  final ValueChanged<MmGroundSlotPick> onAddPick;
+  final ValueChanged<MmGroundSlotPick> onRemovePick;
+  final VoidCallback onChangeArena;
+
+  @override
+  ConsumerState<_SlotStep> createState() => _SlotStepState();
+}
+
+class _SlotStepState extends ConsumerState<_SlotStep> {
+  String _pretty(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .map((p) =>
+            p[0].toUpperCase() + (p.length > 1 ? p.substring(1).toLowerCase() : ''))
+        .join(' ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final arena = widget.arena;
+    final slots = [...arena.slots]
+      ..sort((a, b) => a.time.compareTo(b.time));
+    final matchReady = slots.where((s) => s.hasOpponent).toList();
+    final others = slots.where((s) => !s.hasOpponent).toList();
+    final pickedHere = widget.picks
+        .where((p) => p.ground.id == arena.id)
+        .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Arena bar ──────────────────────────────────────────────
+        GestureDetector(
+          onTap: widget.onChangeArena,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.stadium_rounded,
+                    size: 16, color: context.fgSub),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _pretty(arena.name),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.1,
+                          height: 1.1,
+                        ),
+                      ),
+                      if (arena.area.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          _pretty(arena.area),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'CHANGE',
+                  style: TextStyle(
+                    color: context.accent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded,
+                    size: 16, color: context.accent),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          height: 1,
+          margin: const EdgeInsets.symmetric(horizontal: 20),
+          color: context.stroke.withValues(alpha: 0.18),
+        ),
+        const SizedBox(height: 18),
+
+        // ── Stats ─────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              _MetricCell(
+                value: slots.length.toString(),
+                label: 'slots',
+              ),
+              _DotSep(),
+              _MetricCell(
+                value: matchReady.length.toString(),
+                label: 'match-ready',
+                accent: matchReady.isNotEmpty,
+              ),
+              _DotSep(),
+              _MetricCell(
+                value: pickedHere.toString(),
+                label: 'picked',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 22),
+
+        if (slots.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 20, vertical: 18),
+            child: Text(
+              'No slots at this arena. Pick another →',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+        if (matchReady.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _SlotSectionHeader(
+              label: 'MATCH READY',
+              count: matchReady.length,
+              color: context.match,
+              hint: 'Opponents waiting · pick fast',
+            ),
+          ),
+          const SizedBox(height: 6),
+          ...matchReady.map((s) => _SlotPickRow(
+                ground: arena,
+                slot: s,
+                matchReady: true,
+                picked: widget.picks.any((p) =>
+                    p.slot.unitId == s.unitId && p.slot.time == s.time),
+                onTap: () => widget.onAddPick(
+                  MmGroundSlotPick(ground: arena, slot: s),
+                ),
+                showGround: false,
+              )),
+          const SizedBox(height: 28),
+        ],
+        if (others.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _SlotSectionHeader(
+              label: matchReady.isEmpty ? 'AVAILABLE' : 'OTHER SLOTS',
+              count: others.length,
+              color: context.fgSub,
+              hint: 'No opponent yet · be first',
+            ),
+          ),
+          const SizedBox(height: 6),
+          ...others.map((s) => _SlotPickRow(
+                ground: arena,
+                slot: s,
+                matchReady: false,
+                picked: widget.picks.any((p) =>
+                    p.slot.unitId == s.unitId && p.slot.time == s.time),
+                onTap: () => widget.onAddPick(
+                  MmGroundSlotPick(ground: arena, slot: s),
+                ),
+                showGround: false,
+              )),
+        ],
+      ],
+    );
+  }
+}
+
+class _StepSearchBar extends StatelessWidget {
+  const _StepSearchBar({
+    required this.hint,
+    required this.value,
+    required this.onChanged,
+  });
+  final String hint;
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              Icon(Icons.search_rounded, size: 18, color: context.fgSub),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  onChanged: (v) => onChanged(v.trim()),
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: hint,
+                    hintStyle: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (value.isNotEmpty)
+                GestureDetector(
+                  onTap: () => onChanged(''),
+                  behavior: HitTestBehavior.opaque,
+                  child: Icon(Icons.close_rounded,
+                      size: 18, color: context.fgSub),
+                ),
+            ],
+          ),
+        ),
+        Container(
+          height: 1,
+          color: context.stroke.withValues(alpha: 0.18),
+        ),
+      ],
+    );
+  }
+}
+
+class _SlotSectionHeader extends StatelessWidget {
+  const _SlotSectionHeader({
+    required this.label,
+    required this.count,
+    required this.color,
+    required this.hint,
+  });
+  final String label;
+  final int count;
+  final Color color;
+  final String hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(
+          color: color, shape: BoxShape.circle,
+        )),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          count.toString(),
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          hint,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: context.fgSub.withValues(alpha: 0.75),
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SlotPickRow extends StatelessWidget {
+  const _SlotPickRow({
+    required this.ground,
+    required this.slot,
+    required this.matchReady,
+    required this.picked,
+    required this.onTap,
+    this.showGround = true,
+  });
+
+  final MmGround ground;
+  final MmSlot slot;
+  final bool matchReady;
+  final bool picked;
+  final VoidCallback onTap;
+  final bool showGround;
+
+  String _prettyLabel(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .map((p) =>
+            p[0].toUpperCase() + (p.length > 1 ? p.substring(1).toLowerCase() : ''))
+        .join(' ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groundName = _prettyLabel(ground.name);
+    final area =
+        ground.area.isNotEmpty ? _prettyLabel(ground.area) : 'Cricket ground';
+    final price = slot.priceRupees > 0 ? '₹${slot.priceRupees}' : '';
+
+    final fg = picked ? context.bg : context.fg;
+    final fgSub = picked
+        ? context.bg.withValues(alpha: 0.7)
+        : context.fgSub;
+
+    return GestureDetector(
+      onTap: picked ? null : onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        color: picked ? context.fg : Colors.transparent,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // accent bar (cyan = match-ready, transparent otherwise)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 3,
+              height: 70,
+              color: picked
+                  ? context.warn
+                  : matchReady
+                      ? context.match
+                      : Colors.transparent,
+            ),
+            const SizedBox(width: 13),
+            // Time block
+            SizedBox(
+              width: 88,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    slot.startLabel,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      height: 1.0,
+                    ),
+                  ),
+                  if (slot.endLabel.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '→ ${slot.endLabel}',
+                      style: TextStyle(
+                        color: fgSub,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Ground/secondary info
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (showGround) ...[
+                      Text(
+                        groundName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: fg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.1,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                    ],
+                    Row(
+                      children: [
+                        if (showGround)
+                          Flexible(
+                            child: Text(
+                              area,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: fgSub,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            slot.displayTime,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: fgSub,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        if (matchReady && !picked) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 3,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: context.match,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'TEAM WAITING',
+                            style: TextStyle(
+                              color: context.match,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Right side: price + action
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (price.isNotEmpty)
+                  Text(
+                    price,
+                    style: TextStyle(
+                      color: fgSub,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (price.isNotEmpty) const SizedBox(height: 2),
+                Text(
+                  '/team',
+                  style: TextStyle(
+                    color: fgSub.withValues(alpha: 0.6),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            picked
+                ? Icon(Icons.check_rounded, color: context.warn, size: 22)
+                : Icon(Icons.add_rounded, color: context.fgSub, size: 20),
+            const SizedBox(width: 18),
+          ],
+        ),
+      ),
     );
   }
 }

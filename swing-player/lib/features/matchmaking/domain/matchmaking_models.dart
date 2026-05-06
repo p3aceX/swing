@@ -426,14 +426,18 @@ class MmInterestLock {
   const MmInterestLock({
     required this.interestId,
     required this.razorpayOrderId,
+    required this.razorpayKey,
     required this.amountPaise,
+    required this.currency,
     required this.groundFeePaise,
     required this.lockExpiresAt,
     required this.lockSeconds,
   });
   final String interestId;
   final String razorpayOrderId;
+  final String razorpayKey;
   final int amountPaise;
+  final String currency;
   final int groundFeePaise;
   final DateTime lockExpiresAt;
   final int lockSeconds;
@@ -441,7 +445,9 @@ class MmInterestLock {
   factory MmInterestLock.fromJson(Map<String, dynamic> j) => MmInterestLock(
         interestId: (j['interestId'] as String?) ?? '',
         razorpayOrderId: (j['razorpayOrderId'] as String?) ?? '',
+        razorpayKey: (j['razorpayKey'] as String?) ?? '',
         amountPaise: (j['amountPaise'] as num?)?.toInt() ?? 0,
+        currency: (j['currency'] as String?) ?? 'INR',
         groundFeePaise: (j['groundFeePaise'] as num?)?.toInt() ?? 0,
         lockExpiresAt: DateTime.tryParse(
                 (j['lockExpiresAt'] as String?) ?? '') ??
