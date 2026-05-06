@@ -1375,6 +1375,18 @@ export class BookingService {
     const endTime = this.minutesToTime(endMins)
     const pricePerTeamPaise = Math.floor(unit.pricePerHourPaise * (durationMins / 60) / 2)
 
+    // Match-Up Request UI sends display labels (T10/T20/ODI/Test) — translate
+    // to the SlotBooking.format enum (MatchFormat). The MatchmakingLobby
+    // stores the original display string as-is; only SlotBooking is enum-typed.
+    const formatEnumMap: Record<string, string> = {
+      T10: 'T10',
+      T20: 'T20',
+      ODI: 'ONE_DAY',
+      Test: 'TEST',
+      Custom: 'CUSTOM',
+    }
+    const slotBookingFormat = formatEnumMap[data.format] ?? 'T20'
+
     // Verify team if provided
     const team = data.teamId
       ? await prisma.team.findUnique({ where: { id: data.teamId } })
@@ -1405,7 +1417,7 @@ export class BookingService {
           startTime: data.slotTime,
           endTime,
           durationMins,
-          format: data.format as any,
+          format: slotBookingFormat as any,
           totalAmountPaise: pricePerTeamPaise * 2,
           totalPricePaise: pricePerTeamPaise * 2,
           status: 'HELD',
