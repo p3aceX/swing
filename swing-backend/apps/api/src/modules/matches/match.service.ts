@@ -980,6 +980,24 @@ export class MatchService {
     const match = await prisma.match.findUnique({ where: { id: matchId } })
     if (!match) return
 
+    // Phase 3/4 sticky-assignment guard: once an Owner or Manager has
+    // explicitly pinned a scorer (assignScorer sets this true; revokeScorer
+    // clears it), innings transitions must not overwrite their choice.
+    if ((match as any).scorerLockedByOwner === true) {
+      console.log(
+        `[autoShift] skipped match=${matchId} bowlingTeam=${bowlingTeam} reason=scorer-locked-by-owner`,
+      )
+      return
+    }
+
+    // Don't auto-shift on a finished match.
+    if (['COMPLETED', 'CANCELLED', 'ABANDONED'].includes(match.status)) {
+      console.log(
+        `[autoShift] skipped match=${matchId} status=${match.status}`,
+      )
+      return
+    }
+
     const captainId = bowlingTeam === 'A' ? match.teamACaptainId : match.teamBCaptainId
     if (!captainId) return
 
