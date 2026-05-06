@@ -544,8 +544,11 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
       );
       debugPrint('[markPaid] response: ${resp.statusCode} ${resp.data}');
       if (mounted) {
+        // Refresh the matches list — the sheet's `build` watches this
+        // provider, so the per-team rows + Setup Match CTA update inline
+        // without closing the sheet. Owner can keep marking the second
+        // team paid in the same flow.
         ref.invalidate(arenaMatchesProvider(widget.arenaId));
-        Navigator.pop(context);
       }
     } catch (e) {
       debugPrint('[markPaid] ERROR: $e');
@@ -604,7 +607,20 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
-    final match = widget.match;
+    // Watch the matches list so this sheet re-renders when individual
+    // teams are marked paid. Fall back to the snapshot we opened with if
+    // the list is loading or doesn't include this match anymore (e.g.
+    // post-cancel).
+    final matchesAsync = ref.watch(arenaMatchesProvider(widget.arenaId));
+    final match = matchesAsync.maybeWhen(
+      data: (list) {
+        for (final m in list) {
+          if (m.matchId == widget.match.matchId) return m;
+        }
+        return widget.match;
+      },
+      orElse: () => widget.match,
+    );
     final remainingRupees = match.remainingFeePaise ~/ 100;
     final hasRemaining = remainingRupees > 0;
 
