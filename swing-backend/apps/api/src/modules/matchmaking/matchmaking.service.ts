@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { prisma, FacilityUnitType, Prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { ArenaService } from '../arenas/arena.service'
@@ -13,6 +14,9 @@ const DEFAULT_MATCH_COST_PER_PLAYER_PAISE = 45000
 const LOBBY_EXPIRY_HOURS = 24
 const MATCH_PAYMENT_HOURS = 4
 const CONFIRMATION_FEE_PAISE = 50000 // ₹500 flat per team
+// V2 first-to-pay lock window. The team that taps Pay first holds the slot
+// for this many seconds while their Razorpay order is alive.
+const INTEREST_LOCK_SECONDS = 120
 
 export type MatchmakingFormat = 'T10' | 'T20' | 'ODI' | 'Test' | 'Custom'
 
@@ -2368,6 +2372,416 @@ export class MatchmakingService {
         entityType: 'match',
         entityId: matchId,
         data: { lobbyId: lobby.id },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Plan B / V2 — first-to-pay matchmaking
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * B1 — Player expresses interest in an open lobby.
+   *
+   * No payment, no match created. Just records that this team wants the slot.
+   * Idempotent: if the same team already expressed interest on this lobby,
+   * the existing row is returned. Owner sees the count of interested teams
+   * in their Find Team tab.
+   */
+  async expressInterest(userId: string, lobbyId: string, teamId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const team = await this.resolveCallerTeam(userId, teamId)
+    if (!team || team.id !== teamId) throw Errors.forbidden()
+
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+    })
+    if (!lobby) throw Errors.notFound('Lobby')
+    if (lobby.status !== 'searching') {
+      throw new AppError('INVALID_STATE', 'Lobby is no longer open', 400)
+    }
+    if (lobby.expiresAt < new Date()) {
+      throw new AppError('LOBBY_EXPIRED', 'Lobby has expired', 400)
+    }
+    if (lobby.teamId === teamId) {
+      throw new AppError('SAME_TEAM', 'Cannot express interest on your own lobby', 400)
+    }
+
+    // Idempotent — upsert keyed on (lobbyId, teamId).
+    const interest = await prisma.matchmakingInterest.upsert({
+      where: { lobbyId_teamId: { lobbyId, teamId } },
+      create: {
+        lobbyId,
+        teamId,
+        playerId: player.id,
+        status: 'interested',
+      },
+      update: {
+        // If a previous interest was lost / lock_expired and the slot
+        // is back to searching, allow them to re-express.
+        status: 'interested',
+        playerId: player.id,
+      },
+    })
+
+    this.notifyOwnerOfInterest(lobbyId, teamId).catch(() => undefined)
+
+    return {
+      interestId: interest.id,
+      lobbyId: interest.lobbyId,
+      teamId: interest.teamId,
+      status: interest.status,
+      expressedAt: interest.expressedAt.toISOString(),
+    }
+  }
+
+  /**
+   * B2 — Player taps "Pay" on an interest. Acquire the lobby's payment lock
+   * atomically and mint a Razorpay order. If another team already holds an
+   * unexpired lock, return LOCK_TAKEN — the client surfaces "slot just taken".
+   */
+  async acquireLockAndCreateOrder(userId: string, interestId: string) {
+    const player = await this.getPlayerProfile(userId)
+
+    // Atomic lock acquisition. SELECT inside a transaction with serializable
+    // isolation gives us SELECT…FOR UPDATE semantics on the lobby row.
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const interest = await tx.matchmakingInterest.findUnique({
+          where: { id: interestId },
+          include: { lobby: { include: { picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 } } } },
+        })
+        if (!interest) throw Errors.notFound('Interest')
+        if (interest.playerId !== player.id) throw Errors.forbidden()
+        if (interest.status !== 'interested') {
+          throw new AppError('INVALID_STATE', `Interest is ${interest.status}`, 400)
+        }
+
+        const lobby = interest.lobby
+        if (lobby.status !== 'searching') {
+          throw new AppError('LOCK_TAKEN', 'Slot was just taken by another team', 409)
+        }
+
+        const now = new Date()
+        const heldByOther =
+          lobby.lockedByInterestId &&
+          lobby.lockedByInterestId !== interest.id &&
+          (lobby.lockExpiresAt ?? now) > now
+        if (heldByOther) {
+          throw new AppError('LOCK_TAKEN', 'Another team is paying right now — try again in a moment', 409)
+        }
+
+        const expiresAt = new Date(Date.now() + INTEREST_LOCK_SECONDS * 1000)
+
+        await tx.matchmakingLobby.update({
+          where: { id: lobby.id },
+          data: { lockedByInterestId: interest.id, lockExpiresAt: expiresAt },
+        })
+        await tx.matchmakingInterest.update({
+          where: { id: interest.id },
+          data: { status: 'locked' },
+        })
+
+        return {
+          interest,
+          lobby,
+          pick: lobby.picks[0],
+          lockExpiresAt: expiresAt,
+        }
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    )
+
+    if (!result.pick) {
+      throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+    }
+
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: result.pick.groundId } })
+    if (!unit) throw Errors.notFound('Arena unit')
+
+    // Half the slot's ground fee is the per-team confirmation amount,
+    // floored to CONFIRMATION_FEE_PAISE so the math matches existing
+    // matchmaking flows. Owner can change this later via admin tools.
+    const groundFeePaise = Math.floor(
+      unit.pricePerHourPaise *
+        this.formatDurationMins(result.lobby.format as MatchmakingFormat) /
+        60 /
+        2,
+    )
+    const amountPaise = CONFIRMATION_FEE_PAISE
+
+    const order = await getRazorpay().orders.create({
+      amount: amountPaise,
+      currency: 'INR',
+      receipt: `mm_int_${result.interest.id.slice(0, 14)}`,
+      notes: {
+        interestId: result.interest.id,
+        lobbyId: result.lobby.id,
+        teamId: result.interest.teamId,
+      },
+    })
+
+    await prisma.matchmakingInterest.update({
+      where: { id: result.interest.id },
+      data: { razorpayOrderId: order.id },
+    })
+
+    return {
+      interestId: result.interest.id,
+      razorpayOrderId: order.id,
+      amountPaise,
+      groundFeePaise,
+      lockExpiresAt: result.lockExpiresAt.toISOString(),
+      lockSeconds: INTEREST_LOCK_SECONDS,
+    }
+  }
+
+  /**
+   * B3 — Player's payment came back from Razorpay. Verify signature, promote
+   * the locked interest to "won" and create the Match. Mark every other
+   * interest on this lobby as "lost" and notify their teams.
+   */
+  async verifyInterestPayment(
+    userId: string,
+    interestId: string,
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+    razorpaySignature: string,
+  ) {
+    const player = await this.getPlayerProfile(userId)
+
+    // 1. Validate Razorpay signature out-of-band (no DB locks needed yet).
+    const expected = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET ?? '')
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest('hex')
+    if (expected !== razorpaySignature) {
+      throw new AppError('INVALID_SIGNATURE', 'Payment signature verification failed', 400)
+    }
+
+    // 2. Promote interest, create match, mark losers — all in one transaction.
+    const result = await prisma.$transaction(async (tx) => {
+      const interest = await tx.matchmakingInterest.findUnique({
+        where: { id: interestId },
+        include: { lobby: { include: { picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 } } } },
+      })
+      if (!interest) throw Errors.notFound('Interest')
+      if (interest.playerId !== player.id) throw Errors.forbidden()
+      if (interest.razorpayOrderId !== razorpayOrderId) {
+        throw new AppError('ORDER_MISMATCH', 'Razorpay order does not match this interest', 400)
+      }
+
+      // Idempotency: payment may be re-verified by client/webhook.
+      if (interest.status === 'won') {
+        const existingMatch = await tx.matchmakingMatch.findUnique({
+          where: { lobbyAId: interest.lobbyId },
+        })
+        return { interest, match: existingMatch, lobby: interest.lobby, pick: interest.lobby.picks[0] }
+      }
+
+      if (interest.status !== 'locked') {
+        // Lock might have expired between Razorpay capture and verify-call.
+        // Try to reclaim if the lobby is still searching and unlocked.
+        if (interest.status !== 'interested') {
+          throw new AppError('LOCK_LOST', 'Lock expired before payment confirmed', 409)
+        }
+      }
+
+      const lobby = interest.lobby
+      if (lobby.status === 'matched') {
+        // Someone else won this slot meanwhile. Mark this interest lost
+        // and signal the client (caller will need to refund Razorpay capture).
+        await tx.matchmakingInterest.update({
+          where: { id: interest.id },
+          data: { status: 'lost', razorpayPaymentId, paidAt: new Date() },
+        })
+        throw new AppError('SLOT_TAKEN', 'Slot was taken by another team — payment will be refunded', 409)
+      }
+
+      const pick = lobby.picks[0]
+      if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+
+      const unit = await tx.arenaUnit.findUnique({ where: { id: pick.groundId } })
+      if (!unit) throw Errors.notFound('Arena unit')
+
+      // Build a "joiner" lobby for the winning team (mirrors joinOpenLobby).
+      const joinerLobby = await tx.matchmakingLobby.create({
+        data: {
+          teamId: interest.teamId,
+          playerId: interest.playerId,
+          format: lobby.format,
+          ballType: lobby.ballType,
+          date: lobby.date,
+          status: 'matched',
+          expiresAt: new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000),
+          picks: {
+            create: [{ groundId: pick.groundId, slotTime: pick.slotTime, preferenceOrder: 1 }],
+          },
+        },
+      })
+
+      const groundFeePaise = Math.floor(
+        unit.pricePerHourPaise * this.formatDurationMins(lobby.format as MatchmakingFormat) / 60 / 2,
+      )
+      const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
+
+      const match = await tx.matchmakingMatch.create({
+        data: {
+          lobbyAId: lobby.id,
+          lobbyBId: joinerLobby.id,
+          groundId: pick.groundId,
+          slotTime: pick.slotTime,
+          date: lobby.date,
+          format: lobby.format,
+          status: 'pending_payment',
+          confirmDeadline: new Date(Date.now() + MATCH_PAYMENT_HOURS * 60 * 60 * 1000),
+          // Winner already paid — mark their side confirmed.
+          teamAConfirmed: false,
+          teamBConfirmed: true,
+          paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
+          groundFeePaise,
+          remainingFeePaise,
+        },
+      })
+
+      // Promote winner.
+      await tx.matchmakingInterest.update({
+        where: { id: interest.id },
+        data: {
+          status: 'won',
+          razorpayPaymentId,
+          paidAt: new Date(),
+        },
+      })
+
+      // Mark all other interests as lost.
+      await tx.matchmakingInterest.updateMany({
+        where: {
+          lobbyId: lobby.id,
+          id: { not: interest.id },
+          status: { in: ['interested', 'locked'] },
+        },
+        data: { status: 'lost' },
+      })
+
+      // Original lobby flips to matched, lock cleared, link to match.
+      await tx.matchmakingLobby.update({
+        where: { id: lobby.id },
+        data: {
+          status: 'matched',
+          matchId: match.id,
+          lockedByInterestId: null,
+          lockExpiresAt: null,
+        },
+      })
+
+      return { interest, match, lobby, pick, joinerLobby }
+    })
+
+    // Async notifications outside the tx.
+    if (result.match) {
+      this.notifyMatchFound(result.match.id).catch(() => undefined)
+      this.notifyLosersOfSlotTaken(result.lobby.id, result.interest.id).catch(() => undefined)
+    }
+
+    return {
+      interestId: result.interest.id,
+      lobbyId: result.lobby.id,
+      matchId: result.match?.id ?? null,
+      status: 'won' as const,
+    }
+  }
+
+  /**
+   * B3 — sweeper. Releases locks whose lockExpiresAt has passed without a
+   * successful payment verification. Also marks the holder's interest as
+   * lock_expired so the UI can reflect it. Safe to run idempotently every
+   * minute or two via a cron / BullMQ delayed job.
+   */
+  async releaseExpiredInterestLocks() {
+    const now = new Date()
+    const expired = await prisma.matchmakingLobby.findMany({
+      where: {
+        status: 'searching',
+        lockedByInterestId: { not: null },
+        lockExpiresAt: { lt: now },
+      },
+      select: { id: true, lockedByInterestId: true },
+    })
+
+    if (expired.length === 0) return { released: 0 }
+
+    let released = 0
+    for (const lobby of expired) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          const fresh = await tx.matchmakingLobby.findUnique({
+            where: { id: lobby.id },
+            select: { status: true, lockedByInterestId: true, lockExpiresAt: true },
+          })
+          if (!fresh) return
+          if (fresh.status !== 'searching') return
+          if (!fresh.lockedByInterestId) return
+          if ((fresh.lockExpiresAt ?? now) >= now) return
+
+          await tx.matchmakingInterest.updateMany({
+            where: { id: fresh.lockedByInterestId, status: 'locked' },
+            data: { status: 'lock_expired' },
+          })
+          await tx.matchmakingLobby.update({
+            where: { id: lobby.id },
+            data: { lockedByInterestId: null, lockExpiresAt: null },
+          })
+          released++
+        })
+      } catch (err: any) {
+        console.error('[releaseExpiredInterestLocks] error', { lobbyId: lobby.id, err: err.message })
+      }
+    }
+    return { released }
+  }
+
+  // ── Internal helpers (interest notifications) ──────────────────────────────
+
+  private async notifyOwnerOfInterest(lobbyId: string, teamId: string) {
+    const [lobby, team] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({
+        where: { id: lobbyId },
+        include: { arena: { include: { owner: true } }, team: true },
+      }),
+      prisma.team.findUnique({ where: { id: teamId }, select: { name: true } }),
+    ])
+    const ownerUserId = (lobby as any)?.arena?.owner?.userId
+    if (!ownerUserId || !team) return
+    await notificationService.createNotification(ownerUserId, {
+      type: 'mm_interest_expressed',
+      title: 'A team is interested!',
+      body: `${team.name} wants to play your ${lobby?.format ?? ''} slot.`,
+      entityType: 'matchmaking_lobby',
+      entityId: lobbyId,
+      data: { lobbyId, teamId },
+      sendPush: true,
+      audience: 'BIZ_OWNER',
+    }).catch(() => undefined)
+  }
+
+  private async notifyLosersOfSlotTaken(lobbyId: string, winnerInterestId: string) {
+    const losers = await prisma.matchmakingInterest.findMany({
+      where: { lobbyId, id: { not: winnerInterestId }, status: 'lost' },
+      include: { player: { select: { userId: true } }, team: { select: { name: true } } },
+    })
+    for (const l of losers) {
+      const userId = (l.player as any)?.userId
+      if (!userId) continue
+      await notificationService.createNotification(userId, {
+        type: 'mm_slot_taken',
+        title: 'Slot taken by another team',
+        body: `Another team just paid for that slot first. We\'ll notify you of similar matches.`,
+        entityType: 'matchmaking_lobby',
+        entityId: lobbyId,
+        data: { lobbyId, teamId: l.teamId },
         sendPush: true,
         audience: 'PLAYER',
       }).catch(() => undefined)

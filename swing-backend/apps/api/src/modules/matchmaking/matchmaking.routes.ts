@@ -196,4 +196,50 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const data = await svc.startMatchAsArenaOwner(user.userId, matchId)
     return reply.send({ success: true, data })
   })
+
+  // ── Plan B / V2 — first-to-pay matchmaking ───────────────────────────────
+
+  // B1: Player expresses interest in an open lobby. Idempotent per (lobby,team).
+  app.post('/lobbies/:lobbyId/express-interest', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    const body = z.object({ teamId: z.string().min(1) }).parse(request.body)
+    const data = await svc.expressInterest(user.userId, lobbyId, body.teamId)
+    return reply.code(201).send({ success: true, data })
+  })
+
+  // B2: Acquire 120s payment lock + create Razorpay order. LOCK_TAKEN if
+  // another team already holds the slot.
+  app.post('/interests/:interestId/lock-and-pay', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { interestId } = request.params as { interestId: string }
+    const data = await svc.acquireLockAndCreateOrder(user.userId, interestId)
+    return reply.send({ success: true, data })
+  })
+
+  // B3: Verify Razorpay payment → promote winner, create match, mark losers.
+  app.post('/interests/:interestId/verify-payment', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { interestId } = request.params as { interestId: string }
+    const body = z.object({
+      razorpayOrderId: z.string().min(1),
+      razorpayPaymentId: z.string().min(1),
+      razorpaySignature: z.string().min(1),
+    }).parse(request.body)
+    const data = await svc.verifyInterestPayment(
+      user.userId,
+      interestId,
+      body.razorpayOrderId,
+      body.razorpayPaymentId,
+      body.razorpaySignature,
+    )
+    return reply.send({ success: true, data })
+  })
+
+  // B3 housekeeping: idempotent sweep of expired interest locks. Called by a
+  // BullMQ delayed job / cron — also exposed for manual recovery.
+  app.post('/interests/release-expired-locks', auth, async (_request, reply) => {
+    const data = await svc.releaseExpiredInterestLocks()
+    return reply.send({ success: true, data })
+  })
 }
