@@ -252,31 +252,21 @@ class _HostMatchDetailScreenState extends ConsumerState<HostMatchDetailScreen>
       );
     }
 
-    final viewerIds = <String>{};
-    final currentUserId = widget.currentUserId?.trim() ?? '';
-    if (currentUserId.isNotEmpty) viewerIds.add(currentUserId);
-    final initialOwnerIds =
-        widget.initialMatch?.scoringOwnerIds ?? const <String>[];
-    final canScoreByInitialOwnerId =
-        viewerIds.isNotEmpty && initialOwnerIds.any(viewerIds.contains);
-    final canScoreByOwnerId =
-        viewerIds.isNotEmpty && center.scoringOwnerIds.any(viewerIds.contains);
-    final canScore = widget.initialMatch?.canScore == true ||
-        canScoreByInitialOwnerId ||
-        center.canScore ||
-        canScoreByOwnerId;
+    final centerRole = center.myRole;
+    final centerCanScore = centerRole == 'owner' ||
+        centerRole == 'manager' ||
+        centerRole == 'scorer' ||
+        centerRole == 'captain-A' ||
+        centerRole == 'captain-B';
+    final canScore =
+        widget.initialMatch?.canScoreNow() == true || centerCanScore;
     final isLiveOrUpcoming = center.lifecycle == MatchLifecycle.live ||
         center.lifecycle == MatchLifecycle.upcoming;
     assert(() {
       debugPrint(
         '[MatchDetail] id=${widget.matchId} lifecycle=${center.lifecycle.name} '
-        'initCanScore=${widget.initialMatch?.canScore == true} '
-        'initOwnerIds=${initialOwnerIds.length} '
-        'centerCanScore=${center.canScore} '
-        'ownerIds=${center.scoringOwnerIds.length} '
-        'viewerIds=${viewerIds.length} '
-        'initOwnerMatch=$canScoreByInitialOwnerId '
-        'ownerMatch=$canScoreByOwnerId '
+        'initRole=${widget.initialMatch?.myRole} '
+        'centerRole=$centerRole '
         'showResume=${canScore && isLiveOrUpcoming}',
       );
       return true;
@@ -6235,8 +6225,7 @@ MatchCenter _makeFallback(PlayerMatch m) => MatchCenter(
       youtubeUrl: null,
       innings: const [],
       squads: const [],
-      canScore: m.canScore,
-      scoringOwnerIds: m.scoringOwnerIds,
+      myRole: m.myRole,
     );
 
 Color _teamColor(BuildContext context, String name) {

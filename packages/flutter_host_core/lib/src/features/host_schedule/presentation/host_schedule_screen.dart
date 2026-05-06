@@ -128,10 +128,10 @@ class _HostScheduleScreenState extends ConsumerState<HostScheduleScreen> {
                   ...live.map((m) => _ScheduleMatchCard(
                         match: m,
                         showStart: false,
-                        showContinue: m.canScore,
+                        showContinue: m.canScoreNow(),
                         onTap: () => widget.callbacks.onNavigateToMatch
                             ?.call(context, m.id),
-                        onAction: m.canScore
+                        onAction: m.canScoreNow()
                             ? () => widget.callbacks.onStartMatch
                                 ?.call(context, m.id)
                             : null,
@@ -145,12 +145,12 @@ class _HostScheduleScreenState extends ConsumerState<HostScheduleScreen> {
                   ),
                   ...today.map((m) => _ScheduleMatchCard(
                         match: m,
-                        showStart: m.canScore &&
+                        showStart: m.canScoreNow() &&
                             m.lifecycle == MatchLifecycle.upcoming,
                         showContinue: false,
                         onTap: () => widget.callbacks.onNavigateToMatch
                             ?.call(context, m.id),
-                        onAction: m.canScore
+                        onAction: m.canScoreNow()
                             ? () => widget.callbacks.onStartMatch
                                 ?.call(context, m.id)
                             : null,

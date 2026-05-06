@@ -131,7 +131,7 @@ class HostMatchCard extends StatelessWidget {
                     DateFormat('d MMM yyyy').format(match.scheduledAt!),
                     style: TextStyle(color: context.fgSub, fontSize: 10),
                   ),
-                if (showHostingTag && match.canScore && match.lifecycle != MatchLifecycle.past) ...[
+                if (showHostingTag && match.canScoreNow() && match.lifecycle != MatchLifecycle.past) ...[
                   const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

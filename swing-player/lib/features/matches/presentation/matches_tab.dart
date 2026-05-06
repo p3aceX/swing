@@ -257,7 +257,7 @@ class _MatchesTabState extends ConsumerState<MatchesTab>
         all.where((m) => m.lifecycle == MatchLifecycle.upcoming).length,
       MatchTimelineFilter.past =>
         all.where((m) => m.lifecycle == MatchLifecycle.past).length,
-      MatchTimelineFilter.hosting => all.where((m) => m.canScore).length,
+      MatchTimelineFilter.hosting => all.where((m) => m.canScoreNow()).length,
     };
     final label = switch (f) {
       MatchTimelineFilter.all => 'All',
@@ -551,7 +551,7 @@ class _MatchesList extends ConsumerWidget {
       MatchTimelineFilter.live => m.lifecycle == MatchLifecycle.live,
       MatchTimelineFilter.upcoming => m.lifecycle == MatchLifecycle.upcoming,
       MatchTimelineFilter.past => m.lifecycle == MatchLifecycle.past,
-      MatchTimelineFilter.hosting => m.canScore,
+      MatchTimelineFilter.hosting => m.canScoreNow(),
     };
     if (!lifecycleOk) return false;
     final q = searchQuery.trim().toLowerCase();
@@ -750,7 +750,7 @@ class _MatchCard extends StatelessWidget {
                 ),
 
                 // ── Resume / Score button (hosting only) ──────────────
-                if (match.canScore &&
+                if (match.canScoreNow() &&
                     match.lifecycle != MatchLifecycle.past) ...[
                   const SizedBox(height: 10),
                   SizedBox(
