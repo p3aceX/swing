@@ -429,6 +429,36 @@ export class PlayerService {
     });
     const myTeamNames = playerTeams.map((t) => t.name);
 
+    // If this profile's user is also an arena owner, surface matches that
+    // were booked at any of their arenas. SlotBooking has no back-relation
+    // to Match, so we collect SlotBooking ids for owned arenas first, then
+    // include Match.slotBookingId IN that list.
+    const profileForUser = await prisma.playerProfile.findUnique({
+      where: { id: profileId },
+      select: { userId: true },
+    });
+    let ownedArenaSlotBookingIds: string[] = [];
+    if (profileForUser?.userId) {
+      const owner = await prisma.arenaOwnerProfile.findUnique({
+        where: { userId: profileForUser.userId },
+        select: { id: true },
+      });
+      if (owner) {
+        const arenas = await prisma.arena.findMany({
+          where: { ownerId: owner.id },
+          select: { id: true },
+        });
+        const arenaIds = arenas.map((a) => a.id);
+        if (arenaIds.length > 0) {
+          const bookings = await prisma.slotBooking.findMany({
+            where: { arenaId: { in: arenaIds } },
+            select: { id: true },
+          });
+          ownedArenaSlotBookingIds = bookings.map((b) => b.id);
+        }
+      }
+    }
+
     const [statRows, directMatches] = await Promise.all([
       prisma.playerMatchStats.findMany({
         where: { playerProfileId: profileId },
@@ -460,6 +490,9 @@ export class PlayerService {
                   { teamAName: { in: myTeamNames } },
                   { teamBName: { in: myTeamNames } },
                 ]
+              : []),
+            ...(ownedArenaSlotBookingIds.length > 0
+              ? [{ slotBookingId: { in: ownedArenaSlotBookingIds } }]
               : []),
           ],
         },
