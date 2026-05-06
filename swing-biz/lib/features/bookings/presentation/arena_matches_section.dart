@@ -3,10 +3,44 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+class _C {
+  const _C({
+    required this.text,
+    required this.muted,
+    required this.border,
+    required this.surface,
+    required this.bg,
+    required this.accent,
+    required this.onAccent,
+  });
+  final Color text;
+  final Color muted;
+  final Color border;
+  final Color surface;
+  final Color bg;
+  final Color accent;
+  final Color onAccent;
+  factory _C.of(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    return _C(
+      text: s.onSurface,
+      muted: s.onSurface.withValues(alpha: 0.6),
+      border: s.outline,
+      surface: s.surfaceContainerHighest,
+      bg: s.surface,
+      accent: s.primary,
+      onAccent: s.onPrimary,
+    );
+  }
+}
+
+late _C _c;
+
+
 // ─── Model ───────────────────────────────────────────────────────────────────
 
 class ArenaMatch {
-  const ArenaMatch({
+  ArenaMatch({
     required this.matchId,
     required this.teamAName,
     required this.teamBName,
@@ -118,10 +152,11 @@ class ArenaMatchesSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     final async = ref.watch(arenaMatchesProvider(arenaId));
 
     return async.when(
-      loading: () => const Padding(
+      loading: () => Padding(
         padding: EdgeInsets.symmetric(vertical: 16),
         child: Center(
           child: SizedBox(
@@ -135,17 +170,17 @@ class ArenaMatchesSection extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            const Icon(Icons.error_outline, size: 14, color: Color(0xFF6B7280)),
-            const SizedBox(width: 6),
+            Icon(Icons.error_outline, size: 14, color: _c.muted),
+            SizedBox(width: 6),
             Expanded(
               child: Text(
                 'Could not load confirmed matches',
-                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                style: TextStyle(color: _c.muted, fontSize: 12),
               ),
             ),
             GestureDetector(
               onTap: () => ref.invalidate(arenaMatchesProvider(arenaId)),
-              child: const Text(
+              child: Text(
                 'Retry',
                 style: TextStyle(
                   color: Color(0xFF2563EB),
@@ -166,26 +201,26 @@ class ArenaMatchesSection extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  const Text(
+                  Text(
                     'CONFIRMED MATCHES',
                     style: TextStyle(
-                      color: Color(0xFF6B7280),
+                      color: _c.muted,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.8,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2563EB),
+                      color: Color(0xFF2563EB),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       '${matches.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: _c.surface,
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                       ),
@@ -195,7 +230,7 @@ class ArenaMatchesSection extends ConsumerWidget {
               ),
             ),
             ...matches.map((m) => _MatchRow(match: m, arenaId: arenaId)),
-            const SizedBox(height: 4),
+            SizedBox(height: 4),
             Divider(height: 1, color: Colors.grey.shade200),
           ],
         );
@@ -213,6 +248,7 @@ class _MatchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final isPending = !match.isConfirmed;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -234,8 +270,8 @@ class _MatchRow extends StatelessWidget {
                 children: [
                   Text(
                     match.dateLabel,
-                    style: const TextStyle(
-                      color: Color(0xFF111827),
+                    style: TextStyle(
+                      color: _c.text,
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                     ),
@@ -243,8 +279,8 @@ class _MatchRow extends StatelessWidget {
                   ),
                   Text(
                     match.displaySlot,
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
+                    style: TextStyle(
+                      color: _c.muted,
                       fontSize: 10,
                     ),
                     textAlign: TextAlign.center,
@@ -252,7 +288,7 @@ class _MatchRow extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             // Center: teams + meta
             Expanded(
               child: Column(
@@ -263,8 +299,8 @@ class _MatchRow extends StatelessWidget {
                       Flexible(
                         child: Text(
                           match.teamAName,
-                          style: const TextStyle(
-                            color: Color(0xFF111827),
+                          style: TextStyle(
+                            color: _c.text,
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                           ),
@@ -275,13 +311,13 @@ class _MatchRow extends StatelessWidget {
                         margin: const EdgeInsets.symmetric(horizontal: 6),
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF3F4F6),
+                          color: _c.surface,
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
+                        child: Text(
                           'VS',
                           style: TextStyle(
-                            color: Color(0xFF9CA3AF),
+                            color: _c.muted,
                             fontSize: 9,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.5,
@@ -291,8 +327,8 @@ class _MatchRow extends StatelessWidget {
                       Flexible(
                         child: Text(
                           match.teamBName,
-                          style: const TextStyle(
-                            color: Color(0xFF111827),
+                          style: TextStyle(
+                            color: _c.text,
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                           ),
@@ -301,44 +337,44 @@ class _MatchRow extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 5),
+                  SizedBox(height: 5),
                   Row(
                     children: [
                       if (match.format.isNotEmpty) ...[
                         Text(
                           match.format,
-                          style: const TextStyle(
-                              color: Color(0xFF6B7280), fontSize: 11),
+                          style: TextStyle(
+                              color: _c.muted, fontSize: 11),
                         ),
-                        const SizedBox(width: 6),
-                        const Text('·',
+                        SizedBox(width: 6),
+                        Text('·',
                             style: TextStyle(
-                                color: Color(0xFFD1D5DB), fontSize: 11)),
-                        const SizedBox(width: 6),
+                                color: _c.muted, fontSize: 11)),
+                        SizedBox(width: 6),
                       ],
                       if (match.groundName.isNotEmpty)
                         Flexible(
                           child: Text(
                             match.groundName,
-                            style: const TextStyle(
-                                color: Color(0xFF6B7280), fontSize: 11),
+                            style: TextStyle(
+                                color: _c.muted, fontSize: 11),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  SizedBox(height: 6),
                   Row(
                     children: [
                       _PayDot(paid: match.teamAConfirmed, label: match.teamAName),
-                      const SizedBox(width: 8),
+                      SizedBox(width: 8),
                       _PayDot(paid: match.teamBConfirmed, label: match.teamBName),
                     ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             // Right: status + chevron
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -347,24 +383,24 @@ class _MatchRow extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: isPending
-                        ? const Color(0xFFFEF3C7)
-                        : const Color(0xFFDCFCE7),
+                        ? Color(0xFFFEF3C7)
+                        : Color(0xFFDCFCE7),
                     borderRadius: BorderRadius.circular(5),
                   ),
                   child: Text(
                     isPending ? 'Pending' : 'Confirmed',
                     style: TextStyle(
                       color: isPending
-                          ? const Color(0xFFD97706)
-                          : const Color(0xFF059669),
+                          ? Color(0xFFD97706)
+                          : Color(0xFF059669),
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                const Icon(Icons.chevron_right_rounded,
-                    size: 16, color: Color(0xFFD1D5DB)),
+                SizedBox(height: 6),
+                Icon(Icons.chevron_right_rounded,
+                    size: 16, color: _c.muted),
               ],
             ),
           ],
@@ -381,6 +417,7 @@ class _PayDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -388,17 +425,17 @@ class _PayDot extends StatelessWidget {
           width: 6,
           height: 6,
           decoration: BoxDecoration(
-            color: paid ? const Color(0xFF059669) : const Color(0xFFD1D5DB),
+            color: paid ? Color(0xFF059669) : _c.muted,
             shape: BoxShape.circle,
           ),
         ),
-        const SizedBox(width: 4),
+        SizedBox(width: 4),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 90),
+          constraints: BoxConstraints(maxWidth: 90),
           child: Text(
             label,
             style: TextStyle(
-              color: paid ? const Color(0xFF374151) : const Color(0xFF9CA3AF),
+              color: paid ? _c.text : _c.muted,
               fontSize: 10,
               fontWeight: paid ? FontWeight.w600 : FontWeight.w400,
             ),
@@ -429,30 +466,40 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
   String? _error;
 
   Future<void> _startMatch() async {
+    final messenger = ScaffoldMessenger.of(context);
     setState(() {
       _starting = true;
       _error = null;
     });
     try {
       final dio = ref.read(hostDioProvider);
-      final resp = await dio.post(
-        '/matchmaking/matches/${widget.match.matchId}/start',
-      );
+      final url = '/matchmaking/matches/${widget.match.matchId}/start';
+      debugPrint('[setupMatch] POST $url');
+      final resp = await dio.post(url);
+      debugPrint('[setupMatch] response ${resp.statusCode} ${resp.data}');
       final body = resp.data;
       final data = (body is Map) ? (body['data'] ?? body) : body;
       final linkedMatchId =
           (data is Map) ? data['linkedMatchId'] as String? : null;
+      final newStatus = (data is Map) ? data['status'] as String? : null;
       if (!mounted) return;
-      ref.invalidate(arenaMatchesProvider(widget.arenaId));
-      Navigator.pop(context, {'started': true, 'linkedMatchId': linkedMatchId});
-      ScaffoldMessenger.of(context).showSnackBar(
+      // Show snackbar via the messenger captured before pop so it survives
+      // the sheet's BuildContext being torn down.
+      messenger.showSnackBar(
         const SnackBar(
           content: Text('Match set up — see you on match day.'),
           backgroundColor: Color(0xFF059669),
         ),
       );
+      ref.invalidate(arenaMatchesProvider(widget.arenaId));
+      Navigator.pop(context, {
+        'started': true,
+        'status': newStatus,
+        'linkedMatchId': linkedMatchId,
+      });
     } catch (e) {
-      String msg = 'Could not start match. Try again.';
+      debugPrint('[setupMatch] ERROR $e');
+      String msg = 'Could not set up match. Try again.';
       final s = e.toString();
       final m = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(s);
       if (m != null) msg = m.group(1)!;
@@ -466,17 +513,17 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Mark Advance Received'),
+        title: Text('Mark Advance Received'),
         content: Text(
             'Confirm that $teamName has paid the advance offline (cash / UPI)?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm',
+            child: Text('Confirm',
                 style: TextStyle(color: Color(0xFFF43F5E))),
           ),
         ],
@@ -516,7 +563,7 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Cancel Match'),
+        title: Text('Cancel Match'),
         content: Text(
           'Cancel the match between ${widget.match.teamAName} and ${widget.match.teamBName}? '
           'Both teams will be notified.',
@@ -524,11 +571,11 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep'),
+            child: Text('Keep'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel Match',
+            child: Text('Cancel Match',
                 style: TextStyle(color: Color(0xFFDC2626))),
           ),
         ],
@@ -556,13 +603,14 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final match = widget.match;
     final remainingRupees = match.remainingFeePaise ~/ 100;
     final hasRemaining = remainingRupees > 0;
 
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF9FAFB),
+      decoration: BoxDecoration(
+        color: _c.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: EdgeInsets.fromLTRB(
@@ -577,12 +625,12 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
+                color: _c.border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
 
           // Header
           Row(
@@ -590,8 +638,8 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
               Expanded(
                 child: Text(
                   '${match.teamAName}  vs  ${match.teamBName}',
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
+                  style: TextStyle(
+                    color: _c.text,
                     fontSize: 17,
                     fontWeight: FontWeight.w800,
                   ),
@@ -601,8 +649,8 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: match.isReadyToPlay
-                      ? const Color(0xFFDCFCE7)
-                      : const Color(0xFFFEF3C7),
+                      ? Color(0xFFDCFCE7)
+                      : Color(0xFFFEF3C7),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -613,8 +661,8 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
                           : 'Advance Pending',
                   style: TextStyle(
                     color: match.isReadyToPlay
-                        ? const Color(0xFF059669)
-                        : const Color(0xFFD97706),
+                        ? Color(0xFF059669)
+                        : Color(0xFFD97706),
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
@@ -622,7 +670,7 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           Text(
             [
               match.format,
@@ -630,29 +678,29 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
               match.displaySlot,
               if (match.groundName.isNotEmpty) match.groundName,
             ].join('  ·  '),
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+            style: TextStyle(color: _c.muted, fontSize: 12),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
 
           // Remaining balance callout (confirmed matches)
           if (match.isConfirmed && hasRemaining) ...[
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFFBEB),
+                color: Color(0xFFFFFBEB),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFDE68A)),
+                border: Border.all(color: Color(0xFFFDE68A)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.account_balance_wallet_outlined,
+                  Icon(Icons.account_balance_wallet_outlined,
                       size: 18, color: Color(0xFFD97706)),
-                  const SizedBox(width: 10),
+                  SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Remaining Ground Fee',
                           style: TextStyle(
                             color: Color(0xFF92400E),
@@ -662,7 +710,7 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
                         ),
                         Text(
                           '₹$remainingRupees per team to collect at check-in',
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: Color(0xFFB45309),
                             fontSize: 11,
                           ),
@@ -673,7 +721,7 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
           ],
 
           // Team payment rows
@@ -684,7 +732,7 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
             showButton: !match.teamAConfirmed && !match.isConfirmed,
             onMarkPaid: () => _markPaid(match.teamALobbyId, match.teamAName, true),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           _TeamPayRow(
             teamName: match.teamBName,
             confirmed: match.teamBConfirmed,
@@ -694,13 +742,13 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
           ),
 
           if (_error != null) ...[
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             Text(_error!,
-                style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
+                style: TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
           ],
 
           if (match.isConfirmed) ...[
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
             GestureDetector(
               onTap: _starting ? null : _startMatch,
               child: Container(
@@ -708,22 +756,22 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
                   color: _starting
-                      ? const Color(0xFFF43F5E).withValues(alpha: 0.7)
-                      : const Color(0xFFF43F5E),
+                      ? Color(0xFFF43F5E).withValues(alpha: 0.7)
+                      : Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
                 child: _starting
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
                             strokeWidth: 1.5, color: Colors.white),
                       )
-                    : const Text(
+                    : Text(
                         'Setup Match',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: _c.surface,
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
@@ -731,17 +779,17 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
               ),
             ),
           ] else if (match.isSetUp) ...[
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
+                color: Color(0xFFF0FDF4),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
+                border: Border.all(color: Color(0xFFBBF7D0)),
               ),
               alignment: Alignment.center,
-              child: const Text(
+              child: Text(
                 'Match Setup Complete',
                 style: TextStyle(
                   color: Color(0xFF059669),
@@ -752,25 +800,25 @@ class _MatchDetailSheetState extends ConsumerState<MatchDetailSheet> {
             ),
           ],
 
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           GestureDetector(
             onTap: _cancelling ? null : _cancelMatch,
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 13),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
+                color: Color(0xFFFEF2F2),
                 borderRadius: BorderRadius.circular(10),
               ),
               alignment: Alignment.center,
               child: _cancelling
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
                           strokeWidth: 1.5, color: Color(0xFFDC2626)),
                     )
-                  : const Text(
+                  : Text(
                       'Cancel Match',
                       style: TextStyle(
                         color: Color(0xFFDC2626),
@@ -804,10 +852,11 @@ class _TeamPayRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _c.surface,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -818,17 +867,17 @@ class _TeamPayRow extends StatelessWidget {
                 : Icons.radio_button_unchecked_rounded,
             size: 18,
             color: confirmed
-                ? const Color(0xFF059669)
-                : const Color(0xFF9CA3AF),
+                ? Color(0xFF059669)
+                : _c.muted,
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10),
           Expanded(
             child: Text(
               teamName,
               style: TextStyle(
                 color: confirmed
-                    ? const Color(0xFF111827)
-                    : const Color(0xFF6B7280),
+                    ? _c.text
+                    : _c.muted,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -836,7 +885,7 @@ class _TeamPayRow extends StatelessWidget {
             ),
           ),
           if (confirmed)
-            const Text(
+            Text(
               'Advance Received',
               style: TextStyle(
                 color: Color(0xFF059669),
@@ -852,21 +901,21 @@ class _TeamPayRow extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: loading
-                      ? const Color(0xFFF43F5E).withValues(alpha: 0.6)
-                      : const Color(0xFFF43F5E),
+                      ? Color(0xFFF43F5E).withValues(alpha: 0.6)
+                      : Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: loading
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 12,
                         height: 12,
                         child: CircularProgressIndicator(
                             strokeWidth: 1.5, color: Colors.white),
                       )
-                    : const Text(
+                    : Text(
                         'Mark Received',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: _c.surface,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                         ),
@@ -874,10 +923,10 @@ class _TeamPayRow extends StatelessWidget {
               ),
             )
           else
-            const Text(
+            Text(
               'Pending',
               style: TextStyle(
-                color: Color(0xFF9CA3AF),
+                color: _c.muted,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
