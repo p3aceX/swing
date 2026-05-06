@@ -12,6 +12,7 @@ import '../../../core/theme/app_colors.dart';
 import '../domain/matchmaking_models.dart';
 import '../domain/matchmaking_models.dart' show MatchFormat;
 import 'matchmaking_providers.dart';
+import 'my_matchup_detail_sheet.dart';
 
 // ignore: avoid_print
 void _mmLog(String msg) => debugPrint('[MM:page] $msg');
@@ -2029,6 +2030,152 @@ class _DotSep extends StatelessWidget {
   }
 }
 
+class _DropdownField extends StatelessWidget {
+  const _DropdownField({
+    required this.label,
+    required this.value,
+    required this.placeholder,
+    required this.onTap,
+  });
+
+  final String label;
+  final String? value;
+  final String placeholder;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValue = value != null && value!.isNotEmpty;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    hasValue ? value! : placeholder,
+                    style: TextStyle(
+                      color: hasValue ? context.fg : context.fgSub,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(Icons.keyboard_arrow_down_rounded,
+                color: context.fgSub, size: 24),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TeamOptionRow extends StatelessWidget {
+  const _TeamOptionRow({
+    required this.team,
+    required this.selected,
+    required this.showDivider,
+    required this.onTap,
+  });
+
+  final MmTeam team;
+  final bool selected;
+  final bool showDivider;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            color: selected ? context.ctaBg : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: Row(
+              children: [
+                team.logoUrl != null && team.logoUrl!.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: Image.network(
+                          team.logoUrl!,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _TeamInitials(team.name),
+                        ),
+                      )
+                    : _TeamInitials(team.name),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        team.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: selected ? context.ctaFg : context.fg,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${team.memberCount} member${team.memberCount == 1 ? '' : 's'}',
+                        style: TextStyle(
+                          color: selected
+                              ? context.ctaFg.withValues(alpha: 0.75)
+                              : context.fgSub,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  Icon(Icons.check_rounded, color: context.ctaFg, size: 22),
+              ],
+            ),
+          ),
+        ),
+        if (showDivider && !selected)
+          Divider(
+            height: 1,
+            color: context.stroke.withValues(alpha: 0.14),
+            indent: 20,
+            endIndent: 20,
+          ),
+      ],
+    );
+  }
+}
+
 class _FlowRow extends StatelessWidget {
   const _FlowRow({
     required this.selected,
@@ -2048,16 +2195,15 @@ class _FlowRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = selected ? context.bg : context.fg;
-    final fgSub = selected ? context.bg.withValues(alpha: 0.7) : context.fgSub;
+    final fg = selected ? context.ctaFg : context.fg;
+    final fgSub =
+        selected ? context.ctaFg.withValues(alpha: 0.75) : context.fgSub;
 
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        color: selected ? context.fg : Colors.transparent,
+      child: Container(
+        color: selected ? context.ctaBg : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Row(
           children: [
@@ -2096,7 +2242,7 @@ class _FlowRow extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             if (selected)
-              Icon(Icons.check_rounded, color: context.warn, size: 20)
+              Icon(Icons.check_rounded, color: context.ctaFg, size: 20)
             else if (trailing != null)
               trailing!,
           ],
@@ -2672,16 +2818,14 @@ class _IdleFind extends ConsumerStatefulWidget {
 }
 
 class _IdleFindState extends ConsumerState<_IdleFind> {
-  // 0=team  1=format  2=ball  3=date  4=arena  5=slot
+  // 0=team+format+ball  1=date  2=arena  3=slot
   int _step = 0;
   int _maxStep = 0;
   int _customOvers = 20;
   MmGround? _selectedArena;
 
   static const _sectionLabels = [
-    'Select team',
-    'Choose format',
-    'Pick ball',
+    'Match details',
     'Choose date',
     'Pick arena',
     'Pick slots',
@@ -2692,8 +2836,8 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
     super.initState();
     // Restore to ground section if state was pre-filled (e.g. returning from search)
     if (widget.team != null) {
-      _step = 4;
-      _maxStep = 4;
+      _step = 2;
+      _maxStep = 2;
     }
   }
 
@@ -2723,13 +2867,20 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   }
 
   String _summaryFor(int i) => switch (i) {
-        0 => widget.team?.name ?? '—',
-        1 => widget.format == MatchFormat.custom
-            ? 'Custom over $_customOvers'
-            : widget.format.label,
-        2 => widget.ballType != null ? _ballTypeLabel(widget.ballType!) : '—',
-        3 => _dateLabel(widget.date),
-        4 => _selectedArena?.name ?? '—',
+        0 => () {
+            final t = widget.team?.name;
+            final f = widget.format == MatchFormat.custom
+                ? 'Custom $_customOvers ov'
+                : widget.format.label;
+            final b = widget.ballType != null
+                ? _ballTypeLabel(widget.ballType!)
+                : null;
+            if (t == null) return '—';
+            final parts = [t, f, if (b != null) b];
+            return parts.join(' · ');
+          }(),
+        1 => _dateLabel(widget.date),
+        2 => _selectedArena?.name ?? '—',
         _ => widget.picks.isEmpty
             ? 'No slots added'
             : '${widget.picks.length} slot${widget.picks.length > 1 ? "s" : ""}',
@@ -2771,12 +2922,10 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         !widget.loading;
     final isReview = _step >= _sectionLabels.length;
     final stepReady = switch (_step) {
-      0 => widget.team != null,
+      0 => widget.team != null && widget.ballType != null,
       1 => true,
-      2 => widget.ballType != null,
-      3 => true,
-      4 => _selectedArena != null,
-      5 => widget.picks.isNotEmpty,
+      2 => _selectedArena != null,
+      3 => widget.picks.isNotEmpty,
       _ => canEnter,
     };
 
@@ -2793,36 +2942,12 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   child: _buildFlowHeader(context),
                 ),
                 const SizedBox(height: 26),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 260),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
-                  layoutBuilder: (currentChild, previousChildren) => Stack(
-                    alignment: Alignment.topLeft,
-                    children: [
-                      ...previousChildren,
-                      if (currentChild != null) currentChild,
-                    ],
-                  ),
-                  transitionBuilder: (child, anim) {
-                    final slide = Tween<Offset>(
-                      begin: const Offset(0.06, 0),
-                      end: Offset.zero,
-                    ).animate(
-                      CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
-                    );
-                    return FadeTransition(
-                      opacity: anim,
-                      child: SlideTransition(position: slide, child: child),
-                    );
-                  },
-                  child: _step < _sectionLabels.length
-                      ? _buildStepShell(context, teamsAsync)
-                      : Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: _buildReviewPanel(context),
-                        ),
-                ),
+                _step < _sectionLabels.length
+                    ? _buildStepShell(context, teamsAsync)
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: _buildReviewPanel(context),
+                      ),
 
                 // ── Error ────────────────────────────────────────────
                 if (widget.error != null) ...[
@@ -2858,11 +2983,9 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
               20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
           child: Row(
             children: [
-              AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: _step > 0 ? 1 : 0.0,
-                child: GestureDetector(
-                  onTap: _step > 0 ? _back : null,
+              if (_step > 0)
+                GestureDetector(
+                  onTap: _back,
                   behavior: HitTestBehavior.opaque,
                   child: SizedBox(
                     width: 44,
@@ -2874,15 +2997,13 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                     ),
                   ),
                 ),
-              ),
               Expanded(
                 child: GestureDetector(
                   onTap: isReview
                       ? (canEnter ? widget.onEnter : null)
                       : (stepReady ? _advance : null),
                   behavior: HitTestBehavior.opaque,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                  child: Container(
                     height: 52,
                     decoration: BoxDecoration(
                       color: isReview
@@ -2957,49 +3078,23 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
           ),
         ),
         const SizedBox(height: 12),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 260),
-          transitionBuilder: (child, anim) {
-            final slide = Tween<Offset>(
-              begin: const Offset(0, 0.18),
-              end: Offset.zero,
-            ).animate(
-              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
-            );
-            return FadeTransition(
-              opacity: anim,
-              child: SlideTransition(position: slide, child: child),
-            );
-          },
-          child: Column(
-            key: ValueKey<int>(_step),
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isReview ? 'Review' : _sectionLabels[_step],
-                style: TextStyle(
-                  color: context.fg,
-                  fontSize: 40,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -1.6,
-                  height: 0.95,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TweenAnimationBuilder<double>(
-                tween: Tween(begin: 24, end: 64),
-                duration: const Duration(milliseconds: 360),
-                curve: Curves.easeOutCubic,
-                builder: (_, w, __) => Container(
-                  height: 4,
-                  width: w,
-                  decoration: BoxDecoration(
-                    color: context.accent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ],
+        Text(
+          isReview ? 'Review' : _sectionLabels[_step],
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 40,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -1.6,
+            height: 0.95,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 4,
+          width: 64,
+          decoration: BoxDecoration(
+            color: context.accent,
+            borderRadius: BorderRadius.circular(2),
           ),
         ),
         const SizedBox(height: 22),
@@ -3007,9 +3102,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
           children: [
             for (int i = 0; i < totalSteps; i++) ...[
               Expanded(
-                child: AnimatedContainer(
-                  duration: Duration(milliseconds: 320 + i * 40),
-                  curve: Curves.easeOutCubic,
+                child: Container(
                   height: 6,
                   decoration: BoxDecoration(
                     color: i < _step || isReview
@@ -3119,13 +3212,266 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   Widget _buildPicker(
       BuildContext context, int i, AsyncValue<List<MmTeam>> teamsAsync) {
     return switch (i) {
-      0 => _buildTeamPicker(context, teamsAsync),
-      1 => _buildFormatPicker(context),
-      2 => _buildBallPicker(context),
-      3 => _buildDatePicker(context),
-      4 => _buildArenaPicker(context),
+      0 => _buildTeamFormatPicker(context, teamsAsync),
+      1 => _buildDatePicker(context),
+      2 => _buildArenaPicker(context),
       _ => _buildSlotPicker(context),
     };
+  }
+
+  Widget _buildTeamFormatPicker(
+      BuildContext context, AsyncValue<List<MmTeam>> teamsAsync) {
+    return teamsAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        child: LinearProgressIndicator(minHeight: 1),
+      ),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Text(
+          'Could not load teams',
+          style: TextStyle(color: context.fgSub, fontSize: 13),
+        ),
+      ),
+      data: (teams) {
+        if (teams.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: Text(
+              'No teams yet. Create one first.',
+              style: TextStyle(color: context.fgSub, fontSize: 13),
+            ),
+          );
+        }
+        final formatLabel = widget.format == MatchFormat.custom
+            ? 'Custom · $_customOvers overs'
+            : widget.format.label;
+        return Column(
+          children: [
+            _DropdownField(
+              label: 'Choose Team',
+              value: widget.team?.name,
+              placeholder: 'Tap to select team',
+              onTap: () => _openTeamSheet(teams),
+            ),
+            Divider(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+            _DropdownField(
+              label: 'Choose Format',
+              value: formatLabel,
+              placeholder: 'Tap to select format',
+              onTap: _openFormatSheet,
+            ),
+            Divider(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+            _DropdownField(
+              label: 'Choose Ball Type',
+              value: widget.ballType != null
+                  ? _ballTypeLabel(widget.ballType!)
+                  : null,
+              placeholder: 'Tap to select ball type',
+              onTap: _openBallSheet,
+            ),
+            if (widget.format == MatchFormat.custom) ...[
+              Divider(
+                height: 1,
+                color: context.stroke.withValues(alpha: 0.18),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                child: Row(
+                  children: [
+                    Text(
+                      'Overs',
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    _OversButton(
+                      icon: Icons.remove,
+                      onTap: _customOvers > 1
+                          ? () => setState(() => _customOvers--)
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '$_customOvers',
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.6,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _OversButton(
+                      icon: Icons.add,
+                      onTap: _customOvers < 100
+                          ? () => setState(() => _customOvers++)
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  void _openTeamSheet(List<MmTeam> teams) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.bg,
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Text(
+                  'Choose Team',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              Container(
+                height: 1,
+                color: context.stroke.withValues(alpha: 0.18),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: teams.length,
+                  itemBuilder: (_, i) {
+                    final t = teams[i];
+                    final selected = widget.team?.id == t.id;
+                    return _TeamOptionRow(
+                      team: t,
+                      selected: selected,
+                      showDivider: i < teams.length - 1,
+                      onTap: () {
+                        widget.onTeam(t);
+                        Navigator.of(sheetCtx).pop();
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _openFormatSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.bg,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Text(
+                  'Choose Format',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              Container(
+                height: 1,
+                color: context.stroke.withValues(alpha: 0.18),
+              ),
+              for (int i = 0; i < MatchFormat.values.length; i++) ...[
+                Builder(builder: (_) {
+                  final f = MatchFormat.values[i];
+                  final selected = widget.format == f;
+                  return GestureDetector(
+                    onTap: () {
+                      widget.onFormat(f);
+                      Navigator.of(sheetCtx).pop();
+                    },
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      color: selected ? context.ctaBg : Colors.transparent,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  f.label,
+                                  style: TextStyle(
+                                    color: selected
+                                        ? context.ctaFg
+                                        : context.fg,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                if (_formatOversHint(f) != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _formatOversHint(f)!,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? context.ctaFg
+                                              .withValues(alpha: 0.75)
+                                          : context.fgSub,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (selected)
+                            Icon(Icons.check_rounded,
+                                color: context.ctaFg, size: 20),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                if (i < MatchFormat.values.length - 1)
+                  Divider(
+                    height: 1,
+                    color: context.stroke.withValues(alpha: 0.14),
+                  ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildArenaPicker(BuildContext context) {
@@ -3148,7 +3494,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: GestureDetector(
-          onTap: () => _jumpTo(4),
+          onTap: () => _jumpTo(2),
           behavior: HitTestBehavior.opaque,
           child: Text(
             'Pick an arena first →',
@@ -3166,175 +3512,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
       picks: widget.picks,
       onAddPick: widget.onAddPick,
       onRemovePick: widget.onRemovePick,
-      onChangeArena: () => _jumpTo(4),
-    );
-  }
-
-  Widget _buildTeamPicker(
-      BuildContext context, AsyncValue<List<MmTeam>> teamsAsync) {
-    return teamsAsync.when(
-      loading: () => const LinearProgressIndicator(minHeight: 1),
-      error: (_, __) => Text('Could not load teams',
-          style: TextStyle(color: context.fgSub, fontSize: 13)),
-      data: (teams) {
-        if (teams.isEmpty) {
-          return Text('No teams yet. Create one first.',
-              style: TextStyle(color: context.fgSub, fontSize: 13));
-        }
-        return Column(
-          children: [
-            for (int i = 0; i < teams.length; i++) ...[
-              _FlowRow(
-                selected: widget.team?.id == teams[i].id,
-                leading: teams[i].logoUrl != null && teams[i].logoUrl!.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: Image.network(
-                          teams[i].logoUrl!,
-                          width: 32,
-                          height: 32,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _TeamInitials(teams[i].name),
-                        ),
-                      )
-                    : _TeamInitials(teams[i].name),
-                title: teams[i].name,
-                subtitle: '${teams[i].memberCount} members',
-                trailing: widget.team?.id == teams[i].id
-                    ? Icon(Icons.check_rounded, color: context.accent, size: 18)
-                    : Icon(Icons.arrow_forward_rounded,
-                        color: context.fgSub, size: 16),
-                onTap: () {
-                  widget.onTeam(teams[i]);
-                  _advance();
-                },
-              ),
-              if (i < teams.length - 1)
-                Divider(
-                  height: 1,
-                  color: context.stroke.withValues(alpha: 0.18),
-                ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildFormatPicker(BuildContext context) {
-    const formats = MatchFormat.values;
-    return Column(
-      children: [
-        for (final f in formats)
-          ...[
-          _FlowRow(
-            selected: widget.format == f,
-            title: f.label,
-            subtitle: _formatOversHint(f) ?? 'Select a format',
-            trailing: widget.format == f
-                ? Icon(Icons.check_rounded, color: context.accent, size: 18)
-                : Icon(Icons.arrow_forward_rounded,
-                    color: context.fgSub, size: 16),
-            onTap: () {
-              widget.onFormat(f);
-              if (f != MatchFormat.custom) _advance();
-            },
-          ),
-          if (f != formats.last)
-            Divider(
-              height: 1,
-              color: context.stroke.withValues(alpha: 0.18),
-            ),
-          ],
-        if (widget.format == MatchFormat.custom) ...[
-          const SizedBox(height: 14),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Text(
-                  'OVERS',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                _OversButton(
-                    icon: Icons.remove,
-                    onTap: _customOvers > 1
-                        ? () => setState(() => _customOvers--)
-                        : null),
-                const SizedBox(width: 12),
-                Text(
-                  '$_customOvers',
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.6,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                _OversButton(
-                    icon: Icons.add,
-                    onTap: _customOvers < 100
-                        ? () => setState(() => _customOvers++)
-                        : null),
-                const Spacer(),
-                Text(
-                  'Tap continue',
-                  style: TextStyle(
-                    color: context.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildBallPicker(BuildContext context) {
-    const balls = ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'];
-    return Column(
-      children: [
-        for (final bt in balls)
-          ...[
-          _FlowRow(
-            selected: widget.ballType == bt,
-            leading: Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: _ballTypeColor(bt),
-                shape: BoxShape.circle,
-              ),
-            ),
-            title: _ballTypeLabel(bt),
-            subtitle: widget.ballType == bt ? 'Selected' : 'Tap to choose',
-            trailing: widget.ballType == bt
-                ? Icon(Icons.check_rounded,
-                    color: _ballTypeColor(bt), size: 18)
-                : Icon(Icons.arrow_forward_rounded,
-                    color: context.fgSub, size: 16),
-            onTap: () {
-              widget.onBallType(bt);
-              _advance();
-            },
-          ),
-          if (bt != balls.last)
-            Divider(
-              height: 1,
-              color: context.stroke.withValues(alpha: 0.18),
-            ),
-          ],
-      ],
+      onChangeArena: () => _jumpTo(2),
     );
   }
 
@@ -3590,12 +3768,12 @@ class _ArenaPickRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = selected ? context.bg : context.fg;
+    final fg = selected ? context.ctaFg : context.fg;
     final fgSub =
-        selected ? context.bg.withValues(alpha: 0.7) : context.fgSub;
+        selected ? context.ctaFg.withValues(alpha: 0.75) : context.fgSub;
     final hasMatch = matchReadyCount > 0;
     final accentBar = selected
-        ? context.warn
+        ? context.ctaFg
         : hasMatch
             ? context.match
             : Colors.transparent;
@@ -3603,14 +3781,11 @@ class _ArenaPickRow extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        color: selected ? context.fg : Colors.transparent,
+      child: Container(
+        color: selected ? context.ctaBg : Colors.transparent,
         child: Row(
           children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+            Container(
               width: 3,
               height: 70,
               color: accentBar,
@@ -3699,7 +3874,7 @@ class _ArenaPickRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             selected
-                ? Icon(Icons.check_rounded, color: context.warn, size: 22)
+                ? Icon(Icons.check_rounded, color: context.ctaFg, size: 22)
                 : Icon(Icons.arrow_forward_rounded,
                     color: context.fgSub, size: 18),
             const SizedBox(width: 18),
@@ -4064,28 +4239,25 @@ class _SlotPickRow extends StatelessWidget {
         ground.area.isNotEmpty ? _prettyLabel(ground.area) : 'Cricket ground';
     final price = slot.priceRupees > 0 ? '₹${slot.priceRupees}' : '';
 
-    final fg = picked ? context.bg : context.fg;
+    final fg = picked ? context.ctaFg : context.fg;
     final fgSub = picked
-        ? context.bg.withValues(alpha: 0.7)
+        ? context.ctaFg.withValues(alpha: 0.75)
         : context.fgSub;
 
     return GestureDetector(
       onTap: picked ? null : onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        color: picked ? context.fg : Colors.transparent,
+      child: Container(
+        color: picked ? context.ctaBg : Colors.transparent,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             // accent bar (cyan = match-ready, transparent otherwise)
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+            Container(
               width: 3,
               height: 70,
               color: picked
-                  ? context.warn
+                  ? context.ctaFg
                   : matchReady
                       ? context.match
                       : Colors.transparent,
@@ -4227,7 +4399,7 @@ class _SlotPickRow extends StatelessWidget {
             ),
             const SizedBox(width: 14),
             picked
-                ? Icon(Icons.check_rounded, color: context.warn, size: 22)
+                ? Icon(Icons.check_rounded, color: context.ctaFg, size: 22)
                 : Icon(Icons.add_rounded, color: context.fgSub, size: 20),
             const SizedBox(width: 18),
           ],
@@ -6321,6 +6493,7 @@ class _CountdownTimerState extends State<_CountdownTimer> {
 class _MyConfirmedMatch {
   const _MyConfirmedMatch({
     required this.matchId,
+    this.myLobbyId,
     required this.myTeamName,
     required this.opponentTeamName,
     required this.groundName,
@@ -6331,9 +6504,14 @@ class _MyConfirmedMatch {
     required this.daysFromNow,
     required this.format,
     required this.remainingFeePaise,
+    this.status = 'confirmed',
+    this.myTeamPaid = true,
+    this.opponentPaid = true,
+    this.confirmationFeePaise = 0,
   });
 
   final String matchId;
+  final String? myLobbyId;
   final String myTeamName;
   final String opponentTeamName;
   final String groundName;
@@ -6344,8 +6522,17 @@ class _MyConfirmedMatch {
   final int daysFromNow;
   final String format;
   final int remainingFeePaise;
+  final String status; // pending_payment | confirmed | setup | started
+  final bool myTeamPaid;
+  final bool opponentPaid;
+  final int confirmationFeePaise;
 
   int get remainingRupees => remainingFeePaise ~/ 100;
+  int get confirmationRupees => confirmationFeePaise ~/ 100;
+  bool get isPaymentPending => !myTeamPaid;
+  bool get isAwaitingOpponent => myTeamPaid && !opponentPaid;
+  bool get isFullyConfirmed =>
+      myTeamPaid && opponentPaid && status != 'pending_payment';
 
   String get dateLabel {
     if (daysFromNow == 0) return 'Today';
@@ -6374,6 +6561,7 @@ class _MyConfirmedMatch {
   factory _MyConfirmedMatch.fromJson(Map<String, dynamic> j) =>
       _MyConfirmedMatch(
         matchId: (j['matchId'] as String?) ?? '',
+        myLobbyId: j['myLobbyId'] as String?,
         myTeamName: (j['myTeamName'] as String?) ?? 'Your Team',
         opponentTeamName: (j['opponentTeamName'] as String?) ?? 'Opponent',
         groundName: (j['groundName'] as String?) ?? '',
@@ -6384,6 +6572,11 @@ class _MyConfirmedMatch {
         daysFromNow: (j['daysFromNow'] as num?)?.toInt() ?? 0,
         format: (j['format'] as String?) ?? '',
         remainingFeePaise: (j['remainingFeePaise'] as num?)?.toInt() ?? 0,
+        status: (j['status'] as String?) ?? 'confirmed',
+        myTeamPaid: (j['myTeamPaid'] as bool?) ?? true,
+        opponentPaid: (j['opponentPaid'] as bool?) ?? true,
+        confirmationFeePaise:
+            (j['confirmationFeePaise'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -6514,8 +6707,43 @@ class _MatchesTab extends ConsumerWidget {
   }
 }
 
-class _MatchCard extends StatelessWidget {
+class _MatchCard extends ConsumerWidget {
   const _MatchCard({required this.match});
+  final _MyConfirmedMatch match;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => MyMatchupDetailSheet(
+          matchId: match.matchId,
+          myLobbyId: match.myLobbyId,
+          opponentTeamName: match.opponentTeamName,
+          groundName: match.groundName,
+          arenaName: match.arenaName,
+          groundArea: match.groundArea,
+          dateLabel: match.dateLabel,
+          displaySlot: match.displaySlot,
+          format: match.format,
+          confirmationRupees: match.confirmationRupees,
+          remainingRupees: match.remainingRupees,
+          myTeamPaid: match.myTeamPaid,
+          opponentPaid: match.opponentPaid,
+          status: match.status,
+          onRefresh: () => ref.invalidate(_myMatchesProvider),
+        ),
+      ),
+      child: _MatchCardBody(match: match),
+    );
+  }
+}
+
+class _MatchCardBody extends StatelessWidget {
+  const _MatchCardBody({required this.match});
   final _MyConfirmedMatch match;
 
   @override
@@ -7090,12 +7318,10 @@ class _DateStrip extends StatelessWidget {
           return GestureDetector(
             onTap: () => onSelect(d),
             behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
+            child: Container(
               width: isToday ? 64 : 56,
               decoration: BoxDecoration(
-                color: isSel ? context.fg : Colors.transparent,
+                color: isSel ? context.ctaBg : Colors.transparent,
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -7108,7 +7334,7 @@ class _DateStrip extends StatelessWidget {
                             : DateFormat('EEE').format(d).toUpperCase(),
                     style: TextStyle(
                       color: isSel
-                          ? context.bg
+                          ? context.ctaFg
                           : isWeekend
                               ? context.fgSub.withValues(alpha: 0.85)
                               : context.fgSub,
@@ -7121,7 +7347,7 @@ class _DateStrip extends StatelessWidget {
                   Text(
                     '${d.day}',
                     style: TextStyle(
-                      color: isSel ? context.bg : context.fg,
+                      color: isSel ? context.ctaFg : context.fg,
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
                       height: 1,
@@ -7129,14 +7355,12 @@ class _DateStrip extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
+                  Container(
                     height: 3,
                     width: isSel ? 28 : 12,
                     decoration: BoxDecoration(
                       color: isSel
-                          ? context.match
+                          ? context.ctaFg
                           : context.stroke.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(999),
                     ),
