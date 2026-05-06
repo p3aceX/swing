@@ -3,6 +3,7 @@ import { Errors, AppError } from '../../lib/errors'
 import { ArenaService } from '../arenas/arena.service'
 import { NotificationService } from '../notifications/notification.service'
 import Razorpay from 'razorpay'
+import { areAgeGroupsCompatible } from './matchmaking.utils'
 
 const notificationService = new NotificationService()
 
@@ -223,7 +224,7 @@ export class MatchmakingService {
         const ages = await this.getTeamAgeGroupsMap(teamIds, tx)
         for (const c of candidateLobbies) {
           const age = c.teamId ? (ages.get(c.teamId) ?? null) : null
-          if ((callerAge ?? null) !== (age ?? null)) continue
+          if (!areAgeGroupsCompatible(callerAge ?? null, age ?? null)) continue
           for (const p of input.picks) {
             if (c.picks.some((cp: any) => cp.groundId === p.groundId && cp.slotTime === p.slotTime)) {
               matchedLobby = c
@@ -425,9 +426,7 @@ export class MatchmakingService {
         // Arena-owner lobbies are always visible
         if (l.arenaId != null || l.teamId == null) return true
         const lobbyAge = ages.get(l.teamId) ?? null
-        // Only filter by age group when both sides have an explicit group
-        if (callerAge == null || lobbyAge == null) return true
-        return callerAge === lobbyAge
+        return areAgeGroupsCompatible(callerAge ?? null, lobbyAge ?? null)
       })
       .map((l) => {
         const pick = l.picks[0]
