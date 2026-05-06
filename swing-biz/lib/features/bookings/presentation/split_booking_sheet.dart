@@ -1334,32 +1334,33 @@ class _BottomBar extends StatelessWidget {
             Row(
               children: [
                 if (showBack) ...[
-                  SizedBox(
-                    height: 52,
-                    child: OutlinedButton(
-                      onPressed: loading ? null : onBack,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: t.text,
-                        side: BorderSide(color: t.hair),
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 22),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.arrow_back_rounded, size: 18),
-                          SizedBox(width: 6),
-                          Text(
-                            'Back',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
+                  OutlinedButton(
+                    onPressed: loading ? null : onBack,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: t.text,
+                      side: BorderSide(color: t.hair),
+                      // Override AppTheme's Size.fromHeight(52) which has
+                      // infinite width — that breaks the Row layout. Fixed
+                      // height + intrinsic width instead.
+                      minimumSize: const Size(96, 52),
+                      maximumSize: const Size.fromHeight(52),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_back_rounded, size: 18),
+                        SizedBox(width: 6),
+                        Text(
+                          'Back',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 12),
