@@ -54,13 +54,10 @@ class PlayerMatch {
     this.playerBalls,
     this.playerWickets,
     this.playerCatches,
-    this.canScore = false,
-    this.scoringOwnerIds = const [],
     this.involvesPlayerTeam = false,
     this.ballType,
     this.tossWinner,
     this.tossDecision,
-    this.isMatchmaking = false,
     this.myRole,
   });
 
@@ -86,11 +83,6 @@ class PlayerMatch {
   final int? playerWickets;
   final int? playerCatches;
 
-  /// True when the current player has scoring rights for this match
-  /// (i.e. they created it or are a member of a participating team).
-  final bool canScore;
-  final List<String> scoringOwnerIds;
-
   /// True when the backend payload indicates this match involves the
   /// current player's team, not just the surrounding tournament schedule.
   final bool involvesPlayerTeam;
@@ -101,16 +93,30 @@ class PlayerMatch {
   final String? tossWinner;
   final String? tossDecision;
 
-  /// True when this match was created via the matchmaking flow.
-  /// Delete is controlled by the arena owner, not the player.
-  final bool isMatchmaking;
-
-  /// Role the current user holds: 'owner', 'manager', 'scorer', or null.
+  /// Role the current user holds. One of:
+  ///   'owner', 'manager', 'scorer',
+  ///   'captain-A' (captain of team A — bowling-gated for writes),
+  ///   'captain-B' (captain of team B — bowling-gated for writes),
+  ///   null.
   final String? myRole;
 
+  bool get _isCaptain => myRole == 'captain-A' || myRole == 'captain-B';
+
   bool get canDelete => myRole == 'owner';
-  bool get canManage => myRole == 'owner' || myRole == 'manager';
+  bool get canManage =>
+      myRole == 'owner' || myRole == 'manager' || _isCaptain;
   bool get isActiveScorer => myRole == 'scorer';
+
+  /// UI hint — server-side bowling guard (Phase 2) is authoritative.
+  bool canScoreNow({String? bowlingTeamId, String? teamAId, String? teamBId}) {
+    if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
+      return true;
+    }
+    if (bowlingTeamId == null) return false;
+    if (myRole == 'captain-A' && bowlingTeamId == teamAId) return true;
+    if (myRole == 'captain-B' && bowlingTeamId == teamBId) return true;
+    return false;
+  }
 }
 
 // ── Structured scorecard row types ────────────────────────────────────────────
@@ -191,8 +197,8 @@ class MatchCenter {
     this.teamBLogoUrl,
     this.teamAShortName,
     this.teamBShortName,
-    this.canScore = false,
-    this.scoringOwnerIds = const [],
+    this.myRole,
+    this.activeScorerId,
   });
 
   final String id;
@@ -225,8 +231,27 @@ class MatchCenter {
   final MatchCompetitiveSummary? competitive;
   final List<MatchInnings> innings;
   final List<MatchSquad> squads;
-  final bool canScore;
-  final List<String> scoringOwnerIds;
+  /// Role the current user holds on this match: 'owner', 'manager', 'scorer', or null.
+  final String? myRole;
+
+  /// Profile ID of the currently active scorer (set by assignScorer / auto-shift).
+  final String? activeScorerId;
+
+  bool get _isCaptain => myRole == 'captain-A' || myRole == 'captain-B';
+  bool get canManageCenter =>
+      myRole == 'owner' || myRole == 'manager' || _isCaptain;
+  bool get isActiveScorerCenter => myRole == 'scorer';
+
+  /// UI hint — server-side bowling guard is authoritative.
+  bool canScoreNowCenter({String? bowlingTeamId, String? teamAId, String? teamBId}) {
+    if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
+      return true;
+    }
+    if (bowlingTeamId == null) return false;
+    if (myRole == 'captain-A' && bowlingTeamId == teamAId) return true;
+    if (myRole == 'captain-B' && bowlingTeamId == teamBId) return true;
+    return false;
+  }
 }
 
 class MatchCompetitiveSummary {

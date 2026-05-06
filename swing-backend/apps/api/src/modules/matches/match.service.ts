@@ -496,6 +496,13 @@ export class MatchService {
     const required = options.access ?? 'SCORER'
     const role = await resolveMatchRole(player.id, matchId)
 
+    // Captain-A/B are treated as manager-equivalent for non-write management
+    // actions (XI, toss, edit). Phase 2 adds the write-time bowling guard for
+    // ball-event endpoints; until then, captains keep their score privilege
+    // through the SCORER branch below.
+    const isCaptain = role === 'captain-A' || role === 'captain-B'
+    const isManagerOrAbove = role === 'owner' || role === 'manager' || isCaptain
+
     if (required === 'OWNER') {
       if (role !== 'owner') {
         throw new AppError('INSUFFICIENT_ROLE', 'Only the match owner can perform this action', 403)
@@ -504,15 +511,16 @@ export class MatchService {
     }
 
     if (required === 'MANAGER') {
-      if (role !== 'owner' && role !== 'manager') {
+      if (!isManagerOrAbove) {
         throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager can perform this action', 403)
       }
       return match
     }
 
-    // SCORER — active scorer OR any manager/owner (manager can score in a pinch)
+    // SCORER — active scorer OR any manager-or-above (Phase 2 will further
+    // restrict captain-A/B writes by bowling team).
     const isActiveScorer = match.activeScorerId === player.id
-    if (!isActiveScorer && role !== 'owner' && role !== 'manager') {
+    if (!isActiveScorer && !isManagerOrAbove) {
       throw new AppError('NOT_SCORER', 'Only the active scorer or a manager can update this match', 403)
     }
 

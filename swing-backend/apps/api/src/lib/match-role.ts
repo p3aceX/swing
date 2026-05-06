@@ -1,11 +1,33 @@
 import { prisma } from '@swing/db'
 
-export type MatchRoleValue = 'owner' | 'manager' | 'scorer' | null
+/**
+ * Effective role of a caller on a match.
+ *
+ * - 'owner'      → full authority (delete, manage, score)
+ * - 'manager'    → manage XI/toss, score, assign Scorer (no delete)
+ * - 'scorer'     → score only (assigned by Owner / Manager)
+ * - 'captain-A'  → captain of team A; manage their team; **scoring gated by
+ *                  bowling team check at write time** (Phase 2)
+ * - 'captain-B'  → captain of team B; same as above for team B
+ * - null         → no authority
+ *
+ * Captain-A/B exists so the write-time guard can decide whether the caller is
+ * the currently-bowling team's captain. For *management* checks (XI / toss /
+ * editing the match), captain-A/B are treated as manager-equivalent — see
+ * `authorizeMutation` in match.service.ts.
+ */
+export type MatchRoleValue =
+  | 'owner'
+  | 'manager'
+  | 'scorer'
+  | 'captain-A'
+  | 'captain-B'
+  | null
 
 /**
  * Resolves the highest role a profile holds on a match.
  *
- * Priority: OWNER > MANAGER > SCORER > null
+ * Priority: OWNER > MANAGER > SCORER > captain-A/B > null
  *
  * Falls back to legacy scorerId / teamACaptainId / teamBCaptainId for matches
  * that predate the MatchRole table (Phase 5 backfill will eliminate this path).
@@ -42,14 +64,11 @@ export async function resolveMatchRole(
   // Legacy fallback — matches without MatchRole rows yet
   if (match.scorerId === profileId) return 'owner'
 
-  // For non-tournament matches, captains are managers
+  // For non-tournament matches, captains map to captain-A/B so the write-time
+  // bowling guard (Phase 2) can decide whether they're allowed to score.
   if (!match.tournamentId) {
-    if (
-      match.teamACaptainId === profileId ||
-      match.teamBCaptainId === profileId
-    ) {
-      return 'manager'
-    }
+    if (match.teamACaptainId === profileId) return 'captain-A'
+    if (match.teamBCaptainId === profileId) return 'captain-B'
   }
 
   return null
@@ -114,13 +133,15 @@ export async function resolveMatchRoleBatch(
       result.set(matchId, 'owner')
       continue
     }
-    if (
-      !match?.tournamentId &&
-      (match?.teamACaptainId === profileId ||
-        match?.teamBCaptainId === profileId)
-    ) {
-      result.set(matchId, 'manager')
-      continue
+    if (!match?.tournamentId) {
+      if (match?.teamACaptainId === profileId) {
+        result.set(matchId, 'captain-A')
+        continue
+      }
+      if (match?.teamBCaptainId === profileId) {
+        result.set(matchId, 'captain-B')
+        continue
+      }
     }
 
     result.set(matchId, null)

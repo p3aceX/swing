@@ -54,10 +54,7 @@ class PlayerMatch {
     this.playerBalls,
     this.playerWickets,
     this.playerCatches,
-    this.canScore = false,
-    this.scoringOwnerIds = const [],
     this.involvesPlayerTeam = false,
-    this.isMatchmaking = false,
     this.myRole,
     this.ballType,
     this.tossWinner,
@@ -86,25 +83,46 @@ class PlayerMatch {
   final int? playerWickets;
   final int? playerCatches;
 
-  /// True when the current player has scoring rights for this match
-  /// (i.e. they created it or are a member of a participating team).
-  final bool canScore;
-  final List<String> scoringOwnerIds;
-
   /// True when the backend payload indicates this match involves the
   /// current player's team, not just the surrounding tournament schedule.
   final bool involvesPlayerTeam;
 
-  /// True when this match was created via the matchmaking flow.
-  /// Delete is controlled by the arena owner, not the player.
-  final bool isMatchmaking;
-
-  /// Role the current user holds on this match: 'owner', 'manager', 'scorer', or null.
+  /// Role the current user holds on this match. One of:
+  ///   'owner'      — full authority
+  ///   'manager'    — manage XI/toss, score, assign Scorer
+  ///   'scorer'     — score only (assigned)
+  ///   'captain-A'  — captain of team A (write-time bowling guard applies)
+  ///   'captain-B'  — captain of team B (write-time bowling guard applies)
+  ///   null         — read-only
   final String? myRole;
 
+  bool get _isCaptain => myRole == 'captain-A' || myRole == 'captain-B';
+
+  /// Only the match owner can delete a match. Captains cannot.
   bool get canDelete => myRole == 'owner';
-  bool get canManage => myRole == 'owner' || myRole == 'manager';
+
+  /// Manage XI / toss / edit. Owner, Manager, and either captain may.
+  bool get canManage =>
+      myRole == 'owner' || myRole == 'manager' || _isCaptain;
+
+  /// True when this user is the assigned active scorer.
   bool get isActiveScorer => myRole == 'scorer';
+
+  /// Static "could potentially score" check for UI hints. The authoritative
+  /// per-ball check is server-side (Phase 2 bowling guard) — do not rely on
+  /// this for security decisions, only for whether to show the score button.
+  ///
+  /// `bowlingTeamId` should be the live innings's bowling team id, or null
+  /// before toss is taken.
+  bool canScoreNow({String? bowlingTeamId, String? teamAId, String? teamBId}) {
+    if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
+      return true;
+    }
+    if (bowlingTeamId == null) return false; // pre-toss: nobody can score
+    if (myRole == 'captain-A' && bowlingTeamId == teamAId) return true;
+    if (myRole == 'captain-B' && bowlingTeamId == teamBId) return true;
+    return false;
+  }
 
   /// e.g. 'LEATHER' or 'TENNIS'
   final String? ballType;
@@ -144,13 +162,10 @@ class PlayerMatch {
       playerBalls: playerBalls,
       playerWickets: playerWickets,
       playerCatches: playerCatches,
-      canScore: canScore,
-      scoringOwnerIds: scoringOwnerIds,
       involvesPlayerTeam: involvesPlayerTeam,
       ballType: ballType,
       tossWinner: tossWinner ?? this.tossWinner,
       tossDecision: tossDecision ?? this.tossDecision,
-      isMatchmaking: isMatchmaking,
       myRole: myRole,
     );
   }
@@ -234,8 +249,7 @@ class MatchCenter {
     this.teamBLogoUrl,
     this.teamAShortName,
     this.teamBShortName,
-    this.canScore = false,
-    this.scoringOwnerIds = const [],
+    this.myRole,
   });
 
   final String id;
@@ -268,8 +282,10 @@ class MatchCenter {
   final MatchCompetitiveSummary? competitive;
   final List<MatchInnings> innings;
   final List<MatchSquad> squads;
-  final bool canScore;
-  final List<String> scoringOwnerIds;
+
+  final String? myRole;
+  bool get canManage => myRole == 'owner' || myRole == 'manager';
+  bool get isActiveScorer => myRole == 'scorer';
 }
 
 class MatchCompetitiveSummary {
