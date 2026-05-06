@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -317,25 +319,44 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
       _loading = true;
       _error = null;
     });
+    final url = '/bookings/arena/${_arena!.id}/split';
+    final payload = {
+      'unitId': _slot!.unitId,
+      'date': DateFormat('yyyy-MM-dd').format(_date),
+      'slotTime': _slot!.startTime,
+      'format': _format,
+      if (_ballType != null) 'ballType': _ballType,
+      'teamId': _team!.id,
+      'teamName': _team!.name,
+    };
+    debugPrint('[matchupRequest] POST $url payload=$payload');
     try {
       final dio = ref.read(hostDioProvider);
-      final payload = {
-        'unitId': _slot!.unitId,
-        'date': DateFormat('yyyy-MM-dd').format(_date),
-        'slotTime': _slot!.startTime,
-        'format': _format,
-        if (_ballType != null) 'ballType': _ballType,
-        'teamId': _team!.id,
-        'teamName': _team!.name,
-      };
-      await dio.post(
-        '/bookings/arena/${_arena!.id}/split',
-        data: payload,
-      );
+      final resp = await dio.post(url, data: payload);
+      debugPrint('[matchupRequest] ✓ ${resp.statusCode} ${resp.data}');
       if (mounted) Navigator.pop(context, true);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[matchupRequest] ✗ $e');
+      String msg = 'Something went wrong. Please try again.';
+      if (e is DioException) {
+        debugPrint('[matchupRequest] status=${e.response?.statusCode} body=${e.response?.data}');
+        final data = e.response?.data;
+        if (data is Map) {
+          // backend wraps errors as { error: { code, message } } or { message }
+          final nested = data['error'];
+          if (nested is Map && nested['message'] is String) {
+            msg = nested['message'] as String;
+          } else if (data['message'] is String) {
+            msg = data['message'] as String;
+          }
+        }
+      } else {
+        // Fallback: try to dig a "message": "..." out of the toString.
+        final m = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(e.toString());
+        if (m != null) msg = m.group(1)!;
+      }
       setState(() {
-        _error = 'Something went wrong. Please try again.';
+        _error = msg;
         _loading = false;
       });
     }
