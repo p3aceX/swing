@@ -5,10 +5,41 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'arena_lobbies_section.dart';
 import 'arena_matches_section.dart';
 
-const _text = Color(0xFF111827);
-const _muted = Color(0xFF6B7280);
-const _faint = Color(0xFF9CA3AF);
-const _hair = Color(0xFFE5E7EB);
+class _C {
+  const _C({
+    required this.text,
+    required this.muted,
+    required this.faint,
+    required this.hair,
+    required this.surface,
+    required this.bg,
+    required this.accent,
+    required this.onAccent,
+  });
+  final Color text;
+  final Color muted;
+  final Color faint;
+  final Color hair;
+  final Color surface;
+  final Color bg;
+  final Color accent;
+  final Color onAccent;
+  factory _C.of(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    return _C(
+      text: s.onSurface,
+      muted: s.onSurface.withValues(alpha: 0.6),
+      faint: s.onSurface.withValues(alpha: 0.4),
+      hair: s.outline,
+      surface: s.surfaceContainerHighest,
+      bg: s.surface,
+      accent: s.primary,
+      onAccent: s.onPrimary,
+    );
+  }
+}
+
+late _C _c;
 
 enum _Lane { requests, findTeam, matchups }
 
@@ -34,6 +65,7 @@ class _MatchUpsTabState extends ConsumerState<MatchUpsTab> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final lobbyAsyncs = [
       for (final a in widget.arenas) (a, ref.watch(arenaLobbiesProvider(a.id)))
     ];
@@ -86,7 +118,7 @@ class _MatchUpsTabState extends ConsumerState<MatchUpsTab> {
         Expanded(
           child: RefreshIndicator(
             color: Theme.of(context).colorScheme.primary,
-            backgroundColor: Colors.white,
+            backgroundColor: _c.bg,
             onRefresh: _refresh,
             child: switch (_lane) {
               _Lane.requests => _RequestsLane(
@@ -128,9 +160,10 @@ class _LaneTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _hair, width: 0.5)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: _c.hair, width: 0.5)),
       ),
       child: Row(
         children: [
@@ -172,6 +205,7 @@ class _LaneTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final accent = Theme.of(context).colorScheme.primary;
     return Expanded(
       child: GestureDetector(
@@ -194,7 +228,7 @@ class _LaneTab extends StatelessWidget {
                 TextSpan(
                   text: label,
                   style: TextStyle(
-                    color: active ? accent : _muted,
+                    color: active ? accent : _c.muted,
                     fontSize: 14,
                     fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                     letterSpacing: 0.1,
@@ -203,7 +237,7 @@ class _LaneTab extends StatelessWidget {
                 TextSpan(
                   text: '  $count',
                   style: TextStyle(
-                    color: active ? _muted : _faint,
+                    color: active ? _c.muted : _c.faint,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),
@@ -231,6 +265,7 @@ class _RequestsLane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     if (isLoading && items.isEmpty) return const _LoadingView();
     if (items.isEmpty) {
       return const _EmptyView(
@@ -312,6 +347,7 @@ class _FindTeamLane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     if (isLoading && items.isEmpty) return const _LoadingView();
     if (items.isEmpty) {
       return const _EmptyView(
@@ -352,6 +388,7 @@ class _MatchupsLane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     if (isLoading && items.isEmpty) return const _LoadingView();
     if (items.isEmpty) {
       return const _EmptyView(
@@ -360,22 +397,33 @@ class _MatchupsLane extends StatelessWidget {
       );
     }
 
-    final pendingPay = items
-        .where((e) => !e.$1.isReadyToPlay && !e.$1.isSetUp)
-        .toList();
+    // Four distinct stages so a Setup Match action visibly *moves* the row:
+    //   pending_payment → ADVANCE PENDING
+    //   confirmed       → READY FOR SETUP   (advance in, awaiting Setup Match)
+    //   setup + today   → TODAY
+    //   setup + future  → UPCOMING
+    final advancePending =
+        items.where((e) => e.$1.status == 'pending_payment').toList();
+    final readyForSetup =
+        items.where((e) => e.$1.isConfirmed).toList();
     final today = items
-        .where((e) => e.$1.isReadyToPlay && e.$1.daysFromNow == 0)
+        .where((e) => e.$1.isSetUp && e.$1.daysFromNow == 0)
         .toList();
     final upcoming = items
-        .where((e) => e.$1.isReadyToPlay && e.$1.daysFromNow != 0)
+        .where((e) => e.$1.isSetUp && e.$1.daysFromNow != 0)
         .toList();
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 80),
       children: [
-        if (pendingPay.isNotEmpty) ...[
+        if (advancePending.isNotEmpty) ...[
           const _SectionHeader(label: 'ADVANCE PENDING'),
-          for (final (m, arenaId) in pendingPay)
+          for (final (m, arenaId) in advancePending)
+            _MatchRow(match: m, arenaId: arenaId),
+        ],
+        if (readyForSetup.isNotEmpty) ...[
+          const _SectionHeader(label: 'READY FOR SETUP'),
+          for (final (m, arenaId) in readyForSetup)
             _MatchRow(match: m, arenaId: arenaId),
         ],
         if (today.isNotEmpty) ...[
@@ -401,12 +449,13 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
       child: Text(
         label,
-        style: const TextStyle(
-          color: _faint,
+        style: TextStyle(
+          color: _c.faint,
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 1.0,
@@ -435,6 +484,7 @@ class _LobbyRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final slot = lobby.confirmedSlot != null
         ? _formatTime(lobby.confirmedSlot!)
         : (lobby.picks.length > 1
@@ -445,8 +495,8 @@ class _LobbyRow extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: _hair, width: 0.5)),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: _c.hair, width: 0.5)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -458,15 +508,15 @@ class _LobbyRow extends StatelessWidget {
                 children: [
                   Text(
                     lobby.teamName,
-                    style: const TextStyle(
-                      color: _text,
+                    style: TextStyle(
+                      color: _c.text,
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 3),
+                  SizedBox(height: 3),
                   Text(
                     [
                       lobby.format,
@@ -474,8 +524,8 @@ class _LobbyRow extends StatelessWidget {
                       slot,
                       if (secondary != null) secondary!,
                     ].join(' · '),
-                    style: const TextStyle(
-                      color: _muted,
+                    style: TextStyle(
+                      color: _c.muted,
                       fontSize: 12.5,
                       fontWeight: FontWeight.w400,
                     ),
@@ -485,18 +535,18 @@ class _LobbyRow extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Text(
               actionLabel,
-              style: const TextStyle(
-                color: _text,
+              style: TextStyle(
+                color: _c.text,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right_rounded,
-                size: 18, color: _faint),
+            SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: _c.faint),
           ],
         ),
       ),
@@ -511,6 +561,7 @@ class _MatchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final paidCount =
         (match.teamAConfirmed ? 1 : 0) + (match.teamBConfirmed ? 1 : 0);
 
@@ -538,8 +589,8 @@ class _MatchRow extends StatelessWidget {
       ),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: _hair, width: 0.5)),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: _c.hair, width: 0.5)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -551,19 +602,19 @@ class _MatchRow extends StatelessWidget {
                 children: [
                   Text(
                     '${match.teamAName}  vs  ${match.teamBName}',
-                    style: const TextStyle(
-                      color: _text,
+                    style: TextStyle(
+                      color: _c.text,
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 3),
+                  SizedBox(height: 3),
                   Text(
                     meta,
-                    style: const TextStyle(
-                      color: _muted,
+                    style: TextStyle(
+                      color: _c.muted,
                       fontSize: 12.5,
                     ),
                     maxLines: 1,
@@ -572,21 +623,21 @@ class _MatchRow extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Text(
               match.isSetUp
                   ? 'Open'
                   : match.isConfirmed
                       ? 'Setup'
                       : 'Manage',
-              style: const TextStyle(
-                color: _text,
+              style: TextStyle(
+                color: _c.text,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right_rounded, size: 18, color: _faint),
+            SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded, size: 18, color: _c.faint),
           ],
         ),
       ),
@@ -618,24 +669,25 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
+      physics: AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 80),
       children: [
         Text(
           title,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: _text,
+          style: TextStyle(
+            color: _c.text,
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 6),
+        SizedBox(height: 6),
         Text(
           subtitle,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: _muted, fontSize: 13, height: 1.4),
+          style: TextStyle(color: _c.muted, fontSize: 13, height: 1.4),
         ),
       ],
     );
