@@ -497,11 +497,11 @@ export class MatchService {
     const role = await resolveMatchRole(player.id, matchId)
 
     // Captain-A/B are treated as manager-equivalent for non-write management
-    // actions (XI, toss, edit). Phase 2 adds the write-time bowling guard for
-    // ball-event endpoints; until then, captains keep their score privilege
-    // through the SCORER branch below.
+    // actions (XI, toss, edit). Score writes are additionally bowling-gated
+    // below — a captain whose team is currently batting cannot record balls.
     const isCaptain = role === 'captain-A' || role === 'captain-B'
-    const isManagerOrAbove = role === 'owner' || role === 'manager' || isCaptain
+    const isOwnerOrManager = role === 'owner' || role === 'manager'
+    const isManagerOrAbove = isOwnerOrManager || isCaptain
 
     if (required === 'OWNER') {
       if (role !== 'owner') {
@@ -517,11 +517,41 @@ export class MatchService {
       return match
     }
 
-    // SCORER — active scorer OR any manager-or-above (Phase 2 will further
-    // restrict captain-A/B writes by bowling team).
+    // SCORER — write authority hierarchy:
+    //   1. Explicit active scorer (assigned by Owner/Manager) — always.
+    //   2. Owner / Manager — always.
+    //   3. Captain — only when *their team is bowling* in the current innings.
     const isActiveScorer = match.activeScorerId === player.id
-    if (!isActiveScorer && !isManagerOrAbove) {
+    if (isActiveScorer || isOwnerOrManager) return match
+
+    if (!isCaptain) {
       throw new AppError('NOT_SCORER', 'Only the active scorer or a manager can update this match', 403)
+    }
+
+    // Captain path — find the live innings and check bowling team.
+    const liveInnings = await prisma.innings.findFirst({
+      where: { matchId, isCompleted: false },
+      orderBy: { inningsNumber: 'desc' },
+      select: { battingTeam: true, inningsNumber: true },
+    })
+    if (!liveInnings) {
+      // Pre-toss or all innings complete — captains cannot score.
+      throw new AppError(
+        'NOT_BOWLING_CAPTAIN',
+        'Wait for the toss / next innings to start scoring.',
+        403,
+      )
+    }
+    // Bowling team is the opposite of batting team. captain-A scores when
+    // team A is bowling, i.e. batting team is B; symmetric for captain-B.
+    const captainTeam: 'A' | 'B' = role === 'captain-A' ? 'A' : 'B'
+    const isBowling = liveInnings.battingTeam !== captainTeam
+    if (!isBowling) {
+      throw new AppError(
+        'NOT_BOWLING_CAPTAIN',
+        "Your team is batting — you can only score when your team is bowling.",
+        403,
+      )
     }
 
     return match
