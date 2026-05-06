@@ -3,6 +3,40 @@ import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+class _C {
+  const _C({
+    required this.text,
+    required this.muted,
+    required this.border,
+    required this.surface,
+    required this.bg,
+    required this.accent,
+    required this.onAccent,
+  });
+  final Color text;
+  final Color muted;
+  final Color border;
+  final Color surface;
+  final Color bg;
+  final Color accent;
+  final Color onAccent;
+  factory _C.of(BuildContext context) {
+    final s = Theme.of(context).colorScheme;
+    return _C(
+      text: s.onSurface,
+      muted: s.onSurface.withValues(alpha: 0.6),
+      border: s.outline,
+      surface: s.surfaceContainerHighest,
+      bg: s.surface,
+      accent: s.primary,
+      onAccent: s.onPrimary,
+    );
+  }
+}
+
+late _C _c;
+
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 String _ballTypeLabel(String bt) => switch (bt) {
@@ -29,7 +63,7 @@ String _fmtSlot(String t) {
 // ─── Model ───────────────────────────────────────────────────────────────────
 
 class ArenaLobbyPick {
-  const ArenaLobbyPick({
+  ArenaLobbyPick({
     required this.slotTime,
     required this.unitId,
     this.groundName,
@@ -62,7 +96,7 @@ class ArenaLobbyPick {
 }
 
 class ArenaLobby {
-  const ArenaLobby({
+  ArenaLobby({
     required this.lobbyId,
     required this.teamName,
     required this.ageGroup,
@@ -76,6 +110,7 @@ class ArenaLobby {
     this.accepted = false,
     this.confirmedSlot,
     this.source = 'player',
+    this.interestCount = 0,
   });
 
   final String lobbyId;
@@ -91,6 +126,10 @@ class ArenaLobby {
   final bool accepted;
   final String? confirmedSlot;
   final String source; // 'player' = inbound request, 'owner' = my listing
+  // Plan B / V2 — number of teams currently expressing interest in this
+  // lobby (status in {interested, locked}). Used by the Find Team Manage
+  // sheet to show "5 interested" instead of always "searching for a rival".
+  final int interestCount;
 
   bool get isOwnerOriginated => source == 'owner';
 
@@ -145,9 +184,89 @@ class ArenaLobby {
       accepted: (j['accepted'] as bool?) ?? false,
       confirmedSlot: j['confirmedSlot'] as String?,
       source: (j['source'] as String?) ?? 'player',
+      interestCount: (j['interestCount'] as num?)?.toInt() ?? 0,
     );
   }
 }
+
+// ─── Interest detail (B5 — Find Team Manage sheet) ───────────────────────────
+
+class ArenaLobbyInterest {
+  const ArenaLobbyInterest({
+    required this.interestId,
+    required this.teamId,
+    required this.teamName,
+    this.teamCity,
+    required this.status,
+    required this.expressedAt,
+    this.paidAt,
+  });
+  final String interestId;
+  final String teamId;
+  final String teamName;
+  final String? teamCity;
+  final String status; // interested | locked | won | lost | lock_expired | refunded
+  final DateTime expressedAt;
+  final DateTime? paidAt;
+
+  bool get isLive => status == 'interested' || status == 'locked';
+  bool get isLocked => status == 'locked';
+
+  factory ArenaLobbyInterest.fromJson(Map<String, dynamic> j) =>
+      ArenaLobbyInterest(
+        interestId: (j['interestId'] as String?) ?? '',
+        teamId: (j['teamId'] as String?) ?? '',
+        teamName: (j['teamName'] as String?) ?? 'Unknown',
+        teamCity: j['teamCity'] as String?,
+        status: (j['status'] as String?) ?? 'interested',
+        expressedAt: DateTime.tryParse(
+                (j['expressedAt'] as String?) ?? '') ??
+            DateTime.now(),
+        paidAt: j['paidAt'] is String
+            ? DateTime.tryParse(j['paidAt'] as String)
+            : null,
+      );
+}
+
+class ArenaLobbyInterestSnapshot {
+  const ArenaLobbyInterestSnapshot({
+    required this.lobbyId,
+    this.lockedByInterestId,
+    this.lockExpiresAt,
+    this.interests = const [],
+  });
+  final String lobbyId;
+  final String? lockedByInterestId;
+  final DateTime? lockExpiresAt;
+  final List<ArenaLobbyInterest> interests;
+
+  factory ArenaLobbyInterestSnapshot.fromJson(Map<String, dynamic> j) {
+    final list = (j['interests'] as List?) ?? [];
+    return ArenaLobbyInterestSnapshot(
+      lobbyId: (j['lobbyId'] as String?) ?? '',
+      lockedByInterestId: j['lockedByInterestId'] as String?,
+      lockExpiresAt: j['lockExpiresAt'] is String
+          ? DateTime.tryParse(j['lockExpiresAt'] as String)
+          : null,
+      interests: list
+          .whereType<Map<String, dynamic>>()
+          .map(ArenaLobbyInterest.fromJson)
+          .toList(),
+    );
+  }
+}
+
+final arenaLobbyInterestsProvider = FutureProvider.family
+    .autoDispose<ArenaLobbyInterestSnapshot, String>((ref, lobbyId) async {
+  final dio = ref.watch(hostDioProvider);
+  final resp = await dio.get('/matchmaking/lobbies/$lobbyId/interests');
+  final body = resp.data;
+  final data = (body is Map) ? (body['data'] ?? body) : body;
+  if (data is Map<String, dynamic>) {
+    return ArenaLobbyInterestSnapshot.fromJson(data);
+  }
+  return ArenaLobbyInterestSnapshot(lobbyId: lobbyId);
+});
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
@@ -172,7 +291,7 @@ final arenaLobbiesProvider =
 // ─── Section Widget ───────────────────────────────────────────────────────────
 
 class ArenaLobbiesSection extends ConsumerWidget {
-  const ArenaLobbiesSection({
+  ArenaLobbiesSection({
     super.key,
     required this.arenaId,
     required this.arenaName,
@@ -183,6 +302,7 @@ class ArenaLobbiesSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
     final async = ref.watch(arenaLobbiesProvider(arenaId));
 
     return async.when(
@@ -197,27 +317,27 @@ class ArenaLobbiesSection extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  const Text(
+                  Text(
                     'MATCHUP REQUESTS',
                     style: TextStyle(
-                      color: Color(0xFF6B7280),
+                      color: _c.muted,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.8,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF43F5E),
+                      color: Color(0xFFF43F5E),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       '${lobbies.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: _c.surface,
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                       ),
@@ -232,7 +352,7 @@ class ArenaLobbiesSection extends ConsumerWidget {
                   arenaName: arenaName,
                   onRefresh: () => ref.invalidate(arenaLobbiesProvider(arenaId)),
                 )),
-            const SizedBox(height: 4),
+            SizedBox(height: 4),
             Divider(height: 1, color: Colors.grey.shade200),
           ],
         );
@@ -258,6 +378,7 @@ class _LobbyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return lobby.accepted ? _buildAccepted(context) : _buildPending(context);
   }
 
@@ -272,9 +393,9 @@ class _LobbyCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF1F2),
+          color: Color(0xFFFFF1F2),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFFECDD3)),
+          border: Border.all(color: Color(0xFFFECDD3)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -284,57 +405,57 @@ class _LobbyCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF43F5E),
+                    color: Color(0xFFF43F5E),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text(
+                  child: Text(
                     'SLOT CONFIRMED',
-                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                    style: TextStyle(color: _c.surface, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.5),
                   ),
                 ),
-                const Spacer(),
+                Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFE4E6),
+                    color: Color(0xFFFFE4E6),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     lobby.format,
-                    style: const TextStyle(color: Color(0xFFF43F5E), fontSize: 10, fontWeight: FontWeight.w600),
+                    style: TextStyle(color: Color(0xFFF43F5E), fontSize: 10, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Text(
               lobby.teamName,
-              style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w700),
+              style: TextStyle(color: _c.text, fontSize: 13, fontWeight: FontWeight.w700),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 2),
+            SizedBox(height: 2),
             Text(
               '${lobby.dateLabel}  ·  $slot',
-              style: const TextStyle(color: Color(0xFFF43F5E), fontSize: 11, fontWeight: FontWeight.w600),
+              style: TextStyle(color: Color(0xFFF43F5E), fontSize: 11, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             GestureDetector(
               onTap: () => _showAssignSheet(context),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF43F5E),
+                  color: Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 alignment: Alignment.center,
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Assign Rival', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                    Text('Assign Rival', style: TextStyle(color: _c.surface, fontSize: 12, fontWeight: FontWeight.w700)),
                     SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 13),
+                    Icon(Icons.arrow_forward_rounded, color: _c.surface, size: 13),
                   ],
                 ),
               ),
@@ -356,9 +477,9 @@ class _LobbyCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _c.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: _c.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -368,51 +489,51 @@ class _LobbyCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     lobby.teamName,
-                    style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w700),
+                    style: TextStyle(color: _c.text, fontSize: 13, fontWeight: FontWeight.w700),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 4),
+                SizedBox(width: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(4)),
-                  child: Text(lobby.format, style: const TextStyle(color: Color(0xFF374151), fontSize: 10, fontWeight: FontWeight.w600)),
+                  decoration: BoxDecoration(color: _c.surface, borderRadius: BorderRadius.circular(4)),
+                  child: Text(lobby.format, style: TextStyle(color: _c.text, fontSize: 10, fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
-            const SizedBox(height: 3),
+            SizedBox(height: 3),
             Row(
               children: [
-                Text(lobby.dateLabel, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                Text(lobby.dateLabel, style: TextStyle(color: _c.muted, fontSize: 11)),
                 if (lobby.ballType != null) ...[
-                  const Text('  ·  ', style: TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                  Text('  ·  ', style: TextStyle(color: _c.muted, fontSize: 11)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                    decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(4)),
-                    child: Text(_ballTypeLabel(lobby.ballType!), style: const TextStyle(color: Color(0xFF374151), fontSize: 9, fontWeight: FontWeight.w600)),
+                    decoration: BoxDecoration(color: _c.surface, borderRadius: BorderRadius.circular(4)),
+                    child: Text(_ballTypeLabel(lobby.ballType!), style: TextStyle(color: _c.text, fontSize: 9, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ],
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             ...slots.map((p) => Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Row(children: [
                     Container(width: 5, height: 5, margin: const EdgeInsets.only(right: 6, top: 1),
-                        decoration: const BoxDecoration(color: Color(0xFFF43F5E), shape: BoxShape.circle)),
-                    Text(p.displaySlot, style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w600)),
+                        decoration: BoxDecoration(color: Color(0xFFF43F5E), shape: BoxShape.circle)),
+                    Text(p.displaySlot, style: TextStyle(color: _c.text, fontSize: 12, fontWeight: FontWeight.w600)),
                   ]),
                 )),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             GestureDetector(
               onTap: () => _showAcceptSheet(context),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                decoration: BoxDecoration(color: const Color(0xFFF43F5E), borderRadius: BorderRadius.circular(6)),
+                decoration: BoxDecoration(color: Color(0xFFF43F5E), borderRadius: BorderRadius.circular(6)),
                 alignment: Alignment.center,
-                child: const Text('Accept', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                child: Text('Accept', style: TextStyle(color: _c.surface, fontSize: 12, fontWeight: FontWeight.w700)),
               ),
             ),
           ],
@@ -451,7 +572,7 @@ class _LobbyCard extends StatelessWidget {
 // ─── Accept Sheet ─────────────────────────────────────────────────────────────
 
 class AcceptLobbySheet extends ConsumerStatefulWidget {
-  const AcceptLobbySheet({
+  AcceptLobbySheet({
     super.key,
     required this.lobby,
     required this.arenaId,
@@ -532,6 +653,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final lobby = widget.lobby;
     final slots = lobby.picks.isNotEmpty
         ? lobby.picks
@@ -539,8 +661,8 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
     final multiSlot = slots.length > 1;
 
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: _c.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       padding: EdgeInsets.fromLTRB(
@@ -560,50 +682,50 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           Text(
             lobby.teamName,
-            style: const TextStyle(
-              color: Color(0xFF111827),
+            style: TextStyle(
+              color: _c.text,
               fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 2),
-          const Text(
+          SizedBox(height: 2),
+          Text(
             'Team willing to play',
             style: TextStyle(color: Color(0xFFF43F5E), fontSize: 13, fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4),
           Text(
             multiSlot
                 ? 'They requested ${slots.length} time slots — pick one to lock in.'
                 : 'Confirm the slot to start searching for a rival team.',
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+            style: TextStyle(color: _c.muted, fontSize: 13),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           // Summary rows
           _DetailRow(label: 'Team', value: lobby.teamName),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           _DetailRow(label: 'Format', value: lobby.format),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           _DetailRow(label: 'Date', value: lobby.dateLabel),
           if (lobby.groundName.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             _DetailRow(label: 'Ground', value: lobby.groundName),
           ],
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           // Slot selector
-          const Text(
+          Text(
             'PICK A SLOT TO OFFER',
             style: TextStyle(
-              color: Color(0xFF9CA3AF),
+              color: _c.muted,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.8,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           ...slots.map((p) {
             final selected = _selectedSlot == p.slotTime;
             return GestureDetector(
@@ -613,13 +735,13 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                 decoration: BoxDecoration(
                   color: selected
-                      ? const Color(0xFFF43F5E).withValues(alpha: 0.07)
-                      : const Color(0xFFF9FAFB),
+                      ? Color(0xFFF43F5E).withValues(alpha: 0.07)
+                      : _c.surface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: selected
-                        ? const Color(0xFFF43F5E)
-                        : const Color(0xFFE5E7EB),
+                        ? Color(0xFFF43F5E)
+                        : _c.border,
                     width: selected ? 1.5 : 1,
                   ),
                 ),
@@ -632,8 +754,8 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: selected
-                              ? const Color(0xFFF43F5E)
-                              : const Color(0xFFD1D5DB),
+                              ? Color(0xFFF43F5E)
+                              : _c.muted,
                           width: 1.5,
                         ),
                       ),
@@ -642,7 +764,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                               child: Container(
                                 width: 8,
                                 height: 8,
-                                decoration: const BoxDecoration(
+                                decoration: BoxDecoration(
                                   color: Color(0xFFF43F5E),
                                   shape: BoxShape.circle,
                                 ),
@@ -650,29 +772,29 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                             )
                           : null,
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12),
                     Text(
                       p.displaySlot,
                       style: TextStyle(
                         color: selected
-                            ? const Color(0xFFF43F5E)
-                            : const Color(0xFF111827),
+                            ? Color(0xFFF43F5E)
+                            : _c.text,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     if (p.preferenceOrder == 1) ...[
-                      const Spacer(),
+                      Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF3F4F6),
+                          color: _c.surface,
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
+                        child: Text(
                           '1st choice',
                           style: TextStyle(
-                            color: Color(0xFF6B7280),
+                            color: _c.muted,
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
                           ),
@@ -685,10 +807,10 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
             );
           }),
           if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
+            SizedBox(height: 8),
+            Text(_error!, style: TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
           ],
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: GestureDetector(
@@ -697,21 +819,21 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
                   color: _loading
-                      ? const Color(0xFFF43F5E).withValues(alpha: 0.6)
-                      : const Color(0xFFF43F5E),
+                      ? Color(0xFFF43F5E).withValues(alpha: 0.6)
+                      : Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
                 child: _loading
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text(
+                    : Text(
                         'Confirm & Assign a Team',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: _c.surface,
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
@@ -728,7 +850,7 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
 // ─── Assign Team Sheet ────────────────────────────────────────────────────────
 
 class AssignTeamSheet extends ConsumerStatefulWidget {
-  const AssignTeamSheet({
+  AssignTeamSheet({
     super.key,
     required this.lobby,
     required this.onAssigned,
@@ -795,7 +917,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${_selected!.name} assigned — match is live!'),
-            backgroundColor: const Color(0xFFF43F5E),
+            backgroundColor: Color(0xFFF43F5E),
           ),
         );
       }
@@ -806,13 +928,14 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     final lobby = widget.lobby;
     final slot = lobby.confirmedSlot != null ? _fmtSlot(lobby.confirmedSlot!) : lobby.displaySlot;
 
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF9FAFB),
+      decoration: BoxDecoration(
+        color: _c.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: EdgeInsets.only(bottom: bottom),
@@ -820,7 +943,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // ── Handle ──────────────────────────────────────────────────
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Center(
             child: Container(
               width: 36, height: 4,
@@ -830,7 +953,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
 
           // ── Header ──────────────────────────────────────────────────
           Padding(
@@ -838,20 +961,20 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Assign Rival',
                   style: TextStyle(
-                    color: Color(0xFF111827),
+                    color: _c.text,
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
                   ),
                 ),
-                const SizedBox(height: 4),
+                SizedBox(height: 4),
                 Text(
                   '${lobby.teamName}  ·  ${lobby.format}  ·  $slot  ·  ${lobby.dateLabel}',
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
+                  style: TextStyle(
+                    color: _c.muted,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
@@ -859,41 +982,41 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
 
           // ── Search bar ──────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: _c.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.06),
                     blurRadius: 8,
-                    offset: const Offset(0, 2),
+                    offset: Offset(0, 2),
                   ),
                 ],
               ),
               child: Row(
                 children: [
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(left: 14, right: 8),
-                    child: Icon(Icons.search_rounded, color: Color(0xFF9CA3AF), size: 20),
+                    child: Icon(Icons.search_rounded, color: _c.muted, size: 20),
                   ),
                   Expanded(
                     child: TextField(
                       controller: _searchCtrl,
                       autofocus: true,
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
+                      style: TextStyle(
+                        color: _c.text,
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
                       ),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'Search by team name...',
-                        hintStyle: TextStyle(color: Color(0xFFD1D5DB), fontSize: 15),
+                        hintStyle: TextStyle(color: _c.muted, fontSize: 15),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
@@ -904,11 +1027,11 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                     ),
                   ),
                   if (_searching)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(right: 14),
                       child: SizedBox(
                         width: 14, height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF9CA3AF)),
+                        child: CircularProgressIndicator(strokeWidth: 1.5, color: _c.muted),
                       ),
                     )
                   else if (_searchCtrl.text.isNotEmpty)
@@ -917,21 +1040,21 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                         _searchCtrl.clear();
                         setState(() { _results = []; _selected = null; });
                       },
-                      child: const Padding(
+                      child: Padding(
                         padding: EdgeInsets.only(right: 14),
-                        child: Icon(Icons.close_rounded, color: Color(0xFFD1D5DB), size: 18),
+                        child: Icon(Icons.close_rounded, color: _c.muted, size: 18),
                       ),
                     ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
 
           // ── Results ─────────────────────────────────────────────────
           if (_results.isNotEmpty)
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 260),
+              constraints: BoxConstraints(maxHeight: 260),
               child: ListView.builder(
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -945,21 +1068,21 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                     onTap: () => setState(() => _selected = sel ? null : t),
                     behavior: HitTestBehavior.opaque,
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
+                      duration: Duration(milliseconds: 150),
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: sel ? const Color(0xFFFFF1F2) : Colors.white,
+                        color: sel ? Color(0xFFFFF1F2) : Colors.white,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: sel ? const Color(0xFFFECDD3) : Colors.transparent,
+                          color: sel ? Color(0xFFFECDD3) : Colors.transparent,
                           width: 1.5,
                         ),
                         boxShadow: sel ? [] : [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.04),
                             blurRadius: 4,
-                            offset: const Offset(0, 1),
+                            offset: Offset(0, 1),
                           ),
                         ],
                       ),
@@ -970,21 +1093,21 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                             width: 38, height: 38,
                             decoration: BoxDecoration(
                               color: sel
-                                  ? const Color(0xFFF43F5E).withValues(alpha: 0.12)
-                                  : const Color(0xFFF3F4F6),
+                                  ? Color(0xFFF43F5E).withValues(alpha: 0.12)
+                                  : _c.surface,
                               shape: BoxShape.circle,
                             ),
                             alignment: Alignment.center,
                             child: Text(
                               initials,
                               style: TextStyle(
-                                color: sel ? const Color(0xFFF43F5E) : const Color(0xFF6B7280),
+                                color: sel ? Color(0xFFF43F5E) : _c.muted,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -992,26 +1115,26 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
                                 Text(
                                   t.name,
                                   style: TextStyle(
-                                    color: sel ? const Color(0xFFF43F5E) : const Color(0xFF111827),
+                                    color: sel ? Color(0xFFF43F5E) : _c.text,
                                     fontSize: 14,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
                                 if (t.city != null || t.memberCount > 0) ...[
-                                  const SizedBox(height: 2),
+                                  SizedBox(height: 2),
                                   Text(
                                     [
                                       if (t.city != null) t.city!,
                                       if (t.memberCount > 0) '${t.memberCount} players',
                                     ].join('  ·  '),
-                                    style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
+                                    style: TextStyle(color: _c.muted, fontSize: 11),
                                   ),
                                 ],
                               ],
                             ),
                           ),
                           if (sel)
-                            const Icon(Icons.check_circle_rounded,
+                            Icon(Icons.check_circle_rounded,
                                 color: Color(0xFFF43F5E), size: 20),
                         ],
                       ),
@@ -1026,7 +1149,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
               child: Center(
                 child: Text(
                   'No teams found for "${_searchCtrl.text}"',
-                  style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                  style: TextStyle(color: _c.muted, fontSize: 13),
                 ),
               ),
             ),
@@ -1034,7 +1157,7 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
           if (_error != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-              child: Text(_error!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
+              child: Text(_error!, style: TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
             ),
 
           // ── CTA ─────────────────────────────────────────────────────
@@ -1043,24 +1166,24 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
             child: GestureDetector(
               onTap: (_selected == null || _loading) ? null : _confirm,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+                duration: Duration(milliseconds: 200),
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 15),
                 decoration: BoxDecoration(
                   color: _selected == null
-                      ? const Color(0xFFE5E7EB)
+                      ? _c.border
                       : _loading
-                          ? const Color(0xFFF43F5E).withValues(alpha: 0.7)
-                          : const Color(0xFFF43F5E),
+                          ? Color(0xFFF43F5E).withValues(alpha: 0.7)
+                          : Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
                 child: _loading
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : Text(
                         _selected != null ? 'Assign ${_selected!.name}' : 'Select a team to assign',
                         style: TextStyle(
-                          color: _selected == null ? const Color(0xFF9CA3AF) : Colors.white,
+                          color: _selected == null ? _c.muted : Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
@@ -1098,20 +1221,21 @@ class _DetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _c = _C.of(context);
     return Row(
       children: [
         SizedBox(
           width: 64,
           child: Text(
             label,
-            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+            style: TextStyle(color: _c.muted, fontSize: 12),
           ),
         ),
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              color: Color(0xFF111827),
+            style: TextStyle(
+              color: _c.text,
               fontSize: 13,
               fontWeight: FontWeight.w500,
             ),

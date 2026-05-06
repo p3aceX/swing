@@ -508,6 +508,21 @@ export class MatchmakingService {
       : []
     const startTimeByBookingId = new Map(bookingStartTimes.map((b) => [b.id, b.startTime]))
 
+    // Plan B / V2 — count of teams who have actively expressed interest
+    // (interested or locked) per lobby, so the Find Team tab can show
+    // "5 interested" vs "no responses yet".
+    const lobbyIds = playerLobbies.map((l) => l.id)
+    const interestCounts = lobbyIds.length
+      ? await prisma.matchmakingInterest.groupBy({
+          by: ['lobbyId'],
+          where: { lobbyId: { in: lobbyIds }, status: { in: ['interested', 'locked'] } },
+          _count: { _all: true },
+        })
+      : []
+    const interestCountByLobby = new Map(
+      interestCounts.map((row) => [row.lobbyId, row._count._all] as const),
+    )
+
     const out = playerLobbies
       .filter((l) => {
         const pick = l.picks[0]
@@ -532,6 +547,7 @@ export class MatchmakingService {
           accepted: !!splitBookingId,
           confirmedSlot: splitBookingId ? (startTimeByBookingId.get(splitBookingId) ?? null) : null,
           source: l.playerId ? 'player' : 'owner',
+          interestCount: interestCountByLobby.get(l.id) ?? 0,
           picks: l.picks.map((p: any) => ({
             slotTime: p.slotTime,
             unitId: p.groundId,
@@ -2381,6 +2397,64 @@ export class MatchmakingService {
   // ══════════════════════════════════════════════════════════════════════════
   // Plan B / V2 — first-to-pay matchmaking
   // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Returns the chronological list of interests on a lobby, gated to the
+   * lobby's arena owner. Used by the biz Find Team Manage sheet so the
+   * owner can see which teams responded (and pick one to confirm
+   * manually if needed).
+   */
+  async listLobbyInterestsAsArenaOwner(userId: string, lobbyId: string) {
+    const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+    if (!owner) throw Errors.forbidden()
+
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+      include: { picks: { include: { ground: true }, take: 1 } },
+    })
+    if (!lobby) throw Errors.notFound('Lobby')
+
+    // Authorise: lobby's arena (owner-originated) OR any pick's ground
+    // belongs to an arena owned by this caller.
+    const arenaIds = new Set<string>()
+    if (lobby.arenaId) arenaIds.add(lobby.arenaId)
+    for (const p of lobby.picks) {
+      if ((p as any).ground?.arenaId) arenaIds.add((p as any).ground.arenaId)
+    }
+    if (arenaIds.size === 0) throw Errors.forbidden()
+    const arenas = await prisma.arena.findMany({
+      where: { id: { in: Array.from(arenaIds) } },
+      select: { ownerId: true },
+    })
+    const ownsThisArena = arenas.some((a) => a.ownerId === owner.id)
+    if (!ownsThisArena) throw Errors.forbidden()
+
+    const interests = await prisma.matchmakingInterest.findMany({
+      where: { lobbyId },
+      include: {
+        team: { select: { id: true, name: true, city: true } },
+        player: { select: { id: true, userId: true } },
+      },
+      orderBy: { expressedAt: 'asc' },
+    })
+
+    return {
+      lobbyId,
+      lockedByInterestId: (lobby as any).lockedByInterestId ?? null,
+      lockExpiresAt: (lobby as any).lockExpiresAt
+        ? (lobby as any).lockExpiresAt.toISOString()
+        : null,
+      interests: interests.map((i) => ({
+        interestId: i.id,
+        teamId: i.teamId,
+        teamName: i.team?.name ?? 'Unknown',
+        teamCity: (i.team as any)?.city ?? null,
+        status: i.status,
+        expressedAt: i.expressedAt.toISOString(),
+        paidAt: i.paidAt ? i.paidAt.toISOString() : null,
+      })),
+    }
+  }
 
   /**
    * B1 — Player expresses interest in an open lobby.

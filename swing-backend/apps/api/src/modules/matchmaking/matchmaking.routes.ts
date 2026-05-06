@@ -199,6 +199,15 @@ export async function matchmakingRoutes(app: FastifyInstance) {
 
   // ── Plan B / V2 — first-to-pay matchmaking ───────────────────────────────
 
+  // B5 surface: arena owner views all interests on a lobby. Used by the biz
+  // Find Team Manage sheet.
+  app.get('/lobbies/:lobbyId/interests', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { lobbyId } = request.params as { lobbyId: string }
+    const data = await svc.listLobbyInterestsAsArenaOwner(user.userId, lobbyId)
+    return reply.send({ success: true, data })
+  })
+
   // B1: Player expresses interest in an open lobby. Idempotent per (lobby,team).
   app.post('/lobbies/:lobbyId/express-interest', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }

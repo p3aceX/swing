@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'arena_lobbies_section.dart';
 import 'arena_matches_section.dart';
+import 'manage_listing_sheet.dart';
 
 class _C {
   const _C({
@@ -366,14 +367,18 @@ class _FindTeamLane extends ConsumerWidget {
             lobby: lobby,
             arenaId: arenaId,
             arenaName: arenaName,
-            actionLabel: 'Assign',
-            secondary: 'open to players',
+            actionLabel: 'Manage',
+            secondary: lobby.interestCount > 0
+                ? '${lobby.interestCount} interested'
+                : 'searching for a rival…',
             onTap: () => showModalBottomSheet(
               context: context,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
-              builder: (_) =>
-                  AssignTeamSheet(lobby: lobby, onAssigned: onRefresh),
+              builder: (_) => ManageListingSheet(
+                lobby: lobby,
+                onChanged: onRefresh,
+              ),
             ),
           ),
       ],
