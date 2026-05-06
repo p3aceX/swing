@@ -783,14 +783,34 @@ export class MatchmakingService {
 
       await tx.matchmakingLobby.updateMany({
         where: { id: { in: [lobby.id, proxyLobby.id] } },
-        data: { status: 'matched', matchId: match.id },
+        data: {
+          status: 'matched',
+          matchId: match.id,
+          // Clear any active payment lock — owner override outranks the
+          // first-to-pay race.
+          lockedByInterestId: null,
+          lockExpiresAt: null,
+        },
+      })
+
+      // V2 cleanup: any teams that had expressed interest in this lobby lose
+      // out — the owner manually picked someone else. Mark them as 'lost' so
+      // their player UI updates and we can fire notifications below.
+      await tx.matchmakingInterest.updateMany({
+        where: {
+          lobbyId: lobby.id,
+          status: { in: ['interested', 'locked'] },
+        },
+        data: { status: 'lost' },
       })
 
       return { match, proxyLobby }
     })
 
-    // Notify both team captains
+    // Notify both team captains + everyone who lost out due to the override.
     await this.notifyMatchFound(result.match.id).catch(() => undefined)
+    this.notifyLosersOfSlotTaken(lobby.id, '__owner_override__')
+        .catch(() => undefined)
 
     return { matchId: result.match.id, lobbyId: result.proxyLobby.id }
   }
@@ -878,17 +898,69 @@ export class MatchmakingService {
   }
 
   async leaveLobby(userId: string, lobbyId: string) {
-    const player = await this.getPlayerProfile(userId)
-    const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+      include: { picks: { include: { ground: true }, take: 1 } },
+    })
     if (!lobby) throw Errors.notFound('Lobby')
-    if (lobby.playerId !== player.id) throw Errors.forbidden()
     if (lobby.status !== 'searching') {
       throw new AppError('INVALID_STATE', 'Only searching lobbies can be left', 400)
     }
-    await prisma.matchmakingLobby.update({
-      where: { id: lobbyId },
-      data: { status: 'cancelled' },
+
+    // Authorisation: either the player who created the lobby OR the arena
+    // owner whose ground the lobby's pick is on (covers owner-originated
+    // listings where playerId is null).
+    let authorised = false
+    const player = await prisma.playerProfile.findUnique({ where: { userId } })
+    if (player && lobby.playerId === player.id) authorised = true
+
+    if (!authorised) {
+      const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+      if (owner) {
+        const arenaIds = new Set<string>()
+        if ((lobby as any).arenaId) arenaIds.add((lobby as any).arenaId)
+        for (const p of lobby.picks) {
+          if ((p as any).ground?.arenaId) arenaIds.add((p as any).ground.arenaId)
+        }
+        if (arenaIds.size > 0) {
+          const arenas = await prisma.arena.findMany({
+            where: { id: { in: Array.from(arenaIds) } },
+            select: { ownerId: true },
+          })
+          if (arenas.some((a) => a.ownerId === owner.id)) authorised = true
+        }
+      }
+    }
+    if (!authorised) throw Errors.forbidden()
+
+    await prisma.$transaction(async (tx) => {
+      // V2 — mark all live interests as lost so the players' UI reflects
+      // the cancellation. We don't refund here: lockAndPay only creates the
+      // Razorpay order, no money has been captured unless the player
+      // completed the Razorpay flow. If a verify-payment lands after this
+      // cancel, it'll see lobby.status='cancelled' and refuse to create the
+      // match — Razorpay refund is then handled by the webhook (out of scope
+      // for this commit; webhook implementer should detect orphaned captures).
+      await tx.matchmakingInterest.updateMany({
+        where: {
+          lobbyId,
+          status: { in: ['interested', 'locked'] },
+        },
+        data: { status: 'lost' },
+      })
+      await tx.matchmakingLobby.update({
+        where: { id: lobbyId },
+        data: {
+          status: 'cancelled',
+          lockedByInterestId: null,
+          lockExpiresAt: null,
+        },
+      })
     })
+
+    // Notify out-of-band so the response is fast.
+    this.notifyLosersOfSlotTaken(lobbyId, '__listing_cancelled__')
+        .catch(() => undefined)
   }
 
   async expireStaleLobbies() {
@@ -2605,7 +2677,9 @@ export class MatchmakingService {
     return {
       interestId: result.interest.id,
       razorpayOrderId: order.id,
+      razorpayKey: process.env.RAZORPAY_KEY_ID ?? '',
       amountPaise,
+      currency: 'INR',
       groundFeePaise,
       lockExpiresAt: result.lockExpiresAt.toISOString(),
       lockSeconds: INTEREST_LOCK_SECONDS,
