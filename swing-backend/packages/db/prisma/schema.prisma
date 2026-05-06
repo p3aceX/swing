@@ -656,6 +656,7 @@ model PlayerProfile {
   queueEntries             MatchmakingQueue[]
   matchmakingRequests      MatchmakingRequest[]
   matchmakingLobbies       MatchmakingLobby[]
+  matchmakingInterests     MatchmakingInterest[]
   playerBadges             PlayerBadge[]
   playerMilestones         PlayerMilestone[]
   academyEnrollments       AcademyEnrollment[]
@@ -2231,6 +2232,7 @@ model Team {
   arena              Arena?           @relation(fields: [arenaId], references: [id])
   tournamentTeams    TournamentTeam[]
   matchmakingLobbies MatchmakingLobby[]
+  matchmakingInterests MatchmakingInterest[]
 
   @@index([city])
   @@index([powerScore])
@@ -2661,15 +2663,60 @@ model MatchmakingLobby {
   createdAt      DateTime @default(now())
   expiresAt      DateTime
 
-  team   Team?                @relation(fields: [teamId], references: [id])
-  player PlayerProfile?       @relation(fields: [playerId], references: [id])
-  arena  Arena?               @relation(fields: [arenaId], references: [id])
-  picks  MatchmakingLobbyPick[]
+  // First-to-pay lock (Plan B / V2). When an interested team taps "Pay" on
+  // this lobby, we acquire a 120s lock so only their Razorpay order is alive
+  // for the slot. Other expressors see LOCK_TAKEN.
+  lockedByInterestId String?   @unique
+  lockExpiresAt      DateTime?
+
+  team      Team?                  @relation(fields: [teamId], references: [id])
+  player    PlayerProfile?         @relation(fields: [playerId], references: [id])
+  arena     Arena?                 @relation(fields: [arenaId], references: [id])
+  picks     MatchmakingLobbyPick[]
+  interests MatchmakingInterest[]
 
   @@index([status, date, format])
   @@index([teamId, status])
   @@index([matchId])
   @@index([arenaId, status])
+  @@index([lockExpiresAt])
+}
+
+/// Express-of-interest in an open MatchmakingLobby.
+///
+/// Multiple teams may express interest in the same slot. When one of them
+/// successfully taps Pay, the parent Lobby is locked to their Razorpay order
+/// for 120 seconds. If they pay → status='won' and Match is created;
+/// other interests on the same lobby flip to 'lost'. If they don't pay →
+/// status='lock_expired', lobby returns to 'searching', others can retry.
+model MatchmakingInterest {
+  id          String   @id @default(cuid())
+  lobbyId     String
+  teamId      String
+  playerId    String  // captain who expressed
+  expressedAt DateTime @default(now())
+
+  // interested      → just expressed, no lock yet
+  // locked          → currently holding the 120s payment lock
+  // won             → paid in time → Match was created
+  // lost            → another team won the slot
+  // lock_expired    → had the lock but didn't pay in time
+  // refunded        → payment captured but later refunded (owner cancel)
+  status String @default("interested")
+
+  // Razorpay order/payment IDs when applicable.
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  paidAt            DateTime?
+
+  lobby  MatchmakingLobby @relation(fields: [lobbyId], references: [id], onDelete: Cascade)
+  team   Team             @relation(fields: [teamId], references: [id])
+  player PlayerProfile    @relation(fields: [playerId], references: [id])
+
+  @@unique([lobbyId, teamId])
+  @@index([lobbyId, status])
+  @@index([playerId, status])
+  @@index([razorpayOrderId])
 }
 
 model MatchmakingLobbyPick {
