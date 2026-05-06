@@ -8,15 +8,15 @@ const API = (
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ arenaId: string }> }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
-  const { arenaId } = await params;
+  const { slug } = await params;
   const date = req.nextUrl.searchParams.get("date") ?? "";
   const durationMins = req.nextUrl.searchParams.get("durationMins") ?? "60";
   const includeAvailability = req.nextUrl.searchParams.get("includeAvailability") ?? "true";
 
   try {
-    const url = `${API}/arenas/${encodeURIComponent(arenaId)}/booking-context?date=${encodeURIComponent(date)}&durationMins=${encodeURIComponent(durationMins)}&includeAvailability=${encodeURIComponent(includeAvailability)}`;
+    const url = `${API}/arenas/${encodeURIComponent(slug)}/booking-context?date=${encodeURIComponent(date)}&durationMins=${encodeURIComponent(durationMins)}&includeAvailability=${encodeURIComponent(includeAvailability)}`;
     const res = await fetch(url, { cache: "no-store" });
     const body = await res.json();
     return NextResponse.json(body, { status: res.status });
