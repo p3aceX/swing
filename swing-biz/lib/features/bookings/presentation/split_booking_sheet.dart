@@ -687,11 +687,15 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
               t: t,
               team: _teamResults[i],
               isFirst: i == 0,
-              onTap: () => setState(() {
-                _team = _teamResults[i];
-                _teamResults = [];
-                _searchCtrl.text = _teamResults[i].name;
-              }),
+              onTap: () {
+                final picked = _teamResults[i];
+                FocusScope.of(context).unfocus();
+                setState(() {
+                  _team = picked;
+                  _teamResults = [];
+                  _searchCtrl.text = picked.name;
+                });
+              },
             ),
         ],
         if (_team == null && _teamResults.isEmpty &&
@@ -1201,8 +1205,9 @@ class _TeamResultRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
         decoration: BoxDecoration(
           border: Border(
@@ -1212,7 +1217,9 @@ class _TeamResultRow extends StatelessWidget {
             bottom: BorderSide(color: t.hair, width: 0.5),
           ),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        // Generous vertical padding so the hit target is comfortable even
+        // when the keyboard is up.
+        padding: const EdgeInsets.symmetric(vertical: 14),
         child: Row(
           children: [
             Expanded(
