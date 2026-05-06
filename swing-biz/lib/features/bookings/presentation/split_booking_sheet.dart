@@ -138,11 +138,18 @@ const List<({String code, String label, String header, String hint})> _steps = [
         'players looking at this venue.',
   ),
   (
-    code: 'STYLE',
-    label: 'Style',
-    header: 'What kind of match?',
-    hint: 'Format decides the slot duration. Ball type filters who picks it '
-        'up — leather and tape ball players rarely overlap.',
+    code: 'FORMAT',
+    label: 'Format',
+    header: 'What format?',
+    hint: 'This decides how long the slot needs to be — T20 is ~4 hours, '
+        'ODI takes a full afternoon, Test runs all day.',
+  ),
+  (
+    code: 'BALL',
+    label: 'Ball',
+    header: 'Which ball?',
+    hint: 'Filters who picks it up — leather, tape, tennis, and rubber-ball '
+        'players rarely overlap, so being specific matters.',
   ),
   (
     code: 'WHEN',
@@ -185,7 +192,7 @@ class SplitBookingSheet extends ConsumerStatefulWidget {
 }
 
 class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
-  // 0 Where · 1 Style · 2 When · 3 Who · 4 Review
+  // 0 Where · 1 Format · 2 Ball · 3 When · 4 Who · 5 Review
   int _step = 0;
 
   // Step 0
@@ -342,10 +349,12 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
       case 0:
         return _arena != null;
       case 1:
-        return _ballType != null; // format always defaulted
+        return true; // format always defaulted
       case 2:
-        return _slot != null;
+        return _ballType != null;
       case 3:
+        return _slot != null;
+      case 4:
         return _team != null;
       default:
         return true;
@@ -368,16 +377,13 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
   }
 
   void _proceed() {
-    if (_step == 1 && _slots.isEmpty) {
-      // First entry into When — kick off slot fetch with current format.
-      _fetchSlots();
-    }
-    if (_step == 4) {
+    if (_step == 5) {
       _submit();
       return;
     }
     setState(() => _step++);
-    if (_step == 2) _fetchSlots();
+    // When entering "When" (step 3), kick off slot fetch with current format.
+    if (_step == 3) _fetchSlots();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -429,7 +435,7 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
         canProceed: _canProceed,
         loading: _loading,
         error: _error,
-        primaryLabel: _step == 4 ? 'Send Match-Up Request' : 'Continue',
+        primaryLabel: _step == 5 ? 'Send Match-Up Request' : 'Continue',
         onPrimary: _proceed,
       ),
     );
@@ -440,10 +446,12 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
       case 0:
         return _buildWhere(t);
       case 1:
-        return _buildStyle(t);
+        return _buildFormat(t);
       case 2:
-        return _buildWhen(t);
+        return _buildBall(t);
       case 3:
+        return _buildWhen(t);
+      case 4:
         return _buildWho(t);
       default:
         return _buildReview(t);
@@ -482,38 +490,61 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
     );
   }
 
-  // ── 1. Style — Format + Ball Type ─────────────────────────────────────────
+  // ── 1. Format — 2x2 grid ──────────────────────────────────────────────────
 
-  Widget _buildStyle(_Tokens t) {
+  Widget _buildFormat(_Tokens t) {
     return ListView(
-      key: const ValueKey('style'),
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      key: const ValueKey('format'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
       children: [
-        _SectionLabel(t: t, label: 'FORMAT'),
-        const SizedBox(height: 4),
-        for (final f in _formats) _SelectableRow(
+        _BoxGrid(
+          items: [
+            for (final f in _formats)
+              _BoxItem(
+                title: f,
+                subtitle: _formatDurationLabel(f),
+                selected: _format == f,
+                onTap: () {
+                  setState(() {
+                    _format = f;
+                    _slot = null;
+                    _slots = [];
+                  });
+                },
+              ),
+          ],
           t: t,
-          selected: _format == f,
-          title: f,
-          subtitle: _formatDurationLabel(f),
-          onTap: () {
-            setState(() {
-              _format = f;
-              _slot = null; // re-pick slot since duration changes
-              _slots = [];
-            });
-          },
         ),
-        const SizedBox(height: 22),
-        _SectionLabel(t: t, label: 'BALL TYPE'),
-        const SizedBox(height: 4),
-        for (final bt in const ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'])
-          _SelectableRow(
-            t: t,
-            selected: _ballType == bt,
-            title: _ballTypeLabel(bt),
-            onTap: () => setState(() => _ballType = bt),
-          ),
+      ],
+    );
+  }
+
+  // ── 2. Ball — 2x2 grid ────────────────────────────────────────────────────
+
+  Widget _buildBall(_Tokens t) {
+    const balls = ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'];
+    const ballHints = {
+      'LEATHER': 'Hard, club / league',
+      'TENNIS': 'Soft, casual',
+      'TAPE': 'Tennis + tape',
+      'RUBBER': 'Rubber compound',
+    };
+    return ListView(
+      key: const ValueKey('ball'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      children: [
+        _BoxGrid(
+          items: [
+            for (final bt in balls)
+              _BoxItem(
+                title: _ballTypeLabel(bt),
+                subtitle: ballHints[bt],
+                selected: _ballType == bt,
+                onTap: () => setState(() => _ballType = bt),
+              ),
+          ],
+          t: t,
+        ),
       ],
     );
   }
@@ -826,6 +857,111 @@ class _SectionLabel extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Box-grid selector for format / ball type ────────────────────────────────
+
+class _BoxItem {
+  const _BoxItem({
+    required this.title,
+    this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+}
+
+class _BoxGrid extends StatelessWidget {
+  const _BoxGrid({required this.items, required this.t});
+  final List<_BoxItem> items;
+  final _Tokens t;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < items.length; i += 2) {
+      final left = items[i];
+      final right = i + 1 < items.length ? items[i + 1] : null;
+      rows.add(Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          children: [
+            Expanded(child: _BoxTile(item: left, t: t)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: right != null
+                  ? _BoxTile(item: right, t: t)
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ));
+    }
+    return Column(children: rows);
+  }
+}
+
+class _BoxTile extends StatelessWidget {
+  const _BoxTile({required this.item, required this.t});
+  final _BoxItem item;
+  final _Tokens t;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = item.selected;
+    return InkWell(
+      onTap: item.onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+        decoration: BoxDecoration(
+          color: selected ? t.accent.withValues(alpha: 0.06) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? t.accent : t.hair,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    item.title,
+                    style: TextStyle(
+                      color: selected ? t.accent : t.text,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ),
+                if (selected)
+                  Icon(Icons.check_circle_rounded,
+                      color: t.accent, size: 18),
+              ],
+            ),
+            if (item.subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                item.subtitle!,
+                style: TextStyle(color: t.muted, fontSize: 12.5),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
         ),
       ),
     );
