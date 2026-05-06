@@ -1715,11 +1715,13 @@ export class MatchmakingService {
       orderBy: { createdAt: 'desc' },
     })
 
-    // Also find confirmed matches directly where player is lobbyA or lobbyB
+    // Find every active match where the player's team is on either side.
+    // Includes pending_payment so owner-assigned matches show up immediately
+    // (the player needs to see them to actually pay the advance), plus
+    // confirmed/setup/started so the post-payment lifecycle stays visible.
     const directMatches = await prisma.matchmakingMatch.findMany({
       where: {
-        status: 'confirmed',
-        bookingId: { not: null },
+        status: { in: ['pending_payment', 'confirmed', 'setup', 'started'] },
         OR: [
           { lobbyAId: { in: lobbies.map((l) => l.id) } },
           { lobbyBId: { in: lobbies.map((l) => l.id) } },
@@ -1764,8 +1766,13 @@ export class MatchmakingService {
       const today = new Date(n.getFullYear(), n.getMonth(), n.getDate())
       const matchDate = new Date(m.date)
       const daysFromNow = Math.round((matchDate.getTime() - today.getTime()) / 86400000)
+      // Per-side payment status so the UI can show "Pay ₹500" only when
+      // *this* team still owes the advance.
+      const myTeamPaid = isLobbyA ? m.teamAConfirmed : m.teamBConfirmed
+      const opponentPaid = isLobbyA ? m.teamBConfirmed : m.teamAConfirmed
       return {
         matchId: m.id,
+        myLobbyId,
         myTeamName: myLobby?.team?.name ?? 'Your Team',
         opponentTeamName: opponentLobby?.team?.name ?? 'Opponent',
         groundName: unit?.name ?? '',
@@ -1775,6 +1782,10 @@ export class MatchmakingService {
         date: this.toDateOnly(m.date),
         daysFromNow,
         format: m.format,
+        status: m.status,
+        myTeamPaid,
+        opponentPaid,
+        confirmationFeePaise: m.paymentAmountPerTeam,
         groundFeePaise: m.groundFeePaise,
         remainingFeePaise: m.remainingFeePaise,
       }
