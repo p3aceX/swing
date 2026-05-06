@@ -1,5 +1,18 @@
 import '../../teams/domain/team_models.dart';
 
+// ── Match format ──────────────────────────────────────────────────────────────
+
+enum MatchFormat {
+  t10('T10'),
+  t20('T20'),
+  odi('ODI'),
+  test('Test'),
+  custom('Custom Over');
+
+  const MatchFormat(this.label);
+  final String label;
+}
+
 // ── Team ──────────────────────────────────────────────────────────────────────
 
 class MmTeam {
@@ -375,5 +388,87 @@ class MmCreateLobbyResult {
         match: j['match'] != null
             ? MmMatchSummary.fromJson(j['match'] as Map<String, dynamic>)
             : null,
+      );
+}
+
+// ─── Plan B / V2 — first-to-pay models ──────────────────────────────────────
+
+/// Returned by `expressInterest`. Server creates an Interest row and the
+/// player can then call `lockAndPay` on its id.
+class MmInterest {
+  const MmInterest({
+    required this.interestId,
+    required this.lobbyId,
+    required this.teamId,
+    required this.status,
+    required this.expressedAt,
+  });
+  final String interestId;
+  final String lobbyId;
+  final String teamId;
+  final String status; // interested | locked | won | lost | lock_expired
+  final DateTime expressedAt;
+
+  factory MmInterest.fromJson(Map<String, dynamic> j) => MmInterest(
+        interestId: (j['interestId'] as String?) ?? '',
+        lobbyId: (j['lobbyId'] as String?) ?? '',
+        teamId: (j['teamId'] as String?) ?? '',
+        status: (j['status'] as String?) ?? 'interested',
+        expressedAt: DateTime.tryParse(
+                (j['expressedAt'] as String?) ?? '') ??
+            DateTime.now(),
+      );
+}
+
+/// Returned by `lockAndPay`. The interest now holds the lobby's 120s payment
+/// lock; player must complete Razorpay flow before `lockExpiresAt`.
+class MmInterestLock {
+  const MmInterestLock({
+    required this.interestId,
+    required this.razorpayOrderId,
+    required this.amountPaise,
+    required this.groundFeePaise,
+    required this.lockExpiresAt,
+    required this.lockSeconds,
+  });
+  final String interestId;
+  final String razorpayOrderId;
+  final int amountPaise;
+  final int groundFeePaise;
+  final DateTime lockExpiresAt;
+  final int lockSeconds;
+
+  factory MmInterestLock.fromJson(Map<String, dynamic> j) => MmInterestLock(
+        interestId: (j['interestId'] as String?) ?? '',
+        razorpayOrderId: (j['razorpayOrderId'] as String?) ?? '',
+        amountPaise: (j['amountPaise'] as num?)?.toInt() ?? 0,
+        groundFeePaise: (j['groundFeePaise'] as num?)?.toInt() ?? 0,
+        lockExpiresAt: DateTime.tryParse(
+                (j['lockExpiresAt'] as String?) ?? '') ??
+            DateTime.now().add(const Duration(seconds: 120)),
+        lockSeconds: (j['lockSeconds'] as num?)?.toInt() ?? 120,
+      );
+}
+
+/// Returned by `verifyInterestPayment` after a successful Razorpay capture.
+/// `matchId` is set when this team won the slot; null if SLOT_TAKEN raced.
+class MmInterestVerifyResult {
+  const MmInterestVerifyResult({
+    required this.interestId,
+    required this.lobbyId,
+    required this.status,
+    this.matchId,
+  });
+  final String interestId;
+  final String lobbyId;
+  final String status; // won | lost
+  final String? matchId;
+
+  factory MmInterestVerifyResult.fromJson(Map<String, dynamic> j) =>
+      MmInterestVerifyResult(
+        interestId: (j['interestId'] as String?) ?? '',
+        lobbyId: (j['lobbyId'] as String?) ?? '',
+        status: (j['status'] as String?) ?? 'won',
+        matchId: j['matchId'] as String?,
       );
 }

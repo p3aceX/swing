@@ -10,7 +10,7 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../domain/matchmaking_models.dart';
-import 'matchmaking_page.dart' show MatchFormat;
+import '../domain/matchmaking_models.dart' show MatchFormat;
 import 'matchmaking_providers.dart';
 
 // ignore: avoid_print
@@ -20,10 +20,10 @@ void _mmLog(String msg) => debugPrint('[MM:page] $msg');
 
 Color _ballTypeColor(String bt) => switch (bt) {
       'LEATHER' => const Color(0xFFB91C1C),
-      'TENNIS'  => const Color(0xFF65A30D),
-      'TAPE'    => const Color(0xFF374151),
-      'RUBBER'  => const Color(0xFFEA580C),
-      _         => const Color(0xFF6B7280),
+      'TENNIS' => const Color(0xFF65A30D),
+      'TAPE' => const Color(0xFF374151),
+      'RUBBER' => const Color(0xFFEA580C),
+      _ => const Color(0xFF6B7280),
     };
 
 String _ballTypeLabel(String bt) => switch (bt) {
@@ -94,7 +94,16 @@ class _ChallengeTeam {
 
 // ── Lobby state ───────────────────────────────────────────────────────────────
 
-enum _LobbyState { idle, entering, searching, matched, confirming, waitingOpponent, confirmed }
+enum _LobbyState {
+  idle,
+  entering,
+  scanning,
+  searching,
+  matched,
+  confirming,
+  waitingOpponent,
+  confirmed
+}
 
 // ── Tab page ──────────────────────────────────────────────────────────────────
 
@@ -103,12 +112,11 @@ class MatchmakingTabPage extends ConsumerStatefulWidget {
   final VoidCallback? onFindMatch;
 
   @override
-  ConsumerState<MatchmakingTabPage> createState() =>
-      _MatchmakingTabPageState();
+  ConsumerState<MatchmakingTabPage> createState() => _MatchmakingTabPageState();
 }
 
 class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
-  int _tab = 1; // 0=Open  1=Find  2=Challenge  3=Matches
+  int _tab = 0; // 0=Discover  1=Create  2=My MatchUps
 
   // Find tab state
   _LobbyState _lobbyState = _LobbyState.idle;
@@ -123,16 +131,51 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   MmMatchSummary? _matchSummary;
   String? _error;
   Timer? _pollTimer;
+  Timer? _scanTimer;
+  Timer? _scanPulseTimer;
   List<MmLobbyStatusPick> _restoredPicks = []; // from active lobby on restart
   bool _lobbyRestored = false; // guard against double-restore
+  int _scanStep = 0;
+  String? _scanStatus;
 
   // Payment
   late final Razorpay _razorpay;
+
+  // Plan B / V2 — first-to-pay state. When set, _onPaymentSuccess routes
+  // through verifyInterestPayment instead of the legacy confirmMatch path.
+  String? _activeInterestId;
+  String? _activeInterestLobbyId;
+  String? _activeInterestRazorpayOrderId;
 
   bool get _isActive =>
       _lobbyState != _LobbyState.idle && _lobbyState != _LobbyState.entering;
 
   String get _dateStr => DateFormat('yyyy-MM-dd').format(_date);
+
+  List<({String unitId, String slotTime})> _currentPickSlots() => _picks
+      .map((p) => (unitId: p.slot.unitId, slotTime: p.slot.time))
+      .toList();
+
+  bool _matchesCurrentPicks(MmOpenLobby lobby) {
+    final pickSlots = _currentPickSlots();
+    return lobby.unitId != null &&
+        pickSlots.any((pick) =>
+            pick.unitId.isNotEmpty &&
+            pick.unitId == lobby.unitId &&
+            pick.slotTime == lobby.slotTime);
+  }
+
+  Future<MmOpenLobby?> _findSameSlotLobby() async {
+    final repo = ref.read(matchmakingRepositoryProvider);
+    final openLobbies = await repo.listOpenLobbies(
+      date: _dateStr,
+      format: _format.apiValue,
+    );
+    for (final lobby in openLobbies) {
+      if (_matchesCurrentPicks(lobby)) return lobby;
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -144,7 +187,10 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   }
 
   Future<void> _restoreActiveLobby() async {
-    if (_lobbyRestored) { _mmLog('_restoreActiveLobby → skipped (already ran)'); return; }
+    if (_lobbyRestored) {
+      _mmLog('_restoreActiveLobby → skipped (already ran)');
+      return;
+    }
     _lobbyRestored = true;
     _mmLog('_restoreActiveLobby → start');
     try {
@@ -154,7 +200,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _mmLog('_restoreActiveLobby → no active lobby (or unmounted)');
         return;
       }
-      _mmLog('_restoreActiveLobby → found lobbyId=${active.lobbyId} status=${active.status} '
+      _mmLog(
+          '_restoreActiveLobby → found lobbyId=${active.lobbyId} status=${active.status} '
           'format=${active.format} date=${active.date} team=${active.teamName} picks=${active.picks.length}');
 
       // Restore format and date from the lobby so _SearchingFind shows correct info
@@ -171,8 +218,11 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       }
       // Restore team name if we don't have it yet (best-effort from teams provider)
       MmTeam? restoredTeam = _team;
-      if (restoredTeam == null && active.teamId != null && active.teamName != null) {
-        restoredTeam = MmTeam(id: active.teamId!, name: active.teamName!, ageGroupLabel: '');
+      if (restoredTeam == null &&
+          active.teamId != null &&
+          active.teamName != null) {
+        restoredTeam = MmTeam(
+            id: active.teamId!, name: active.teamName!, ageGroupLabel: '');
       }
 
       setState(() {
@@ -192,8 +242,10 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
           _lobbyState = _LobbyState.searching;
         }
       });
-      _mmLog('_restoreActiveLobby → setState done, lobbyState=$_lobbyState team=${_team?.name} format=${_format.apiValue} date=$_dateStr');
-      if (_lobbyState == _LobbyState.searching || _lobbyState == _LobbyState.waitingOpponent) _startPolling();
+      _mmLog(
+          '_restoreActiveLobby → setState done, lobbyState=$_lobbyState team=${_team?.name} format=${_format.apiValue} date=$_dateStr');
+      if (_lobbyState == _LobbyState.searching ||
+          _lobbyState == _LobbyState.waitingOpponent) _startPolling();
     } catch (e, st) {
       _mmLog('_restoreActiveLobby ERROR: $e\n$st');
     }
@@ -202,6 +254,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _scanTimer?.cancel();
+    _scanPulseTimer?.cancel();
     _razorpay.clear();
     super.dispose();
   }
@@ -210,11 +264,60 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
 
   Future<void> _enterLobby() async {
     if (_picks.isEmpty || _team == null) return;
+    _pollTimer?.cancel();
+    _scanTimer?.cancel();
+    _scanPulseTimer?.cancel();
     setState(() {
-      _lobbyState = _LobbyState.entering;
+      _lobbyState = _LobbyState.scanning;
       _error = null;
+      _scanStep = 0;
+      _scanStatus = null;
     });
+    _scanPulseTimer = Timer.periodic(const Duration(milliseconds: 850), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (_scanStep >= 3) {
+        t.cancel();
+        return;
+      }
+      setState(() => _scanStep += 1);
+    });
+    _scanTimer = Timer(const Duration(milliseconds: 3300), () {
+      if (!mounted) return;
+      _scanPulseTimer?.cancel();
+      _resolveEntryAfterScan();
+    });
+  }
+
+  Future<void> _resolveEntryAfterScan() async {
     try {
+      _mmLog(
+          '_resolveEntryAfterScan → picks=${_picks.length} team=${_team?.id} format=${_format.apiValue} date=$_dateStr');
+      final sameSlotLobby = await _findSameSlotLobby();
+      if (!mounted) return;
+      _mmLog(
+          '_resolveEntryAfterScan → sameSlot=${sameSlotLobby?.lobbyId ?? 'none'}');
+
+      if (sameSlotLobby != null) {
+        setState(() => _scanStatus = 'Found a direct match. Opening it now.');
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        setState(() {
+          _lobbyState = _LobbyState.entering;
+          _error = null;
+        });
+        await _instantChallenge(sameSlotLobby, withTeam: _team);
+        return;
+      }
+
+      setState(() => _scanStatus =
+          'No direct match found. Creating a lobby for this slot.');
+      await Future<void>.delayed(const Duration(milliseconds: 850));
+      setState(() {
+        _lobbyState = _LobbyState.entering;
+        _error = null;
+      });
       final repo = ref.read(matchmakingRepositoryProvider);
       final result = await repo.createLobby(
         teamId: _team!.id,
@@ -239,6 +342,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       setState(() {
         _lobbyState = _LobbyState.idle;
         _error = _parseError(e, isCreate: true);
+        _scanStatus = null;
       });
     }
   }
@@ -260,7 +364,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _pollTimer?.cancel();
         // If we're waiting for opponent and both confirmed → done
         if (_lobbyState == _LobbyState.waitingOpponent &&
-            match.myTeamConfirmed && match.opponentConfirmed) {
+            match.myTeamConfirmed &&
+            match.opponentConfirmed) {
           setState(() => _lobbyState = _LobbyState.confirmed);
           return;
         }
@@ -285,7 +390,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
 
   Future<void> _instantChallenge(MmOpenLobby lobby, {MmTeam? withTeam}) async {
     final team = withTeam ?? _team;
-    _mmLog('_instantChallenge → lobbyId=${lobby.lobbyId} team=${team?.id} teamName=${team?.name}');
+    _mmLog(
+        '_instantChallenge → lobbyId=${lobby.lobbyId} team=${team?.id} teamName=${team?.name}');
     if (team == null) {
       _mmLog('_instantChallenge → aborted: team is null');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -296,7 +402,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     // If already searching with an old lobby, cancel it first so we don't leave orphans
     final oldLobbyId = _lobbyId;
     if (oldLobbyId != null && _lobbyState == _LobbyState.searching) {
-      _mmLog('_instantChallenge → leaving old lobby $oldLobbyId before joining');
+      _mmLog(
+          '_instantChallenge → leaving old lobby $oldLobbyId before joining');
       _pollTimer?.cancel();
       try {
         await ref.read(matchmakingRepositoryProvider).leaveLobby(oldLobbyId);
@@ -304,11 +411,15 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _mmLog('_instantChallenge → leave old lobby error (ignored): $e');
       }
     }
-    setState(() { _lobbyState = _LobbyState.entering; _error = null; });
+    setState(() {
+      _lobbyState = _LobbyState.entering;
+      _error = null;
+    });
     try {
       final repo = ref.read(matchmakingRepositoryProvider);
       final result = await repo.joinLobby(lobby.lobbyId, team.id);
-      _mmLog('_instantChallenge → join success lobbyId=${result.lobbyId} status=${result.status} match=${result.match?.matchId}');
+      _mmLog(
+          '_instantChallenge → join success lobbyId=${result.lobbyId} status=${result.status} match=${result.match?.matchId}');
       if (!mounted) return;
       setState(() {
         _lobbyId = result.lobbyId;
@@ -323,13 +434,19 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       _mmLog('_instantChallenge ERROR: $e\n$st');
       if (!mounted) return;
       final msg = _parseError(e);
-      setState(() { _lobbyState = _LobbyState.idle; _error = msg; _tab = 1; });
+      setState(() {
+        _lobbyState = _LobbyState.idle;
+        _error = msg;
+        _tab = 1;
+      });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
   Future<void> _leaveLobby() async {
     _pollTimer?.cancel();
+    _scanTimer?.cancel();
+    _scanPulseTimer?.cancel();
     final id = _lobbyId;
     if (id != null) {
       try {
@@ -347,7 +464,10 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     final matchId = _matchSummary?.matchId;
     final lobbyId = _lobbyId;
     if (matchId == null || lobbyId == null) return;
-    setState(() { _lobbyState = _LobbyState.confirming; _error = null; });
+    setState(() {
+      _lobbyState = _LobbyState.confirming;
+      _error = null;
+    });
     try {
       final repo = ref.read(matchmakingRepositoryProvider);
       final result = await repo.confirmMatch(matchId, lobbyId);
@@ -360,13 +480,64 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() { _lobbyState = _LobbyState.matched; _error = _parseError(e); });
+      setState(() {
+        _lobbyState = _LobbyState.matched;
+        _error = _parseError(e);
+      });
     }
   }
 
   Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
+    final repo = ref.read(matchmakingRepositoryProvider);
+
+    // Plan B / V2 — first-to-pay flow. If an interest is active, this payment
+    // came from the express-interest → lock-and-pay path. Verify via the
+    // interest endpoint (creates the Match if won; reports SLOT_TAKEN if
+    // another team won concurrently).
+    final interestId = _activeInterestId;
+    final interestOrderId = _activeInterestRazorpayOrderId;
+    if (interestId != null && interestOrderId != null) {
+      try {
+        final result = await repo.verifyInterestPayment(
+          interestId: interestId,
+          razorpayOrderId: response.orderId ?? interestOrderId,
+          razorpayPaymentId: response.paymentId ?? '',
+          razorpaySignature: response.signature ?? '',
+        );
+        if (!mounted) return;
+        if (result.matchId != null) {
+          ref.invalidate(mmOpenLobbiesProvider((date: null, format: null)));
+          setState(() {
+            _lobbyId = _activeInterestLobbyId;
+            _lobbyState = _LobbyState.confirmed;
+            _activeInterestId = null;
+            _activeInterestLobbyId = null;
+            _activeInterestRazorpayOrderId = null;
+          });
+        } else {
+          setState(() {
+            _lobbyState = _LobbyState.idle;
+            _error = 'Slot was taken by another team. Refund will be issued.';
+            _activeInterestId = null;
+            _activeInterestLobbyId = null;
+            _activeInterestRazorpayOrderId = null;
+          });
+        }
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _lobbyState = _LobbyState.idle;
+          _error = "Payment done but couldn't lock the slot. Contact support.";
+          _activeInterestId = null;
+          _activeInterestLobbyId = null;
+          _activeInterestRazorpayOrderId = null;
+        });
+      }
+      return;
+    }
+
+    // Legacy joinLobby → verifyMatchPayment flow.
     try {
-      final repo = ref.read(matchmakingRepositoryProvider);
       await repo.verifyMatchPayment(
         razorpayPaymentId: response.paymentId ?? '',
         razorpayOrderId: response.orderId ?? '',
@@ -397,13 +568,19 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       _startPolling();
     } catch (e) {
       if (!mounted) return;
-      setState(() { _lobbyState = _LobbyState.matched; _error = 'Payment done but confirmation failed. Contact support.'; });
+      setState(() {
+        _lobbyState = _LobbyState.matched;
+        _error = 'Payment done but confirmation failed. Contact support.';
+      });
     }
   }
 
   void _onPaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
-    setState(() { _lobbyState = _LobbyState.matched; _error = response.message ?? 'Payment was not completed.'; });
+    setState(() {
+      _lobbyState = _LobbyState.matched;
+      _error = response.message ?? 'Payment was not completed.';
+    });
   }
 
   // Back arrow — cancel silently and return to Open tab, preserving form state
@@ -411,10 +588,16 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     final matchId = _matchSummary?.matchId;
     final lobbyId = _lobbyId;
     _pollTimer?.cancel();
+    _scanTimer?.cancel();
+    _scanPulseTimer?.cancel();
     final repo = ref.read(matchmakingRepositoryProvider);
     if (matchId != null && lobbyId != null) {
-      try { await repo.declineMatch(matchId, lobbyId); } catch (_) {}
-      try { await repo.leaveLobby(lobbyId); } catch (_) {}
+      try {
+        await repo.declineMatch(matchId, lobbyId);
+      } catch (_) {}
+      try {
+        await repo.leaveLobby(lobbyId);
+      } catch (_) {}
     }
     if (!mounted) return;
     ref.invalidate(mmOpenLobbiesProvider((date: null, format: null)));
@@ -432,9 +615,15 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
     final lobbyId = _lobbyId;
     if (matchId == null || lobbyId == null) return;
     _pollTimer?.cancel();
+    _scanTimer?.cancel();
+    _scanPulseTimer?.cancel();
     final repo = ref.read(matchmakingRepositoryProvider);
-    try { await repo.declineMatch(matchId, lobbyId); } catch (_) {}
-    try { await repo.leaveLobby(lobbyId); } catch (_) {}
+    try {
+      await repo.declineMatch(matchId, lobbyId);
+    } catch (_) {}
+    try {
+      await repo.leaveLobby(lobbyId);
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
       _lobbyId = null;
@@ -447,6 +636,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
 
   void _resetToIdle() {
     _pollTimer?.cancel();
+    _scanTimer?.cancel();
+    _scanPulseTimer?.cancel();
     setState(() {
       _lobbyId = null;
       _matchSummary = null;
@@ -457,24 +648,29 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
 
   void _addPick(MmGroundSlotPick pick) {
     if (_picks.length >= 3) return;
-    if (_picks.any(
-        (p) => p.slot.unitId == pick.slot.unitId && p.slot.time == pick.slot.time)) {
+    if (_picks.any((p) =>
+        p.slot.unitId == pick.slot.unitId && p.slot.time == pick.slot.time)) {
       return;
     }
     setState(() => _picks.add(pick));
   }
 
   void _removePick(MmGroundSlotPick pick) {
-    setState(() => _picks.removeWhere(
-        (p) => p.slot.unitId == pick.slot.unitId && p.slot.time == pick.slot.time));
+    setState(() => _picks.removeWhere((p) =>
+        p.slot.unitId == pick.slot.unitId && p.slot.time == pick.slot.time));
   }
 
   String _parseError(Object e, {bool isCreate = false}) {
     final msg = e.toString();
     if (msg.contains('401')) return 'Session expired. Please log in again.';
     if (msg.contains('400')) return 'Invalid picks. Please try again.';
-    if (msg.contains('404')) return isCreate ? 'Could not create request. Try again.' : 'Request expired or not found.';
-    return 'Something went wrong. Try again.';
+    if (msg.contains('404'))
+      return isCreate
+          ? 'Could not create request. Try again.'
+          : 'Request expired or not found.';
+    return isCreate
+        ? 'No direct match found. Creating a lobby for this slot.'
+        : 'Something went wrong. Try again.';
   }
 
   @override
@@ -498,7 +694,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
               children: [
                 Expanded(
                   child: Text(
-                    'Matchup',
+                    'MatchUp',
                     style: TextStyle(
                       color: context.fg,
                       fontSize: 26,
@@ -509,8 +705,8 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                 ),
                 if (_isActive)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: context.panel,
                       borderRadius: BorderRadius.circular(20),
@@ -528,15 +724,14 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                         Text(
                           _lobbyState == _LobbyState.matched ||
                                   _lobbyState == _LobbyState.confirming
-                              ? 'My Matchup'
+                              ? 'Found'
                               : _lobbyState == _LobbyState.waitingOpponent
-                                  ? 'Waiting…'
+                                  ? 'Waiting'
                                   : 'Searching',
                           style: TextStyle(
                             color: context.accent,
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            letterSpacing: 0.3,
                           ),
                         ),
                       ],
@@ -546,50 +741,53 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
           // ── Tab bar ──────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                _TabLabel(
-                  label: 'Open',
-                  active: _tab == 0,
-                  onTap: () => setState(() => _tab = 0),
-                  badge: ref.watch(mmOpenLobbiesProvider((date: null, format: null))).valueOrNull?.length,
-                ),
-                const SizedBox(width: 24),
-                _TabLabel(
-                  label: 'Find',
-                  active: _tab == 1,
-                  onTap: () => setState(() => _tab = 1),
-                ),
-                const SizedBox(width: 24),
-                _TabLabel(
-                  label: 'Challenge',
-                  active: _tab == 2,
-                  onTap: () => setState(() => _tab = 2),
-                ),
-                const SizedBox(width: 24),
-                _TabLabel(
-                  label: 'Matches',
-                  active: _tab == 3,
-                  onTap: () => setState(() => _tab = 3),
-                ),
-              ],
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: context.panel,
+                borderRadius: BorderRadius.circular(16),
+                border:
+                    Border.all(color: context.stroke.withValues(alpha: 0.65)),
+              ),
+              child: Row(
+                children: [
+                  _TabLabel(
+                    label: 'Discover',
+                    active: _tab == 0,
+                    onTap: () => setState(() => _tab = 0),
+                    badge: ref
+                        .watch(
+                            mmOpenLobbiesProvider((date: null, format: null)))
+                        .valueOrNull
+                        ?.length,
+                  ),
+                  _TabLabel(
+                    label: 'Create',
+                    active: _tab == 1,
+                    onTap: () => setState(() => _tab = 1),
+                  ),
+                  _TabLabel(
+                    label: 'My MatchUps',
+                    active: _tab == 2,
+                    onTap: () => setState(() => _tab = 2),
+                  ),
+                ],
+              ),
             ),
           ),
 
-          const SizedBox(height: 4),
-          Container(height: 1, color: context.stroke.withValues(alpha: 0.4)),
+          const SizedBox(height: 6),
 
           // ── Content ──────────────────────────────────────────────────────
           Expanded(
             child: IndexedStack(
               index: _tab,
               children: [
-                // Tab 0: Open — no date filter so all upcoming lobbies show
                 _OpenTab(
                   query: (date: null, format: null),
                   ownLobbyId: _lobbyId,
@@ -609,7 +807,6 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                     );
                   },
                 ),
-                // Tab 1: Find
                 _FindTab(
                   lobbyState: _lobbyState,
                   team: _team,
@@ -620,10 +817,13 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                   restoredPicks: _restoredPicks,
                   matchSummary: _matchSummary,
                   error: _error,
+                  scanStep: _scanStep,
+                  scanStatus: _scanStatus,
                   onTeam: (t) => setState(() => _team = t),
                   onFormat: (f) => setState(() {
                     _format = f;
-                    _picks = []; // slot availability changes with format duration
+                    _picks =
+                        []; // slot availability changes with format duration
                   }),
                   onBallType: (bt) => setState(() => _ballType = bt),
                   onDate: (d) => setState(() {
@@ -640,9 +840,6 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                   onBack: _goBackFromMatch,
                   onDone: _resetToIdle,
                 ),
-                // Tab 2: Challenge
-                const _ChallengeTab(),
-                // Tab 3: Matches
                 const _MatchesTab(),
               ],
             ),
@@ -669,41 +866,58 @@ class _TabLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: active ? context.fg : context.fgSub,
-                fontSize: 15,
-                fontWeight: active ? FontWeight.w800 : FontWeight.w500,
-              ),
-            ),
-            if (badge != null && badge! > 0) ...[
-              const SizedBox(width: 5),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: active ? context.accent : context.fgSub.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: active ? context.ctaBg : Colors.transparent,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
                 child: Text(
-                  '$badge',
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: active ? Colors.white : context.fgSub,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
+                    color: active ? context.ctaFg : context.fgSub,
+                    fontSize: 13,
+                    fontWeight: active ? FontWeight.w900 : FontWeight.w700,
+                    letterSpacing: -0.1,
                   ),
                 ),
               ),
+              if (badge != null && badge! > 0) ...[
+                const SizedBox(width: 5),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? context.ctaFg
+                        : context.fgSub.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$badge',
+                    style: TextStyle(
+                      color: active ? context.ctaBg : context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -729,6 +943,7 @@ class _OpenTab extends ConsumerStatefulWidget {
 class _OpenTabState extends ConsumerState<_OpenTab> {
   String? _selectedDate;
   String? _ballTypeFilter;
+  String? _formatFilter;
   Timer? _refreshTimer;
 
   @override
@@ -773,371 +988,401 @@ class _OpenTabState extends ConsumerState<_OpenTab> {
     }
     if (async.hasError && lobbiesSnapshot == null) {
       return Center(
-        child: Text('Could not load open games', style: TextStyle(color: context.fgSub, fontSize: 13)),
+        child: Text('Could not load open games',
+            style: TextStyle(color: context.fgSub, fontSize: 13)),
       );
     }
     return _buildLobbiesList(context, lobbiesSnapshot ?? []);
   }
 
   Widget _buildLobbiesList(BuildContext context, List<MmOpenLobby> lobbies) {
-        final others = lobbies
-            .where((l) => !_isSlotPast(l))
-            .where((l) => widget.ownLobbyId == null || l.lobbyId != widget.ownLobbyId)
-            .toList();
+    final others = lobbies
+        .where((l) => !_isSlotPast(l))
+        .where(
+            (l) => widget.ownLobbyId == null || l.lobbyId != widget.ownLobbyId)
+        .toList();
 
-        // Group by date
-        final Map<String, List<MmOpenLobby>> byDate = {};
-        for (final l in others) {
-          (byDate[l.date] ??= []).add(l);
-        }
+    // Group by date
+    final Map<String, List<MmOpenLobby>> byDate = {};
+    for (final l in others) {
+      (byDate[l.date] ??= []).add(l);
+    }
 
-        // Only show dates that have lobbies
-        final today = DateTime.now();
-        final todayStr = DateFormat('yyyy-MM-dd').format(today);
-        final sortedDates = (byDate.keys.toList()..sort())
-            .where((d) => d.compareTo(todayStr) >= 0)
-            .toList();
+    // Only show dates that have lobbies
+    final today = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(today);
+    final sortedDates = (byDate.keys.toList()..sort())
+        .where((d) => d.compareTo(todayStr) >= 0)
+        .toList();
 
-        // Auto-select first available date; reset if selected date no longer has lobbies
-        final autoDate = sortedDates.isNotEmpty ? sortedDates.first : todayStr;
-        final selected = (_selectedDate != null && sortedDates.contains(_selectedDate))
+    // Auto-select first available date; reset if selected date no longer has lobbies
+    final autoDate = sortedDates.isNotEmpty ? sortedDates.first : todayStr;
+    final selected =
+        (_selectedDate != null && sortedDates.contains(_selectedDate))
             ? _selectedDate!
             : autoDate;
-        final filtered = (byDate[selected] ?? [])
-            .where((l) => _ballTypeFilter == null || l.ballType == null || l.ballType == _ballTypeFilter)
-            .toList();
+    final filtered = (byDate[selected] ?? [])
+        .where((l) =>
+            _ballTypeFilter == null ||
+            l.ballType == null ||
+            l.ballType == _ballTypeFilter)
+        .where((l) => _formatFilter == null || l.format == _formatFilter)
+        .toList();
 
-        return Column(
-          children: [
-            // ── Date strip ──────────────────────────────────────────────────
-            Container(
-              color: context.bg,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 12),
-                  SingleChildScrollView(
+    return Column(
+      children: [
+        // ── Date strip ──────────────────────────────────────────────────
+        Container(
+          color: context.bg,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _FilterDropdown(
+                        label: 'Format',
+                        value: _formatFilter,
+                        options: const [
+                          (value: null, label: 'Any format'),
+                          (value: 'T10', label: 'T10'),
+                          (value: 'T20', label: 'T20'),
+                          (value: 'ODI', label: 'ODI'),
+                          (value: 'Test', label: 'Test'),
+                          (value: 'Custom', label: 'Custom'),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _formatFilter = value),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _FilterDropdown(
+                        label: 'Ball',
+                        value: _ballTypeFilter,
+                        options: const [
+                          (value: null, label: 'Any ball'),
+                          (value: 'LEATHER', label: 'Leather'),
+                          (value: 'TENNIS', label: 'Tennis'),
+                          (value: 'TAPE', label: 'Tape Ball'),
+                          (value: 'RUBBER', label: 'Rubber'),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _ballTypeFilter = value),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (sortedDates.isNotEmpty) ...[
+                SizedBox(
+                  height: 62,
+                  child: ListView.separated(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                    child: Row(
-                      children: ['ALL', 'LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
-                        final isAll = bt == 'ALL';
-                        final sel = isAll ? _ballTypeFilter == null : _ballTypeFilter == bt;
-                        return GestureDetector(
-                          onTap: () => setState(() => _ballTypeFilter = isAll ? null : bt),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 140),
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: sel ? context.accent : context.surf,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: sel ? context.accent : context.stroke,
-                              ),
-                            ),
-                            child: Text(
-                              isAll ? 'All' : _ballTypeLabel(bt),
-                              style: TextStyle(
-                                color: sel ? Colors.white : context.fgSub,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    itemCount: sortedDates.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) {
+                      final dateStr = sortedDates[i];
+                      final isSelected = dateStr == selected;
+                      final count = byDate[dateStr]!.length;
+                      final d = DateTime.tryParse(dateStr) ?? today;
+                      final isToday = dateStr == todayStr;
+                      final dayName =
+                          isToday ? 'Today' : DateFormat('EEE').format(d);
+                      return GestureDetector(
+                        onTap: () => setState(() => _selectedDate = dateStr),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: isSelected ? context.accent : context.surf,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isSelected
+                                  ? context.accent
+                                  : context.accent.withValues(alpha: 0.35),
+                              width: isSelected ? 0 : 1,
                             ),
                           ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  if (sortedDates.isNotEmpty) ...[
-                    SizedBox(
-                      height: 62,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                        itemCount: sortedDates.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (_, i) {
-                          final dateStr = sortedDates[i];
-                          final isSelected = dateStr == selected;
-                          final count = byDate[dateStr]!.length;
-                          final d = DateTime.tryParse(dateStr) ?? today;
-                          final isToday = dateStr == todayStr;
-                          final dayName = isToday ? 'Today' : DateFormat('EEE').format(d);
-                          return GestureDetector(
-                            onTap: () => setState(() => _selectedDate = dateStr),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 160),
-                              padding: const EdgeInsets.symmetric(horizontal: 14),
-                              decoration: BoxDecoration(
-                                color: isSelected ? context.accent : context.surf,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: isSelected ? context.accent : context.accent.withValues(alpha: 0.35),
-                                  width: isSelected ? 0 : 1,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        dayName,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: isSelected ? Colors.white.withValues(alpha: 0.8) : context.fgSub,
-                                        ),
-                                      ),
-                                      Text(
-                                        '${d.day} ${DateFormat('MMM').format(d)}',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w800,
-                                          color: isSelected ? Colors.white : context.fg,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    width: 20,
-                                    height: 20,
-                                    decoration: BoxDecoration(
+                                  Text(
+                                    dayName,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
                                       color: isSelected
-                                          ? Colors.white.withValues(alpha: 0.25)
-                                          : context.success,
-                                      shape: BoxShape.circle,
+                                          ? Colors.white.withValues(alpha: 0.8)
+                                          : context.fgSub,
                                     ),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      '$count',
-                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
+                                  ),
+                                  Text(
+                                    '${d.day} ${DateFormat('MMM').format(d)}',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                      color: isSelected
+                                          ? Colors.white
+                                          : context.fg,
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Divider(height: 1, color: context.stroke.withValues(alpha: 0.5)),
-                  ],
-                ],
-              ),
-            ),
-
-            // ── Lobby list ──────────────────────────────────────────────────
-            Expanded(
-              child: RefreshIndicator(
-                color: context.accent,
-                onRefresh: () async => ref.invalidate(mmOpenLobbiesProvider(widget.query)),
-                child: filtered.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: [
-                          SizedBox(
-                            height: 260,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.sports_cricket_rounded,
-                                    color: context.fgSub.withValues(alpha: 0.3), size: 44),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No open games on this day',
-                                  style: TextStyle(color: context.fgSub, fontSize: 14, fontWeight: FontWeight.w600),
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? Colors.white.withValues(alpha: 0.25)
+                                      : context.success,
+                                  shape: BoxShape.circle,
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Try another date',
-                                  style: TextStyle(color: context.fgSub.withValues(alpha: 0.5), fontSize: 12),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '$count',
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
-                      )
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                        children: [
-                          for (final lobby in filtered)
-                            _OpenLobbyCard(
-                              lobby: lobby,
-                              onCounter: () => widget.onCounter(lobby),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Divider(
+                    height: 1, color: context.stroke.withValues(alpha: 0.5)),
+              ],
+            ],
+          ),
+        ),
+
+        // ── Lobby list ──────────────────────────────────────────────────
+        Expanded(
+          child: RefreshIndicator(
+            color: context.accent,
+            onRefresh: () async =>
+                ref.invalidate(mmOpenLobbiesProvider(widget.query)),
+            child: filtered.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(
+                        height: 260,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.sports_cricket_rounded,
+                                color: context.fgSub.withValues(alpha: 0.3),
+                                size: 44),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No open games on this day',
+                              style: TextStyle(
+                                  color: context.fgSub,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600),
                             ),
-                        ],
+                            const SizedBox(height: 4),
+                            Text(
+                              'Try another date',
+                              style: TextStyle(
+                                  color: context.fgSub.withValues(alpha: 0.5),
+                                  fontSize: 12),
+                            ),
+                          ],
+                        ),
                       ),
-              ),
-            ),
-          ],
-        );
+                    ],
+                  )
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+                    children: [
+                      for (final lobby in filtered)
+                        _OpenLobbyCard(
+                          lobby: lobby,
+                          onCounter: () => widget.onCounter(lobby),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
 class _OpenLobbyCard extends StatelessWidget {
-  const _OpenLobbyCard({required this.lobby, required this.onCounter});
+  const _OpenLobbyCard({
+    required this.lobby,
+    required this.onCounter,
+  });
   final MmOpenLobby lobby;
   final VoidCallback onCounter;
 
-  String get _initials {
-    final words = lobby.teamName.trim().split(RegExp(r'\s+'));
-    if (words.length >= 2) return '${words[0][0]}${words[1][0]}'.toUpperCase();
-    return lobby.teamName.isNotEmpty ? lobby.teamName[0].toUpperCase() : '?';
-  }
-
   @override
   Widget build(BuildContext context) {
+    final ball = lobby.ballType;
+    final price = lobby.pricePerTeamPaise ~/ 100;
+    final venue = lobby.arenaName.isNotEmpty
+        ? lobby.arenaName
+        : (lobby.groundName.isNotEmpty ? lobby.groundName : 'Arena slot');
+    final age = lobby.ageGroup.isNotEmpty ? lobby.ageGroup : 'Open';
+    final meta = [
+      lobby.format,
+      if (ball != null) _ballTypeLabel(ball),
+      age,
+    ].join(' · ');
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
       decoration: BoxDecoration(
         color: context.surf,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.stroke),
+        border: Border.all(color: context.stroke.withValues(alpha: 0.7)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Team row ──────────────────────────────────────────────────
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Expanded(
+                child: Text(
+                  lobby.teamName,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.25,
+                    height: 1.05,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 10),
               Container(
-                width: 40,
-                height: 40,
+                height: 24,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
                   color: context.panel,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                    color: context.stroke.withValues(alpha: 0.55),
+                  ),
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  _initials,
+                  lobby.dateLabel,
                   style: TextStyle(
-                    color: context.fg,
-                    fontSize: 14,
+                    color: context.fgSub,
+                    fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Row(
+            children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      lobby.teamName,
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (lobby.ageGroup.isNotEmpty && lobby.ageGroup != 'Open') ...[
-                      const SizedBox(height: 1),
-                      Text(
-                        lobby.ageGroup,
-                        style: TextStyle(color: context.fgSub, fontSize: 11),
-                      ),
-                    ],
-                  ],
+                child: Text(
+                  meta,
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              _MiniChip(label: lobby.format, context: context),
+              const SizedBox(width: 10),
+              Text(
+                '₹$price / team',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
-          // ── Info rows ─────────────────────────────────────────────────
+          Container(height: 1, color: context.stroke.withValues(alpha: 0.42)),
+          const SizedBox(height: 10),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(Icons.access_time_rounded, size: 13, color: context.fgSub),
-              const SizedBox(width: 4),
-              Text(
-                lobby.displaySlot,
-                style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
-              ),
-              if (lobby.groundName.isNotEmpty) ...[
-                Text('  ·  ', style: TextStyle(color: context.fgSub.withValues(alpha: 0.4), fontSize: 12)),
-                Expanded(
-                  child: Text(
-                    lobby.groundName,
-                    style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time_rounded,
+                        color: context.fgSub, size: 14),
+                    const SizedBox(width: 5),
+                    Text(
+                      lobby.displaySlot,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        venue,
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
-              ] else
-                const Spacer(),
-            ],
-          ),
-          if (lobby.ballType != null) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Container(
-                  width: 11,
-                  height: 11,
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: onCounter,
+                child: Container(
+                  height: 34,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: _ballTypeColor(lobby.ballType!),
-                    shape: BoxShape.circle,
+                    color: context.ctaBg,
+                    borderRadius: BorderRadius.circular(9),
                   ),
-                ),
-                const SizedBox(width: 5),
-                Text(
-                  _ballTypeLabel(lobby.ballType!),
-                  style: TextStyle(color: context.fgSub, fontSize: 12, fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
-          ],
-          if (lobby.arenaName.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.stadium_rounded, size: 13, color: context.accent),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    lobby.arenaName,
-                    style: TextStyle(color: context.accent, fontSize: 12, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 14),
-          // ── CTA ───────────────────────────────────────────────────────
-          SizedBox(
-            width: double.infinity,
-            height: 40,
-            child: GestureDetector(
-              onTap: onCounter,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: context.accent,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                alignment: Alignment.center,
-                child: const Text(
-                  'Matchup',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Match',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -1145,25 +1390,79 @@ class _OpenLobbyCard extends StatelessWidget {
   }
 }
 
-class _MiniChip extends StatelessWidget {
-  const _MiniChip({required this.label, required this.context});
+class _FilterDropdown extends StatelessWidget {
+  const _FilterDropdown({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
   final String label;
-  final BuildContext context;
+  final String? value;
+  final List<({String? value, String label})> options;
+  final ValueChanged<String?> onChanged;
 
   @override
-  Widget build(BuildContext ctx) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: context.panel,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: context.fgSub,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String?>(
+      initialValue: value,
+      onSelected: onChanged,
+      itemBuilder: (_) => [
+        for (final option in options)
+          PopupMenuItem<String?>(
+            value: option.value,
+            child: Text(option.label),
+          ),
+      ],
+      offset: const Offset(0, 46),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: context.surf,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.stroke.withValues(alpha: 0.85)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    options
+                        .firstWhere(
+                          (option) => option.value == value,
+                          orElse: () => options.first,
+                        )
+                        .label,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.keyboard_arrow_down_rounded,
+                color: context.fgSub, size: 20),
+          ],
         ),
       ),
     );
@@ -1208,7 +1507,8 @@ class _PlayConfirmSheetState extends ConsumerState<_PlayConfirmSheet> {
     final teams = teamsAsync.valueOrNull ?? [];
     if (_selected == null && teams.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _selected == null) setState(() => _selected = teams.first);
+        if (mounted && _selected == null)
+          setState(() => _selected = teams.first);
       });
     }
 
@@ -1221,7 +1521,8 @@ class _PlayConfirmSheetState extends ConsumerState<_PlayConfirmSheet> {
             ? const Offset(1, 0)
             : const Offset(-1, 0);
         return SlideTransition(
-          position: Tween<Offset>(begin: offset, end: Offset.zero).animate(anim),
+          position:
+              Tween<Offset>(begin: offset, end: Offset.zero).animate(anim),
           child: FadeTransition(opacity: anim, child: child),
         );
       },
@@ -1281,7 +1582,11 @@ class _DetailsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canReview = selected != null;
-    final myTeamName = selected?.name ?? 'Your team';
+    final venue = lobby.arenaName.isNotEmpty
+        ? lobby.arenaName
+        : (lobby.groundName.isNotEmpty ? lobby.groundName : 'Ground');
+    final ballLabel =
+        lobby.ballType == null ? null : _ballTypeLabel(lobby.ballType!);
     return Container(
       decoration: BoxDecoration(
         color: context.bg,
@@ -1298,7 +1603,8 @@ class _DetailsPage extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 12, bottom: 4),
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                   color: context.stroke,
                   borderRadius: BorderRadius.circular(2),
@@ -1309,490 +1615,222 @@ class _DetailsPage extends StatelessWidget {
 
           Flexible(
             child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
-                  // ── Hero: opponent ───────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  Text('Play this team?',
+                      style: TextStyle(
+                          color: context.fg,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5)),
+                  const SizedBox(height: 4),
+                  Text('Check the match details and choose your team.',
+                      style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 18),
+                  _PlainInfoCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'MATCHUP INVITE',
-                          style: TextStyle(
-                            color: context.fgSub,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.4,
-                          ),
+                        _SimpleLine(
+                          icon: Icons.groups_rounded,
+                          title: 'Opponent',
+                          value: lobby.teamName,
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 14),
+                        _SimpleLine(
+                          icon: Icons.stadium_rounded,
+                          title: 'Place',
+                          value: venue,
+                        ),
+                        const SizedBox(height: 14),
                         Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Expanded(
-                              child: Text(
-                                lobby.teamName,
-                                style: TextStyle(
-                                  color: context.fg,
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.5,
-                                  height: 1.1,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
+                              child: _SimpleLine(
+                                icon: Icons.calendar_today_rounded,
+                                title: 'Date',
+                                value: lobby.dateLabel,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                Text(
-                                  lobby.dateLabel,
-                                  style: TextStyle(
-                                    color: context.fg,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                Text(
-                                  lobby.displaySlot,
-                                  style: TextStyle(
-                                    color: context.fgSub,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            _MiniChip(label: lobby.format, context: context),
-                            if (lobby.ballType != null) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                width: 7, height: 7,
-                                decoration: BoxDecoration(
-                                  color: _ballTypeColor(lobby.ballType!),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _ballTypeLabel(lobby.ballType!),
-                                style: TextStyle(
-                                  color: context.fgSub,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                            if (lobby.ageGroup.isNotEmpty && lobby.ageGroup != 'Open') ...[
-                              const SizedBox(width: 6),
-                              _MiniChip(label: lobby.ageGroup, context: context),
-                            ],
-                          ],
-                        ),
-                        if (lobby.arenaName.isNotEmpty || lobby.groundName.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Icon(Icons.stadium_rounded, size: 12, color: context.accent),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  lobby.arenaName.isNotEmpty
-                                      ? lobby.arenaName
-                                      : lobby.groundName,
-                                  style: TextStyle(
-                                    color: context.accent,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-
-                  // ── Total booking fee + split ─────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
+                            const SizedBox(width: 14),
                             Expanded(
-                              child: Text(
-                                'TOTAL BOOKING FEE',
-                                style: TextStyle(
-                                  color: context.fgSub,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.2,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              '₹${groundFeeRupees * 2}',
-                              style: TextStyle(
-                                color: context.fg,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.5,
+                              child: _SimpleLine(
+                                icon: Icons.access_time_rounded,
+                                title: 'Time',
+                                value: lobby.displaySlot,
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 14),
-                        // ── Team split ──────────────────────────────────
-                        IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: context.panel,
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(12),
-                                      bottomLeft: Radius.circular(12),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        lobby.teamName,
-                                        style: TextStyle(
-                                          color: context.fgSub,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '₹$groundFeeRupees',
-                                        style: TextStyle(
-                                          color: context.fg,
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: -0.4,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'their share',
-                                        style: TextStyle(
-                                          color: context.fgSub.withValues(alpha: 0.45),
-                                          fontSize: 10,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SimplePill(
+                                label: lobby.format,
+                                icon: Icons.sports_cricket_rounded,
                               ),
-                              Container(width: 1, color: context.stroke),
+                            ),
+                            if (ballLabel != null) ...[
+                              const SizedBox(width: 8),
                               Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: context.accent.withValues(alpha: 0.08),
-                                    borderRadius: const BorderRadius.only(
-                                      topRight: Radius.circular(12),
-                                      bottomRight: Radius.circular(12),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        myTeamName,
-                                        style: TextStyle(
-                                          color: context.accent.withValues(alpha: 0.7),
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '₹$groundFeeRupees',
-                                        style: TextStyle(
-                                          color: context.accent,
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: -0.4,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'your share',
-                                        style: TextStyle(
-                                          color: context.accent.withValues(alpha: 0.45),
-                                          fontSize: 10,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                child: _SimplePill(
+                                  label: ballLabel,
+                                  icon: Icons.circle,
                                 ),
                               ),
                             ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        // ── Pay schedule ────────────────────────────────
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'PAY NOW',
-                                    style: TextStyle(
-                                      color: context.accent,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 1.0,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    '₹$depositRupees',
-                                    style: TextStyle(
-                                      color: context.fg,
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: -0.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'refundable deposit',
-                                    style: TextStyle(
-                                      color: context.success,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              width: 1,
-                              height: 56,
-                              color: context.stroke.withValues(alpha: 0.4),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'AT GROUND',
-                                      style: TextStyle(
-                                        color: context.fgSub,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.0,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      '₹$balanceRupees',
-                                      style: TextStyle(
-                                        color: context.fg,
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: -0.5,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'balance due',
-                                      style: TextStyle(
-                                        color: context.fgSub.withValues(alpha: 0.45),
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
                           ],
-                        ),
-                        const SizedBox(height: 16),
-                        Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Deposit auto-refunded if opponent doesn\'t confirm within 4 hours.',
-                          style: TextStyle(
-                            color: context.fgSub.withValues(alpha: 0.5),
-                            fontSize: 11,
-                            height: 1.5,
-                          ),
                         ),
                       ],
                     ),
                   ),
-
-                  // ── Playing as ────────────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-                    child: Text(
-                      'PLAYING AS',
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: context.accent.withValues(alpha: 0.09),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: context.accent.withValues(alpha: 0.22),
                       ),
                     ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Confirm match with advance',
+                                  style: TextStyle(
+                                      color: context.accent,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w900)),
+                              const SizedBox(height: 4),
+                              Text(
+                                balanceRupees > 0
+                                    ? 'Pay balance ₹$balanceRupees at ground'
+                                    : 'No balance shown for ground',
+                                style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text('₹$depositRupees',
+                            style: TextStyle(
+                                color: context.fg,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.8)),
+                      ],
+                    ),
                   ),
-
+                  const SizedBox(height: 18),
+                  Text('Choose your team',
+                      style: TextStyle(
+                          color: context.fg,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 8),
                   if (teamsLoading)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: LinearProgressIndicator(minHeight: 1),
                     )
                   else if (teams.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-                      child: Text(
-                        'No teams found. Create a team first.',
-                        style: TextStyle(color: context.fgSub, fontSize: 13),
-                      ),
-                    )
+                    Text('No teams found. Create a team first.',
+                        style: TextStyle(color: context.fgSub, fontSize: 13))
                   else
-                    ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                      itemCount: teams.length,
-                      separatorBuilder: (_, __) =>
-                          Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
-                      itemBuilder: (_, i) {
-                        final team = teams[i];
-                        final sel = selected?.id == team.id;
-                        return GestureDetector(
-                          onTap: () => onSelectTeam(team),
-                          behavior: HitTestBehavior.opaque,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            child: Row(
+                    PopupMenuButton<MmTeam>(
+                      initialValue: selected,
+                      onSelected: onSelectTeam,
+                      itemBuilder: (_) => [
+                        for (final team in teams)
+                          PopupMenuItem<MmTeam>(
+                            value: team,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  width: 36, height: 36,
-                                  decoration: BoxDecoration(
-                                    color: context.panel,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: team.logoUrl != null && team.logoUrl!.isNotEmpty
-                                      ? Image.network(team.logoUrl!, fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => _TeamInitials(team.name))
-                                      : _TeamInitials(team.name),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        team.name,
-                                        style: TextStyle(
-                                          color: context.fg,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: -0.2,
-                                        ),
-                                      ),
-                                      Text(
-                                        '${team.ageGroupLabel}  ·  ${team.memberCount} members',
-                                        style: TextStyle(color: context.fgSub, fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                AnimatedContainer(
-                                  duration: const Duration(milliseconds: 140),
-                                  width: 20, height: 20,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: sel ? context.accent : Colors.transparent,
-                                    border: Border.all(
-                                      color: sel ? context.accent : context.stroke,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: sel
-                                      ? const Icon(Icons.check_rounded,
-                                          color: Colors.white, size: 12)
-                                      : null,
+                                Text(team.name,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                Text(
+                                  '${team.ageGroupLabel} · ${team.memberCount} players',
+                                  style: TextStyle(
+                                      color: context.fgSub, fontSize: 12),
                                 ),
                               ],
                             ),
                           ),
-                        );
-                      },
-                    ),
-
-                  // ── CTA ──────────────────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                    child: GestureDetector(
-                      onTap: canReview ? onReview : null,
-                      behavior: HitTestBehavior.opaque,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
+                      ],
+                      offset: const Offset(0, 52),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      child: Container(
                         height: 52,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         decoration: BoxDecoration(
-                          color: canReview ? context.ctaBg : context.panel,
-                          borderRadius: BorderRadius.circular(14),
+                          color: context.surf,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: selected != null
+                                ? context.accent
+                                : context.stroke,
+                          ),
                         ),
-                        alignment: Alignment.center,
                         child: Row(
-                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              canReview ? 'Review & Confirm' : 'Select your team',
-                              style: TextStyle(
-                                color: canReview ? context.ctaFg : context.fgSub,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.2,
+                            Expanded(
+                              child: Text(
+                                selected?.name ?? 'Select team',
+                                style: TextStyle(
+                                    color: selected != null
+                                        ? context.fg
+                                        : context.fgSub,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (canReview) ...[
-                              const SizedBox(width: 6),
-                              Icon(Icons.arrow_forward_rounded,
-                                  color: context.ctaFg.withValues(alpha: 0.7), size: 16),
-                            ],
+                            Icon(Icons.keyboard_arrow_down_rounded,
+                                color: context.fgSub, size: 22),
                           ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: canReview ? onReview : null,
+                    behavior: HitTestBehavior.opaque,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      height: 54,
+                      decoration: BoxDecoration(
+                        color: canReview ? context.ctaBg : context.panel,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        canReview
+                            ? 'Confirm Match · ₹$depositRupees Advance'
+                            : 'Select your team',
+                        style: TextStyle(
+                          color: canReview ? context.ctaFg : context.fgSub,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
@@ -1802,6 +1840,240 @@ class _DetailsPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PlainInfoCard extends StatelessWidget {
+  const _PlainInfoCard({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.surf,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.stroke.withValues(alpha: 0.75)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _SimpleLine extends StatelessWidget {
+  const _SimpleLine({
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
+  final IconData icon;
+  final String title;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: context.fgSub, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 2),
+              Text(value,
+                  style: TextStyle(
+                      color: context.fg,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SimplePill extends StatelessWidget {
+  const _SimplePill({required this.label, required this.icon});
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: context.panel,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: context.fgSub, size: 14),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 110),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricCell extends StatelessWidget {
+  const _MetricCell({
+    required this.value,
+    required this.label,
+    this.accent = false,
+  });
+
+  final String value;
+  final String label;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: accent ? context.accent : context.fg,
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.6,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DotSep extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        width: 3,
+        height: 3,
+        decoration: BoxDecoration(
+          color: context.fgSub.withValues(alpha: 0.5),
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
+  }
+}
+
+class _FlowRow extends StatelessWidget {
+  const _FlowRow({
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.leading,
+    this.trailing,
+  });
+
+  final bool selected;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Widget? leading;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? context.bg : context.fg;
+    final fgSub = selected ? context.bg.withValues(alpha: 0.7) : context.fgSub;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        color: selected ? context.fg : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Row(
+          children: [
+            if (leading != null) ...[
+              leading!,
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            if (selected)
+              Icon(Icons.check_rounded, color: context.warn, size: 20)
+            else if (trailing != null)
+              trailing!,
+          ],
+        ),
       ),
     );
   }
@@ -1846,7 +2118,8 @@ class _ConfirmPage extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 12, bottom: 4),
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                   color: context.stroke,
                   borderRadius: BorderRadius.circular(2),
@@ -1947,7 +2220,9 @@ class _ConfirmPage extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       [
-                        lobby.arenaName.isNotEmpty ? lobby.arenaName : lobby.groundName,
+                        lobby.arenaName.isNotEmpty
+                            ? lobby.arenaName
+                            : lobby.groundName,
                         lobby.format,
                         lobby.displaySlot,
                         lobby.dateLabel,
@@ -2137,7 +2412,8 @@ class _ConfirmPage extends StatelessWidget {
                                 Text(
                                   'balance due',
                                   style: TextStyle(
-                                    color: context.fgSub.withValues(alpha: 0.45),
+                                    color:
+                                        context.fgSub.withValues(alpha: 0.45),
                                     fontSize: 10,
                                   ),
                                 ),
@@ -2150,7 +2426,9 @@ class _ConfirmPage extends StatelessWidget {
 
                     // ── T&C ─────────────────────────────────────────────
                     const SizedBox(height: 20),
-                    Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
+                    Divider(
+                        height: 1,
+                        color: context.stroke.withValues(alpha: 0.4)),
                     const SizedBox(height: 12),
                     Text(
                       'By paying you agree: the ₹$depositRupees deposit is non-refundable once both teams have confirmed. If the opponent does not pay within 4 hours, your deposit is fully refunded automatically.',
@@ -2210,6 +2488,8 @@ class _FindTab extends StatelessWidget {
     required this.restoredPicks,
     required this.matchSummary,
     required this.error,
+    required this.scanStep,
+    required this.scanStatus,
     required this.onTeam,
     required this.onFormat,
     required this.onBallType,
@@ -2234,6 +2514,8 @@ class _FindTab extends StatelessWidget {
   final List<MmLobbyStatusPick> restoredPicks;
   final MmMatchSummary? matchSummary;
   final String? error;
+  final int scanStep;
+  final String? scanStatus;
   final ValueChanged<MmTeam> onTeam;
   final ValueChanged<MatchFormat> onFormat;
   final ValueChanged<String?> onBallType;
@@ -2274,6 +2556,15 @@ class _FindTab extends StatelessWidget {
             onEnter: onEnter,
             onInstantChallenge: onInstantChallenge,
           ),
+        _LobbyState.scanning => _ScanningFind(
+            key: const ValueKey('scanning'),
+            team: team,
+            format: format,
+            date: date,
+            picks: picks,
+            scanStep: scanStep,
+            scanStatus: scanStatus,
+          ),
         _LobbyState.searching => _SearchingFind(
             key: const ValueKey('searching'),
             team: team,
@@ -2285,7 +2576,10 @@ class _FindTab extends StatelessWidget {
             onLeave: onLeave,
             onInstantChallenge: onInstantChallenge,
           ),
-        _LobbyState.matched || _LobbyState.confirming || _LobbyState.waitingOpponent => _MatchedFind(
+        _LobbyState.matched ||
+        _LobbyState.confirming ||
+        _LobbyState.waitingOpponent =>
+          _MatchedFind(
             key: const ValueKey('matched'),
             team: team,
             format: format,
@@ -2356,7 +2650,13 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   int _maxStep = 0;
   int _customOvers = 20;
 
-  static const _sectionLabels = ['YOUR TEAM', 'FORMAT', 'BALL TYPE', 'DATE', 'GROUND & SLOT'];
+  static const _sectionLabels = [
+    'Select team',
+    'Choose format',
+    'Pick ball',
+    'Choose date',
+    'Select slot'
+  ];
 
   @override
   void initState() {
@@ -2370,11 +2670,16 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
 
   void _advance() {
     if (!mounted) return;
-    final next = (_step + 1).clamp(0, 4);
+    final next = (_step + 1).clamp(0, 5);
     setState(() {
       _step = next;
       if (next > _maxStep) _maxStep = next;
     });
+  }
+
+  void _back() {
+    if (!mounted || _step == 0) return;
+    setState(() => _step -= 1);
   }
 
   void _jumpTo(int s) => setState(() => _step = s);
@@ -2391,7 +2696,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   String _summaryFor(int i) => switch (i) {
         0 => widget.team?.name ?? '—',
         1 => widget.format == MatchFormat.custom
-            ? 'Custom · $_customOvers ov'
+            ? 'Custom over $_customOvers'
             : widget.format.label,
         2 => widget.ballType != null ? _ballTypeLabel(widget.ballType!) : '—',
         3 => _dateLabel(widget.date),
@@ -2410,13 +2715,21 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         query: (
           date: dateStr,
           format: widget.format.apiValue,
-          teamId: widget.team?.id,
+          teamId: null,
           overs: widget.format == MatchFormat.custom ? _customOvers : null,
         ),
         existingPicks: widget.picks,
         onPick: widget.onAddPick,
       ),
-    );
+    ).then((_) {
+      if (!mounted) return;
+      if (widget.picks.isNotEmpty) {
+        setState(() {
+          _step = 5;
+          if (_maxStep < 5) _maxStep = 5;
+        });
+      }
+    });
   }
 
   @override
@@ -2426,72 +2739,72 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         widget.team != null &&
         widget.ballType != null &&
         !widget.loading;
+    final isReview = _step >= 5;
+    final stepReady = switch (_step) {
+      0 => widget.team != null,
+      1 => true,
+      2 => widget.ballType != null,
+      3 => true,
+      4 => widget.picks.isNotEmpty,
+      _ => canEnter,
+    };
 
     return Column(
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            padding: const EdgeInsets.fromLTRB(0, 20, 0, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Tagline ─────────────────────────────────────────
-                Text(
-                  'Set your preferences — we\'ll find you a rival.',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _buildFlowHeader(context),
                 ),
-                const SizedBox(height: 28),
-
-                // ── 5 sections (each revealed progressively) ─────────
-                for (int i = 0; i <= 4; i++)
-                  _AnimatedSection(
-                    visible: i <= _maxStep,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (i > 0) const SizedBox(height: 4),
-                        if (i == _step) ...[
-                          // Active: show full picker
-                          if (i > 0 && _step > 0) ...[
-                            Divider(
-                                height: 1,
-                                color: context.stroke.withValues(alpha: 0.3)),
-                            const SizedBox(height: 20),
-                          ],
-                          Text(
-                            _sectionLabels[i],
-                            style: TextStyle(
-                              color: context.fg,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          _buildPicker(context, i, teamsAsync),
-                        ] else if (i < _maxStep || (i <= _maxStep && i != _step)) ...[
-                          // Completed: show compact summary row
-                          _buildSummaryRow(context, i),
-                          const SizedBox(height: 2),
-                        ],
-                      ],
-                    ),
+                const SizedBox(height: 26),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 260),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  layoutBuilder: (currentChild, previousChildren) => Stack(
+                    alignment: Alignment.topLeft,
+                    children: [
+                      ...previousChildren,
+                      if (currentChild != null) currentChild,
+                    ],
                   ),
+                  transitionBuilder: (child, anim) {
+                    final slide = Tween<Offset>(
+                      begin: const Offset(0.06, 0),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+                    );
+                    return FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(position: slide, child: child),
+                    );
+                  },
+                  child: _step < 5
+                      ? _buildStepShell(context, teamsAsync)
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _buildReviewPanel(context),
+                        ),
+                ),
 
                 // ── Error ────────────────────────────────────────────
                 if (widget.error != null) ...[
                   const SizedBox(height: 14),
-                  Text(
-                    widget.error!,
-                    style: TextStyle(
-                      color: context.danger,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      widget.error!,
+                      style: TextStyle(
+                        color: context.danger,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
@@ -2501,116 +2814,279 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         ),
 
         // ── CTA ──────────────────────────────────────────────────────
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-              20, 8, 20, 16 + MediaQuery.of(context).padding.bottom),
-          child: GestureDetector(
-            onTap: canEnter ? widget.onEnter : null,
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 56,
-              decoration: BoxDecoration(
-                color: canEnter ? context.ctaBg : context.panel,
-                borderRadius: BorderRadius.circular(16),
+        Container(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: context.stroke.withValues(alpha: 0.14),
+                width: 1,
               ),
-              alignment: Alignment.center,
-              child: widget.loading
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.2, color: context.ctaFg),
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.radar_rounded,
-                            color: canEnter ? context.ctaFg : context.fgSub,
-                            size: 19),
-                        const SizedBox(width: 9),
-                        Text(
-                          canEnter
-                              ? 'Find Matchup'
-                              : 'Add ground & slot to continue',
-                          style: TextStyle(
-                            color: canEnter ? context.ctaFg : context.fgSub,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                        if (canEnter) ...[
-                          const SizedBox(width: 8),
-                          Icon(Icons.arrow_forward_rounded,
-                              color: context.ctaFg.withValues(alpha: 0.7),
-                              size: 16),
-                        ],
-                      ],
-                    ),
             ),
+          ),
+          padding: EdgeInsets.fromLTRB(
+              20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
+          child: Row(
+            children: [
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: _step > 0 ? 1 : 0.0,
+                child: GestureDetector(
+                  onTap: _step > 0 ? _back : null,
+                  behavior: HitTestBehavior.opaque,
+                  child: SizedBox(
+                    width: 44,
+                    height: 52,
+                    child: Icon(
+                      Icons.arrow_back_rounded,
+                      size: 20,
+                      color: context.fg,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: isReview
+                      ? (canEnter ? widget.onEnter : null)
+                      : (stepReady ? _advance : null),
+                  behavior: HitTestBehavior.opaque,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: isReview
+                          ? (canEnter ? context.ctaBg : context.stroke.withValues(alpha: 0.18))
+                          : (stepReady ? context.fg : context.stroke.withValues(alpha: 0.18)),
+                    ),
+                    alignment: Alignment.center,
+                    child: widget.loading
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.2, color: context.ctaFg),
+                          )
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                isReview ? 'Find Matchup' : 'Continue',
+                                style: TextStyle(
+                                  color: isReview
+                                      ? (canEnter ? context.ctaFg : context.fgSub)
+                                      : (stepReady ? context.bg : context.fgSub),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.2,
+                                  height: 1.0,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Icon(
+                                isReview
+                                    ? Icons.radar_rounded
+                                    : Icons.arrow_forward_rounded,
+                                color: isReview
+                                    ? (canEnter ? context.ctaFg : context.fgSub)
+                                    : (stepReady ? context.bg : context.fgSub),
+                                size: 17,
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSummaryRow(BuildContext context, int i) {
-    return GestureDetector(
-      onTap: () => _jumpTo(i),
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        child: Row(
-          children: [
-            Text(
-              _sectionLabels[i],
-              style: TextStyle(
-                color: context.fgSub,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.1,
-              ),
-            ),
-            const SizedBox(width: 12),
-            if (i == 2 && widget.ballType != null) ...[
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: _ballTypeColor(widget.ballType!),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 5),
-            ],
-            Expanded(
-              child: Text(
-                _summaryFor(i),
+  Widget _buildFlowHeader(BuildContext context) {
+    final totalSteps = _sectionLabels.length;
+    final isReview = _step >= totalSteps;
+    final stepNumber =
+        isReview ? totalSteps : (_step.clamp(0, totalSteps - 1)) + 1;
+    final eyebrow = isReview
+        ? 'FINAL REVIEW'
+        : 'STEP ${stepNumber.toString().padLeft(2, '0')} OF 0$totalSteps';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.8,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 12),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 260),
+          transitionBuilder: (child, anim) {
+            final slide = Tween<Offset>(
+              begin: const Offset(0, 0.18),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+            );
+            return FadeTransition(
+              opacity: anim,
+              child: SlideTransition(position: slide, child: child),
+            );
+          },
+          child: Column(
+            key: ValueKey<int>(_step),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isReview ? 'Review' : _sectionLabels[_step],
                 style: TextStyle(
                   color: context.fg,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 40,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.6,
+                  height: 0.95,
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            Text(
-              'Edit',
-              style: TextStyle(
-                color: context.accent,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 8),
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 24, end: 64),
+                duration: const Duration(milliseconds: 360),
+                curve: Curves.easeOutCubic,
+                builder: (_, w, __) => Container(
+                  height: 4,
+                  width: w,
+                  decoration: BoxDecoration(
+                    color: context.accent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-            ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            for (int i = 0; i < totalSteps; i++) ...[
+              Expanded(
+                child: AnimatedContainer(
+                  duration: Duration(milliseconds: 320 + i * 40),
+                  curve: Curves.easeOutCubic,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: i < _step || isReview
+                        ? context.accent
+                        : i == _step
+                            ? context.fg
+                            : context.stroke.withValues(alpha: 0.22),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              if (i < totalSteps - 1) const SizedBox(width: 6),
+            ],
           ],
         ),
-      ),
+      ],
     );
   }
 
-  Widget _buildPicker(BuildContext context, int i,
-      AsyncValue<List<MmTeam>> teamsAsync) {
+  Widget _buildStepShell(
+      BuildContext context, AsyncValue<List<MmTeam>> teamsAsync) {
+    return KeyedSubtree(
+      key: ValueKey<int>(_step),
+      child: _buildPicker(context, _step, teamsAsync),
+    );
+  }
+
+  Widget _buildReviewPanel(BuildContext context) {
+    return Column(
+      key: const ValueKey<String>('review'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int i = 0; i < _sectionLabels.length; i++) ...[
+          InkWell(
+            onTap: () => _jumpTo(i),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 22,
+                    child: Text(
+                      '0${i + 1}',
+                      style: TextStyle(
+                        color: i < _step
+                            ? context.accent
+                            : context.fgSub.withValues(alpha: 0.6),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _sectionLabels[i],
+                          style: TextStyle(
+                            color: context.fg,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _summaryFor(i),
+                          style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.edit_rounded,
+                      size: 15, color: context.fgSub.withValues(alpha: 0.7)),
+                ],
+              ),
+            ),
+          ),
+          if (i < _sectionLabels.length - 1)
+            Divider(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.14),
+            ),
+        ],
+        const SizedBox(height: 18),
+        Text(
+          widget.picks.isEmpty
+              ? 'Add a slot to continue'
+              : '${widget.picks.length} slot${widget.picks.length > 1 ? "s" : ""} ready · tap any row to edit',
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPicker(
+      BuildContext context, int i, AsyncValue<List<MmTeam>> teamsAsync) {
     return switch (i) {
       0 => _buildTeamPicker(context, teamsAsync),
       1 => _buildFormatPicker(context),
@@ -2632,178 +3108,118 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
               style: TextStyle(color: context.fgSub, fontSize: 13));
         }
         return Column(
-          children: teams.map((t) {
-            final sel = widget.team?.id == t.id;
-            return GestureDetector(
-              onTap: () {
-                widget.onTeam(t);
-                _advance();
-              },
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 140),
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
-                decoration: BoxDecoration(
-                  color: sel ? context.ctaBg : context.panel,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? context.ctaFg.withValues(alpha: 0.15)
-                            : context.bg,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: t.logoUrl != null && t.logoUrl!.isNotEmpty
-                          ? Image.network(t.logoUrl!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) =>
-                                  _TeamInitials(t.name))
-                          : _TeamInitials(t.name),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            t.name,
-                            style: TextStyle(
-                              color: sel ? context.ctaFg : context.fg,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                          Text(
-                            '${t.memberCount} members',
-                            style: TextStyle(
-                              color: sel
-                                  ? context.ctaFg.withValues(alpha: 0.6)
-                                  : context.fgSub,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (sel)
-                      Icon(Icons.check_circle_rounded,
-                          color: context.ctaFg, size: 18),
-                  ],
-                ),
+          children: [
+            for (int i = 0; i < teams.length; i++) ...[
+              _FlowRow(
+                selected: widget.team?.id == teams[i].id,
+                leading: teams[i].logoUrl != null && teams[i].logoUrl!.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: Image.network(
+                          teams[i].logoUrl!,
+                          width: 32,
+                          height: 32,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _TeamInitials(teams[i].name),
+                        ),
+                      )
+                    : _TeamInitials(teams[i].name),
+                title: teams[i].name,
+                subtitle: '${teams[i].memberCount} members',
+                trailing: widget.team?.id == teams[i].id
+                    ? Icon(Icons.check_rounded, color: context.accent, size: 18)
+                    : Icon(Icons.arrow_forward_rounded,
+                        color: context.fgSub, size: 16),
+                onTap: () {
+                  widget.onTeam(teams[i]);
+                  _advance();
+                },
               ),
-            );
-          }).toList(),
+              if (i < teams.length - 1)
+                Divider(
+                  height: 1,
+                  color: context.stroke.withValues(alpha: 0.18),
+                ),
+            ],
+          ],
         );
       },
     );
   }
 
   Widget _buildFormatPicker(BuildContext context) {
+    const formats = MatchFormat.values;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: MatchFormat.values.map((f) {
-            final sel = widget.format == f;
-            final hint = _formatOversHint(f);
-            return GestureDetector(
-              onTap: () {
-                widget.onFormat(f);
-                if (f != MatchFormat.custom) _advance();
-              },
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 140),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                  color: sel ? context.ctaBg : context.panel,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      f.label,
-                      style: TextStyle(
-                        color: sel ? context.ctaFg : context.fg,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    if (hint != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        hint,
-                        style: TextStyle(
-                          color: sel
-                              ? context.ctaFg.withValues(alpha: 0.65)
-                              : context.fgSub,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
+        for (final f in formats)
+          ...[
+          _FlowRow(
+            selected: widget.format == f,
+            title: f.label,
+            subtitle: _formatOversHint(f) ?? 'Select a format',
+            trailing: widget.format == f
+                ? Icon(Icons.check_rounded, color: context.accent, size: 18)
+                : Icon(Icons.arrow_forward_rounded,
+                    color: context.fgSub, size: 16),
+            onTap: () {
+              widget.onFormat(f);
+              if (f != MatchFormat.custom) _advance();
+            },
+          ),
+          if (f != formats.last)
+            Divider(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+          ],
         if (widget.format == MatchFormat.custom) ...[
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text('Overs',
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Text(
+                  'OVERS',
                   style: TextStyle(
-                      color: context.fgSub,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(width: 16),
-              _OversButton(
-                  icon: Icons.remove,
-                  onTap: _customOvers > 1
-                      ? () => setState(() => _customOvers--)
-                      : null),
-              const SizedBox(width: 12),
-              Text('$_customOvers',
-                  style: TextStyle(
-                      color: context.fg,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900)),
-              const SizedBox(width: 12),
-              _OversButton(
-                  icon: Icons.add,
-                  onTap: _customOvers < 100
-                      ? () => setState(() => _customOvers++)
-                      : null),
-              const Spacer(),
-              GestureDetector(
-                onTap: _advance,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                      color: context.ctaBg,
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text('Next →',
-                      style: TextStyle(
-                          color: context.ctaFg,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700)),
+                    color: context.fgSub,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 14),
+                _OversButton(
+                    icon: Icons.remove,
+                    onTap: _customOvers > 1
+                        ? () => setState(() => _customOvers--)
+                        : null),
+                const SizedBox(width: 12),
+                Text(
+                  '$_customOvers',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _OversButton(
+                    icon: Icons.add,
+                    onTap: _customOvers < 100
+                        ? () => setState(() => _customOvers++)
+                        : null),
+                const Spacer(),
+                Text(
+                  'Tap continue',
+                  style: TextStyle(
+                    color: context.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ],
@@ -2811,91 +3227,124 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
   }
 
   Widget _buildBallPicker(BuildContext context) {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 8,
-      children: ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'].map((bt) {
-        final sel = widget.ballType == bt;
-        final ballColor = _ballTypeColor(bt);
-        return GestureDetector(
-          onTap: () {
-            widget.onBallType(bt);
-            _advance();
-          },
-          behavior: HitTestBehavior.opaque,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
-            decoration: BoxDecoration(
-              color: sel ? ballColor.withValues(alpha: 0.12) : context.panel,
-              borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: sel ? ballColor : Colors.transparent, width: 1.5),
+    const balls = ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'];
+    return Column(
+      children: [
+        for (final bt in balls)
+          ...[
+          _FlowRow(
+            selected: widget.ballType == bt,
+            leading: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: _ballTypeColor(bt),
+                shape: BoxShape.circle,
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                        color: ballColor, shape: BoxShape.circle)),
-                const SizedBox(width: 8),
-                Text(_ballTypeLabel(bt),
-                    style: TextStyle(
-                        color: sel ? ballColor : context.fg,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700)),
-              ],
-            ),
+            title: _ballTypeLabel(bt),
+            subtitle: widget.ballType == bt ? 'Selected' : 'Tap to choose',
+            trailing: widget.ballType == bt
+                ? Icon(Icons.check_rounded,
+                    color: _ballTypeColor(bt), size: 18)
+                : Icon(Icons.arrow_forward_rounded,
+                    color: context.fgSub, size: 16),
+            onTap: () {
+              widget.onBallType(bt);
+              _advance();
+            },
           ),
-        );
-      }).toList(),
+          if (bt != balls.last)
+            Divider(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+          ],
+      ],
     );
   }
 
   Widget _buildDatePicker(BuildContext context) {
-    return _DateStrip(
-      selected: widget.date,
-      onSelect: (d) {
-        widget.onDate(d);
-        _advance();
-      },
+    final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
+    final groundsAsync = ref.watch(
+      mmGroundsProvider((
+        date: dateStr,
+        format: widget.format.apiValue,
+        teamId: null,
+        overs: widget.format == MatchFormat.custom ? _customOvers : null,
+      )),
+    );
+    final grounds = groundsAsync.valueOrNull ?? [];
+    final totalSlots = grounds.fold<int>(0, (sum, g) => sum + g.slots.length);
+    final hotSlots = grounds.fold<int>(
+        0, (sum, g) => sum + g.slots.where((s) => s.hasOpponent).length);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 20),
+          child: _DateStrip(
+            selected: widget.date,
+            onSelect: (d) {
+              widget.onDate(d);
+              _advance();
+            },
+          ),
+        ),
+        const SizedBox(height: 22),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              _MetricCell(
+                value: grounds.length.toString(),
+                label: 'grounds',
+              ),
+              _DotSep(),
+              _MetricCell(
+                value: totalSlots.toString(),
+                label: 'slots',
+              ),
+              _DotSep(),
+              _MetricCell(
+                value: hotSlots.toString(),
+                label: 'matchups',
+                accent: true,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Text(
+            grounds.isEmpty
+                ? 'No availability — try another date'
+                : 'Availability updates as you slide the date',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildGroundPicker(BuildContext context) {
-    return _Step4Content(
-      date: widget.date,
-      format: widget.format,
-      ballType: widget.ballType,
-      ownTeam: widget.team,
-      picks: widget.picks,
-      onAddPick: widget.onAddPick,
-      onRemovePick: widget.onRemovePick,
-      onInstantChallenge: widget.onInstantChallenge,
-      onOpenGroundSheet: _openGroundSheet,
-    );
-  }
-}
-
-// ── Animated section reveal ───────────────────────────────────────────────────
-
-class _AnimatedSection extends StatelessWidget {
-  const _AnimatedSection({required this.visible, required this.child});
-  final bool visible;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: AnimatedOpacity(
-        opacity: visible ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 260),
-        child: visible ? child : const SizedBox(width: double.infinity),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: _Step4Content(
+        date: widget.date,
+        format: widget.format,
+        customOvers: _customOvers,
+        ballType: widget.ballType,
+        ownTeam: widget.team,
+        picks: widget.picks,
+        onAddPick: widget.onAddPick,
+        onRemovePick: widget.onRemovePick,
       ),
     );
   }
@@ -2907,24 +3356,22 @@ class _Step4Content extends ConsumerStatefulWidget {
   const _Step4Content({
     required this.date,
     required this.format,
+    required this.customOvers,
     required this.ballType,
     required this.ownTeam,
     required this.picks,
     required this.onAddPick,
     required this.onRemovePick,
-    required this.onInstantChallenge,
-    required this.onOpenGroundSheet,
   });
 
   final DateTime date;
   final MatchFormat format;
+  final int customOvers;
   final String? ballType;
   final MmTeam? ownTeam;
   final List<MmGroundSlotPick> picks;
   final ValueChanged<MmGroundSlotPick> onAddPick;
   final ValueChanged<MmGroundSlotPick> onRemovePick;
-  final ValueChanged<MmOpenLobby> onInstantChallenge;
-  final VoidCallback onOpenGroundSheet;
 
   @override
   ConsumerState<_Step4Content> createState() => _Step4ContentState();
@@ -2935,6 +3382,8 @@ class _Step4ContentState extends ConsumerState<_Step4Content>
   late final AnimationController _pulse;
   late final Animation<double> _glow;
   Timer? _refreshTimer;
+  String _groundQuery = '';
+  MmGround? _selectedGround;
 
   @override
   void initState() {
@@ -2949,8 +3398,8 @@ class _Step4ContentState extends ConsumerState<_Step4Content>
     _refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
       if (!mounted) return;
       final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
-      ref.invalidate(
-          mmOpenLobbiesProvider((date: dateStr, format: widget.format.apiValue)));
+      ref.invalidate(mmOpenLobbiesProvider(
+          (date: dateStr, format: widget.format.apiValue)));
     });
   }
 
@@ -2961,237 +3410,380 @@ class _Step4ContentState extends ConsumerState<_Step4Content>
     super.dispose();
   }
 
+  String _prettyLabel(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => part.isEmpty
+            ? part
+            : part[0].toUpperCase() +
+                (part.length > 1 ? part.substring(1).toLowerCase() : ''))
+        .join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
-    final lobbiesAsync = ref.watch(
-      mmOpenLobbiesProvider((date: dateStr, format: widget.format.apiValue)),
+    final groundsAsync = ref.watch(
+      mmGroundsProvider((
+        date: dateStr,
+        format: widget.format.apiValue,
+        teamId: null,
+        overs: widget.format == MatchFormat.custom ? widget.customOvers : null,
+      )),
     );
 
-    final allLobbies = lobbiesAsync.valueOrNull
-            ?.where((l) =>
-                (widget.ownTeam == null ||
-                    l.teamName != widget.ownTeam!.name) &&
-                (widget.ballType == null ||
-                    l.ballType == null ||
-                    l.ballType == widget.ballType))
-            .toList() ??
-        [];
+    final grounds = groundsAsync.valueOrNull ?? [];
+    final totalSlots = grounds.fold<int>(0, (sum, g) => sum + g.slots.length);
+    final hotSlots = grounds.fold<int>(
+        0, (sum, g) => sum + g.slots.where((s) => s.hasOpponent).length);
+    final availableSlots = totalSlots;
+    final notReadySlots = (totalSlots - hotSlots).clamp(0, totalSlots);
+    final activeGrounds = grounds.length;
+    final filteredGrounds = _groundQuery.isEmpty
+        ? grounds
+        : grounds.where((g) {
+            final q = _groundQuery.toLowerCase();
+            return g.name.toLowerCase().contains(q) ||
+                g.area.toLowerCase().contains(q);
+          }).toList();
 
-    // Split: lobbies that share a ground+slot with the user's picks vs everything else
-    for (final l in allLobbies) {
-      _mmLog('lobby unitId=${l.unitId} slotTime=${l.slotTime} ground=${l.groundName} arena=${l.arenaName}');
-    }
-    for (final p in widget.picks) {
-      _mmLog('pick unitId=${p.slot.unitId} time=${p.slot.time} ground=${p.ground.name}');
-    }
-    final directMatches = allLobbies
-        .where((l) => widget.picks.any((p) =>
-            l.unitId != null &&
-            p.slot.unitId.isNotEmpty &&
-            p.slot.unitId == l.unitId &&
-            p.slot.time == l.slotTime))
-        .toList();
-    _mmLog('directMatches=${directMatches.length} others=${allLobbies.length - directMatches.length}');
-    final otherLobbies = allLobbies
-        .where((l) => !directMatches.contains(l))
-        .toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Direct matchup found (same pick) ──────────────────────────
-        if (directMatches.isNotEmpty) ...[
-          AnimatedBuilder(
-            animation: _glow,
-            builder: (context, _) => Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF16A34A).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: const Color(0xFF16A34A)
-                      .withValues(alpha: _glow.value * 0.75),
-                  width: 1.5,
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Text('🎯', style: TextStyle(fontSize: 20)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'MATCHUP FOUND',
-                          style: const TextStyle(
-                            color: Color(0xFF16A34A),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.7,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'A team wants the same ground & slot as you',
-                          style: TextStyle(
-                            color: context.fgSub,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+    return groundsAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LinearProgressIndicator(minHeight: 1.5),
+      ),
+      error: (_, __) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: context.panel,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: context.stroke.withValues(alpha: 0.6)),
+        ),
+        child: Text(
+          'Could not load grounds for this date.',
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      data: (_) {
+        if (grounds.isEmpty) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: context.panel,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: context.stroke.withValues(alpha: 0.55)),
             ),
-          ),
-          const SizedBox(height: 10),
-          ...directMatches.map((lobby) => _InstantLobbyRow(
-                lobby: lobby,
-                pulseAnim: _glow,
-                highlight: true,
-                onChallenge: () => widget.onInstantChallenge(lobby),
-              )),
-          const SizedBox(height: 14),
-        ],
-
-        // ── Other available lobbies (different ground/slot) ────────────
-        if (otherLobbies.isNotEmpty) ...[
-          AnimatedBuilder(
-            animation: _glow,
-            builder: (context, _) => Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
-              decoration: BoxDecoration(
-                color: context.accent.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: context.accent.withValues(alpha: _glow.value * 0.7),
-                  width: 1.5,
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Text('⚡', style: TextStyle(fontSize: 18)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'MATCH AVAILABLE',
-                          style: TextStyle(
-                            color: context.accent,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Grab it before someone else does',
-                          style: TextStyle(
-                            color: context.fgSub,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'No grounds available on this date',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
                   ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          ...otherLobbies.map((lobby) => _InstantLobbyRow(
-                lobby: lobby,
-                pulseAnim: _glow,
-                onChallenge: () => widget.onInstantChallenge(lobby),
-              )),
-          const SizedBox(height: 14),
-        ],
-
-        if (allLobbies.isNotEmpty) ...[
-          Row(
-            children: [
-              Expanded(child: Divider(color: context.stroke.withValues(alpha: 0.5))),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'or add your own picks',
-                  style: TextStyle(color: context.fgSub, fontSize: 11, fontWeight: FontWeight.w500),
                 ),
-              ),
-              Expanded(child: Divider(color: context.stroke.withValues(alpha: 0.5))),
-            ],
-          ),
-          const SizedBox(height: 12),
-        ],
+                const SizedBox(height: 4),
+                Text(
+                  'Choose another date or adjust your format.',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
 
-        // ── Manual ground picks ────────────────────────────────────────
-        if (widget.picks.isEmpty)
-          GestureDetector(
-            onTap: widget.onOpenGroundSheet,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: context.panel,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: context.stroke.withValues(alpha: 0.5)),
+                borderRadius: BorderRadius.circular(18),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.add_rounded, color: context.fgSub, size: 16),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Add ground & slot',
-                    style: TextStyle(
-                      color: context.fgSub,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  const SizedBox(height: 4),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 2),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded,
+                            size: 18, color: context.fgSub),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            onChanged: (value) =>
+                                setState(() => _groundQuery = value.trim()),
+                            textInputAction: TextInputAction.search,
+                            decoration: InputDecoration(
+                              hintText: 'Search ground or area',
+                              hintStyle: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              border: InputBorder.none,
+                              isDense: true,
+                            ),
+                            style: TextStyle(
+                              color: context.fg,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (_groundQuery.isNotEmpty)
+                          GestureDetector(
+                            onTap: () => setState(() => _groundQuery = ''),
+                            behavior: HitTestBehavior.opaque,
+                            child: Icon(Icons.close_rounded,
+                                size: 18, color: context.fgSub),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _SimplePill(
+                          label: '$activeGrounds grounds',
+                          icon: Icons.stadium_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _SimplePill(
+                          label: '$availableSlots units',
+                          icon: Icons.schedule_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _SimplePill(
+                          label: '$notReadySlots pending',
+                          icon: Icons.hourglass_bottom_rounded,
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-          )
-        else ...[
-          ...widget.picks.map((p) => _PickRow(
-                pick: p,
-                onRemove: () => widget.onRemovePick(p),
-              )),
-          if (widget.picks.length < 3)
-            GestureDetector(
-              onTap: widget.onOpenGroundSheet,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 2, bottom: 4),
-                child: Row(
-                  children: [
-                    Icon(Icons.add_rounded, color: context.fgSub, size: 14),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Add another  ${widget.picks.length}/3',
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+            const SizedBox(height: 12),
+            Text(
+              'Tap a ground to reveal its slots.',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
               ),
             ),
-        ],
-      ],
+            const SizedBox(height: 10),
+            if (filteredGrounds.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: context.panel,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: context.stroke.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Text(
+                  'No grounds match this search.',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ...filteredGrounds.map((g) {
+              final selected = _selectedGround?.id == g.id;
+              final groundName = _prettyLabel(g.name);
+              final groundArea =
+                  g.area.isNotEmpty ? _prettyLabel(g.area) : 'Cricket ground';
+              return Column(
+                children: [
+                  InkWell(
+                    onTap: () => setState(() {
+                      _selectedGround = selected ? null : g;
+                    }),
+                    borderRadius: BorderRadius.circular(14),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 2, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? context.accentBg.withValues(alpha: 0.08)
+                            : Colors.transparent,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  groundName,
+                                  style: TextStyle(
+                                    color: context.fg,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  groundArea,
+                                  style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '${g.slots.length} slots',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            selected
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 18,
+                            color: context.fgSub,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (selected) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+                      child: LayoutBuilder(
+                        builder: (_, constraints) {
+                          final slotWidth = (constraints.maxWidth - 10) / 2;
+                          return Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: g.slots.map((slot) {
+                              final picked = widget.picks.any((p) =>
+                                  p.slot.unitId == slot.unitId &&
+                                  p.slot.time == slot.time);
+                              final hot = slot.hasOpponent;
+                              return SizedBox(
+                                width: slotWidth,
+                                child: GestureDetector(
+                                  onTap: picked
+                                      ? null
+                                      : () => widget.onAddPick(
+                                            MmGroundSlotPick(
+                                              ground: g,
+                                              slot: slot,
+                                            ),
+                                          ),
+                                  behavior: HitTestBehavior.opaque,
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 140),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: picked
+                                          ? context.ctaBg.withValues(alpha: 0.08)
+                                          : hot
+                                              ? context.accent
+                                                  .withValues(alpha: 0.06)
+                                              : context.bg
+                                                  .withValues(alpha: 0.28),
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          slot.displayTime,
+                                          style: TextStyle(
+                                            color: picked
+                                                ? context.ctaBg
+                                                : hot
+                                                    ? context.accent
+                                                    : context.fg,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          picked
+                                              ? 'added'
+                                              : hot
+                                                  ? 'match ready'
+                                                  : 'open',
+                                          style: TextStyle(
+                                            color: picked
+                                                ? context.ctaBg.withValues(
+                                                    alpha: 0.75)
+                                                : context.fgSub,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
+                    ),
+                  ] else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Divider(
+                        height: 1,
+                        color: context.stroke.withValues(alpha: 0.12),
+                      ),
+                    ),
+                ],
+              );
+            }),
+          ],
+        );
+      },
     );
   }
 }
@@ -3210,22 +3802,21 @@ class _InstantLobbyRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final arenaLabel = lobby.arenaName.isNotEmpty
-        ? lobby.arenaName
-        : lobby.groundName;
+    final arenaLabel =
+        lobby.arenaName.isNotEmpty ? lobby.arenaName : lobby.groundName;
     final dateLabel = lobby.daysFromNow == 0
         ? 'Today'
         : lobby.daysFromNow == 1
             ? 'Tomorrow'
-            : DateFormat('MMM d').format(DateTime.tryParse(lobby.date) ?? DateTime.now());
+            : DateFormat('MMM d')
+                .format(DateTime.tryParse(lobby.date) ?? DateTime.now());
     final venueLine = [
       if (arenaLabel.isNotEmpty) arenaLabel,
       dateLabel,
       lobby.displaySlot,
     ].where((s) => s.isNotEmpty).join('  ·  ');
 
-    final accentColor =
-        highlight ? const Color(0xFF16A34A) : context.accent;
+    final accentColor = highlight ? const Color(0xFF16A34A) : context.accent;
 
     return AnimatedBuilder(
       animation: pulseAnim,
@@ -3273,14 +3864,16 @@ class _InstantLobbyRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: accentColor
-                              .withValues(alpha: pulseAnim.value * 0.15 + 0.08),
+                          color: accentColor.withValues(
+                              alpha: pulseAnim.value * 0.15 + 0.08),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           highlight
                               ? 'SAME PICK'
-                              : (lobby.isArenaLobby ? 'ARENA SLOT' : 'OPEN TEAM'),
+                              : (lobby.isArenaLobby
+                                  ? 'ARENA SLOT'
+                                  : 'OPEN TEAM'),
                           style: TextStyle(
                             color: accentColor,
                             fontSize: 9,
@@ -3344,7 +3937,6 @@ class _InstantLobbyRow extends StatelessWidget {
   }
 }
 
-
 // ── Pick row ──────────────────────────────────────────────────────────────────
 
 class _OversButton extends StatelessWidget {
@@ -3361,13 +3953,16 @@ class _OversButton extends StatelessWidget {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: onTap != null ? context.panel : context.panel.withValues(alpha: 0.4),
+          color: onTap != null
+              ? context.panel
+              : context.panel.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
           size: 18,
-          color: onTap != null ? context.fg : context.fgSub.withValues(alpha: 0.3),
+          color:
+              onTap != null ? context.fg : context.fgSub.withValues(alpha: 0.3),
         ),
       ),
     );
@@ -3387,9 +3982,7 @@ class _PickRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: hot
-              ? context.accent.withValues(alpha: 0.07)
-              : context.panel,
+          color: hot ? context.accent.withValues(alpha: 0.07) : context.panel,
           borderRadius: BorderRadius.circular(12),
           border: hot
               ? Border.all(
@@ -3451,8 +4044,8 @@ class _PickRow extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               child: Padding(
                 padding: const EdgeInsets.only(left: 12),
-                child: Icon(Icons.close_rounded,
-                    color: context.fgSub, size: 16),
+                child:
+                    Icon(Icons.close_rounded, color: context.fgSub, size: 16),
               ),
             ),
           ],
@@ -3482,14 +4075,42 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
   String _filterQuery = '';
   MmGround? _selectedGround;
 
-  bool _alreadyPicked(MmSlot slot) =>
-      widget.existingPicks.any(
-          (p) => p.slot.unitId == slot.unitId && p.slot.time == slot.time);
+  bool _alreadyPicked(MmSlot slot) => widget.existingPicks
+      .any((p) => p.slot.unitId == slot.unitId && p.slot.time == slot.time);
+
+  @override
+  void initState() {
+    super.initState();
+    _mmLog(
+        '_AddGroundSheet:init date=${widget.query.date} format=${widget.query.format} teamId=${widget.query.teamId} overs=${widget.query.overs} picks=${widget.existingPicks.length}');
+    if (kDebugMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          final repo = ref.read(matchmakingRepositoryProvider);
+          final result = await repo.searchGrounds(
+            date: widget.query.date,
+            format: widget.query.format,
+            overs: widget.query.overs,
+          );
+          _mmLog(
+              '_AddGroundSheet:probe result=${result.length} date=${widget.query.date} format=${widget.query.format}');
+          for (final g in result.take(10)) {
+            _mmLog(
+                '  probeGround: id=${g.id} name=${g.name} area=${g.area} slots=${g.slots.length}');
+          }
+        } catch (e, st) {
+          _mmLog('_AddGroundSheet:probe ERROR: $e\n$st');
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final groundsAsync = ref.watch(mmGroundsProvider(widget.query));
     final h = MediaQuery.of(context).size.height;
+    _mmLog(
+        '_AddGroundSheet:build selected=${_selectedGround?.name ?? 'none'} filter=${_filterQuery.isEmpty ? 'none' : _filterQuery}');
 
     return Container(
       height: h * 0.88,
@@ -3504,7 +4125,8 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
             child: Padding(
               padding: const EdgeInsets.only(top: 12, bottom: 4),
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                     color: context.stroke,
                     borderRadius: BorderRadius.circular(2)),
@@ -3530,20 +4152,27 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _selectedGround == null ? 'Choose Ground' : _selectedGround!.name,
+                        _selectedGround == null
+                            ? 'Choose Ground'
+                            : _selectedGround!.name,
                         style: TextStyle(
-                          color: context.fg, fontSize: 18,
-                          fontWeight: FontWeight.w900, letterSpacing: -0.4,
+                          color: context.fg,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.4,
                         ),
                       ),
                       if (_selectedGround != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Row(children: [
-                            Icon(Icons.location_on_rounded, color: context.fgSub, size: 12),
+                            Icon(Icons.location_on_rounded,
+                                color: context.fgSub, size: 12),
                             const SizedBox(width: 3),
                             Text(_selectedGround!.area,
-                                style: TextStyle(color: context.fgSub, fontSize: 12,
+                                style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w500)),
                           ]),
                         ),
@@ -3561,7 +4190,8 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
               child: Container(
                 height: 42,
                 decoration: BoxDecoration(
-                    color: context.panel, borderRadius: BorderRadius.circular(12)),
+                    color: context.panel,
+                    borderRadius: BorderRadius.circular(12)),
                 child: Row(children: [
                   const SizedBox(width: 12),
                   Icon(Icons.search_rounded, color: context.fgSub, size: 18),
@@ -3569,11 +4199,16 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                   Expanded(
                     child: TextField(
                       onChanged: (v) => setState(() => _filterQuery = v),
-                      style: TextStyle(color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                          color: context.fg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500),
                       decoration: InputDecoration(
                         hintText: 'Search ground or area...',
-                        hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
-                        border: InputBorder.none, isDense: true,
+                        hintStyle:
+                            TextStyle(color: context.fgSub, fontSize: 14),
+                        border: InputBorder.none,
+                        isDense: true,
                       ),
                     ),
                   ),
@@ -3582,13 +4217,15 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
             ),
             Expanded(
               child: groundsAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 1.5)),
+                loading: () => const Center(
+                    child: CircularProgressIndicator(strokeWidth: 1.5)),
                 error: (_, __) => Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.sports_cricket_rounded,
-                          size: 40, color: context.fgSub.withValues(alpha: 0.3)),
+                          size: 40,
+                          color: context.fgSub.withValues(alpha: 0.3)),
                       const SizedBox(height: 12),
                       Text('No slots available on this day',
                           style: TextStyle(
@@ -3606,16 +4243,29 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                 data: (grounds) {
                   final filtered = _filterQuery.isEmpty
                       ? grounds
-                      : grounds.where((g) =>
-                          g.name.toLowerCase().contains(_filterQuery.toLowerCase()) ||
-                          g.area.toLowerCase().contains(_filterQuery.toLowerCase())).toList();
+                      : grounds
+                          .where((g) =>
+                              g.name
+                                  .toLowerCase()
+                                  .contains(_filterQuery.toLowerCase()) ||
+                              g.area
+                                  .toLowerCase()
+                                  .contains(_filterQuery.toLowerCase()))
+                          .toList();
+                  _mmLog(
+                      '_AddGroundSheet:data raw=${grounds.length} filtered=${filtered.length} selected=${_selectedGround?.name ?? 'none'}');
+                  for (final g in filtered.take(10)) {
+                    _mmLog(
+                        '  filteredGround: id=${g.id} name=${g.name} area=${g.area} slots=${g.slots.length}');
+                  }
                   if (filtered.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.sports_cricket_rounded,
-                              size: 40, color: context.fgSub.withValues(alpha: 0.3)),
+                              size: 40,
+                              color: context.fgSub.withValues(alpha: 0.3)),
                           const SizedBox(height: 12),
                           Text('No slots available on this day',
                               style: TextStyle(
@@ -3636,9 +4286,14 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                     itemCount: filtered.length,
                     itemBuilder: (_, i) {
                       final g = filtered[i];
-                      final hotCount = g.slots.where((s) => s.hasOpponent).length;
+                      final hotCount =
+                          g.slots.where((s) => s.hasOpponent).length;
                       return GestureDetector(
-                        onTap: () => setState(() => _selectedGround = g),
+                        onTap: () {
+                          _mmLog(
+                              '_AddGroundSheet:selectGround id=${g.id} name=${g.name} area=${g.area} slots=${g.slots.length}');
+                          setState(() => _selectedGround = g);
+                        },
                         behavior: HitTestBehavior.opaque,
                         child: Container(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -3653,24 +4308,31 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                               // Image banner
                               AspectRatio(
                                 aspectRatio: 16 / 7,
-                                child: g.photoUrl != null && g.photoUrl!.isNotEmpty
-                                    ? Image.network(g.photoUrl!, fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => _GroundImagePlaceholder())
-                                    : _GroundImagePlaceholder(),
+                                child:
+                                    g.photoUrl != null && g.photoUrl!.isNotEmpty
+                                        ? Image.network(g.photoUrl!,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                _GroundImagePlaceholder())
+                                        : _GroundImagePlaceholder(),
                               ),
                               // Info
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                                padding:
+                                    const EdgeInsets.fromLTRB(14, 12, 14, 14),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(g.name,
                                               style: TextStyle(
-                                                color: context.fg, fontSize: 15,
-                                                fontWeight: FontWeight.w800, letterSpacing: -0.2,
+                                                color: context.fg,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w800,
+                                                letterSpacing: -0.2,
                                               )),
                                           const SizedBox(height: 4),
                                           Row(children: [
@@ -3678,29 +4340,41 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                                                 color: context.fgSub, size: 12),
                                             const SizedBox(width: 3),
                                             Text(g.area,
-                                                style: TextStyle(color: context.fgSub,
-                                                    fontSize: 12, fontWeight: FontWeight.w500)),
+                                                style: TextStyle(
+                                                    color: context.fgSub,
+                                                    fontSize: 12,
+                                                    fontWeight:
+                                                        FontWeight.w500)),
                                             const SizedBox(width: 10),
                                             Icon(Icons.schedule_rounded,
                                                 color: context.fgSub, size: 12),
                                             const SizedBox(width: 3),
                                             Text('${g.slots.length} slots',
-                                                style: TextStyle(color: context.fgSub,
-                                                    fontSize: 12, fontWeight: FontWeight.w500)),
+                                                style: TextStyle(
+                                                    color: context.fgSub,
+                                                    fontSize: 12,
+                                                    fontWeight:
+                                                        FontWeight.w500)),
                                           ]),
                                         ],
                                       ),
                                     ),
                                     if (hotCount > 0)
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 5),
                                         decoration: BoxDecoration(
-                                          color: context.accent.withValues(alpha: 0.12),
-                                          borderRadius: BorderRadius.circular(8),
+                                          color: context.accent
+                                              .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
                                         ),
-                                        child: Text('⚡ $hotCount rival${hotCount > 1 ? 's' : ''}',
-                                            style: TextStyle(color: context.accent,
-                                                fontSize: 11, fontWeight: FontWeight.w700)),
+                                        child: Text(
+                                            '⚡ $hotCount rival${hotCount > 1 ? 's' : ''}',
+                                            style: TextStyle(
+                                                color: context.accent,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700)),
                                       ),
                                   ],
                                 ),
@@ -3719,14 +4393,16 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
           // Slot picker
           else ...[
             // Ground image strip
-            if (_selectedGround!.photoUrl != null && _selectedGround!.photoUrl!.isNotEmpty)
+            if (_selectedGround!.photoUrl != null &&
+                _selectedGround!.photoUrl!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: AspectRatio(
                     aspectRatio: 16 / 6,
-                    child: Image.network(_selectedGround!.photoUrl!, fit: BoxFit.cover,
+                    child: Image.network(_selectedGround!.photoUrl!,
+                        fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => const SizedBox.shrink()),
                   ),
                 ),
@@ -3734,8 +4410,11 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text('Pick a slot',
-                  style: TextStyle(color: context.fgSub, fontSize: 12,
-                      fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+                  style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8)),
             ),
             Expanded(
               child: GridView.builder(
@@ -3752,10 +4431,15 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                   final taken = _alreadyPicked(slot);
                   final hot = slot.hasOpponent;
                   return GestureDetector(
-                    onTap: taken ? null : () {
-                      widget.onPick(MmGroundSlotPick(ground: _selectedGround!, slot: slot));
-                      Navigator.pop(context);
-                    },
+                    onTap: taken
+                        ? null
+                        : () {
+                            _mmLog(
+                                '_AddGroundSheet:pickSlot ground=${_selectedGround!.name} unitId=${slot.unitId} time=${slot.time} end=${slot.endTime ?? 'null'} taken=$taken hot=$hot');
+                            widget.onPick(MmGroundSlotPick(
+                                ground: _selectedGround!, slot: slot));
+                            Navigator.pop(context);
+                          },
                     child: AnimatedOpacity(
                       opacity: taken ? 0.3 : 1.0,
                       duration: const Duration(milliseconds: 150),
@@ -3766,7 +4450,8 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                               : context.panel,
                           borderRadius: BorderRadius.circular(12),
                           border: hot
-                              ? Border.all(color: context.accent.withValues(alpha: 0.4))
+                              ? Border.all(
+                                  color: context.accent.withValues(alpha: 0.4))
                               : null,
                         ),
                         child: Column(
@@ -3774,27 +4459,35 @@ class _AddGroundSheetState extends ConsumerState<_AddGroundSheet> {
                           children: [
                             if (hot)
                               const Text('⚡', style: TextStyle(fontSize: 10)),
-                            if (slot.endTime != null && slot.endTime!.isNotEmpty) ...[
+                            if (slot.endTime != null &&
+                                slot.endTime!.isNotEmpty) ...[
                               Text(slot.startLabel,
                                   style: TextStyle(
                                     color: hot ? context.accent : context.fg,
-                                    fontSize: 13, fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
                                   )),
                               Text('→ ${slot.endLabel}',
                                   style: TextStyle(
-                                    color: hot ? context.accent.withValues(alpha: 0.8) : context.fgSub,
-                                    fontSize: 11, fontWeight: FontWeight.w700,
+                                    color: hot
+                                        ? context.accent.withValues(alpha: 0.8)
+                                        : context.fgSub,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
                                   )),
                             ] else
                               Text(slot.displayTime,
                                   style: TextStyle(
                                     color: hot ? context.accent : context.fg,
-                                    fontSize: 14, fontWeight: FontWeight.w800,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
                                   )),
                             const SizedBox(height: 2),
                             Text('₹${slot.priceRupees}',
-                                style: TextStyle(color: context.fgSub,
-                                    fontSize: 11, fontWeight: FontWeight.w500)),
+                                style: TextStyle(
+                                    color: context.fgSub,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500)),
                           ],
                         ),
                       ),
@@ -3816,8 +4509,301 @@ class _GroundImagePlaceholder extends StatelessWidget {
     return Container(
       color: context.panel,
       child: Center(
-        child: Icon(Icons.stadium_rounded,
-            color: context.stroke, size: 36),
+        child: Icon(Icons.stadium_rounded, color: context.stroke, size: 36),
+      ),
+    );
+  }
+}
+
+// ── Find: scanning ────────────────────────────────────────────────────────────
+
+class _ScanningFind extends StatefulWidget {
+  const _ScanningFind({
+    super.key,
+    required this.team,
+    required this.format,
+    required this.date,
+    required this.picks,
+    required this.scanStep,
+    required this.scanStatus,
+  });
+
+  final MmTeam? team;
+  final MatchFormat format;
+  final DateTime date;
+  final List<MmGroundSlotPick> picks;
+  final int scanStep;
+  final String? scanStatus;
+
+  @override
+  State<_ScanningFind> createState() => _ScanningFindState();
+}
+
+class _ScanningFindState extends State<_ScanningFind>
+    with TickerProviderStateMixin {
+  late final AnimationController _pulse;
+  late final AnimationController _wave;
+
+  static const _phases = [
+    ('Finding match', 'Reading your request'),
+    ('Searching nearby requests', 'Looking for active lobbies'),
+    ('Analysing available grounds', 'Checking the ground and slot list'),
+    ('Checking same ground, different slots', 'Looking for a closer fit'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+    _wave = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    _wave.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final phase = widget.scanStep.clamp(0, _phases.length - 1);
+    final phaseTitle = _phases[phase].$1;
+    final phaseSubtitle = _phases[phase].$2;
+    final dateLabel = DateFormat('MMM d').format(widget.date);
+    final picksLabel = widget.picks.isEmpty
+        ? 'No slots chosen'
+        : '${widget.picks.length} slot${widget.picks.length > 1 ? 's' : ''} selected';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'FINDING MATCHUP',
+            style: TextStyle(
+              color: context.accent,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 2.0,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.team?.name ?? 'Your team',
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.8,
+              height: 1.05,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'is being matched against live slot availability',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 24),
+          AnimatedBuilder(
+            animation: Listenable.merge([_pulse, _wave]),
+            builder: (context, _) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: context.panel,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: context.stroke.withValues(alpha: 0.75),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 150,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          for (int i = 0; i < 3; i++)
+                            _RadarRing(
+                              progress: (_wave.value + i / 3) % 1.0,
+                              color: context.accent,
+                            ),
+                          Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: context.accent,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: context.accent.withValues(alpha: 0.3),
+                                  blurRadius: 18,
+                                  spreadRadius: 4,
+                                ),
+                              ],
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 8,
+                            child: AnimatedOpacity(
+                              opacity: 0.75 + (_pulse.value * 0.25),
+                              duration: const Duration(milliseconds: 120),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: context.accent.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  phaseTitle,
+                                  style: TextStyle(
+                                    color: context.accent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      child: Column(
+                        key: ValueKey(phase),
+                        children: [
+                          Text(
+                            phaseSubtitle,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: context.fg,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$dateLabel  ·  $picksLabel',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Column(
+                      children: List.generate(_phases.length, (i) {
+                        final active = i == phase;
+                        final done = i < phase;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: active
+                                  ? context.accent.withValues(alpha: 0.08)
+                                  : context.bg,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: active
+                                    ? context.accent.withValues(alpha: 0.35)
+                                    : context.stroke.withValues(alpha: 0.55),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: done
+                                        ? const Color(0xFF16A34A)
+                                        : active
+                                            ? context.accent
+                                            : context.fgSub
+                                                .withValues(alpha: 0.35),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _phases[i].$1,
+                                    style: TextStyle(
+                                      color: active || done
+                                          ? context.fg
+                                          : context.fgSub,
+                                      fontSize: 13,
+                                      fontWeight: active
+                                          ? FontWeight.w800
+                                          : FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                if (done)
+                                  Icon(Icons.check_rounded,
+                                      size: 14, color: const Color(0xFF16A34A))
+                                else if (active)
+                                  SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.7,
+                                      color: context.accent,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'We will not jump to a result until the scan finishes.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'We will show a result only after we finish the scan.',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3919,25 +4905,39 @@ class _SearchingFindState extends ConsumerState<_SearchingFind>
         mmOpenLobbiesProvider((date: dateStr, format: widget.format.apiValue)));
 
     final pickUnitSlots = [
-      ...widget.picks.map((p) => (unitId: p.slot.unitId, slotTime: p.slot.time)),
-      ...widget.restoredPicks.map((p) => (unitId: p.groundId, slotTime: p.slotTime)),
+      ...widget.picks
+          .map((p) => (unitId: p.slot.unitId, slotTime: p.slot.time)),
+      ...widget.restoredPicks
+          .map((p) => (unitId: p.groundId, slotTime: p.slotTime)),
     ];
 
     final allOpenLobbies = lobbiesAsync.valueOrNull ?? [];
-    final matchedLobbies = allOpenLobbies.where((l) =>
-        l.unitId != null &&
-        pickUnitSlots.any((ps) =>
-            ps.unitId.isNotEmpty &&
-            ps.unitId == l.unitId &&
-            ps.slotTime == l.slotTime)).toList();
+    final matchedLobbies = allOpenLobbies
+        .where((l) =>
+            l.unitId != null &&
+            pickUnitSlots.any((ps) =>
+                ps.unitId.isNotEmpty &&
+                ps.unitId == l.unitId &&
+                ps.slotTime == l.slotTime))
+        .toList();
+    final sameGroundLobbies = allOpenLobbies
+        .where((l) =>
+            l.unitId != null &&
+            pickUnitSlots.any((ps) =>
+                ps.unitId.isNotEmpty &&
+                ps.unitId == l.unitId &&
+                ps.slotTime != l.slotTime))
+        .toList();
 
     for (final ps in pickUnitSlots) {
-      _mmLog('_SearchingFind pick: unitId=${ps.unitId} slotTime=${ps.slotTime}');
+      _mmLog(
+          '_SearchingFind pick: unitId=${ps.unitId} slotTime=${ps.slotTime}');
     }
     for (final l in allOpenLobbies) {
       _mmLog('_SearchingFind open: unitId=${l.unitId} slotTime=${l.slotTime}');
     }
-    _mmLog('_SearchingFind: pickUnitSlots=${pickUnitSlots.length} openLobbies=${allOpenLobbies.length} matched=${matchedLobbies.length}');
+    _mmLog(
+        '_SearchingFind: pickUnitSlots=${pickUnitSlots.length} openLobbies=${allOpenLobbies.length} matched=${matchedLobbies.length} sameGround=${sameGroundLobbies.length}');
 
     final dateLabel = () {
       final n = DateTime.now();
@@ -3951,6 +4951,7 @@ class _SearchingFindState extends ConsumerState<_SearchingFind>
     final hasRichPicks = widget.picks.isNotEmpty;
     final hasAnyPicks = hasRichPicks || widget.restoredPicks.isNotEmpty;
     final hasMatches = matchedLobbies.isNotEmpty;
+    final hasSameGround = sameGroundLobbies.isNotEmpty;
 
     final bottom = MediaQuery.of(context).padding.bottom;
 
@@ -3959,7 +4960,6 @@ class _SearchingFindState extends ConsumerState<_SearchingFind>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
           // ── Header ────────────────────────────────────────────────
           Text(
             hasMatches ? 'RIVAL FOUND' : 'SEARCHING',
@@ -4001,13 +5001,11 @@ class _SearchingFindState extends ConsumerState<_SearchingFind>
                   child: Stack(
                     alignment: Alignment.centerLeft,
                     children: [
-                      // Ripple rings
                       for (int i = 0; i < 3; i++)
                         _RadarRing(
                           progress: (_radar.value + i / 3) % 1.0,
                           color: context.accent,
                         ),
-                      // Center dot
                       Container(
                         width: 10,
                         height: 10,
@@ -4016,7 +5014,6 @@ class _SearchingFindState extends ConsumerState<_SearchingFind>
                           shape: BoxShape.circle,
                         ),
                       ),
-                      // Cycling message label
                       Padding(
                         padding: const EdgeInsets.only(left: 20),
                         child: AnimatedSwitcher(
@@ -4097,6 +5094,44 @@ class _SearchingFindState extends ConsumerState<_SearchingFind>
                   lobby: lobby,
                   pulseAnim: _glow,
                   highlight: true,
+                  onChallenge: () => widget.onInstantChallenge(lobby),
+                )),
+            const SizedBox(height: 20),
+          ],
+
+          if (hasSameGround) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                color: context.accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: context.accent.withValues(alpha: 0.32),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.sports_cricket_rounded,
+                      color: context.accent, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Same ground has an active matchup in another slot',
+                      style: TextStyle(
+                        color: context.accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...sameGroundLobbies.map((lobby) => _InstantLobbyRow(
+                  lobby: lobby,
+                  pulseAnim: _glow,
                   onChallenge: () => widget.onInstantChallenge(lobby),
                 )),
             const SizedBox(height: 20),
@@ -4390,7 +5425,9 @@ class _MatchedFind extends StatelessWidget {
     final dateLabel = () {
       final n = DateTime.now();
       if (DateTime(date.year, date.month, date.day) ==
-          DateTime(n.year, n.month, n.day)) { return 'Today'; }
+          DateTime(n.year, n.month, n.day)) {
+        return 'Today';
+      }
       return DateFormat('MMM d').format(date);
     }();
 
@@ -4444,7 +5481,7 @@ class _MatchedFind extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            groundName,
+            team?.name ?? 'Your team',
             style: TextStyle(
               color: context.fg,
               fontSize: 30,
@@ -4456,6 +5493,7 @@ class _MatchedFind extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             [
+              groundName,
               groundArea,
               format.label,
               if (slotDisplay.isNotEmpty) slotDisplay,
@@ -4473,6 +5511,35 @@ class _MatchedFind extends StatelessWidget {
                 color: context.fgSub,
                 fontSize: 13,
                 fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: context.panel,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: context.stroke.withValues(alpha: 0.55)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.sports_cricket_rounded,
+                    color: context.accent, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    waitingOpponent
+                        ? 'Same slot is locked. Waiting on the opponent.'
+                        : 'Same slot found. Confirm to lock it.',
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 36),
           // Fee display
@@ -4514,15 +5581,12 @@ class _MatchedFind extends StatelessWidget {
             ],
           ] else ...[
             // Waiting state: show 4h countdown
-            if (deadline != null)
-              _CountdownTimer(deadline: deadline),
+            if (deadline != null) _CountdownTimer(deadline: deadline),
             const SizedBox(height: 8),
             Text(
               'Your ₹$confirmFee deposit is confirmed.',
               style: TextStyle(
-                  color: context.fg,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700),
+                  color: context.fg, fontSize: 15, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),
             Text(
@@ -4920,7 +5984,8 @@ class _MatchesTab extends ConsumerWidget {
                   child: Column(
                     children: [
                       Icon(Icons.sports_cricket_outlined,
-                          size: 48, color: context.fgSub.withValues(alpha: 0.3)),
+                          size: 48,
+                          color: context.fgSub.withValues(alpha: 0.3)),
                       const SizedBox(height: 16),
                       Text(
                         'No confirmed matches yet',
@@ -5132,7 +6197,8 @@ class _ChallengeTabState extends State<_ChallengeTab> {
       });
       return;
     }
-    _debounce = Timer(const Duration(milliseconds: 400), () => _search(q.trim()));
+    _debounce =
+        Timer(const Duration(milliseconds: 400), () => _search(q.trim()));
   }
 
   Future<void> _search(String q) async {
@@ -5142,7 +6208,8 @@ class _ChallengeTabState extends State<_ChallengeTab> {
         ApiEndpoints.searchTeams,
         queryParameters: {'q': q, 'limit': 20},
       );
-      final data = resp.data is Map ? (resp.data['data'] ?? resp.data) : resp.data;
+      final data =
+          resp.data is Map ? (resp.data['data'] ?? resp.data) : resp.data;
       final teams = (data['teams'] as List? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(_ChallengeTeam.fromJson)
@@ -5201,8 +6268,7 @@ class _ChallengeTabState extends State<_ChallengeTab> {
                     ),
                     decoration: InputDecoration(
                       hintText: 'Search team to challenge...',
-                      hintStyle:
-                          TextStyle(color: context.fgSub, fontSize: 15),
+                      hintStyle: TextStyle(color: context.fgSub, fontSize: 15),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -5232,26 +6298,23 @@ class _ChallengeTabState extends State<_ChallengeTab> {
         // Content
         Expanded(
           child: _loading
-              ? const Center(
-                  child: CircularProgressIndicator(strokeWidth: 1.5))
+              ? const Center(child: CircularProgressIndicator(strokeWidth: 1.5))
               : !_searched
                   ? _EmptyChallenge()
                   : _results.isEmpty
                       ? Center(
                           child: Text(
                             'No teams found',
-                            style: TextStyle(
-                                color: context.fgSub, fontSize: 14),
+                            style:
+                                TextStyle(color: context.fgSub, fontSize: 14),
                           ),
                         )
                       : ListView.separated(
-                          padding:
-                              const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                           itemCount: _results.length,
                           separatorBuilder: (_, __) => Container(
                               height: 1,
-                              color: context.stroke
-                                  .withValues(alpha: 0.3)),
+                              color: context.stroke.withValues(alpha: 0.3)),
                           itemBuilder: (_, i) {
                             final team = _results[i];
                             final expanded = _expandedId == team.id;
@@ -5264,12 +6327,10 @@ class _ChallengeTabState extends State<_ChallengeTab> {
                               format: _challengeFormat,
                               date: _challengeDate,
                               onTap: () => setState(() =>
-                                  _expandedId =
-                                      expanded ? null : team.id),
+                                  _expandedId = expanded ? null : team.id),
                               onFormat: (f) =>
                                   setState(() => _challengeFormat = f),
-                              onDate: (d) =>
-                                  setState(() => _challengeDate = d),
+                              onDate: (d) => setState(() => _challengeDate = d),
                               onSend: () => _sendChallenge(team),
                             );
                           },
@@ -5401,8 +6462,8 @@ class _ChallengeTeamRow extends StatelessWidget {
                 ),
                 if (sent)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: context.success.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
@@ -5510,9 +6571,8 @@ class _ChallengeTeamRow extends StatelessWidget {
               ],
             ),
           ),
-          crossFadeState: expanded
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
+          crossFadeState:
+              expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
           duration: const Duration(milliseconds: 220),
           sizeCurve: Curves.easeOutCubic,
         ),
@@ -5565,11 +6625,11 @@ class _DateStrip extends StatelessWidget {
         21, (i) => DateTime(today.year, today.month, today.day + i));
 
     return SizedBox(
-      height: 72,
+      height: 82,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: days.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (_, i) {
           final d = days[i];
           final isSel = DateUtils.isSameDay(d, selected);
@@ -5582,48 +6642,54 @@ class _DateStrip extends StatelessWidget {
             onTap: () => onSelect(d),
             behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: isToday ? 62 : 52,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: isToday ? 64 : 56,
               decoration: BoxDecoration(
-                color: isSel
-                    ? context.ctaBg
-                    : isWeekend && !isSel
-                        ? context.panel.withValues(alpha: 0.7)
-                        : context.panel,
-                borderRadius: BorderRadius.circular(14),
-                border: isSel
-                    ? null
-                    : isWeekend
-                        ? Border.all(
-                            color: context.stroke.withValues(alpha: 0.5))
-                        : null,
+                color: isSel ? context.fg : Colors.transparent,
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
                     isToday
-                        ? 'Today'
+                        ? 'TODAY'
                         : isNewMonth
-                            ? DateFormat('MMM').format(d)
-                            : DateFormat('EEE').format(d),
+                            ? DateFormat('MMM').format(d).toUpperCase()
+                            : DateFormat('EEE').format(d).toUpperCase(),
                     style: TextStyle(
                       color: isSel
-                          ? context.ctaFg.withValues(alpha: 0.75)
-                          : context.fgSub,
-                      fontSize: isToday ? 9 : 10,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
+                          ? context.bg
+                          : isWeekend
+                              ? context.fgSub.withValues(alpha: 0.85)
+                              : context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
                     '${d.day}',
                     style: TextStyle(
-                      color: isSel ? context.ctaFg : context.fg,
-                      fontSize: 20,
+                      color: isSel ? context.bg : context.fg,
+                      fontSize: 22,
                       fontWeight: FontWeight.w900,
                       height: 1,
+                      letterSpacing: -0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    height: 3,
+                    width: isSel ? 28 : 12,
+                    decoration: BoxDecoration(
+                      color: isSel
+                          ? context.match
+                          : context.stroke.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(999),
                     ),
                   ),
                 ],
@@ -5647,7 +6713,20 @@ class _CalendarPicker extends StatefulWidget {
 
 class _CalendarPickerState extends State<_CalendarPicker> {
   static const _dn = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  static const _mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  static const _mn = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
 
   late DateTime _month; // first day of displayed month
   final DateTime _today = DateTime.now();
@@ -5730,19 +6809,21 @@ class _CalendarPickerState extends State<_CalendarPicker> {
         const SizedBox(height: 10),
         // Day-of-week headers
         Row(
-          children: List.generate(7, (i) => Expanded(
-            child: Center(
-              child: Text(
-                _dn[i],
-                style: TextStyle(
-                  color: context.fgSub,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          )),
+          children: List.generate(
+              7,
+              (i) => Expanded(
+                    child: Center(
+                      child: Text(
+                        _dn[i],
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  )),
         ),
         const SizedBox(height: 6),
         // Grid

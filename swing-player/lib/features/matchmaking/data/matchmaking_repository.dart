@@ -20,6 +20,8 @@ class MatchmakingRepository {
     String? teamId,
     int? overs,
   }) async {
+    _mmLog(
+        'searchGrounds → date=$date format=$format teamId=${teamId ?? 'null'} overs=${overs ?? 'null'} q=${query ?? 'null'}');
     final resp = await _dio.get(
       ApiEndpoints.matchmakingGrounds,
       queryParameters: {
@@ -36,6 +38,11 @@ class MatchmakingRepository {
         .whereType<Map<String, dynamic>>()
         .map(MmGround.fromJson)
         .toList();
+    _mmLog('searchGrounds → raw grounds=${raw.length}');
+    for (final g in raw.take(10)) {
+      _mmLog(
+          '  rawGround: id=${g.id} name=${g.name} area=${g.area} slots=${g.slots.length} photo=${g.photoUrl != null && g.photoUrl!.isNotEmpty}');
+    }
 
     // Group by arena id — backend sends one entry per unit,
     // we collapse them into one card per arena, merging slots.
@@ -60,6 +67,11 @@ class MatchmakingRepository {
         );
       }
     }
+    _mmLog('searchGrounds → grouped arenas=${byArena.length}');
+    for (final g in byArena.values.take(10)) {
+      _mmLog(
+          '  groupedArena: id=${g.id} name=${g.name} area=${g.area} slots=${g.slots.length}');
+    }
     return byArena.values.toList();
   }
 
@@ -69,6 +81,47 @@ class MatchmakingRepository {
       data: {'teamId': teamId},
     );
     return MmCreateLobbyResult.fromJson(_unwrap(resp.data));
+  }
+
+  // ── Plan B / V2 — first-to-pay flow ─────────────────────────────────────
+
+  /// B1 — express interest on a lobby. Idempotent per (lobbyId, teamId).
+  Future<MmInterest> expressInterest(String lobbyId, String teamId) async {
+    _mmLog('expressInterest → lobbyId=$lobbyId teamId=$teamId');
+    final resp = await _dio.post(
+      ApiEndpoints.matchmakingExpressInterest(lobbyId),
+      data: {'teamId': teamId},
+    );
+    return MmInterest.fromJson(_unwrap(resp.data));
+  }
+
+  /// B2 — acquire 120s lock + create Razorpay order. Throws "LOCK_TAKEN" if
+  /// another team is currently paying.
+  Future<MmInterestLock> lockAndPay(String interestId) async {
+    _mmLog('lockAndPay → interestId=$interestId');
+    final resp = await _dio.post(
+      ApiEndpoints.matchmakingInterestLockAndPay(interestId),
+    );
+    return MmInterestLock.fromJson(_unwrap(resp.data));
+  }
+
+  /// B3 — verify Razorpay payment and create the match.
+  Future<MmInterestVerifyResult> verifyInterestPayment({
+    required String interestId,
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+  }) async {
+    _mmLog('verifyInterestPayment → interestId=$interestId');
+    final resp = await _dio.post(
+      ApiEndpoints.matchmakingInterestVerifyPayment(interestId),
+      data: {
+        'razorpayOrderId': razorpayOrderId,
+        'razorpayPaymentId': razorpayPaymentId,
+        'razorpaySignature': razorpaySignature,
+      },
+    );
+    return MmInterestVerifyResult.fromJson(_unwrap(resp.data));
   }
 
   Future<({String orderId, String key, int amountPaise, String currency})>
