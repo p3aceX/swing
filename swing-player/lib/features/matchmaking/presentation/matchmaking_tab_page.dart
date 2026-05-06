@@ -3079,7 +3079,7 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
         ),
         const SizedBox(height: 12),
         Text(
-          isReview ? 'Review' : _sectionLabels[_step],
+          'Match Setup',
           style: TextStyle(
             color: context.fg,
             fontSize: 40,
@@ -3462,6 +3462,89 @@ class _IdleFindState extends ConsumerState<_IdleFind> {
                   );
                 }),
                 if (i < MatchFormat.values.length - 1)
+                  Divider(
+                    height: 1,
+                    color: context.stroke.withValues(alpha: 0.14),
+                  ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _openBallSheet() {
+    const balls = ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.bg,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Text(
+                  'Choose Ball Type',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              Container(
+                height: 1,
+                color: context.stroke.withValues(alpha: 0.18),
+              ),
+              for (int i = 0; i < balls.length; i++) ...[
+                Builder(builder: (_) {
+                  final bt = balls[i];
+                  final selected = widget.ballType == bt;
+                  return GestureDetector(
+                    onTap: () {
+                      widget.onBallType(bt);
+                      Navigator.of(sheetCtx).pop();
+                    },
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      color: selected ? context.ctaBg : Colors.transparent,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: _ballTypeColor(bt),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              _ballTypeLabel(bt),
+                              style: TextStyle(
+                                color: selected ? context.ctaFg : context.fg,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (selected)
+                            Icon(Icons.check_rounded,
+                                color: context.ctaFg, size: 20),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                if (i < balls.length - 1)
                   Divider(
                     height: 1,
                     color: context.stroke.withValues(alpha: 0.14),
@@ -6630,7 +6713,7 @@ class _MatchesTab extends ConsumerWidget {
                           color: context.fgSub.withValues(alpha: 0.3)),
                       const SizedBox(height: 16),
                       Text(
-                        'No confirmed matches yet',
+                        'No matchups yet',
                         style: TextStyle(
                           color: context.fgSub,
                           fontSize: 15,
@@ -6639,7 +6722,7 @@ class _MatchesTab extends ConsumerWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Your confirmed matchups will appear here.',
+                        'Your matchups will appear here once you join one or an arena owner pairs you in.',
                         style: TextStyle(color: context.fgSub, fontSize: 13),
                         textAlign: TextAlign.center,
                       ),
@@ -6795,36 +6878,7 @@ class _MatchCardBody extends StatelessWidget {
                   ],
                 ),
               ),
-              if (match.remainingRupees > 0)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '₹${match.remainingRupees}',
-                        style: const TextStyle(
-                          color: Color(0xFF92400E),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const Text(
-                        'due at ground',
-                        style: TextStyle(
-                          color: Color(0xFFD97706),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              _CardStatusPill(match: match),
             ],
           ),
           const SizedBox(height: 10),
@@ -6832,6 +6886,121 @@ class _MatchCardBody extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Trailing pill on the My MatchUp card. Shows the most actionable thing the
+/// player needs to know about this match at a glance:
+///   • myTeamPaid=false                    → "Pay ₹500" (coral) — tap card to pay
+///   • myTeamPaid && !opponentPaid         → "Awaiting opponent" (muted)
+///   • both paid && remaining ground fee   → "₹X due at ground" (amber)
+///   • both paid && no remaining           → no pill
+class _CardStatusPill extends StatelessWidget {
+  const _CardStatusPill({required this.match});
+  final _MyConfirmedMatch match;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    // Pay-due — most actionable, gets coral.
+    if (match.isPaymentPending) {
+      final amount = match.confirmationRupees;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: colors.primary,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              amount > 0 ? 'Pay ₹$amount' : 'Pay advance',
+              style: TextStyle(
+                color: colors.onPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            Text(
+              'tap to pay',
+              style: TextStyle(
+                color: colors.onPrimary.withValues(alpha: 0.85),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Paid but waiting for opponent.
+    if (match.isAwaitingOpponent) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: context.fgSub.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              'Awaiting',
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              'opponent\'s pay',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Confirmed + remaining ground fee.
+    if (match.remainingRupees > 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3C7),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              '₹${match.remainingRupees}',
+              style: const TextStyle(
+                color: Color(0xFF92400E),
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const Text(
+              'due at ground',
+              style: TextStyle(
+                color: Color(0xFFD97706),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 }
 
