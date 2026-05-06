@@ -112,6 +112,8 @@ class ApiEndpoints {
   static String matchCommentary(String id) => '/matches/$id/commentary';
   static String matchAnalysis(String id) => '/matches/$id/analysis';
   static String matchPlayers(String id) => '/matches/$id/players';
+  static String matchAssignScorer(String id) => '/matches/$id/assign-scorer';
+  static String matchScorer(String id) => '/matches/$id/scorer';
   static String publicOverlay(String id) => '/public/overlay/$id';
   static String publicOverlayStream(String id) => '/public/overlay/$id/stream';
 

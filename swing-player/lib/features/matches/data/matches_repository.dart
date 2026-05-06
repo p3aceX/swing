@@ -171,6 +171,19 @@ class MatchesRepository extends BaseRepository {
     return result;
   }
 
+  Future<void> assignScorer(String matchId, String profileId) async {
+    await _client.post(
+      ApiEndpoints.matchAssignScorer(matchId),
+      data: {'profileId': profileId},
+    );
+  }
+
+  /// Owner / Manager only — clears the manually-assigned scorer and releases
+  /// the match back to innings-transition auto-shift behaviour.
+  Future<void> revokeScorer(String matchId) async {
+    await _client.delete(ApiEndpoints.matchScorer(matchId));
+  }
+
   Future<MatchCenter> loadMatchCenter(String matchId) async {
     final scorecardResponse = await _client.get(
       ApiEndpoints.matchScorecard(matchId),
@@ -414,10 +427,6 @@ class MatchesRepository extends BaseRepository {
       stat['performanceScore'],
       stat['impactPoints'],
     ].any((value) => value != null);
-    final scoringOwnerIds = <String>{}
-      ..addAll(_collectScoringOwnerIds(raw))
-      ..addAll(_collectScoringOwnerIds(stat))
-      ..addAll(_collectScoringOwnerIds(match));
     final involvesPlayerTeam = playerSide == 'A' ||
         playerSide == 'B' ||
         _truthy(stat['isParticipant']) ||
@@ -522,19 +531,7 @@ class MatchesRepository extends BaseRepository {
       playerBalls: _intOrNull(stat['balls']),
       playerWickets: _intOrNull(stat['wickets']),
       playerCatches: _intOrNull(stat['catches']),
-      canScore: _truthy(stat['isHost']) ||
-          _truthy(stat['canScore']) ||
-          _truthy(stat['isScorer']) ||
-          _truthy(stat['isOwner']) ||
-          _truthy(stat['isManager']) ||
-          _truthy(match['isHost']) ||
-          _truthy(match['canScore']) ||
-          _truthy(match['isScorer']) ||
-          _truthy(match['isOwner']) ||
-          _truthy(match['isManager']),
-      isMatchmaking: _string(match['matchmakingId']).isNotEmpty,
       myRole: _nullIfEmpty(_string(raw['myRole'] ?? match['myRole'])),
-      scoringOwnerIds: scoringOwnerIds.toList(growable: false),
       involvesPlayerTeam: involvesPlayerTeam,
       ballType: _nullIfEmpty(_firstNonEmpty([
         _string(match['ballType']),
@@ -622,14 +619,6 @@ class MatchesRepository extends BaseRepository {
             scorecardRoot: scorecard,
           )
         : null;
-
-    final scoringOwnerIds = <String>{}
-      ..addAll(_collectScoringOwnerIds(merged))
-      ..addAll(_collectScoringOwnerIds(matchContainer))
-      ..addAll(_collectScoringOwnerIds(matchRoot))
-      ..addAll(_collectScoringOwnerIds(scorecard))
-      ..addAll(_collectScoringOwnerIds(previewRoot))
-      ..addAll(_collectScoringOwnerIds(playersRoot));
 
     final innings = _parseInnings(
       merged,
@@ -758,13 +747,14 @@ class MatchesRepository extends BaseRepository {
         teamAName: teamAName.isEmpty ? 'Team A' : teamAName,
         teamBName: teamBName.isEmpty ? 'Team B' : teamBName,
       ),
-      canScore: _hasScoringPermissionFlag(merged) ||
-          _hasScoringPermissionFlag(matchContainer) ||
-          _hasScoringPermissionFlag(matchRoot) ||
-          _hasScoringPermissionFlag(previewRoot) ||
-          _hasScoringPermissionFlag(playersRoot) ||
-          _hasScoringPermissionFlag(scorecard),
-      scoringOwnerIds: scoringOwnerIds.toList(growable: false),
+      myRole: _nullIfEmpty(_firstNonEmpty([
+        _string(matchRoot['myRole']),
+        _string(merged['myRole']),
+      ])),
+      activeScorerId: _nullIfEmpty(_firstNonEmpty([
+        _string(matchRoot['activeScorerId']),
+        _string(merged['activeScorerId']),
+      ])),
     );
   }
 
@@ -1103,74 +1093,6 @@ class MatchesRepository extends BaseRepository {
 
   bool _containsAny(String value, List<String> patterns) {
     return patterns.any(value.contains);
-  }
-
-  bool _hasScoringPermissionFlag(Map<String, dynamic> source) {
-    return _truthy(source['canScore']) ||
-        _truthy(source['isHost']) ||
-        _truthy(source['isScorer']) ||
-        _truthy(source['isOwner']) ||
-        _truthy(source['isManager']);
-  }
-
-  List<String> _collectScoringOwnerIds(Map<String, dynamic> source) {
-    final ids = <String>{};
-    void add(dynamic value) {
-      final normalized = '$value'.trim();
-      if (normalized.isEmpty || normalized == 'null') return;
-      ids.add(normalized);
-    }
-
-    for (final key in const [
-      'scorerId',
-      'scorerProfileId',
-      'scorerPlayerId',
-      'hostId',
-      'hostProfileId',
-      'hostPlayerId',
-      'ownerId',
-      'ownerProfileId',
-      'ownerPlayerId',
-      'managerId',
-      'managerProfileId',
-      'organizerId',
-      'organizerProfileId',
-      'createdBy',
-      'createdById',
-      'createdByProfileId',
-      'createdByPlayerId',
-      'userId',
-      'playerId',
-      'profileId',
-    ]) {
-      add(source[key]);
-    }
-
-    final scorer = _map(source['scorer']);
-    final host = _map(source['host']);
-    final owner = _map(source['owner']);
-    final manager = _map(source['manager']);
-    final creator = _map(source['createdByUser']);
-    final creatorAlt = _map(source['createdBy']);
-    final organizer = _map(source['organizer']);
-    for (final nested in [
-      scorer,
-      host,
-      owner,
-      manager,
-      creator,
-      creatorAlt,
-      organizer
-    ]) {
-      add(nested['id']);
-      add(nested['_id']);
-      add(nested['profileId']);
-      add(nested['playerId']);
-      add(nested['playerProfileId']);
-      add(nested['userId']);
-    }
-
-    return ids.toList(growable: false);
   }
 
   bool _truthy(dynamic value) {

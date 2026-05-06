@@ -205,40 +205,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
 
     final profileState = ref.watch(profileControllerProvider);
     final authState = ref.watch(authControllerProvider);
-    final viewerIds = <String>{};
-    void addViewerId(String? value) {
-      final normalized = value?.trim() ?? '';
-      if (normalized.isNotEmpty) viewerIds.add(normalized);
-    }
-
-    addViewerId(profileState.data?.identity.id);
-    addViewerId(profileState.data?.unified.identity.id);
-    final initialOwnerIds =
-        widget.initialMatch?.scoringOwnerIds ?? const <String>[];
-    final canScoreByInitialOwnerId =
-        viewerIds.isNotEmpty && initialOwnerIds.any(viewerIds.contains);
-    final canScoreByOwnerId =
-        viewerIds.isNotEmpty && center.scoringOwnerIds.any(viewerIds.contains);
-    final canScore = widget.initialMatch?.canScore == true ||
-        canScoreByInitialOwnerId ||
-        center.canScore ||
-        canScoreByOwnerId;
+    final canScore = center.canManageCenter || center.isActiveScorerCenter ||
+        widget.initialMatch?.canManage == true ||
+        widget.initialMatch?.isActiveScorer == true;
     final isLiveOrUpcoming = center.lifecycle == MatchLifecycle.live ||
         center.lifecycle == MatchLifecycle.upcoming;
-    assert(() {
-      debugPrint(
-        '[MatchDetail] id=${widget.matchId} lifecycle=${center.lifecycle.name} '
-        'initCanScore=${widget.initialMatch?.canScore == true} '
-        'initOwnerIds=${initialOwnerIds.length} '
-        'centerCanScore=${center.canScore} '
-        'ownerIds=${center.scoringOwnerIds.length} '
-        'viewerIds=${viewerIds.length} '
-        'initOwnerMatch=$canScoreByInitialOwnerId '
-        'ownerMatch=$canScoreByOwnerId '
-        'showResume=${canScore && isLiveOrUpcoming}',
-      );
-      return true;
-    }());
 
     final currentRank =
         profileState.data?.rankProgress.rank ?? authState.userRank;
@@ -289,13 +260,18 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
             ),
           ),
 
-          // ── Resume Scoring bar (only for player-created live matches) ──
+          // ── Manager / Scorer action bar ────────────────────────────
           if (canScore && isLiveOrUpcoming)
-            _ResumeScoringBar(
+            _ManagerBar(
               matchId: widget.matchId,
               isLive: center.lifecycle == MatchLifecycle.live,
               teamAName: center.teamAName,
               teamBName: center.teamBName,
+              canManage: center.canManageCenter ||
+                  widget.initialMatch?.canManage == true,
+              squads: center.squads,
+              activeScorerId: center.activeScorerId,
+              onAssigned: () => ref.invalidate(matchCenterProvider(widget.matchId)),
             ),
         ],
       ),
@@ -311,23 +287,32 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// RESUME SCORING BAR
+// MANAGER / SCORER ACTION BAR
 // ══════════════════════════════════════════════════════════════════════════════
 
-class _ResumeScoringBar extends StatelessWidget {
-  const _ResumeScoringBar({
+class _ManagerBar extends ConsumerWidget {
+  const _ManagerBar({
     required this.matchId,
     required this.isLive,
     required this.teamAName,
     required this.teamBName,
+    required this.canManage,
+    required this.squads,
+    required this.onAssigned,
+    this.activeScorerId,
   });
+
   final String matchId;
   final bool isLive;
   final String teamAName;
   final String teamBName;
+  final bool canManage;
+  final List<MatchSquad> squads;
+  final String? activeScorerId;
+  final VoidCallback onAssigned;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final bottom = MediaQuery.of(context).padding.bottom;
     return Container(
       padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottom),
@@ -335,35 +320,335 @@ class _ResumeScoringBar extends StatelessWidget {
         color: context.surf,
         border: Border(top: BorderSide(color: context.stroke)),
       ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 48,
-        child: ElevatedButton.icon(
-          onPressed: () {
-            if (isLive) {
-              context.push('/score-match/$matchId');
-            } else {
-              final id = Uri.encodeQueryComponent(matchId);
-              final teamA = Uri.encodeQueryComponent(teamAName);
-              final teamB = Uri.encodeQueryComponent(teamBName);
-              context
-                  .push('/create-match?matchId=$id&teamA=$teamA&teamB=$teamB');
-            }
-          },
-          icon: const Icon(Icons.sports_cricket_rounded, size: 18),
-          label: Text(
-            isLive ? 'Resume Scoring' : 'Set Playing 11',
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: context.accent,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  if (!canManage) {
+                    // Delegated scorer → stripped-down scorer route
+                    context.push('/scorer/$matchId');
+                  } else if (isLive) {
+                    context.push('/score-match/$matchId');
+                  } else {
+                    final id = Uri.encodeQueryComponent(matchId);
+                    final teamA = Uri.encodeQueryComponent(teamAName);
+                    final teamB = Uri.encodeQueryComponent(teamBName);
+                    context.push(
+                        '/create-match?matchId=$id&teamA=$teamA&teamB=$teamB');
+                  }
+                },
+                icon: const Icon(Icons.sports_cricket_rounded, size: 18),
+                label: Text(
+                  canManage
+                      ? (isLive ? 'Resume Scoring' : 'Set Playing 11')
+                      : 'Score Match',
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: context.accent,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
+          if (canManage) ...[
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 48,
+              width: 48,
+              child: OutlinedButton(
+                onPressed: () => _showAssignSheet(context, ref),
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  side: BorderSide(color: context.stroke),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Icon(Icons.person_add_alt_1_rounded,
+                    color: context.fgSub, size: 20),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _showAssignSheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AssignScorerSheet(
+        matchId: matchId,
+        squads: squads,
+        activeScorerId: activeScorerId,
+        onAssigned: onAssigned,
+      ),
+    );
+  }
+}
+
+// ── Assign Scorer Bottom Sheet ────────────────────────────────────────────────
+
+class _AssignScorerSheet extends ConsumerStatefulWidget {
+  const _AssignScorerSheet({
+    required this.matchId,
+    required this.squads,
+    required this.onAssigned,
+    this.activeScorerId,
+  });
+
+  final String matchId;
+  final List<MatchSquad> squads;
+  final String? activeScorerId;
+  final VoidCallback onAssigned;
+
+  @override
+  ConsumerState<_AssignScorerSheet> createState() => _AssignScorerSheetState();
+}
+
+class _AssignScorerSheetState extends ConsumerState<_AssignScorerSheet> {
+  String? _assigning;
+  bool _revoking = false;
+
+  Future<void> _assign(String profileId) async {
+    if (_assigning != null || _revoking) return;
+    setState(() => _assigning = profileId);
+    try {
+      await ref
+          .read(matchesRepositoryProvider)
+          .assignScorer(widget.matchId, profileId);
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onAssigned();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _assigning = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to assign scorer: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _revoke() async {
+    if (_assigning != null || _revoking) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Clear scorer?'),
+        content: const Text(
+            'The match will fall back to the bowling team\'s captain on each innings.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Clear')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _revoking = true);
+    try {
+      await ref
+          .read(matchesRepositoryProvider)
+          .revokeScorer(widget.matchId);
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onAssigned();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _revoking = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to clear scorer: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).padding.bottom;
+    final allPlayers = widget.squads
+        .expand((s) => s.players.map((p) => (squad: s, player: p)))
+        .where((e) => e.player.playerId != null && e.player.playerId!.isNotEmpty)
+        .toList();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.surf,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(0, 12, 0, bottom + 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // drag handle
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: context.stroke,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Assign Scorer',
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (widget.activeScorerId != null && widget.activeScorerId!.isNotEmpty)
+                  TextButton(
+                    onPressed: _revoking || _assigning != null ? null : _revoke,
+                    child: _revoking
+                        ? SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: context.accent,
+                            ),
+                          )
+                        : Text(
+                            'Clear',
+                            style: TextStyle(
+                              color: context.danger,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              widget.activeScorerId != null && widget.activeScorerId!.isNotEmpty
+                  ? 'Replace the scorer, or Clear to fall back to the bowling captain.'
+                  : 'Pick who will score this match.',
+              style: TextStyle(color: context.fgSub, fontSize: 13),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (allPlayers.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'No squad players available. Add players first.',
+                style: TextStyle(color: context.fgSub, fontSize: 14),
+              ),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.55,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: allPlayers.length,
+                separatorBuilder: (_, __) =>
+                    Divider(height: 1, color: context.stroke),
+                itemBuilder: (_, i) {
+                  final entry = allPlayers[i];
+                  final p = entry.player;
+                  final pid = p.playerId!;
+                  final isCurrent = pid == widget.activeScorerId;
+                  final isLoading = _assigning == pid;
+
+                  return ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 18,
+                      backgroundColor: context.accentBg,
+                      backgroundImage: p.avatarUrl != null
+                          ? NetworkImage(p.avatarUrl!)
+                          : null,
+                      child: p.avatarUrl == null
+                          ? Text(
+                              p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                              style: TextStyle(
+                                color: context.accent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            )
+                          : null,
+                    ),
+                    title: Text(
+                      p.name,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${entry.squad.teamName}${p.isCaptain ? ' · C' : p.isViceCaptain ? ' · VC' : ''}',
+                      style: TextStyle(color: context.fgSub, fontSize: 12),
+                    ),
+                    trailing: isLoading
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: context.accent,
+                            ),
+                          )
+                        : isCurrent
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: context.success.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'Scoring',
+                                  style: TextStyle(
+                                    color: context.success,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              )
+                            : Icon(Icons.chevron_right_rounded,
+                                color: context.fgSub, size: 18),
+                    onTap: isLoading || isCurrent ? null : () => _assign(pid),
+                  );
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -6060,8 +6345,7 @@ MatchCenter _makeFallback(PlayerMatch m) => MatchCenter(
       youtubeUrl: null,
       innings: const [],
       squads: const [],
-      canScore: m.canScore,
-      scoringOwnerIds: m.scoringOwnerIds,
+      myRole: m.myRole,
     );
 
 Color _teamColor(String name) {

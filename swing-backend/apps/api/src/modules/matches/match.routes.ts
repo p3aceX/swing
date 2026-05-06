@@ -87,6 +87,14 @@ export async function matchRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.assignScorer(id, user.userId, body.profileId) })
   })
 
+  // Phase 3 (lockdown plan): revoke the manually-assigned scorer and release
+  // the match back to auto-shift behaviour. Owner / Manager only.
+  app.delete('/:id/scorer', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    return reply.send({ success: true, data: await svc.revokeScorer(id, user.userId) })
+  })
+
   app.post('/:id/innings/:num/ball', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id, num } = request.params as { id: string; num: string }

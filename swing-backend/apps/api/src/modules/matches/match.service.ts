@@ -888,8 +888,12 @@ export class MatchService {
           grantedBy: requester.id,
         },
       })
-      // Update activeScorerId on the match
-      await tx.match.update({ where: { id: matchId }, data: { activeScorerId: target.id } })
+      // Update activeScorerId AND lock the assignment so the innings-transition
+      // auto-shift (Phase 4) doesn't overwrite this owner's intent.
+      await tx.match.update({
+        where: { id: matchId },
+        data: { activeScorerId: target.id, scorerLockedByOwner: true },
+      })
     })
 
     // Notify new scorer
@@ -920,6 +924,56 @@ export class MatchService {
     }
 
     return { matchId, activeScorerId: target.id }
+  }
+
+  /**
+   * Owner / Manager-only: revoke the manually assigned Scorer.
+   * Releases the match back to innings-transition auto-shift behaviour
+   * (clears scorerLockedByOwner). Use this when the assigned scorer is
+   * unavailable and you want the bowling captain to score by default.
+   */
+  async revokeScorer(matchId: string, userId: string) {
+    const match = await prisma.match.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+    if (['COMPLETED', 'CANCELLED'].includes(match.status)) {
+      throw new AppError('INVALID_STATE', 'Cannot revoke scorer for a completed or cancelled match', 400)
+    }
+
+    const requester = await prisma.playerProfile.findUnique({ where: { userId }, select: { id: true } })
+    if (!requester) throw Errors.forbidden()
+
+    const role = await resolveMatchRole(requester.id, matchId)
+    if (role !== 'owner' && role !== 'manager') {
+      throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager or owner can revoke the scorer', 403)
+    }
+
+    const prevScorerId = match.activeScorerId
+
+    await prisma.$transaction(async (tx) => {
+      await tx.matchRole.deleteMany({ where: { matchId, role: 'SCORER' } })
+      await tx.match.update({
+        where: { id: matchId },
+        data: { activeScorerId: null, scorerLockedByOwner: false },
+      })
+    })
+
+    // Notify the revoked scorer
+    if (prevScorerId) {
+      const prev = await prisma.playerProfile.findUnique({ where: { id: prevScorerId }, select: { userId: true } })
+      if (prev) {
+        notificationSvc.createNotification(prev.userId, {
+          type: 'scorer_revoked',
+          title: 'Scoring Revoked',
+          body: `You're no longer the scorer for ${match.teamAName} vs ${match.teamBName}`,
+          entityType: 'match',
+          entityId: matchId,
+          sendPush: true,
+          audience: 'PLAYER',
+        }).catch(() => undefined)
+      }
+    }
+
+    return { matchId, activeScorerId: null }
   }
 
   private async autoAssignScorerForBowlingTeam(matchId: string, bowlingTeam: 'A' | 'B') {

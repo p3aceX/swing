@@ -1320,6 +1320,10 @@ model Match {
   hasImpactPlayer     Boolean           @default(false)
   matchmakingId       String?
   activeScorerId      String?
+  // True after an Owner or Manager manually assigns a SCORER. While true,
+  // autoAssignScorerForBowlingTeam (Phase 4) skips this match — owner intent
+  // outranks innings auto-shift. Cleared back to false on revokeScorer.
+  scorerLockedByOwner Boolean           @default(false)
   highlights          Json              @default("[]")
   youtubeUrl          String?
   liveCode            String?           @unique
