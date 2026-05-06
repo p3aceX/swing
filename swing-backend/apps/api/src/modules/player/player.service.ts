@@ -443,6 +443,7 @@ export class PlayerService {
     });
     let ownedArenaSlotBookingIds: string[] = [];
     let ownedArenaMmMatchIds: string[] = [];
+    let ownedArenaLinkedMatchIds: string[] = [];
     let ownedArenaIds: string[] = [];
     let ownedUnitIds: string[] = [];
     if (profileForUser?.userId) {
@@ -472,9 +473,31 @@ export class PlayerService {
           if (ownedUnitIds.length > 0) {
             const mmMatches = await prisma.matchmakingMatch.findMany({
               where: { groundId: { in: ownedUnitIds } },
-              select: { id: true },
+              select: { id: true, status: true, linkedMatchId: true },
             });
             ownedArenaMmMatchIds = mmMatches.map((m) => m.id);
+            ownedArenaLinkedMatchIds = mmMatches
+              .map((m) => m.linkedMatchId)
+              .filter((id): id is string => !!id);
+            // DIAGNOSTIC: dump each MmMatch and check if cricket Matches exist.
+            console.log(
+              `[matchHistory] mmMatch detail: ${JSON.stringify(
+                mmMatches.map((m) => ({
+                  id: m.id,
+                  status: m.status,
+                  linkedMatchId: m.linkedMatchId,
+                })),
+              )}`,
+            );
+            if (ownedArenaLinkedMatchIds.length > 0) {
+              const cricketMatches = await prisma.match.findMany({
+                where: { id: { in: ownedArenaLinkedMatchIds } },
+                select: { id: true, matchmakingId: true, scorerId: true, status: true },
+              });
+              console.log(
+                `[matchHistory] cricket Match for linked ids: ${JSON.stringify(cricketMatches)}`,
+              );
+            }
           }
         }
       }
@@ -483,6 +506,7 @@ export class PlayerService {
       `[matchHistory] profileId=${profileId} userId=${profileForUser?.userId ?? 'none'} `
         + `ownedArenas=${ownedArenaIds.length} units=${ownedUnitIds.length} `
         + `slotBookings=${ownedArenaSlotBookingIds.length} mmMatches=${ownedArenaMmMatchIds.length} `
+        + `linkedCricketMatches=${ownedArenaLinkedMatchIds.length} `
         + `myTeams=${myTeamNames.length}`,
     );
 
@@ -523,6 +547,9 @@ export class PlayerService {
               : []),
             ...(ownedArenaMmMatchIds.length > 0
               ? [{ matchmakingId: { in: ownedArenaMmMatchIds } }]
+              : []),
+            ...(ownedArenaLinkedMatchIds.length > 0
+              ? [{ id: { in: ownedArenaLinkedMatchIds } }]
               : []),
           ],
         },
