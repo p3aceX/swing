@@ -1342,7 +1342,7 @@ class _MoneyRow extends StatelessWidget {
             '₹$rupees',
             style: TextStyle(
               color: emphasis ? t.accent : t.text,
-              fontSize: emphasis ? 22 : 15,
+              fontSize: 22,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
             ),
