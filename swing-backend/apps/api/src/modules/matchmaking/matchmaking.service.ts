@@ -2148,8 +2148,29 @@ export class MatchmakingService {
   }
 
   async backfillLinkedMatches(): Promise<{ processed: number; skipped: number; errors: string[] }> {
-    const unlinked = await prisma.matchmakingMatch.findMany({
-      where: { status: 'confirmed', linkedMatchId: null },
+    // Pull every MmMatch that *should* have a paired cricket Match:
+    // status confirmed (advance in), setup (owner ran setup), or started (legacy).
+    const candidates = await prisma.matchmakingMatch.findMany({
+      where: { status: { in: ['confirmed', 'setup', 'started'] } },
+    })
+
+    // Group them by case:
+    //   A. linkedMatchId is null          → create cricket Match (existing path)
+    //   B. linkedMatchId points to nothing → cricket Match was deleted, recreate
+    const linkedIds = candidates
+      .map((m) => (m as any).linkedMatchId as string | null)
+      .filter((id): id is string => !!id)
+    const existing = linkedIds.length
+      ? await prisma.match.findMany({
+          where: { id: { in: linkedIds } },
+          select: { id: true },
+        })
+      : []
+    const existingIds = new Set(existing.map((m) => m.id))
+
+    const unlinked = candidates.filter((m) => {
+      const id = (m as any).linkedMatchId as string | null
+      return !id || !existingIds.has(id)
     })
 
     let processed = 0

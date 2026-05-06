@@ -651,7 +651,7 @@ export class MatchService {
     const liveCode = await this.generateUniqueMatchLiveCode()
     const livePin = this.generateMatchLivePin()
 
-    return prisma.match.create({
+    const match = await prisma.match.create({
       data: {
         matchType: data.matchType, format: data.format,
         teamAName: data.teamAName, teamBName: data.teamBName,
@@ -673,6 +673,16 @@ export class MatchService {
         livePin,
       },
     })
+
+    if (player) {
+      await this.seedMatchRoles(match.id, player.id, {
+        captainAId: data.teamACaptainId ?? null,
+        captainBId: data.teamBCaptainId ?? null,
+        isTournament: !!data.tournamentId,
+      })
+    }
+
+    return match
   }
 
   async recordToss(matchId: string, userId: string, tossWonBy: string, tossDecision: string, options: MutationOptions = {}) {
@@ -926,6 +936,25 @@ export class MatchService {
     }
   }
 
+  private async seedMatchRoles(
+    matchId: string,
+    ownerId: string,
+    opts: { captainAId?: string | null; captainBId?: string | null; isTournament: boolean },
+  ) {
+    const rows: { id: string; matchId: string; profileId: string; role: 'OWNER' | 'MANAGER'; grantedBy: null }[] = [
+      { id: `${matchId}-${ownerId}-OWNER`, matchId, profileId: ownerId, role: 'OWNER', grantedBy: null },
+    ]
+    if (!opts.isTournament) {
+      if (opts.captainAId && opts.captainAId !== ownerId) {
+        rows.push({ id: `${matchId}-${opts.captainAId}-MANAGER`, matchId, profileId: opts.captainAId, role: 'MANAGER', grantedBy: null })
+      }
+      if (opts.captainBId && opts.captainBId !== ownerId && opts.captainBId !== opts.captainAId) {
+        rows.push({ id: `${matchId}-${opts.captainBId}-MANAGER`, matchId, profileId: opts.captainBId, role: 'MANAGER', grantedBy: null })
+      }
+    }
+    await prisma.matchRole.createMany({ data: rows, skipDuplicates: true })
+  }
+
   async updateMatchOvers(matchId: string, userId: string, customOvers: number) {
     const match = await this.authorizeMutation(matchId, userId, { access: 'MANAGER' })
     if (!['SCHEDULED', 'TOSS_DONE'].includes(match.status)) {
@@ -981,6 +1010,12 @@ export class MatchService {
         tx.matchmakingQueue.updateMany({
           where: { matchId },
           data: { matchId: null },
+        }),
+        // Clear dangling linkedMatchId on MatchmakingMatch so the matchmaking
+        // backfill can recreate the cricket Match if needed.
+        tx.matchmakingMatch.updateMany({
+          where: { linkedMatchId: matchId },
+          data: { linkedMatchId: null },
         }),
         tx.eliteInsight.updateMany({
           where: { matchId },
@@ -2457,6 +2492,14 @@ export class MatchService {
         livePin,
       },
     })
+
+    if (player) {
+      await this.seedMatchRoles(match.id, player.id, {
+        captainAId: data.teamA?.captainId ?? null,
+        captainBId: data.teamB?.captainId ?? null,
+        isTournament: !!data.tournamentId,
+      })
+    }
 
     return match
   }
