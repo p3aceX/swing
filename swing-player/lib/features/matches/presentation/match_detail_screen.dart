@@ -260,17 +260,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
             ),
           ),
 
-          // ── Manager / Scorer action bar ────────────────────────────
-          if (canScore && isLiveOrUpcoming)
-            _ManagerBar(
+          // ── Score action bar (status block + primary CTA) ───────────
+          if (isLiveOrUpcoming)
+            _ScoreActionBar(
               matchId: widget.matchId,
-              isLive: center.lifecycle == MatchLifecycle.live,
-              teamAName: center.teamAName,
-              teamBName: center.teamBName,
-              canManage: center.canManageCenter ||
-                  widget.initialMatch?.canManage == true,
-              squads: center.squads,
-              activeScorerId: center.activeScorerId,
+              center: center,
+              fallback: widget.initialMatch,
               onAssigned: () => ref.invalidate(matchCenterProvider(widget.matchId)),
             ),
         ],
@@ -290,94 +285,106 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
 // MANAGER / SCORER ACTION BAR
 // ══════════════════════════════════════════════════════════════════════════════
 
-class _ManagerBar extends ConsumerWidget {
-  const _ManagerBar({
+/// Status block + primary CTA for the match-detail screen.
+///
+/// Three states:
+///   1. canScoreNow == true        → "Score this match" CTA
+///   2. captain whose team is batting → muted hint, no CTA
+///   3. no role at all              → bar hidden by parent
+///
+/// Owner / Manager additionally get a small "Assign scorer" trigger.
+class _ScoreActionBar extends ConsumerWidget {
+  const _ScoreActionBar({
     required this.matchId,
-    required this.isLive,
-    required this.teamAName,
-    required this.teamBName,
-    required this.canManage,
-    required this.squads,
+    required this.center,
+    required this.fallback,
     required this.onAssigned,
-    this.activeScorerId,
   });
 
   final String matchId;
-  final bool isLive;
-  final String teamAName;
-  final String teamBName;
-  final bool canManage;
-  final List<MatchSquad> squads;
-  final String? activeScorerId;
+  final MatchCenter center;
+  final PlayerMatch? fallback;
   final VoidCallback onAssigned;
+
+  /// Map the live innings's `battingTeamName` (display name) to 'A' or 'B'
+  /// by comparing against MatchCenter.teamAName/teamBName.
+  String? _liveBattingTeamCode() {
+    MatchInnings? live;
+    for (final inn in center.innings) {
+      if (!inn.isCompleted) {
+        live = inn;
+      }
+    }
+    if (live == null) return null;
+    if (live.battingTeamName == center.teamAName) return 'A';
+    if (live.battingTeamName == center.teamBName) return 'B';
+    return null;
+  }
+
+  bool get _isCaptain =>
+      center.myRole == 'captain-A' || center.myRole == 'captain-B';
+
+  bool get _canManage =>
+      center.canManageCenter || fallback?.canManage == true;
+
+  bool get _isLive => center.lifecycle == MatchLifecycle.live;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final battingTeam = _liveBattingTeamCode();
+    final canScoreNow = center.canScoreNowCenter(battingTeam: battingTeam) ||
+        fallback?.canScoreNow(battingTeam: battingTeam) == true;
+
+    // No role and not active scorer → bar hidden entirely.
+    final hasAnyRole = center.myRole != null || fallback?.myRole != null;
+    if (!hasAnyRole && center.activeScorerId == null) {
+      return const SizedBox.shrink();
+    }
+
     final bottom = MediaQuery.of(context).padding.bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottom),
+      padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottom),
       decoration: BoxDecoration(
-        color: context.surf,
-        border: Border(top: BorderSide(color: context.stroke)),
+        border: Border(top: BorderSide(color: context.stroke, width: 0.5)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: SizedBox(
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  if (!canManage) {
-                    // Delegated scorer → stripped-down scorer route
-                    context.push('/scorer/$matchId');
-                  } else if (isLive) {
-                    context.push('/score-match/$matchId');
-                  } else {
-                    final id = Uri.encodeQueryComponent(matchId);
-                    final teamA = Uri.encodeQueryComponent(teamAName);
-                    final teamB = Uri.encodeQueryComponent(teamBName);
-                    context.push(
-                        '/create-match?matchId=$id&teamA=$teamA&teamB=$teamB');
-                  }
-                },
-                icon: const Icon(Icons.sports_cricket_rounded, size: 18),
-                label: Text(
-                  canManage
-                      ? (isLive ? 'Resume Scoring' : 'Set Playing 11')
-                      : 'Score Match',
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: context.accent,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+          _StatusLine(center: center, battingTeam: battingTeam),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _PrimaryCta(
+                  canScoreNow: canScoreNow,
+                  isCaptainBatting: _isCaptain && !canScoreNow,
+                  isLive: _isLive,
+                  canManage: _canManage,
+                  onScore: () {
+                    if (_canManage && !_isLive) {
+                      // Pre-live + manage rights → set playing 11 first
+                      final id = Uri.encodeQueryComponent(matchId);
+                      final teamA = Uri.encodeQueryComponent(center.teamAName);
+                      final teamB = Uri.encodeQueryComponent(center.teamBName);
+                      context.push(
+                          '/create-match?matchId=$id&teamA=$teamA&teamB=$teamB');
+                    } else if (_canManage) {
+                      context.push('/score-match/$matchId');
+                    } else {
+                      // Delegated scorer route
+                      context.push('/scorer/$matchId');
+                    }
+                  },
                 ),
               ),
-            ),
+              if (_canManage) ...[
+                const SizedBox(width: 12),
+                _AssignTrigger(
+                  onTap: () => _showAssignSheet(context, ref),
+                ),
+              ],
+            ],
           ),
-          if (canManage) ...[
-            const SizedBox(width: 10),
-            SizedBox(
-              height: 48,
-              width: 48,
-              child: OutlinedButton(
-                onPressed: () => _showAssignSheet(context, ref),
-                style: OutlinedButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  side: BorderSide(color: context.stroke),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Icon(Icons.person_add_alt_1_rounded,
-                    color: context.fgSub, size: 20),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -390,9 +397,182 @@ class _ManagerBar extends ConsumerWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => _AssignScorerSheet(
         matchId: matchId,
-        squads: squads,
-        activeScorerId: activeScorerId,
+        squads: center.squads,
+        activeScorerId: center.activeScorerId,
         onAssigned: onAssigned,
+      ),
+    );
+  }
+}
+
+class _StatusLine extends StatelessWidget {
+  const _StatusLine({required this.center, required this.battingTeam});
+  final MatchCenter center;
+  final String? battingTeam;
+
+  @override
+  Widget build(BuildContext context) {
+    final liveInn = () {
+      MatchInnings? l;
+      for (final i in center.innings) {
+        if (!i.isCompleted) l = i;
+      }
+      return l;
+    }();
+
+    final phase = liveInn != null
+        ? '${liveInn.title.toUpperCase()} · ${liveInn.battingTeamName.toUpperCase()} BATTING'
+        : (center.lifecycle == MatchLifecycle.upcoming
+            ? 'AWAITING TOSS'
+            : 'NOT STARTED');
+
+    // "Currently scoring" indicator — pull a name if we have an activeScorerId
+    // matching one of the squad players.
+    String? scorerName;
+    if (center.activeScorerId != null) {
+      for (final s in center.squads) {
+        for (final p in s.players) {
+          if (p.playerId == center.activeScorerId) {
+            scorerName = p.name;
+            break;
+          }
+        }
+        if (scorerName != null) break;
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          phase,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(height: 4),
+        if (scorerName != null)
+          RichText(
+            text: TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Scoring · ',
+                  style: TextStyle(color: context.fgSub, fontSize: 13),
+                ),
+                TextSpan(
+                  text: scorerName,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Text(
+            battingTeam == null
+                ? 'No scorer yet · waiting for toss'
+                : 'No scorer yet · bowling captain takes over by default',
+            style: TextStyle(color: context.fgSub, fontSize: 13),
+          ),
+      ],
+    );
+  }
+}
+
+class _PrimaryCta extends StatelessWidget {
+  const _PrimaryCta({
+    required this.canScoreNow,
+    required this.isCaptainBatting,
+    required this.isLive,
+    required this.canManage,
+    required this.onScore,
+  });
+
+  final bool canScoreNow;
+  final bool isCaptainBatting;
+  final bool isLive;
+  final bool canManage;
+  final VoidCallback onScore;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isCaptainBatting) {
+      // Disabled state — your team is batting, wait for innings break.
+      return Container(
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: context.stroke.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(
+          'Your team is batting · wait for the break',
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+
+    if (!canScoreNow) {
+      // No write authority — should be hidden by parent, but defensive.
+      return const SizedBox.shrink();
+    }
+
+    final label = canManage
+        ? (isLive ? 'Resume scoring' : 'Set playing 11')
+        : 'Score match';
+
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton.icon(
+        onPressed: onScore,
+        icon: const Icon(Icons.sports_cricket_rounded, size: 18),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: context.accent,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AssignTrigger extends StatelessWidget {
+  const _AssignTrigger({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      width: 48,
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          side: BorderSide(color: context.stroke),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        child: Icon(Icons.person_add_alt_1_rounded,
+            color: context.fgSub, size: 20),
       ),
     );
   }
