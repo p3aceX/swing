@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../../core/api/api_client.dart';
@@ -34,6 +35,7 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
     required this.opponentPaid,
     required this.status,
     required this.onRefresh,
+    this.bookingId,
   });
 
   final String matchId;
@@ -53,6 +55,7 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
   final bool myTeamPaid;
   final bool opponentPaid;
   final String status;
+  final String? bookingId;
   final RefreshFn onRefresh;
 
   @override
@@ -353,8 +356,29 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
                 ),
               ],
 
+              if (widget.bookingId != null) ...[
+                const SizedBox(height: 12),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      context.go('/bookings/${widget.bookingId}');
+                    },
+                    icon: Icon(Icons.receipt_long_rounded,
+                        size: 16, color: context.fg),
+                    label: Text(
+                      'View booking details',
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               if (_canCancel) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 6),
                 Center(
                   child: TextButton(
                     onPressed: _busy ? null : _onCancel,

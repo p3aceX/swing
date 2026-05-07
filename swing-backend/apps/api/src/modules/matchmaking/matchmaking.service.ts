@@ -2629,6 +2629,9 @@ export class MatchmakingService {
         confirmationFeePaise: m.paymentAmountPerTeam,
         groundFeePaise: m.groundFeePaise,
         remainingFeePaise: m.remainingFeePaise,
+        // Surfaced so the My Match-Up sheet can link out to the side-nav
+        // booking page via /bookings/:id.
+        bookingId: (m as any).bookingId ?? null,
       }
     })
     return { matches: out }

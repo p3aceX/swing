@@ -7129,6 +7129,7 @@ class _MyConfirmedMatch {
     this.myTeamPaid = true,
     this.opponentPaid = true,
     this.confirmationFeePaise = 0,
+    this.bookingId,
   });
 
   final String matchId;
@@ -7137,6 +7138,7 @@ class _MyConfirmedMatch {
   final String? myTeamLogoUrl;
   final String opponentTeamName;
   final String? opponentTeamLogoUrl;
+  final String? bookingId;
   final String groundName;
   final String arenaName;
   final String groundArea;
@@ -7202,6 +7204,7 @@ class _MyConfirmedMatch {
         opponentPaid: (j['opponentPaid'] as bool?) ?? true,
         confirmationFeePaise:
             (j['confirmationFeePaise'] as num?)?.toInt() ?? 0,
+        bookingId: j['bookingId'] as String?,
       );
 }
 
@@ -7362,6 +7365,7 @@ class _MatchCard extends ConsumerWidget {
           myTeamPaid: match.myTeamPaid,
           opponentPaid: match.opponentPaid,
           status: match.status,
+          bookingId: match.bookingId,
           onRefresh: () => ref.invalidate(_myMatchesProvider),
         ),
       ),

@@ -405,6 +405,24 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
             _showSlotConflictDialog(err);
             return;
           }
+          if (err['code'] == 'TEAM_BANNED') {
+            setState(() {
+              _submitting = false;
+              _error = null;
+              if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+            });
+            _showTeamBannedDialog(err);
+            return;
+          }
+          if (err['code'] == 'NO_AVAILABLE_SLOT') {
+            setState(() {
+              _submitting = false;
+              _error = (err['message'] as String?) ??
+                  'No available slot for these grounds. Pick different grounds.';
+              if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+            });
+            return;
+          }
         }
       }
       setState(() {
@@ -413,6 +431,45 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         if (_stage == _Stage.celebrating) _stage = _Stage.setup;
       });
     }
+  }
+
+  void _showTeamBannedDialog(Map err) {
+    final details = (err['details'] is Map) ? err['details'] as Map : const {};
+    String? until;
+    final raw = details['banUntil'];
+    if (raw is String) {
+      try {
+        final dt = DateTime.parse(raw).toLocal();
+        until = DateFormat('EEE d MMM').format(dt);
+      } catch (_) {}
+    }
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ctx.bg,
+        title: Text(
+          'Match-ups paused',
+          style: TextStyle(
+            color: ctx.fg,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.3,
+          ),
+        ),
+        content: Text(
+          until != null
+              ? 'Your team is paused from match-ups until $until due to recent cancellations. Try again after the cooldown.'
+              : 'Your team is paused from match-ups due to recent cancellations. Try again after the cooldown.',
+          style: TextStyle(color: ctx.fgSub, fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('OK',
+                style: TextStyle(color: ctx.fg, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSlotConflictDialog(Map err) {
