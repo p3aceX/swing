@@ -2393,7 +2393,7 @@ export class MatchmakingService {
       }),
       prisma.matchmakingLobby.findMany({
         where: { id: { in: lobbyIds } },
-        include: { team: { select: { id: true, name: true } } },
+        include: { team: { select: { id: true, name: true, logoUrl: true } } },
       }),
     ])
 
@@ -2418,7 +2418,9 @@ export class MatchmakingService {
         matchId: m.id,
         myLobbyId,
         myTeamName: myLobby?.team?.name ?? 'Your Team',
+        myTeamLogoUrl: (myLobby as any)?.team?.logoUrl ?? null,
         opponentTeamName: opponentLobby?.team?.name ?? 'Opponent',
+        opponentTeamLogoUrl: (opponentLobby as any)?.team?.logoUrl ?? null,
         groundName: unit?.name ?? '',
         arenaName: (unit as any)?.arena?.name ?? '',
         groundArea: unit ? this.arenaArea((unit as any).arena?.address ?? '', (unit as any).arena?.city ?? '') : '',

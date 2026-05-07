@@ -7114,7 +7114,9 @@ class _MyConfirmedMatch {
     required this.matchId,
     this.myLobbyId,
     required this.myTeamName,
+    this.myTeamLogoUrl,
     required this.opponentTeamName,
+    this.opponentTeamLogoUrl,
     required this.groundName,
     required this.arenaName,
     required this.groundArea,
@@ -7132,7 +7134,9 @@ class _MyConfirmedMatch {
   final String matchId;
   final String? myLobbyId;
   final String myTeamName;
+  final String? myTeamLogoUrl;
   final String opponentTeamName;
+  final String? opponentTeamLogoUrl;
   final String groundName;
   final String arenaName;
   final String groundArea;
@@ -7182,7 +7186,9 @@ class _MyConfirmedMatch {
         matchId: (j['matchId'] as String?) ?? '',
         myLobbyId: j['myLobbyId'] as String?,
         myTeamName: (j['myTeamName'] as String?) ?? 'Your Team',
+        myTeamLogoUrl: j['myTeamLogoUrl'] as String?,
         opponentTeamName: (j['opponentTeamName'] as String?) ?? 'Opponent',
+        opponentTeamLogoUrl: j['opponentTeamLogoUrl'] as String?,
         groundName: (j['groundName'] as String?) ?? '',
         arenaName: (j['arenaName'] as String?) ?? '',
         groundArea: (j['groundArea'] as String?) ?? '',
@@ -7341,7 +7347,10 @@ class _MatchCard extends ConsumerWidget {
         builder: (_) => MyMatchupDetailSheet(
           matchId: match.matchId,
           myLobbyId: match.myLobbyId,
+          myTeamName: match.myTeamName,
+          myTeamLogoUrl: match.myTeamLogoUrl,
           opponentTeamName: match.opponentTeamName,
+          opponentTeamLogoUrl: match.opponentTeamLogoUrl,
           groundName: match.groundName,
           arenaName: match.arenaName,
           groundArea: match.groundArea,
@@ -7361,12 +7370,35 @@ class _MatchCard extends ConsumerWidget {
   }
 }
 
+// Compact list card — opponent + date/time + status pill.
+// The full vertical-ticket layout lives in MyMatchupDetailSheet.
 class _MatchCardBody extends StatelessWidget {
   const _MatchCardBody({required this.match});
   final _MyConfirmedMatch match;
 
+  ({String label, Color color}) _statusTone(BuildContext context) {
+    if (match.isPaymentPending) {
+      return (label: 'PAY DUE', color: context.danger);
+    }
+    if (match.isAwaitingOpponent) {
+      return (label: 'WAITING', color: context.warn);
+    }
+    switch (match.status) {
+      case 'started':
+        return (label: 'LIVE', color: context.ctaBg);
+      case 'setup':
+        return (label: 'READY', color: context.ctaBg);
+      default:
+        return (label: 'CONFIRMED', color: context.ctaBg);
+    }
+  }
+
+  String get _venueShort =>
+      match.groundName.isNotEmpty ? match.groundName : (match.arenaName);
+
   @override
   Widget build(BuildContext context) {
+    final tone = _statusTone(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Column(
@@ -7381,45 +7413,220 @@ class _MatchCardBody extends StatelessWidget {
                   children: [
                     Text(
                       'vs ${match.opponentTeamName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: context.fg,
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       [
-                        match.groundName,
-                        if (match.groundArea.isNotEmpty) match.groundArea,
-                      ].join(', '),
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        match.format,
                         match.dateLabel,
                         match.displaySlot,
-                      ].join('  ·  '),
+                        if (_venueShort.isNotEmpty) _venueShort,
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: context.fgSub,
                         fontSize: 12,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
               ),
-              _CardStatusPill(match: match),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: tone.color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  tone.label,
+                  style: TextStyle(
+                    color: tone.color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Divider(height: 1, color: context.stroke.withValues(alpha: 0.4)),
         ],
+      ),
+    );
+  }
+}
+
+class _TeamBlock extends StatelessWidget {
+  const _TeamBlock({
+    required this.name,
+    required this.initials,
+    required this.color,
+    required this.youLabel,
+  });
+  final String name;
+  final String initials;
+  final Color color;
+  final bool youLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            initials,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.3,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                  height: 1.1,
+                ),
+              ),
+              if (youLabel) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'YOU',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Perforation extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 18,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // Dashed line spanning the width
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Center(
+              child: LayoutBuilder(
+                builder: (_, c) {
+                  final dashCount = (c.maxWidth / 6).floor();
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(dashCount, (_) {
+                      return Container(
+                        width: 3,
+                        height: 1,
+                        color: context.fgSub.withValues(alpha: 0.35),
+                      );
+                    }),
+                  );
+                },
+              ),
+            ),
+          ),
+          // Left notch
+          Positioned(
+            left: -9,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: context.bg,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+          // Right notch
+          Positioned(
+            right: -9,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: context.bg,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: context.fg.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: context.fg,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.6,
+        ),
       ),
     );
   }
