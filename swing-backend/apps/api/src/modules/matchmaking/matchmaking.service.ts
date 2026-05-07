@@ -502,14 +502,29 @@ export class MatchmakingService {
       input.filters.timeWindows,
     )
 
+    // Reject already-expired requests up front. Without this, lobbies were
+    // being persisted with expiresAt in the past (e.g. searching for today's
+    // MORNING after 12:00 IST), which then failed the "active" filter and
+    // produced duplicate rows on every retry.
+    if (expiresAt.getTime() <= Date.now()) {
+      throw new AppError(
+        'WINDOW_PASSED',
+        'The selected time window has already passed. Pick a future window or date.',
+        400,
+      )
+    }
+
     // Ensure team-uniqueness: find/update existing or create a new one.
+    // Search WITHOUT the expiresAt filter so we recycle a stale row instead
+    // of creating a duplicate. We only re-use rows in 'searching' state — a
+    // matched/confirmed lobby stays untouched.
     const yourLobby = await prisma.$transaction(async (tx) => {
       const existing = await tx.matchmakingLobby.findFirst({
         where: {
           teamId: team.id,
           status: 'searching',
-          expiresAt: { gt: new Date() },
         },
+        orderBy: { createdAt: 'desc' },
       })
       if (existing) {
         return await tx.matchmakingLobby.update({

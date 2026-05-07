@@ -44,6 +44,18 @@ extension _DiscoverWindowApi on DiscoverWindow {
         DiscoverWindow.afternoon => '12 PM – 6 PM',
         DiscoverWindow.evening => '6 PM onwards',
       };
+  // Hour at which this window ends, expressed as hours past start-of-day in
+  // local clock (so EVENING is 28 = 04:00 next day).
+  int get _endHour => switch (this) {
+        DiscoverWindow.morning => 12,
+        DiscoverWindow.afternoon => 18,
+        DiscoverWindow.evening => 28,
+      };
+  bool isPast(DateTime date) {
+    final end = DateTime(date.year, date.month, date.day)
+        .add(Duration(hours: _endHour));
+    return DateTime.now().isAfter(end);
+  }
 }
 
 DiscoverWindow? _parseWindow(String? s) => switch (s) {
@@ -217,11 +229,36 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     });
   }
 
+  // Used by the Results page to render an "expired" banner. We deliberately
+  // no longer auto-bounce the user back to Intro — that felt like an
+  // interrupt. Instead the user sees the banner and chooses Modify or Cancel.
+  bool get _hasExpired =>
+      _activeLobbyId != null &&
+      _isAllWindowsPassed(_prefs.date, _prefs.windows);
+
   void _maybeExpire() {
+    // Lightweight tick to nudge a rebuild so the expired banner shows up
+    // exactly when the last window passes (without waiting for user input).
     if (_stage != _Stage.results || _activeLobbyId == null) return;
     if (!_isAllWindowsPassed(_prefs.date, _prefs.windows)) return;
-    _log('all windows passed → reset to intro');
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _cancelSearch() async {
+    if (_activeLobbyId == null) {
+      setState(() => _stage = _Stage.intro);
+      return;
+    }
+    final repo = ref.read(matchmakingRepositoryProvider);
+    try {
+      await repo.leaveLobby(_activeLobbyId!);
+    } catch (e) {
+      _log('cancelSearch leaveLobby error (ignored): $e');
+    }
+    if (!mounted) return;
+    final tid = _currentTeam?.id;
     setState(() {
+      if (tid != null) _teamLobbies.remove(tid);
       _activeLobbyId = null;
       _closest = [];
       _alternatives = [];
@@ -399,12 +436,14 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           team: _currentTeam,
           allTeams: allTeams,
           teamLobbies: _teamLobbies,
+          expired: _hasExpired,
           onSwitchTeam: _switchTeam,
           closest: _closest,
           alternatives: _alternatives,
           alternativeReason: _alternativeReason,
           onModify: _goSetup,
           onRefresh: _runDiscover,
+          onCancel: _cancelSearch,
           onChallenge: (lobby) => widget.onChallenge(lobby, _currentTeam),
         ),
     };
@@ -703,9 +742,10 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
   bool _stepReady() {
     switch (_step) {
       case 0:
-        // Team is now picked via the chip (handled in DiscoverView). Step 1
-        // gates on ball type — format always has a default.
-        return widget.team != null && widget.prefs.ballType != null;
+        // Team comes from the chip. Format defaults to T20. Ball defaults
+        // to null which now means "All ball types" — both are valid out of
+        // the box, so the only hard requirement is that a team is picked.
+        return widget.team != null;
       case 1:
         return widget.prefs.windows.isNotEmpty;
       case 2:
@@ -995,6 +1035,7 @@ class _WhenStep extends StatelessWidget {
           _WindowCard(
             window: w,
             selected: prefs.windows.contains(w),
+            disabled: w.isPast(prefs.date),
             onTap: () {
               if (prefs.windows.contains(w)) {
                 prefs.windows.remove(w);
@@ -1190,10 +1231,11 @@ class _DiscoverCelebrateState extends State<_DiscoverCelebrate>
               ),
             ),
 
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
                 // Pulsing core
                 Container(
                   width: 96,
@@ -1284,7 +1326,8 @@ class _DiscoverCelebrateState extends State<_DiscoverCelebrate>
                     ],
                   ],
                 ),
-              ],
+                ],
+              ),
             ),
           ],
         );
@@ -1301,12 +1344,14 @@ class _DiscoverResults extends StatelessWidget {
     required this.team,
     required this.allTeams,
     required this.teamLobbies,
+    required this.expired,
     required this.onSwitchTeam,
     required this.closest,
     required this.alternatives,
     required this.alternativeReason,
     required this.onModify,
     required this.onRefresh,
+    required this.onCancel,
     required this.onChallenge,
   });
 
@@ -1314,12 +1359,14 @@ class _DiscoverResults extends StatelessWidget {
   final MmTeam? team;
   final List<MmTeam> allTeams;
   final Map<String, MmTeamLobbySummary> teamLobbies;
+  final bool expired;
   final ValueChanged<MmTeam> onSwitchTeam;
   final List<MmRankedLobby> closest;
   final List<MmRankedLobby> alternatives;
   final String? alternativeReason;
   final VoidCallback onModify;
   final Future<void> Function({bool skipCelebrate}) onRefresh;
+  final VoidCallback onCancel;
   final ValueChanged<MmOpenLobby> onChallenge;
 
   @override
@@ -1339,39 +1386,26 @@ class _DiscoverResults extends StatelessWidget {
                   onSwitch: onSwitchTeam,
                 ),
                 const Spacer(),
-                GestureDetector(
+                _IconPillButton(
+                  icon: Icons.tune_rounded,
+                  label: 'Modify',
                   onTap: onModify,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: context.stroke.withValues(alpha: 0.6),
-                        width: 1,
-                      ),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.tune_rounded, size: 14, color: context.fg),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Modify',
-                          style: TextStyle(
-                            color: context.fg,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                ),
+                const SizedBox(width: 8),
+                _IconPillButton(
+                  icon: Icons.close_rounded,
+                  label: 'Cancel',
+                  onTap: onCancel,
+                  destructive: true,
                 ),
               ],
             ),
           ),
+        ),
+        // Status banner — "Searching" while live, "Expired" once windows pass
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: _StatusBanner(expired: expired),
         ),
         Expanded(
           child: RefreshIndicator(
@@ -1513,6 +1547,159 @@ class _DiscoverResults extends StatelessWidget {
 
 String _ballLabelFor(_Prefs p) =>
     p.ballType == null ? 'Any ball' : _ballLabel(p.ballType!);
+
+class _IconPillButton extends StatelessWidget {
+  const _IconPillButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive ? context.danger : context.fg;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: destructive
+                ? context.danger.withValues(alpha: 0.4)
+                : context.stroke.withValues(alpha: 0.6),
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Live "we're searching for you" banner with a slow pulsing dot. Flips to
+// an "Expired" banner once all selected windows have passed.
+class _StatusBanner extends StatefulWidget {
+  const _StatusBanner({required this.expired});
+  final bool expired;
+
+  @override
+  State<_StatusBanner> createState() => _StatusBannerState();
+}
+
+class _StatusBannerState extends State<_StatusBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.expired) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            context.warn.withValues(alpha: 0.10), context.bg),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.schedule_rounded, color: context.warn, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Search expired — pick another window or cancel',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (_, __) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            context.ctaBg.withValues(alpha: 0.06), context.bg),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: context.ctaBg
+                    .withValues(alpha: 0.4 + 0.6 * _pulse.value),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Searching for matches',
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.1,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              'Live',
+              style: TextStyle(
+                color: context.ctaBg,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 String _emptyClosestText(String? reason, bool hasAlts) {
   if (reason == 'no_exact_matches') {
@@ -1746,11 +1933,13 @@ class _WindowCard extends StatelessWidget {
     required this.window,
     required this.selected,
     required this.onTap,
+    this.disabled = false,
   });
 
   final DiscoverWindow window;
   final bool selected;
   final VoidCallback onTap;
+  final bool disabled;
 
   ({IconData icon, List<Color> grad}) _theme(BuildContext context) {
     return switch (window) {
@@ -1782,93 +1971,112 @@ class _WindowCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = _theme(context);
     final iconBg = t.grad[0].withValues(alpha: selected ? 1.0 : 0.18);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          decoration: BoxDecoration(
-            color: selected
-                ? Color.alphaBlend(
-                    t.grad[0].withValues(alpha: 0.12), context.bg)
-                : Color.alphaBlend(
-                    context.fg.withValues(alpha: 0.04), context.bg),
-            borderRadius: BorderRadius.circular(14),
-            border: selected
-                ? Border.all(
-                    color: t.grad[1].withValues(alpha: 0.4), width: 1.4)
-                : null,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: selected
-                      ? LinearGradient(
-                          colors: t.grad,
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : null,
-                  color: selected ? null : iconBg,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  t.icon,
-                  color: selected ? Colors.white : t.grad[1],
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      window.label,
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      window.hint,
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (selected)
+    return Opacity(
+      opacity: disabled ? 0.45 : 1.0,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: disabled ? null : onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            decoration: BoxDecoration(
+              color: selected
+                  ? Color.alphaBlend(
+                      t.grad[0].withValues(alpha: 0.12), context.bg)
+                  : Color.alphaBlend(
+                      context.fg.withValues(alpha: 0.04), context.bg),
+              borderRadius: BorderRadius.circular(14),
+              border: selected
+                  ? Border.all(
+                      color: t.grad[1].withValues(alpha: 0.4), width: 1.4)
+                  : null,
+            ),
+            child: Row(
+              children: [
                 Container(
-                  width: 22,
-                  height: 22,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: t.grad,
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    shape: BoxShape.circle,
+                    gradient: selected
+                        ? LinearGradient(
+                            colors: t.grad,
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    color: selected ? null : iconBg,
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   alignment: Alignment.center,
-                  child: const Icon(Icons.check_rounded,
-                      color: Colors.white, size: 14),
+                  child: Icon(
+                    t.icon,
+                    color: selected ? Colors.white : t.grad[1],
+                    size: 22,
+                  ),
                 ),
-            ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            window.label,
+                            style: TextStyle(
+                              color: context.fg,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          if (disabled) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              'PAST',
+                              style: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        window.hint,
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: t.grad,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.check_rounded,
+                        color: Colors.white, size: 14),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
