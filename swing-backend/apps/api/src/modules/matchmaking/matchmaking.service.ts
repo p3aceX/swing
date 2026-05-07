@@ -307,6 +307,7 @@ export class MatchmakingService {
       if (!unit) throw Errors.notFound('Arena unit')
       const groundFeePaise = Math.floor(unit.pricePerHourPaise * this.formatDurationMins(input.format) / 60 / 2)
       const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
+      const fee = await this.resolveFeeBreakdown(unit.arenaId, groundFeePaise, tx)
       // Clean up stale cancelled matches to avoid @unique constraint on lobbyAId/lobbyBId
       await tx.matchmakingMatch.deleteMany({
         where: {
@@ -329,6 +330,8 @@ export class MatchmakingService {
           paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
           groundFeePaise,
           remainingFeePaise,
+          platformFeePaise: fee.platformFeePaise,
+          arenaPayoutPaise: fee.arenaPayoutPaise,
         },
       })
       await tx.matchmakingLobby.updateMany({
@@ -1209,6 +1212,7 @@ export class MatchmakingService {
       if (!unit) throw Errors.notFound('Arena unit')
 
       const groundFeePaise = Math.floor(unit.pricePerHourPaise * this.formatDurationMins(targetLobby.format as MatchmakingFormat) / 60 / 2)
+      const joinFee = await this.resolveFeeBreakdown(unit.arenaId, groundFeePaise, tx)
       const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
       const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
 
@@ -1251,6 +1255,8 @@ export class MatchmakingService {
           paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
           groundFeePaise,
           remainingFeePaise,
+          platformFeePaise: joinFee.platformFeePaise,
+          arenaPayoutPaise: joinFee.arenaPayoutPaise,
         },
       })
 
@@ -1367,6 +1373,7 @@ export class MatchmakingService {
 
     const groundFeePaise = Math.floor(unit.pricePerHourPaise * this.formatDurationMins(lobby.format as MatchmakingFormat) / 60 / 2)
     const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
+    const ownerFee = await this.resolveFeeBreakdown(unit.arenaId, groundFeePaise)
     const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
 
     const result = await prisma.$transaction(async (tx) => {
@@ -1407,6 +1414,8 @@ export class MatchmakingService {
           paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
           groundFeePaise,
           remainingFeePaise,
+          platformFeePaise: ownerFee.platformFeePaise,
+          arenaPayoutPaise: ownerFee.arenaPayoutPaise,
         },
       })
 
@@ -2145,6 +2154,36 @@ export class MatchmakingService {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
     if (!player) throw Errors.notFound('Player profile')
     return player
+  }
+
+  // Resolves the commission rate that applies to a match-up at this arena.
+  // Per-arena override (Arena.commissionRateBpsOverride) wins; otherwise
+  // falls back to the platform-wide PlatformConfig 'mm_commission_rate_bps'.
+  // Default 0 (test mode). Computes both sides of the ledger so every match
+  // record has a complete payout snapshot — even when fee = 0 today.
+  private async resolveFeeBreakdown(
+    arenaId: string,
+    groundFeePaise: number,
+    tx?: any,
+  ): Promise<{ platformFeePaise: number; arenaPayoutPaise: number; rateBps: number }> {
+    const client = tx ?? prisma
+    const [arena, cfg] = await Promise.all([
+      client.arena.findUnique({
+        where: { id: arenaId },
+        select: { commissionRateBpsOverride: true },
+      }),
+      client.platformConfig.findUnique({
+        where: { key: 'mm_commission_rate_bps' },
+      }),
+    ])
+    const cfgVal = cfg?.value ?? '0'
+    const platformDefault = Number.parseInt(cfgVal, 10)
+    const rateBps =
+      arena?.commissionRateBpsOverride ??
+      (Number.isFinite(platformDefault) ? platformDefault : 0)
+    const platformFeePaise = Math.floor((groundFeePaise * rateBps) / 10000)
+    const arenaPayoutPaise = Math.max(0, groundFeePaise - platformFeePaise)
+    return { platformFeePaise, arenaPayoutPaise, rateBps }
   }
 
   private async resolveCallerTeam(userId: string, teamId?: string) {
@@ -3629,6 +3668,7 @@ export class MatchmakingService {
     // This branch goes away the moment CONFIRMATION_FEE_PAISE returns to
     // a non-zero value — the regular Razorpay path takes over.
     if (amountPaise === 0) {
+      const bypassFee = await this.resolveFeeBreakdown(unit.arenaId, groundFeePaise)
       const finalize = await prisma.$transaction(async (tx) => {
         const interest = await tx.matchmakingInterest.findUnique({
           where: { id: result.interest.id },
@@ -3674,6 +3714,8 @@ export class MatchmakingService {
             paymentAmountPerTeam: amountPaise,
             groundFeePaise,
             remainingFeePaise,
+            platformFeePaise: bypassFee.platformFeePaise,
+            arenaPayoutPaise: bypassFee.arenaPayoutPaise,
           },
         })
 
@@ -3859,6 +3901,7 @@ export class MatchmakingService {
         unit.pricePerHourPaise * this.formatDurationMins(lobby.format as MatchmakingFormat) / 60 / 2,
       )
       const remainingFeePaise = Math.max(0, groundFeePaise - CONFIRMATION_FEE_PAISE)
+      const verifyFee = await this.resolveFeeBreakdown(unit.arenaId, groundFeePaise, tx)
 
       const match = await tx.matchmakingMatch.create({
         data: {
@@ -3876,6 +3919,8 @@ export class MatchmakingService {
           paymentAmountPerTeam: CONFIRMATION_FEE_PAISE,
           groundFeePaise,
           remainingFeePaise,
+          platformFeePaise: verifyFee.platformFeePaise,
+          arenaPayoutPaise: verifyFee.arenaPayoutPaise,
         },
       })
 

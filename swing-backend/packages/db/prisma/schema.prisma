@@ -2347,6 +2347,11 @@ model Arena {
   rating             Float     @default(0)
   totalRatings       Int       @default(0)
   isActive           Boolean   @default(true)
+  // Per-arena commission override in basis points (8% = 800). NULL falls
+  // back to the platform-wide PlatformConfig.commissionRateBps (default 0).
+  // Lets specific arenas opt into different rates without touching the
+  // global setting.
+  commissionRateBpsOverride Int?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -2792,6 +2797,13 @@ model MatchmakingMatch {
   paymentAmountPerTeam Int
   groundFeePaise       Int      @default(0)
   remainingFeePaise    Int      @default(0)
+  // Monetisation ledger (rails — set to 0 in test mode). When commission is
+  // flipped on platform-wide or per-arena, finalizeMatch computes:
+  //   platformFeePaise = groundFeePaise * rateBps / 10000
+  //   arenaPayoutPaise = groundFeePaise - platformFeePaise
+  // Stored on every match for reporting + settlement.
+  platformFeePaise     Int      @default(0)
+  arenaPayoutPaise     Int      @default(0)
   bookingId            String?
   linkedMatchId        String?  @unique
   createdAt            DateTime @default(now())
@@ -4519,3 +4531,4 @@ model AcademyExpense {
   @@index([academyId])
   @@index([date])
 }
+
