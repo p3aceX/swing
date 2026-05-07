@@ -8,6 +8,7 @@
 
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,6 +59,7 @@ class _Prefs {
   _Prefs({
     this.team,
     this.format = MatchFormat.t20,
+    this.allFormats = false,
     this.ballType,
     DateTime? date,
     this.window,
@@ -67,16 +69,19 @@ class _Prefs {
 
   MmTeam? team;
   MatchFormat format;
-  String? ballType;
+  bool allFormats; // true = "All formats" picked; ignore format on search
+  String? ballType; // null = "All ball types" picked
   DateTime date;
   DiscoverWindow? window;
   String? preferredArenaId;
   String? preferredArenaName;
 
-  bool get isComplete =>
-      team != null && ballType != null && window != null;
+  bool get isComplete => team != null && window != null;
 
   String get dateApi => DateFormat('yyyy-MM-dd').format(date);
+
+  String get formatLabel => allFormats ? 'All formats' : format.label;
+  String get ballLabel => ballType == null ? 'All ball types' : _ballLabel(ballType!);
 }
 
 // ── Top-level widget ────────────────────────────────────────────────────────
@@ -200,8 +205,9 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       }
       final created = await repo.createLobby(
         teamId: _prefs.team!.id,
-        format: _prefs.format.apiValue,
-        ballType: _prefs.ballType,
+        // 'ANY' is the wildcard the backend accepts when "All formats" is on.
+        format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
+        ballType: _prefs.ballType, // null = no ball preference
         date: _prefs.dateApi,
         picks: const [],
         timeWindow: _prefs.window!.apiValue,
@@ -223,25 +229,41 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = '$e';
+        _error = _extractServerError(e);
       });
     }
+  }
+
+  // Surface the actual server reason instead of just "DioException".
+  String _extractServerError(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map) {
+        final msg = (data['error'] ?? data['message'])?.toString();
+        if (msg != null && msg.isNotEmpty) return msg;
+      }
+      final code = e.response?.statusCode;
+      if (code != null) return 'Request failed ($code).';
+    }
+    return e.toString();
   }
 
   Future<void> _refreshResults() async {
     final repo = ref.read(matchmakingRepositoryProvider);
     try {
+      final formatFilter =
+          _prefs.allFormats ? null : _prefs.format.apiValue;
       // Lobbies that match preferences exactly (window + ground if pinned)
       final matches = await repo.listOpenLobbies(
         date: _prefs.dateApi,
-        format: _prefs.format.apiValue,
+        format: formatFilter,
         timeWindow: _prefs.window!.apiValue,
         preferredArenaId: _prefs.preferredArenaId,
       );
       // Also-available: same date+format, any window/arena → minus the matches
       final all = await repo.listOpenLobbies(
         date: _prefs.dateApi,
-        format: _prefs.format.apiValue,
+        format: formatFilter,
       );
       final matchIds = matches.map((l) => l.lobbyId).toSet();
       final others = all.where((l) => !matchIds.contains(l.lobbyId)).toList();
@@ -398,7 +420,7 @@ class _DiscoverIntro extends StatelessWidget {
 
 // ─── SETUP ──────────────────────────────────────────────────────────────────
 
-class _DiscoverSetup extends ConsumerWidget {
+class _DiscoverSetup extends ConsumerStatefulWidget {
   const _DiscoverSetup({
     required this.prefs,
     required this.submitting,
@@ -416,8 +438,48 @@ class _DiscoverSetup extends ConsumerWidget {
   final VoidCallback onSubmit;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final teamsAsync = ref.watch(mmTeamsProvider);
+  ConsumerState<_DiscoverSetup> createState() => _DiscoverSetupState();
+}
+
+class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
+  // 0 = Match details (team/format/ball)
+  // 1 = When (date + window)
+  // 2 = Where (optional ground)
+  int _step = 0;
+
+  static const _stepLabels = ['Match details', 'When', 'Where'];
+
+  bool _stepReady() {
+    switch (_step) {
+      case 0:
+        return widget.prefs.team != null && widget.prefs.ballType != null;
+      case 1:
+        return widget.prefs.window != null;
+      case 2:
+        return true; // ground is optional
+    }
+    return false;
+  }
+
+  void _next() {
+    if (_step < _stepLabels.length - 1) {
+      setState(() => _step += 1);
+    } else {
+      widget.onSubmit();
+    }
+  }
+
+  void _back() {
+    if (_step == 0) {
+      widget.onCancel();
+    } else {
+      setState(() => _step -= 1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.prefs;
     return Column(
       children: [
         // ── Header ─────────────────────────────────────────────────
@@ -426,7 +488,7 @@ class _DiscoverSetup extends ConsumerWidget {
           child: Row(
             children: [
               GestureDetector(
-                onTap: onCancel,
+                onTap: _back,
                 behavior: HitTestBehavior.opaque,
                 child: SizedBox(
                   width: 36,
@@ -436,165 +498,89 @@ class _DiscoverSetup extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                'Match Setup',
-                style: TextStyle(
-                  color: context.fg,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.6,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'STEP 0${_step + 1} OF 0${_stepLabels.length}',
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.6,
+                        height: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _stepLabels[_step],
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.8,
+                        height: 1.0,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _SectionLabel('Team'),
-                _SetupRow(
-                  label: prefs.team?.name ?? 'Pick a team',
-                  hasValue: prefs.team != null,
-                  onTap: () async {
-                    final teams = teamsAsync.valueOrNull ?? const <MmTeam>[];
-                    final picked = await _pickTeam(context, teams);
-                    if (picked != null) {
-                      prefs.team = picked;
-                      onChanged();
-                    }
-                  },
-                ),
-                const SizedBox(height: 18),
-                _SectionLabel('Format'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final f in MatchFormat.values)
-                        _Chip(
-                          label: f.label,
-                          selected: prefs.format == f,
-                          onTap: () {
-                            prefs.format = f;
-                            onChanged();
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _SectionLabel('Ball'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final bt in const ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'])
-                        _Chip(
-                          label: _ballLabel(bt),
-                          selected: prefs.ballType == bt,
-                          onTap: () {
-                            prefs.ballType = bt;
-                            onChanged();
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                _SectionLabel('When'),
-                Padding(
-                  padding: const EdgeInsets.only(left: 20),
-                  child: _DateStripSimple(
-                    selected: prefs.date,
-                    onSelect: (d) {
-                      prefs.date = d;
-                      onChanged();
-                    },
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final w in DiscoverWindow.values)
-                        _Chip(
-                          label: w.label,
-                          subLabel: w.hint,
-                          selected: prefs.window == w,
-                          onTap: () {
-                            prefs.window = w;
-                            onChanged();
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                _SectionLabel('Where'),
-                _SetupRow(
-                  label: prefs.preferredArenaName ?? 'Any nearby ground',
-                  hasValue: prefs.preferredArenaName != null,
-                  onTap: () async {
-                    final picked = await _pickArena(
-                      context,
-                      ref,
-                      prefs.dateApi,
-                      prefs.format.apiValue,
-                    );
-                    if (picked == null) return;
-                    if (picked.id == '') {
-                      // sentinel for "Any nearby"
-                      prefs.preferredArenaId = null;
-                      prefs.preferredArenaName = null;
-                    } else {
-                      prefs.preferredArenaId = picked.id;
-                      prefs.preferredArenaName = picked.name;
-                    }
-                    onChanged();
-                  },
-                ),
-                if (prefs.preferredArenaId != null) ...[
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      'Filtering by ground reduces match chances.',
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
+        const SizedBox(height: 14),
+        // ── Progress dots ──────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              for (int i = 0; i < _stepLabels.length; i++) ...[
+                Expanded(
+                  child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: i <= _step
+                          ? context.ctaBg
+                          : context.stroke.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                ],
-                if (error != null) ...[
-                  const SizedBox(height: 14),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      error!,
-                      style: TextStyle(
-                        color: context.danger,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
+                if (i < _stepLabels.length - 1) const SizedBox(width: 6),
               ],
-            ),
+            ],
           ),
         ),
+        const SizedBox(height: 22),
+        // ── Body ───────────────────────────────────────────────────
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+            child: switch (_step) {
+              0 => _DetailsStep(prefs: p, onChanged: () => setState(() {})),
+              1 => _WhenStep(prefs: p, onChanged: () => setState(() {})),
+              _ => _WhereStep(
+                  prefs: p,
+                  onChanged: () => setState(() {}),
+                  ref: ref,
+                ),
+            },
+          ),
+        ),
+        // ── Error ──────────────────────────────────────────────────
+        if (widget.error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              widget.error!,
+              style: TextStyle(
+                color: context.danger,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
         // ── CTA ────────────────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
@@ -608,17 +594,17 @@ class _DiscoverSetup extends ConsumerWidget {
           padding: EdgeInsets.fromLTRB(
               20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
           child: GestureDetector(
-            onTap: prefs.isComplete && !submitting ? onSubmit : null,
+            onTap: _stepReady() && !widget.submitting ? _next : null,
             behavior: HitTestBehavior.opaque,
             child: Container(
               height: 52,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: prefs.isComplete && !submitting
+                color: _stepReady() && !widget.submitting
                     ? context.ctaBg
                     : context.stroke.withValues(alpha: 0.18),
               ),
-              child: submitting
+              child: widget.submitting
                   ? SizedBox(
                       width: 20,
                       height: 20,
@@ -629,9 +615,11 @@ class _DiscoverSetup extends ConsumerWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Find matches',
+                          _step == _stepLabels.length - 1
+                              ? 'Find matches'
+                              : 'Continue',
                           style: TextStyle(
-                            color: prefs.isComplete
+                            color: _stepReady()
                                 ? context.ctaFg
                                 : context.fgSub,
                             fontSize: 15,
@@ -640,13 +628,182 @@ class _DiscoverSetup extends ConsumerWidget {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Icon(Icons.arrow_forward_rounded,
-                            color: prefs.isComplete
-                                ? context.ctaFg
-                                : context.fgSub,
-                            size: 17),
+                        Icon(
+                          _step == _stepLabels.length - 1
+                              ? Icons.search_rounded
+                              : Icons.arrow_forward_rounded,
+                          color:
+                              _stepReady() ? context.ctaFg : context.fgSub,
+                          size: 17,
+                        ),
                       ],
                     ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Setup sub-steps ────────────────────────────────────────────────────────
+
+class _DetailsStep extends ConsumerWidget {
+  const _DetailsStep({required this.prefs, required this.onChanged});
+  final _Prefs prefs;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final teamsAsync = ref.watch(mmTeamsProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SetupRow(
+          label: 'Team',
+          value: prefs.team?.name,
+          placeholder: 'Tap to pick team',
+          onTap: () async {
+            final teams = teamsAsync.valueOrNull ?? const <MmTeam>[];
+            final picked = await _pickTeam(context, teams);
+            if (picked != null) {
+              prefs.team = picked;
+              onChanged();
+            }
+          },
+        ),
+        _RowDivider(),
+        _SetupRow(
+          label: 'Format',
+          value: prefs.formatLabel,
+          placeholder: 'Tap to choose format',
+          onTap: () async {
+            final r = await _pickFormat(context,
+                allSelected: prefs.allFormats, current: prefs.format);
+            if (r == null) return;
+            prefs.allFormats = r.all;
+            if (r.format != null) prefs.format = r.format!;
+            onChanged();
+          },
+        ),
+        _RowDivider(),
+        _SetupRow(
+          label: 'Ball type',
+          value: prefs.ballLabel,
+          placeholder: 'Tap to pick ball type',
+          onTap: () async {
+            final r = await _pickBallType(context, prefs.ballType);
+            if (r == null) return;
+            prefs.ballType = r.all ? null : r.value;
+            onChanged();
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// Picker result types. `null` from the picker = dismissed without choice.
+typedef _FormatPick = ({bool all, MatchFormat? format});
+typedef _BallPick = ({bool all, String? value});
+
+class _WhenStep extends StatelessWidget {
+  const _WhenStep({required this.prefs, required this.onChanged});
+  final _Prefs prefs;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel('Choose date'),
+        Padding(
+          padding: const EdgeInsets.only(left: 20),
+          child: _DateStripSimple(
+            selected: prefs.date,
+            onSelect: (d) {
+              prefs.date = d;
+              onChanged();
+            },
+          ),
+        ),
+        const SizedBox(height: 26),
+        _SectionLabel('Time window'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final w in DiscoverWindow.values) ...[
+                _Chip(
+                  label: w.label,
+                  subLabel: w.hint,
+                  selected: prefs.window == w,
+                  onTap: () {
+                    prefs.window = w;
+                    onChanged();
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WhereStep extends StatelessWidget {
+  const _WhereStep({
+    required this.prefs,
+    required this.onChanged,
+    required this.ref,
+  });
+  final _Prefs prefs;
+  final VoidCallback onChanged;
+  final WidgetRef ref;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SetupRow(
+          label: 'Preferred ground',
+          value: prefs.preferredArenaName ?? 'Any nearby',
+          placeholder: 'Any nearby',
+          onTap: () async {
+            final picked = await _pickArena(
+              context,
+              ref,
+              prefs.dateApi,
+              prefs.format.apiValue,
+            );
+            if (picked == null) return;
+            if (picked.id == '') {
+              prefs.preferredArenaId = null;
+              prefs.preferredArenaName = null;
+            } else {
+              prefs.preferredArenaId = picked.id;
+              prefs.preferredArenaName = picked.name;
+            }
+            onChanged();
+          },
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Text(
+            prefs.preferredArenaId != null
+                ? 'Filtering by ground reduces match chances.'
+                : 'Leave as "Any nearby" for the most matches. Pick a ground only if you must play there.',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              height: 1.4,
             ),
           ),
         ),
@@ -950,49 +1107,73 @@ class _SectionLabel extends StatelessWidget {
 class _SetupRow extends StatelessWidget {
   const _SetupRow({
     required this.label,
-    required this.hasValue,
+    required this.value,
+    required this.placeholder,
     required this.onTap,
   });
   final String label;
-  final bool hasValue;
+  final String? value;
+  final String placeholder;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final hasValue = value != null && value!.isNotEmpty;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 20),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: context.stroke.withValues(alpha: 0.6),
-            width: 1,
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: hasValue ? context.fg : context.fgSub,
-                  fontSize: 15,
-                  fontWeight: hasValue ? FontWeight.w800 : FontWeight.w500,
-                  letterSpacing: -0.2,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label.toUpperCase(),
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    hasValue ? value! : placeholder,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: hasValue ? context.fg : context.fgSub,
+                      fontSize: 17,
+                      fontWeight:
+                          hasValue ? FontWeight.w800 : FontWeight.w500,
+                      letterSpacing: -0.2,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 10),
-            Icon(Icons.keyboard_arrow_down_rounded,
+            const SizedBox(width: 12),
+            Icon(Icons.chevron_right_rounded,
                 color: context.fgSub, size: 22),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _RowDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 1,
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      color: context.stroke.withValues(alpha: 0.14),
     );
   }
 }
@@ -1330,6 +1511,176 @@ Future<MmTeam?> _pickTeam(BuildContext context, List<MmTeam> teams) {
       );
     },
   );
+}
+
+Future<_FormatPick?> _pickFormat(
+  BuildContext context, {
+  required bool allSelected,
+  required MatchFormat current,
+}) {
+  return showModalBottomSheet<_FormatPick>(
+    context: context,
+    backgroundColor: context.bg,
+    builder: (sheetCtx) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text(
+                'Choose Format',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                ),
+              ),
+            ),
+            Container(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+            // "All formats" — first option, with subtitle to clarify
+            _PickerRow(
+              label: 'All formats',
+              subtitle: 'Match teams playing any format',
+              selected: allSelected,
+              onTap: () => Navigator.of(sheetCtx)
+                  .pop((all: true, format: null)),
+            ),
+            Container(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.14),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+            ),
+            for (final f in MatchFormat.values)
+              _PickerRow(
+                label: f.label,
+                selected: !allSelected && f == current,
+                onTap: () => Navigator.of(sheetCtx)
+                    .pop((all: false, format: f)),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Future<_BallPick?> _pickBallType(
+    BuildContext context, String? current) {
+  const balls = ['LEATHER', 'TENNIS', 'TAPE', 'RUBBER'];
+  return showModalBottomSheet<_BallPick>(
+    context: context,
+    backgroundColor: context.bg,
+    builder: (sheetCtx) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text(
+                'Choose Ball Type',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                ),
+              ),
+            ),
+            Container(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+            _PickerRow(
+              label: 'All ball types',
+              subtitle: 'Match teams using any ball',
+              selected: current == null,
+              onTap: () => Navigator.of(sheetCtx)
+                  .pop((all: true, value: null)),
+            ),
+            Container(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.14),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+            ),
+            for (final bt in balls)
+              _PickerRow(
+                label: _ballLabel(bt),
+                selected: bt == current,
+                onTap: () => Navigator.of(sheetCtx)
+                    .pop((all: false, value: bt)),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _PickerRow extends StatelessWidget {
+  const _PickerRow({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.subtitle,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        color: selected ? context.ctaBg : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? context.ctaFg : context.fg,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(
+                        color: selected
+                            ? context.ctaFg.withValues(alpha: 0.75)
+                            : context.fgSub,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_rounded, color: context.ctaFg, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 Future<({String id, String name})?> _pickArena(

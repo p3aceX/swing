@@ -18,7 +18,16 @@ const CONFIRMATION_FEE_PAISE = 50000 // ₹500 flat per team
 // for this many seconds while their Razorpay order is alive.
 const INTEREST_LOCK_SECONDS = 120
 
-export type MatchmakingFormat = 'T10' | 'T20' | 'ODI' | 'Test' | 'Custom'
+// 'ANY' = team is open to any format (Discover-flow "All formats" option).
+// Treated as a wildcard during matching: a lobby with format='ANY' matches
+// any other lobby's format, and vice versa.
+export type MatchmakingFormat =
+  | 'T10'
+  | 'T20'
+  | 'ODI'
+  | 'Test'
+  | 'Custom'
+  | 'ANY'
 
 let _razorpay: Razorpay | null = null
 function getRazorpay() {
@@ -241,7 +250,12 @@ export class MatchmakingService {
         where: {
           id: { not: lobby.id },
           teamId: { not: team.id },
-          format: input.format,
+          // Format match: 'ANY' on either side acts as a wildcard. If the
+          // caller is 'ANY', accept all formats; otherwise accept exact or
+          // 'ANY' on the candidate side.
+          ...(input.format === 'ANY'
+              ? {}
+              : { format: { in: [input.format, 'ANY'] } }),
           date,
           status: 'searching',
           expiresAt: { gt: new Date() },
@@ -440,7 +454,11 @@ export class MatchmakingService {
         OR: [{ teamId: null }, { teamId: { notIn: myTeamIds } }],
         // if date given → exact match; otherwise show all upcoming lobbies from today
         ...(input.date ? { date: this.startOfDay(input.date) } : { date: { gte: today } }),
-        ...(input.format ? { format: input.format } : {}),
+        // Format filter: 'ANY' or unset → no filter (return all). Specific
+        // format → also include lobbies tagged 'ANY' (open to any format).
+        ...(input.format && input.format !== 'ANY'
+          ? { format: { in: [input.format, 'ANY'] } }
+          : {}),
       },
       include: {
         team: true,

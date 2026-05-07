@@ -6,7 +6,9 @@ export async function matchmakingRoutes(app: FastifyInstance) {
   const svc = new MatchmakingService()
   const auth = { onRequest: [(app as any).authenticate] }
 
-  const formatSchema = z.enum(['T10', 'T20', 'ODI', 'Test', 'Custom'])
+  // 'ANY' is the Discover-flow "All formats" wildcard — accepted on create
+  // + filter; service matching treats it as match-all.
+  const formatSchema = z.enum(['T10', 'T20', 'ODI', 'Test', 'Custom', 'ANY'])
 
   app.get('/grounds', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
