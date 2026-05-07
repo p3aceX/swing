@@ -213,14 +213,18 @@ class MatchmakingRepository {
   /// Single-shot discovery: ensures the team's active lobby (find/update/create)
   /// and returns ranked closest matches + alternatives in one round trip.
   // Returns the time-window buckets that have at least one matching arena
-  // (by operating-hour overlap) for the given date. Empty arenaIds = all
-  // active arenas. Used by Discover Setup to hide impossible chips.
+  // unit (a viable start time exists where a full match-duration slot fits
+  // inside the unit's operating hours) for the given date.
+  // Empty arenaIds = all active arenas. format determines match duration
+  // (T20 = 4hr, ODI = 8hr) — defaults to T20 server-side when omitted.
   Future<List<({String window, int arenaCount})>> availableBuckets({
     required String date,
     List<String> arenaIds = const [],
+    String? format,
   }) async {
     final qp = <String, dynamic>{'date': date};
     if (arenaIds.isNotEmpty) qp['arenaIds'] = arenaIds.join(',');
+    if (format != null) qp['format'] = format;
     final resp = await _dio.get(
       ApiEndpoints.matchmakingAvailableBuckets,
       queryParameters: qp,

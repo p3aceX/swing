@@ -97,11 +97,12 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     const q = z.object({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       arenaIds: z.string().optional(),
+      format: z.string().optional(),
     }).parse(request.query)
     const ids = q.arenaIds
       ? q.arenaIds.split(',').filter((s) => s.length > 0)
       : []
-    const data = await svc.availableBuckets(q.date, ids)
+    const data = await svc.availableBuckets(q.date, ids, q.format)
     return reply.send({ success: true, data })
   })
 

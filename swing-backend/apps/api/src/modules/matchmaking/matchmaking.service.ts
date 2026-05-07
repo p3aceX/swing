@@ -2575,13 +2575,28 @@ export class MatchmakingService {
   // If arenaIds is non-empty, only those arenas are considered. Otherwise
   // all active arenas (used as a coarse "what's possible in your city" hint;
   // the arena set will be narrowed server-side by city in a future revision).
-  async availableBuckets(_date: string, arenaIds: string[]) {
-    const arenas = await prisma.arena.findMany({
+  async availableBuckets(
+    _date: string,
+    arenaIds: string[],
+    format?: string,
+  ) {
+    // Query ArenaUnit (the actual playing surface) — it can have its own
+    // openTime/closeTime that overrides the parent arena. A unit with a
+    // 5 PM close can't host an EVENING (16:30–20:30) match even if the
+    // parent arena says 10 PM close. Fall back to arena's hours when the
+    // unit didn't override.
+    const units = await prisma.arenaUnit.findMany({
       where: arenaIds.length > 0
-        ? { id: { in: arenaIds }, isActive: true }
-        : { isActive: true },
-      select: { id: true, openTime: true, closeTime: true },
-      take: 200, // cap fan-out for the no-filter case
+        ? { arenaId: { in: arenaIds } }
+        : { arena: { isActive: true } },
+      select: {
+        id: true,
+        arenaId: true,
+        openTime: true,
+        closeTime: true,
+        arena: { select: { openTime: true, closeTime: true, isActive: true } },
+      },
+      take: 200,
     })
 
     const parseMin = (t: string | null | undefined): number | null => {
@@ -2591,18 +2606,43 @@ export class MatchmakingService {
       return Number(m[1]) * 60 + Number(m[2])
     }
 
+    // Format-aware: a bucket is "available" iff there's at least one start
+    // time within the bucket where a full match-duration slot fits inside
+    // the unit's operating hours. Default to T20 (240 min) so a missing
+    // format query param doesn't silently widen results.
+    const durationMins = (() => {
+      switch (format) {
+        case 'ODI':
+        case 'Test':
+          return 480
+        case 'T10':
+        case 'T20':
+        case 'Custom':
+        case 'ANY':
+        default:
+          return 240
+      }
+    })()
+
     const buckets = TIME_WINDOWS.map((w) => {
       const r = WINDOW_RANGES[w]
       let arenaCount = 0
-      for (const a of arenas) {
-        const open = parseMin(a.openTime)
-        const closeRaw = parseMin(a.closeTime)
+      for (const u of units) {
+        if (!u.arena?.isActive) continue
+        // Unit-level hours override the arena's when set.
+        const open = parseMin(u.openTime ?? u.arena.openTime)
+        const closeRaw = parseMin(u.closeTime ?? u.arena.closeTime)
         if (open === null || closeRaw === null) continue
-        // close < open means the venue closes after midnight (e.g. 06:00 →
-        // 02:00). Express as "minutes past start-of-day" extended past 1440
-        // so the overlap math works without special-casing.
+        // Close < open → venue runs past midnight; extend close past 1440
+        // so the math works without special-casing.
         const close = closeRaw <= open ? closeRaw + 24 * 60 : closeRaw
-        if (intervalsOverlap(open, close, r.startMin, r.endMin)) {
+        // A viable start time t satisfies:
+        //   t in [bucketStart, bucketEnd)  AND  t >= open  AND
+        //   t + duration <= close
+        // i.e. t in [max(open, bucketStart), min(bucketEnd, close - duration))
+        const startMin = Math.max(open, r.startMin)
+        const startMax = Math.min(r.endMin, close - durationMins)
+        if (startMin < startMax) {
           arenaCount++
         }
       }

@@ -244,7 +244,12 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       final active = chosen != null ? _teamLobbies[chosen.id] : null;
       if (active != null) {
         _hydratePrefsFromLobby(active);
-        await _runDiscover(skipCelebrate: true);
+        // Don't fire /discover if hydration produced no windows — backend
+        // rejects empty windowsRanked with 400. User has to pick a window
+        // first via the wizard.
+        if (_prefs.windowsRanked.isNotEmpty) {
+          await _runDiscover(skipCelebrate: true);
+        }
       }
     } catch (e) {
       _log('bootstrap error: $e');
@@ -1300,14 +1305,23 @@ class _DetailsStep extends StatelessWidget {
 typedef _FormatPick = ({bool all, MatchFormat? format});
 typedef _BallPick = ({bool all, String? value});
 
-// Smart-window cache. Keyed by (dateApi, sorted arenaIds joined by '|') so the
-// same query returns cached results across rebuilds.
-typedef _AvailableBucketsKey = ({String date, String arenaKey});
+// Smart-window cache. Keyed by (dateApi, sorted arenaIds joined by '|', format)
+// so the cache busts when any input changes — including format, since duration
+// (T20 = 4hr vs ODI = 8hr) determines whether a bucket can host a viable slot.
+typedef _AvailableBucketsKey = ({
+  String date,
+  String arenaKey,
+  String format,
+});
 final _availableBucketsProvider = FutureProvider.family
     .autoDispose<Set<DiscoverWindow>, _AvailableBucketsKey>((ref, key) async {
   final repo = ref.read(matchmakingRepositoryProvider);
   final ids = key.arenaKey.isEmpty ? <String>[] : key.arenaKey.split('|');
-  final res = await repo.availableBuckets(date: key.date, arenaIds: ids);
+  final res = await repo.availableBuckets(
+    date: key.date,
+    arenaIds: ids,
+    format: key.format,
+  );
   return {
     for (final b in res)
       if (b.arenaCount > 0)
@@ -1415,7 +1429,11 @@ class _WhenWindowsStep extends ConsumerWidget {
     for (final d in dates) {
       final dateApi = DateFormat('yyyy-MM-dd').format(d);
       final res = ref
-          .watch(_availableBucketsProvider((date: dateApi, arenaKey: arenaKey)));
+          .watch(_availableBucketsProvider((
+        date: dateApi,
+        arenaKey: arenaKey,
+        format: prefs.format.apiValue,
+      )));
       res.whenData((s) {
         anyData = true;
         available.addAll(s);
@@ -1685,7 +1703,13 @@ class _GroundChip extends StatelessWidget {
             const SizedBox(width: 6),
           ] else
             const SizedBox(width: 4),
-          Flexible(
+          // Bound the label width so a long ground name doesn't push the
+          // chip past the Wrap's row. Flexible inside Row(mainAxisSize.min)
+          // is a Flutter layout footgun (it has no leftover space to flex
+          // into) and triggers the "RenderBox was not laid out" cascade —
+          // ConstrainedBox + plain Text + ellipsis is the safe pattern.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
             child: Text(
               label,
               maxLines: 1,
@@ -3483,16 +3507,28 @@ Future<List<MmArenaPick>?> _pickArenas(
     backgroundColor: context.bg,
     isScrollControlled: true,
     builder: (sheetCtx) {
+      // With isScrollControlled, the modal sheet does NOT bound the
+      // body's width/height — the body has to do that itself. SizedBox
+      // pins the width to the screen so the Row/Spacer at the bottom
+      // (Cancel + Save buttons) gets a finite max-width to flex against.
+      // ConstrainedBox(maxHeight:…) gives the Flexible/ListView a finite
+      // vertical space to occupy.
+      final size = MediaQuery.of(sheetCtx).size;
+      final maxHeight = size.height * 0.85;
       return StatefulBuilder(
         builder: (ctxSB, setSB) {
           return Consumer(
             builder: (consumerCtx, ref, _) {
               final asyncGrounds = ref.watch(mmGroundsProvider(query));
               return SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                child: SizedBox(
+                  width: size.width,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeight),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 20, 20, 6),
                       child: Row(
@@ -3667,43 +3703,56 @@ Future<List<MmArenaPick>?> _pickArenas(
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                      // Custom button row built from GestureDetector +
+                      // Container instead of Material's TextButton /
+                      // ElevatedButton + Spacer. The Material buttons pass
+                      // `BoxConstraints(w=Infinity)` to their inner shape
+                      // when their parent Row has unbounded main-axis (which
+                      // is the default Row behaviour for non-flex children),
+                      // triggering "BoxConstraints forces an infinite width".
+                      // GestureDetector + Container has no such surprise.
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          TextButton(
-                            onPressed: () => Navigator.of(sheetCtx).pop(),
-                            child: Text(
-                              'Cancel',
-                              style: TextStyle(
-                                color: context.fgSub,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => Navigator.of(sheetCtx).pop(),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 12),
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: context.fgSub,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ),
-                          const Spacer(),
-                          ElevatedButton(
-                            onPressed: () => Navigator.of(sheetCtx).pop([
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => Navigator.of(sheetCtx).pop([
                               for (final entry in selected.entries)
                                 (id: entry.key, name: entry.value),
                             ]),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: context.ctaBg,
-                              foregroundColor: context.ctaFg,
-                              elevation: 0,
+                            child: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 22, vertical: 12),
-                              shape: RoundedRectangleBorder(
+                              decoration: BoxDecoration(
+                                color: context.ctaBg,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                            ),
-                            child: Text(
-                              selected.isEmpty
-                                  ? 'Use any nearby'
-                                  : 'Save (${selected.length})',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.2,
+                              child: Text(
+                                selected.isEmpty
+                                    ? 'Use any nearby'
+                                    : 'Save (${selected.length})',
+                                style: TextStyle(
+                                  color: context.ctaFg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.2,
+                                ),
                               ),
                             ),
                           ),
@@ -3711,6 +3760,8 @@ Future<List<MmArenaPick>?> _pickArenas(
                       ),
                     ),
                   ],
+                ),
+                ),
                 ),
               );
             },
