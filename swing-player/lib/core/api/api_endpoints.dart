@@ -146,6 +146,8 @@ class ApiEndpoints {
   static const String matchmakingActiveLobby = '/matchmaking/lobbies/active';
   static const String matchmakingActiveLobbiesAll = '/matchmaking/lobbies/active-all';
   static const String matchmakingDiscover = '/matchmaking/discover';
+  static const String matchmakingAvailableBuckets =
+      '/matchmaking/available-buckets';
   static String matchmakingLobby(String id) => '/matchmaking/lobbies/$id';
   static String matchmakingExpressInterest(String lobbyId) =>
       '/matchmaking/lobbies/$lobbyId/express-interest';

@@ -206,6 +206,29 @@ class MatchmakingRepository {
 
   /// Single-shot discovery: ensures the team's active lobby (find/update/create)
   /// and returns ranked closest matches + alternatives in one round trip.
+  // Returns the time-window buckets that have at least one matching arena
+  // (by operating-hour overlap) for the given date. Empty arenaIds = all
+  // active arenas. Used by Discover Setup to hide impossible chips.
+  Future<List<({String window, int arenaCount})>> availableBuckets({
+    required String date,
+    List<String> arenaIds = const [],
+  }) async {
+    final qp = <String, dynamic>{'date': date};
+    if (arenaIds.isNotEmpty) qp['arenaIds'] = arenaIds.join(',');
+    final resp = await _dio.get(
+      ApiEndpoints.matchmakingAvailableBuckets,
+      queryParameters: qp,
+    );
+    final data = _unwrap(resp.data);
+    final list = (data['buckets'] as List?) ?? const [];
+    return list.whereType<Map<String, dynamic>>().map((m) {
+      return (
+        window: (m['window'] as String?) ?? '',
+        arenaCount: (m['arenaCount'] as num?)?.toInt() ?? 0,
+      );
+    }).toList();
+  }
+
   Future<MmDiscoverResponse> discoverLobbies({
     required String teamId,
     required String date,

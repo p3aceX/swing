@@ -67,6 +67,25 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  // Returns which time-window buckets have at least one matching arena
+  // (by operating hours overlap) for the given date. Used by the Discover
+  // Setup "When" step to hide impossible chips (e.g. NIGHT in cities
+  // without floodlit grounds).
+  //
+  // arenaIds (comma-separated) optionally narrows to a specific set of
+  // grounds the user pre-picked; omit for all active arenas.
+  app.get('/available-buckets', auth, async (request, reply) => {
+    const q = z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      arenaIds: z.string().optional(),
+    }).parse(request.query)
+    const ids = q.arenaIds
+      ? q.arenaIds.split(',').filter((s) => s.length > 0)
+      : []
+    const data = await svc.availableBuckets(q.date, ids)
+    return reply.send({ success: true, data })
+  })
+
   // Discover-flow: returns one active lobby per team the caller belongs to.
   // Used by the team-switcher chip to show which of the user's teams are
   // currently searching.

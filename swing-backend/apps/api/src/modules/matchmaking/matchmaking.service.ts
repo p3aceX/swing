@@ -12,6 +12,7 @@ import {
   formatRange,
   bucketForSlotTime,
   WINDOW_RANGES,
+  TIME_WINDOWS,
   type TimeWindow,
 } from './time-windows'
 
@@ -2154,6 +2155,50 @@ export class MatchmakingService {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
     if (!player) throw Errors.notFound('Player profile')
     return player
+  }
+
+  // Smart-window scanner. For each of the 5 time buckets, count how many
+  // active arenas have operating hours that overlap the bucket on the given
+  // date. Player-side abstraction — arenas don't tag slots with buckets, we
+  // derive overlap from openTime / closeTime.
+  //
+  // If arenaIds is non-empty, only those arenas are considered. Otherwise
+  // all active arenas (used as a coarse "what's possible in your city" hint;
+  // the arena set will be narrowed server-side by city in a future revision).
+  async availableBuckets(_date: string, arenaIds: string[]) {
+    const arenas = await prisma.arena.findMany({
+      where: arenaIds.length > 0
+        ? { id: { in: arenaIds }, isActive: true }
+        : { isActive: true },
+      select: { id: true, openTime: true, closeTime: true },
+      take: 200, // cap fan-out for the no-filter case
+    })
+
+    const parseMin = (t: string | null | undefined): number | null => {
+      if (!t) return null
+      const m = /^(\d{1,2}):(\d{2})$/.exec(t)
+      if (!m) return null
+      return Number(m[1]) * 60 + Number(m[2])
+    }
+
+    const buckets = TIME_WINDOWS.map((w) => {
+      const r = WINDOW_RANGES[w]
+      let arenaCount = 0
+      for (const a of arenas) {
+        const open = parseMin(a.openTime)
+        const closeRaw = parseMin(a.closeTime)
+        if (open === null || closeRaw === null) continue
+        // close < open means the venue closes after midnight (e.g. 06:00 →
+        // 02:00). Express as "minutes past start-of-day" extended past 1440
+        // so the overlap math works without special-casing.
+        const close = closeRaw <= open ? closeRaw + 24 * 60 : closeRaw
+        if (intervalsOverlap(open, close, r.startMin, r.endMin)) {
+          arenaCount++
+        }
+      }
+      return { window: w, arenaCount }
+    })
+    return { buckets }
   }
 
   // Resolves the commission rate that applies to a match-up at this arena.
