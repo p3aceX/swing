@@ -1141,28 +1141,52 @@ export class BookingService {
       where: { bookingId },
     })
 
-    let matchInfo: {
+    type CaptainContact = { name: string | null; phone: string | null }
+    type MatchInfo = {
       matchId: string
       format: string
       ballType: string | null
       status: string
+      teamAId: string | null
+      teamBId: string | null
       teamAName: string
       teamBName: string
+      teamACaptain: CaptainContact | null
+      teamBCaptain: CaptainContact | null
       teamAConfirmed: boolean
       teamBConfirmed: boolean
-    } | null = null
+    }
+    let matchInfo: MatchInfo | null = null
+
+    const resolveCaptain = async (
+      team: { captainId: string | null } | null | undefined,
+    ): Promise<CaptainContact | null> => {
+      if (!team?.captainId) return null
+      const profile = await prisma.playerProfile.findUnique({
+        where: { id: team.captainId },
+        include: { user: { select: { name: true, phone: true } } },
+      })
+      if (!profile) return null
+      return {
+        name: profile.user?.name ?? null,
+        phone: profile.user?.phone ?? null,
+      }
+    }
 
     if (mmMatch) {
-      // Resolve team names from both lobbies
       const [lobbyA, lobbyB] = await Promise.all([
         prisma.matchmakingLobby.findUnique({
           where: { id: mmMatch.lobbyAId },
-          include: { team: { select: { name: true } } },
+          include: { team: { select: { id: true, name: true, captainId: true } } },
         }),
         prisma.matchmakingLobby.findUnique({
           where: { id: mmMatch.lobbyBId },
-          include: { team: { select: { name: true } } },
+          include: { team: { select: { id: true, name: true, captainId: true } } },
         }),
+      ])
+      const [teamACaptain, teamBCaptain] = await Promise.all([
+        resolveCaptain(lobbyA?.team),
+        resolveCaptain(lobbyB?.team),
       ])
       const ballType = splitLobby?.ballType
         ?? lobbyA?.ballType
@@ -1173,20 +1197,33 @@ export class BookingService {
         format: mmMatch.format,
         ballType,
         status: mmMatch.status,
+        teamAId: lobbyA?.team?.id ?? null,
+        teamBId: lobbyB?.team?.id ?? null,
         teamAName: lobbyA?.team?.name ?? 'Team A',
         teamBName: lobbyB?.team?.name ?? 'Team B',
+        teamACaptain,
+        teamBCaptain,
         teamAConfirmed: mmMatch.teamAConfirmed,
         teamBConfirmed: mmMatch.teamBConfirmed,
       }
     } else if (splitLobby) {
-      // Lobby exists but no match found yet — still searching
+      // Lobby exists but no opponent matched yet — show the originating team only.
+      const lobbyTeam = await prisma.matchmakingLobby.findUnique({
+        where: { id: splitLobby.id },
+        include: { team: { select: { id: true, name: true, captainId: true } } },
+      })
+      const teamACaptain = await resolveCaptain(lobbyTeam?.team)
       matchInfo = {
         matchId: '',
         format: splitLobby.format,
         ballType: splitLobby.ballType ?? null,
         status: splitLobby.status,
-        teamAName: splitLobby.team?.name ?? 'Your Team',
+        teamAId: lobbyTeam?.team?.id ?? null,
+        teamBId: null,
+        teamAName: lobbyTeam?.team?.name ?? 'Your Team',
         teamBName: '',
+        teamACaptain,
+        teamBCaptain: null,
         teamAConfirmed: false,
         teamBConfirmed: false,
       }

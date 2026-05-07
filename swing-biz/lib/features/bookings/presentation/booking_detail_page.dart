@@ -154,6 +154,10 @@ class _BookingDetailBody extends ConsumerWidget {
         ),
         if (booking.bookingPayments.isEmpty)
           SliverToBoxAdapter(child: _EmptyLedger())
+        else if (booking.isSplit && booking.matchInfo != null)
+          SliverToBoxAdapter(
+            child: _GroupedLedger(booking: booking, ref: ref),
+          )
         else
           SliverList(
             delegate: SliverChildBuilderDelegate(
@@ -196,22 +200,26 @@ class _HeaderCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(booking.displayName,
-                    style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: _c.text)),
-              ),
-              _StatusChip(status: booking.status),
+          if (booking.isSplit && booking.matchInfo != null)
+            _SplitTeamsBlock(matchInfo: booking.matchInfo!, status: booking.status)
+          else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(booking.displayName,
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: _c.text)),
+                ),
+                _StatusChip(status: booking.status),
+              ],
+            ),
+            if (booking.displayPhone.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(booking.displayPhone,
+                  style: TextStyle(fontSize: 12, color: _c.muted)),
             ],
-          ),
-          if (booking.displayPhone.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(booking.displayPhone,
-                style: TextStyle(fontSize: 12, color: _c.muted)),
           ],
           const SizedBox(height: 16),
           _InfoRow(
@@ -376,6 +384,257 @@ class _PaymentSummaryCard extends StatelessWidget {
 
 // ─── Split badge ──────────────────────────────────────────────────────────────
 
+class _SplitTeamsBlock extends StatelessWidget {
+  const _SplitTeamsBlock({required this.matchInfo, required this.status});
+  final MatchupContext matchInfo;
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _TeamLine(
+                teamName: matchInfo.teamAName,
+                captain: matchInfo.teamACaptain,
+                confirmed: matchInfo.teamAConfirmed,
+              ),
+            ),
+            _StatusChip(status: status),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Text(
+            'vs',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: _c.muted,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        if (matchInfo.hasOpponent)
+          _TeamLine(
+            teamName: matchInfo.teamBName,
+            captain: matchInfo.teamBCaptain,
+            confirmed: matchInfo.teamBConfirmed,
+          )
+        else
+          Text(
+            'Looking for opponent',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: _c.muted,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _TeamLine extends StatelessWidget {
+  const _TeamLine({
+    required this.teamName,
+    required this.captain,
+    required this.confirmed,
+  });
+  final String teamName;
+  final TeamCaptainContact? captain;
+  final bool confirmed;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final captainName = captain?.name?.trim() ?? '';
+    final captainPhone = captain?.phone?.trim() ?? '';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                teamName,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: _c.text,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (confirmed) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.check_circle_rounded, color: _c.green, size: 14),
+            ],
+          ],
+        ),
+        if (captainName.isNotEmpty || captainPhone.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              [
+                if (captainName.isNotEmpty) 'Captain · $captainName',
+                if (captainPhone.isNotEmpty) captainPhone,
+              ].join('  ·  '),
+              style: TextStyle(fontSize: 11, color: _c.muted),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _GroupedLedger extends StatelessWidget {
+  const _GroupedLedger({required this.booking, required this.ref});
+  final ArenaReservation booking;
+  final WidgetRef ref;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final mi = booking.matchInfo!;
+    final perTeamShare = (booking.totalAmountPaise / 2).round();
+    final groupA = <BookingPayment>[];
+    final groupB = <BookingPayment>[];
+    final unattributed = <BookingPayment>[];
+    for (final p in booking.bookingPayments) {
+      if (p.payerTeamId == mi.teamAId && mi.teamAId != null) {
+        groupA.add(p);
+      } else if (p.payerTeamId == mi.teamBId && mi.teamBId != null) {
+        groupB.add(p);
+      } else {
+        unattributed.add(p);
+      }
+    }
+    int sum(List<BookingPayment> ps) =>
+        ps.fold(0, (a, p) => a + p.amountPaise);
+
+    return Column(
+      children: [
+        _TeamLedgerSection(
+          teamLabel: mi.teamAName,
+          paidPaise: sum(groupA),
+          sharePaise: perTeamShare,
+          payments: groupA,
+          bookingId: booking.id,
+          onChanged: () =>
+              ref.invalidate(_bookingDetailProvider(booking.id)),
+        ),
+        if (mi.hasOpponent)
+          _TeamLedgerSection(
+            teamLabel: mi.teamBName,
+            paidPaise: sum(groupB),
+            sharePaise: perTeamShare,
+            payments: groupB,
+            bookingId: booking.id,
+            onChanged: () =>
+                ref.invalidate(_bookingDetailProvider(booking.id)),
+          ),
+        if (unattributed.isNotEmpty)
+          _TeamLedgerSection(
+            teamLabel: 'Unassigned',
+            paidPaise: sum(unattributed),
+            sharePaise: null,
+            payments: unattributed,
+            bookingId: booking.id,
+            onChanged: () =>
+                ref.invalidate(_bookingDetailProvider(booking.id)),
+          ),
+      ],
+    );
+  }
+}
+
+class _TeamLedgerSection extends StatelessWidget {
+  const _TeamLedgerSection({
+    required this.teamLabel,
+    required this.paidPaise,
+    required this.sharePaise,
+    required this.payments,
+    required this.bookingId,
+    required this.onChanged,
+  });
+  final String teamLabel;
+  final int paidPaise;
+  final int? sharePaise;
+  final List<BookingPayment> payments;
+  final String bookingId;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final paid = paidPaise / 100;
+    final share = sharePaise == null ? null : sharePaise! / 100;
+    final fullyPaid = sharePaise != null && paidPaise >= sharePaise!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  teamLabel.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: _c.muted,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+              Text(
+                share == null
+                    ? '₹${paid.toStringAsFixed(0)}'
+                    : '₹${paid.toStringAsFixed(0)} / ₹${share.toStringAsFixed(0)}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: fullyPaid ? _c.green : _c.text,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (payments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                'No payments yet',
+                style: TextStyle(fontSize: 12, color: _c.muted),
+              ),
+            )
+          else
+            ...payments.map((p) => Padding(
+                  padding: EdgeInsets.zero,
+                  child: _PaymentRow(
+                    payment: p,
+                    bookingId: bookingId,
+                    onDeleted: onChanged,
+                    flat: true,
+                  ),
+                )),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
 class _SplitBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -426,10 +685,14 @@ class _PaymentRow extends ConsumerWidget {
     required this.payment,
     required this.bookingId,
     required this.onDeleted,
+    this.flat = false,
   });
   final BookingPayment payment;
   final String bookingId;
   final VoidCallback onDeleted;
+  // When true, the row sits inside a section that already provides outer
+  // horizontal padding (the grouped ledger). Avoids double-indenting.
+  final bool flat;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -438,7 +701,7 @@ class _PaymentRow extends ConsumerWidget {
     final date = DateFormat('d MMM, hh:mm a').format(payment.recordedAt.toLocal());
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: flat ? 0 : 16, vertical: 4),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -600,6 +863,135 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+class _TeamPicker extends StatelessWidget {
+  const _TeamPicker({
+    required this.matchInfo,
+    required this.selectedTeamId,
+    required this.onSelect,
+  });
+  final MatchupContext matchInfo;
+  final String? selectedTeamId;
+  final ValueChanged<String?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final teamA = (
+      id: matchInfo.teamAId,
+      name: matchInfo.teamAName,
+      captain: matchInfo.teamACaptain?.name,
+    );
+    final teamB = matchInfo.hasOpponent
+        ? (
+            id: matchInfo.teamBId,
+            name: matchInfo.teamBName,
+            captain: matchInfo.teamBCaptain?.name,
+          )
+        : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Paying for',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: _c.muted,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _TeamPickerOption(
+                teamId: teamA.id,
+                teamName: teamA.name,
+                captainName: teamA.captain,
+                selected: selectedTeamId == teamA.id,
+                onTap: () => onSelect(teamA.id),
+              ),
+            ),
+            if (teamB != null) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: _TeamPickerOption(
+                  teamId: teamB.id,
+                  teamName: teamB.name,
+                  captainName: teamB.captain,
+                  selected: selectedTeamId == teamB.id,
+                  onTap: () => onSelect(teamB.id),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _TeamPickerOption extends StatelessWidget {
+  const _TeamPickerOption({
+    required this.teamId,
+    required this.teamName,
+    required this.captainName,
+    required this.selected,
+    required this.onTap,
+  });
+  final String? teamId;
+  final String teamName;
+  final String? captainName;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return GestureDetector(
+      onTap: teamId == null ? null : onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? _c.accent : _c.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? _c.accent : _c.divider),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              teamName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: selected ? _c.onAccent : _c.text,
+              ),
+            ),
+            if ((captainName ?? '').trim().isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                'Captain · ${captainName!.trim()}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: selected
+                      ? _c.onAccent.withValues(alpha: 0.85)
+                      : _c.muted,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Record Payment FAB ───────────────────────────────────────────────────────
 
 class _RecordPaymentFab extends StatelessWidget {
@@ -665,17 +1057,56 @@ class _RecordPaymentSheetState extends ConsumerState<RecordPaymentSheet> {
   final _refCtrl = TextEditingController();
   String _mode = 'CASH';
   bool _loading = false;
+  // For split bookings: which team this payment is from. Null = no team
+  // selected yet (we force the user to pick).
+  String? _selectedTeamId;
 
   static const _modes = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER'];
+
+  bool get _isSplit =>
+      widget.booking.isSplit && widget.booking.matchInfo != null;
 
   @override
   void initState() {
     super.initState();
-    _payerCtrl.text = widget.defaultPayerName ?? widget.booking.displayName;
+    if (_isSplit) {
+      // Default to Team A (the originating team) for split bookings.
+      final mi = widget.booking.matchInfo!;
+      _selectedTeamId = mi.teamAId;
+      _payerCtrl.text = widget.defaultPayerName
+          ?? mi.teamACaptain?.name?.trim()
+          ?? '';
+    } else {
+      _payerCtrl.text = widget.defaultPayerName ?? widget.booking.displayName;
+    }
     final balance = widget.booking.balancePaise;
     if (balance > 0) {
       _amountCtrl.text = (balance / 100).toStringAsFixed(0);
     }
+  }
+
+  void _selectTeam(String? teamId) {
+    final mi = widget.booking.matchInfo;
+    if (mi == null) return;
+    setState(() {
+      _selectedTeamId = teamId;
+      final captain = teamId == mi.teamAId
+          ? mi.teamACaptain
+          : (teamId == mi.teamBId ? mi.teamBCaptain : null);
+      final captainName = captain?.name?.trim() ?? '';
+      // Only overwrite if the user hasn't typed something custom yet.
+      if (_payerCtrl.text.trim().isEmpty || _isCaptainName(_payerCtrl.text)) {
+        _payerCtrl.text = captainName;
+      }
+    });
+  }
+
+  bool _isCaptainName(String value) {
+    final mi = widget.booking.matchInfo;
+    if (mi == null) return false;
+    final v = value.trim();
+    return v == (mi.teamACaptain?.name?.trim() ?? '__none_a__') ||
+        v == (mi.teamBCaptain?.name?.trim() ?? '__none_b__');
   }
 
   @override
@@ -726,6 +1157,14 @@ class _RecordPaymentSheetState extends ConsumerState<RecordPaymentSheet> {
                   'Total: ₹${(widget.booking.totalAmountPaise / 100).toStringAsFixed(0)} · Balance: ₹${(widget.booking.balancePaise / 100).toStringAsFixed(0)}',
                   style: TextStyle(fontSize: 12, color: _c.muted)),
               const SizedBox(height: 20),
+              if (_isSplit) ...[
+                _TeamPicker(
+                  matchInfo: widget.booking.matchInfo!,
+                  selectedTeamId: _selectedTeamId,
+                  onSelect: _selectTeam,
+                ),
+                const SizedBox(height: 14),
+              ],
               TextFormField(
                 controller: _payerCtrl,
                 style: TextStyle(color: _c.text),
@@ -824,6 +1263,7 @@ class _RecordPaymentSheetState extends ConsumerState<RecordPaymentSheet> {
             amountPaise: amountPaise,
             paymentMode: _mode,
             payerName: _payerCtrl.text.trim(),
+            payerTeamId: _isSplit ? _selectedTeamId : null,
             reference: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
           );
       if (mounted) Navigator.pop(context);

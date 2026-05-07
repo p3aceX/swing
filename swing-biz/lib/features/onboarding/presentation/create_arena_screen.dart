@@ -20,14 +20,6 @@ import '../../arena/services/arena_profile_providers.dart';
 
 const _googlePlacesKey = 'AIzaSyDpJ1S4JYO-jVA6BgzxM1LYjdSvrSrTkTo';
 
-const _bg = Color(0xFFFFFFFF);
-const _surface = Color(0xFFF6F7F9);
-const _line = Color(0xFFEDEEF2);
-const _text = Color(0xFF0B0B0F);
-const _muted = Color(0xFF6B7280);
-const _accent = Color(0xFFF43F5E);
-const _deep = Color(0xFF9F1239);
-
 class CreateArenaScreen extends ConsumerStatefulWidget {
   const CreateArenaScreen({super.key});
 
@@ -318,7 +310,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
-          backgroundColor: _bg,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           builder: (_) => UnitEditorSheet(arenaId: arenaId),
         );
       }
@@ -347,8 +339,9 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: scheme.surface,
       appBar: AppBar(
         title: const Text('Add Arena'),
         leading: IconButton(
@@ -371,12 +364,13 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                   controller: _searchCtrl,
                   onChanged: _onSearchChanged,
                   decoration: _inputDecoration(
+                    scheme,
                     'Search arena address...',
                     suffixIcon: _searchLoading
                         ? const Padding(padding: EdgeInsets.all(13), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
                         : _searchCtrl.text.isNotEmpty
                             ? IconButton(
-                                icon: const Icon(Icons.close_rounded, size: 18, color: _muted),
+                                icon: Icon(Icons.close_rounded, size: 18, color: scheme.onSurface.withValues(alpha: 0.55)),
                                 onPressed: () => setState(() {
                                   _searchCtrl.clear();
                                   _suggestions = [];
@@ -385,7 +379,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                                   _searchDebounce?.cancel();
                                 }),
                               )
-                            : const Padding(padding: EdgeInsets.all(13), child: Icon(Icons.search_rounded, color: _muted, size: 20)),
+                            : Padding(padding: const EdgeInsets.all(13), child: Icon(Icons.search_rounded, color: scheme.onSurface.withValues(alpha: 0.55), size: 20)),
                   ),
                 ),
                 // Suggestions dropdown
@@ -393,9 +387,9 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                   Container(
                     margin: const EdgeInsets.only(top: 4),
                     decoration: BoxDecoration(
-                      color: _surface,
+                      color: scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _line),
+                      border: Border.all(color: scheme.outline),
                       boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 12, offset: Offset(0, 4))],
                     ),
                     child: Column(
@@ -408,12 +402,12 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                             child: Row(children: [
-                              const Icon(Icons.location_on_outlined, size: 18, color: _accent),
+                              Icon(Icons.location_on_outlined, size: 18, color: scheme.primary),
                               const SizedBox(width: 10),
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(title.isNotEmpty ? title : subtitle, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _text)),
+                                Text(title.isNotEmpty ? title : subtitle, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: scheme.onSurface)),
                                 if (subtitle.isNotEmpty && title.isNotEmpty)
-                                  Text(subtitle, style: const TextStyle(fontSize: 12, color: _muted)),
+                                  Text(subtitle, style: TextStyle(fontSize: 12, color: scheme.onSurface.withValues(alpha: 0.55))),
                               ])),
                             ]),
                           ),
@@ -426,9 +420,9 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: const Color(0xFFFFF1F2), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFFBCFE8))),
+                    decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(10), border: Border.all(color: scheme.error.withValues(alpha: 0.12))),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Location details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _accent)),
+                      Text('Location details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: scheme.primary)),
                       const SizedBox(height: 10),
                       _DetailRow('Address', _address.text),
                       _DetailRow('City', _city.text),
@@ -463,7 +457,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
               }),
             ),
             _StepShell(title: 'Arena Photos', subtitle: 'Add up to 3 photos of your arena.', child: ListView(padding: const EdgeInsets.all(20), children: [
-              if (_photoUrls.isNotEmpty) GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: _photoUrls.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (_, i) => Stack(children: [ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_photoUrls[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity)), Positioned(right: 4, top: 4, child: GestureDetector(onTap: () => setState(() => _photoUrls.removeAt(i)), child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 14, color: Colors.white))))])),
+              if (_photoUrls.isNotEmpty) GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: _photoUrls.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (_, i) => Stack(children: [ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(_photoUrls[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity)), Positioned(right: 4, top: 4, child: GestureDetector(onTap: () => setState(() => _photoUrls.removeAt(i)), child: Container(padding: const EdgeInsets.all(4), decoration: BoxDecoration(color: scheme.onSurface.withValues(alpha: 0.55), shape: BoxShape.circle), child: Icon(Icons.close, size: 14, color: scheme.surface))))])),
               const SizedBox(height: 20),
               if (_photoUrls.length < 3) OutlinedButton.icon(onPressed: _uploading ? null : _pickPhotos, icon: _uploading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add_a_photo_rounded), label: Text(_uploading ? 'Uploading...' : 'Add Photo'), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 24), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))
             ])),
@@ -480,13 +474,19 @@ class _SetupStep { const _SetupStep(this.label, this.icon); final String label; 
 class _ProgressHeader extends StatelessWidget {
   const _ProgressHeader({required this.step, required this.steps}); final int step; final List<_SetupStep> steps;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 12), child: Column(children: [Row(children: [Text('Step ${step + 1} of ${steps.length}', style: const TextStyle(color: _muted, fontSize: 12, fontWeight: FontWeight.w800)), const Spacer(), Icon(steps[step].icon, size: 18, color: _muted), const SizedBox(width: 6), Text(steps[step].label, style: const TextStyle(color: _text, fontSize: 12, fontWeight: FontWeight.w900))]), const SizedBox(height: 10), Row(children: List.generate(steps.length, (i) => Expanded(child: Container(margin: EdgeInsets.only(right: i == steps.length - 1 ? 0 : 6), height: 5, decoration: BoxDecoration(color: i <= step ? _deep : _line, borderRadius: BorderRadius.circular(99))))))]));
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 12), child: Column(children: [Row(children: [Text('Step ${step + 1} of ${steps.length}', style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 12, fontWeight: FontWeight.w800)), const Spacer(), Icon(steps[step].icon, size: 18, color: scheme.onSurface.withValues(alpha: 0.55)), const SizedBox(width: 6), Text(steps[step].label, style: TextStyle(color: scheme.onSurface, fontSize: 12, fontWeight: FontWeight.w900))]), const SizedBox(height: 10), Row(children: List.generate(steps.length, (i) => Expanded(child: Container(margin: EdgeInsets.only(right: i == steps.length - 1 ? 0 : 6), height: 5, decoration: BoxDecoration(color: i <= step ? scheme.primary : scheme.outline, borderRadius: BorderRadius.circular(99))))))]));
+  }
 }
 
 class _StepShell extends StatelessWidget {
   const _StepShell({required this.title, required this.subtitle, required this.child}); final String title, subtitle; final Widget child;
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(color: _text, fontSize: 24, fontWeight: FontWeight.w900)), const SizedBox(height: 6), Text(subtitle, style: const TextStyle(color: _muted, fontSize: 13, fontWeight: FontWeight.w600))])), Expanded(child: child)]);
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(color: scheme.onSurface, fontSize: 24, fontWeight: FontWeight.w900)), const SizedBox(height: 6), Text(subtitle, style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 13, fontWeight: FontWeight.w600))])), Expanded(child: child)]);
+  }
 }
 
 class _SportEntry {
@@ -558,10 +558,11 @@ class _ChoiceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = locked ? const Color(0xFFF9FAFB) : (selected ? _deep : _surface);
-    final borderColor = locked ? _line : (selected ? _deep : _line);
-    final iconColor = locked ? const Color(0xFFC5C7CF) : (selected ? Colors.white : _deep);
-    final labelColor = locked ? const Color(0xFF9CA3AF) : (selected ? Colors.white : _text);
+    final scheme = Theme.of(context).colorScheme;
+    final bg = locked ? scheme.surfaceContainerHighest : (selected ? scheme.primary : scheme.surfaceContainerHighest);
+    final borderColor = locked ? scheme.outline : (selected ? scheme.primary : scheme.outline);
+    final iconColor = locked ? scheme.outline : (selected ? scheme.onPrimary : scheme.primary);
+    final labelColor = locked ? scheme.onSurface.withValues(alpha: 0.55) : (selected ? scheme.onPrimary : scheme.onSurface);
 
     return Material(
       color: bg,
@@ -584,7 +585,7 @@ class _ChoiceTile extends StatelessWidget {
                   Icon(icon, color: iconColor, size: 28),
                   const Spacer(),
                   if (locked)
-                    const Icon(Icons.lock_rounded, size: 15, color: Color(0xFFC5C7CF)),
+                    Icon(Icons.lock_rounded, size: 15, color: scheme.outline),
                 ],
               ),
               Row(
@@ -595,12 +596,12 @@ class _ChoiceTile extends StatelessWidget {
                       children: [
                         Text(title, style: TextStyle(color: labelColor, fontSize: 15, fontWeight: FontWeight.w900)),
                         if (locked)
-                          const Text('Coming soon', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.w600)),
+                          Text('Coming soon', style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 11, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
                   if (selected && !locked)
-                    const Icon(Icons.check_circle_rounded, color: _accent, size: 19),
+                    Icon(Icons.check_circle_rounded, color: scheme.primary, size: 19),
                 ],
               ),
             ],
@@ -614,13 +615,20 @@ class _ChoiceTile extends StatelessWidget {
 class _Field extends StatelessWidget {
   const _Field(this.controller, this.label, {this.required = false, this.maxLines = 1, this.keyboardType, this.inputFormatters, this.validator}); final TextEditingController controller; final String label; final bool required; final int maxLines; final TextInputType? keyboardType; final List<TextInputFormatter>? inputFormatters; final String? Function(String?)? validator;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(controller: controller, maxLines: maxLines, keyboardType: keyboardType, inputFormatters: inputFormatters, validator: validator ?? (required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null), decoration: _inputDecoration(label)));
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(controller: controller, maxLines: maxLines, keyboardType: keyboardType, inputFormatters: inputFormatters, validator: validator ?? (required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null), decoration: _inputDecoration(scheme, label)));
+  }
 }
 
 class _BottomBar extends StatelessWidget {
   const _BottomBar({required this.step, required this.total, required this.saving, required this.onBack, required this.onNext}); final int step, total; final bool saving; final VoidCallback onBack, onNext;
   @override
-  Widget build(BuildContext context) { final isLast = step == total - 1; return Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: _bg, border: Border(top: BorderSide(color: _line))), child: Row(children: [Expanded(child: OutlinedButton(onPressed: saving ? null : onBack, child: Text(step == 0 ? 'Cancel' : 'Back'))), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: saving ? null : onNext, style: FilledButton.styleFrom(backgroundColor: _deep, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(isLast ? 'Create Arena' : 'Next')))])); }
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isLast = step == total - 1;
+    return Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: scheme.surface, border: Border(top: BorderSide(color: scheme.outline))), child: Row(children: [Expanded(child: OutlinedButton(onPressed: saving ? null : onBack, child: Text(step == 0 ? 'Cancel' : 'Back'))), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: saving ? null : onNext, style: FilledButton.styleFrom(backgroundColor: scheme.primary, foregroundColor: scheme.onPrimary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(isLast ? 'Create Arena' : 'Next')))]));
+  }
 }
 
 class _DetailRow extends StatelessWidget {
@@ -628,13 +636,16 @@ class _DetailRow extends StatelessWidget {
   final String label;
   final String value;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: 70, child: Text(label, style: const TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w700))),
-      Expanded(child: Text(value.isEmpty ? '—' : value, style: const TextStyle(fontSize: 12, color: _text, fontWeight: FontWeight.w700))),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(width: 70, child: Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurface.withValues(alpha: 0.55), fontWeight: FontWeight.w700))),
+        Expanded(child: Text(value.isEmpty ? '—' : value, style: TextStyle(fontSize: 12, color: scheme.onSurface, fontWeight: FontWeight.w700))),
+      ]),
+    );
+  }
 }
 
 class _FacilitiesStep extends StatelessWidget {
@@ -675,6 +686,8 @@ class _FacilitiesStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     Widget timeChip(String label, String time, ValueChanged<String> onPicked) {
       return Expanded(
         child: GestureDetector(
@@ -682,16 +695,16 @@ class _FacilitiesStep extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-            color: _surface,
+            color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _deep),
+            border: Border.all(color: scheme.primary),
           ),
           child: Row(children: [
-              const Icon(Icons.schedule_rounded, size: 15, color: _accent),
+              Icon(Icons.schedule_rounded, size: 15, color: scheme.primary),
               const SizedBox(width: 8),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(label, style: const TextStyle(fontSize: 10, color: _muted, fontWeight: FontWeight.w600)),
-                Text(time, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text)),
+                Text(label, style: TextStyle(fontSize: 10, color: scheme.onSurface.withValues(alpha: 0.55), fontWeight: FontWeight.w600)),
+                Text(time, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: scheme.onSurface)),
               ]),
             ]),
           ),
@@ -706,16 +719,16 @@ class _FacilitiesStep extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           decoration: BoxDecoration(
-            color: value ? _deep : _surface,
+            color: value ? scheme.primary : scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: value ? _deep : _line),
+            border: Border.all(color: value ? scheme.primary : scheme.outline),
           ),
           child: Row(children: [
-            Icon(icon, size: 18, color: value ? Colors.white : _muted),
+            Icon(icon, size: 18, color: value ? scheme.onPrimary : scheme.onSurface.withValues(alpha: 0.55)),
             const SizedBox(width: 10),
-            Expanded(child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: value ? Colors.white : _text))),
+            Expanded(child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: value ? scheme.onPrimary : scheme.onSurface))),
             Icon(value ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                size: 18, color: value ? _accent : _line),
+                size: 18, color: value ? scheme.primary : scheme.outline),
           ]),
         ),
       );
@@ -725,7 +738,7 @@ class _FacilitiesStep extends StatelessWidget {
       title: 'Facilities',
       subtitle: 'Operating hours and amenities players will see on your arena page.',
       child: ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('OPERATING HOURS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+        Text('OPERATING HOURS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: scheme.onSurface.withValues(alpha: 0.55), letterSpacing: 0.5)),
         const SizedBox(height: 10),
         Row(children: [
           timeChip('Opens at', openTime, onOpenTimePicked),
@@ -733,7 +746,7 @@ class _FacilitiesStep extends StatelessWidget {
           timeChip('Closes at', closeTime, onCloseTimePicked),
         ]),
         const SizedBox(height: 24),
-        const Text('AMENITIES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 0.5)),
+        Text('AMENITIES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: scheme.onSurface.withValues(alpha: 0.55), letterSpacing: 0.5)),
         const SizedBox(height: 10),
         toggle('parking',   'Parking',        Icons.local_parking_rounded,     hasParking),
         const SizedBox(height: 8),
@@ -751,7 +764,7 @@ class _FacilitiesStep extends StatelessWidget {
   }
 }
 
-InputDecoration _inputDecoration(String label, {Widget? suffixIcon, String? helperText}) => InputDecoration(labelText: label, suffixIcon: suffixIcon, helperText: helperText, helperMaxLines: 2, filled: true, fillColor: _surface, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _line)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _deep, width: 1.4)));
+InputDecoration _inputDecoration(ColorScheme scheme, String label, {Widget? suffixIcon, String? helperText}) => InputDecoration(labelText: label, suffixIcon: suffixIcon, helperText: helperText, helperMaxLines: 2, filled: true, fillColor: scheme.surfaceContainerHighest, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: scheme.outline)), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: scheme.outline)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: scheme.primary, width: 1.4)));
 String _newSessionToken() => DateTime.now().millisecondsSinceEpoch.toRadixString(36);
 String? _emptyToNull(String v) => v.trim().isEmpty ? null : v.trim();
 double? _parseDouble(String v) => v.trim().isEmpty ? null : double.tryParse(v.trim());

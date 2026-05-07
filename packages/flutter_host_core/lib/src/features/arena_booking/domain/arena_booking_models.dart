@@ -481,6 +481,69 @@ class AvailabilitySlot {
   }
 }
 
+class TeamCaptainContact {
+  const TeamCaptainContact({this.name, this.phone});
+  final String? name;
+  final String? phone;
+
+  factory TeamCaptainContact.fromJson(Map<String, dynamic> json) =>
+      TeamCaptainContact(
+        name: _stringOrNull(json['name']),
+        phone: _stringOrNull(json['phone']),
+      );
+}
+
+class MatchupContext {
+  const MatchupContext({
+    required this.teamAName,
+    required this.teamBName,
+    this.matchId,
+    this.format,
+    this.ballType,
+    this.status,
+    this.teamAId,
+    this.teamBId,
+    this.teamACaptain,
+    this.teamBCaptain,
+    this.teamAConfirmed = false,
+    this.teamBConfirmed = false,
+  });
+
+  final String? matchId;
+  final String? format;
+  final String? ballType;
+  final String? status;
+  final String? teamAId;
+  final String? teamBId;
+  final String teamAName;
+  final String teamBName;
+  final TeamCaptainContact? teamACaptain;
+  final TeamCaptainContact? teamBCaptain;
+  final bool teamAConfirmed;
+  final bool teamBConfirmed;
+
+  bool get hasOpponent => teamBId != null && teamBName.trim().isNotEmpty;
+
+  factory MatchupContext.fromJson(Map<String, dynamic> json) {
+    final capA = (json['teamACaptain'] as Map?)?.cast<String, dynamic>();
+    final capB = (json['teamBCaptain'] as Map?)?.cast<String, dynamic>();
+    return MatchupContext(
+      matchId: _stringOrNull(json['matchId']),
+      format: _stringOrNull(json['format']),
+      ballType: _stringOrNull(json['ballType']),
+      status: _stringOrNull(json['status']),
+      teamAId: _stringOrNull(json['teamAId']),
+      teamBId: _stringOrNull(json['teamBId']),
+      teamAName: '${json['teamAName'] ?? ''}',
+      teamBName: '${json['teamBName'] ?? ''}',
+      teamACaptain: capA == null ? null : TeamCaptainContact.fromJson(capA),
+      teamBCaptain: capB == null ? null : TeamCaptainContact.fromJson(capB),
+      teamAConfirmed: json['teamAConfirmed'] == true,
+      teamBConfirmed: json['teamBConfirmed'] == true,
+    );
+  }
+}
+
 class BookingPayment {
   const BookingPayment({
     required this.id,
@@ -551,6 +614,7 @@ class ArenaReservation {
     this.lastPaymentAt,
     this.paidAmountPaise = 0,
     this.bookingPayments = const [],
+    this.matchInfo,
   });
 
   final String id;
@@ -582,6 +646,7 @@ class ArenaReservation {
   final DateTime? lastPaymentAt;
   final int paidAmountPaise;
   final List<BookingPayment> bookingPayments;
+  final MatchupContext? matchInfo;
 
   bool get isSplit => bookingSource == 'SPLIT';
 
@@ -638,6 +703,11 @@ class ArenaReservation {
           .whereType<Map>()
           .map((e) => BookingPayment.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
+      matchInfo: () {
+        final raw = json['matchInfo'];
+        if (raw is! Map) return null;
+        return MatchupContext.fromJson(Map<String, dynamic>.from(raw));
+      }(),
     );
   }
 }

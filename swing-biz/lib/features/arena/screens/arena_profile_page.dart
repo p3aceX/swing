@@ -765,7 +765,7 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
+                                    strokeWidth: 2, color: _c.onAccent))
                             : Text('Save Arena'),
                       ),
                     ),
@@ -809,8 +809,8 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
           border: _inputBorder(_c.line),
           enabledBorder: _inputBorder(_c.line),
           focusedBorder: _inputBorder(_c.accent),
-          errorBorder: _inputBorder(Color(0xFFD92D20)),
-          focusedErrorBorder: _inputBorder(Color(0xFFD92D20)),
+          errorBorder: _inputBorder(Theme.of(context).colorScheme.error),
+          focusedErrorBorder: _inputBorder(Theme.of(context).colorScheme.error),
         ),
       ),
     );
@@ -1652,7 +1652,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                           border: Border.all(color: selected ? _c.accent : _c.line),
                         ),
                         alignment: Alignment.center,
-                        child: Text(l, style: TextStyle(color: selected ? Colors.white : _c.text, fontWeight: FontWeight.w700, fontSize: 14)),
+                        child: Text(l, style: TextStyle(color: selected ? _c.onAccent : _c.text, fontWeight: FontWeight.w700, fontSize: 14)),
                       );
                     }),
                   ),
@@ -1814,7 +1814,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               selectedColor: _c.deep,
               checkmarkColor: _c.accent,
               labelStyle: TextStyle(
-                color: selected ? Colors.white : _c.text,
+                color: selected ? _c.onAccent : _c.text,
                 fontWeight: FontWeight.w800,
               ),
               side: BorderSide(color: selected ? _c.deep : _c.line),
@@ -1938,7 +1938,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 labelText: '${v.label} pass rate (₹ / month)',
                 prefixText: '₹ ',
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: _c.surface,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _c.line)),
                 enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _c.line)),
@@ -2181,7 +2181,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
               labelText: 'Rate per day (₹)',
               prefixText: '₹ ',
               filled: true,
-              fillColor: Colors.white,
+              fillColor: _c.surface,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
               border: OutlineInputBorder(
@@ -2269,7 +2269,7 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
                 labelText: 'Pass rate (₹ / month)',
                 prefixText: '₹ ',
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: _c.surface,
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
                 border: OutlineInputBorder(
@@ -2632,7 +2632,7 @@ class _ParentUnitPicker extends ConsumerWidget {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: selected ? Color(0xFFF0FDF4) : Colors.white,
+              color: selected ? Color(0xFFF0FDF4) : _c.bg,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: selected ? _c.accent : _c.line,
@@ -2710,7 +2710,7 @@ class _SegmentedOptions extends StatelessWidget {
           selectedColor: _c.deep,
           checkmarkColor: _c.accent,
           labelStyle: TextStyle(
-            color: selected ? Colors.white : _c.text,
+            color: selected ? _c.onAccent : _c.text,
             fontWeight: FontWeight.w800,
           ),
           side: BorderSide(color: selected ? _c.deep : _c.line),
@@ -2757,8 +2757,8 @@ class _SheetField extends StatelessWidget {
           border: _inputBorder(_c.line),
           enabledBorder: _inputBorder(_c.line),
           focusedBorder: _inputBorder(_c.accent),
-          errorBorder: _inputBorder(Color(0xFFD92D20)),
-          focusedErrorBorder: _inputBorder(Color(0xFFD92D20)),
+          errorBorder: _inputBorder(Theme.of(context).colorScheme.error),
+          focusedErrorBorder: _inputBorder(Theme.of(context).colorScheme.error),
         ),
       ),
     );
@@ -3097,7 +3097,7 @@ class _UnitPhotoPicker extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.all(5),
                           decoration: BoxDecoration(
-                            color: Colors.black54,
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
@@ -3849,7 +3849,7 @@ class _PhotosTab extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
-                              color: Colors.black54,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
                               borderRadius: BorderRadius.circular(6)),
                           child: Icon(Icons.close_rounded,
                               color: _c.surface, size: 14),
@@ -4255,7 +4255,7 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
         FilledButton(
           onPressed: _saving ? null : _saveSlug,
           style: FilledButton.styleFrom(
-            backgroundColor: _saved ? Colors.green : _c.accent,
+            backgroundColor: _saved ? const Color(0xFF059669) : _c.accent,
             foregroundColor: _c.onAccent,
             padding: const EdgeInsets.symmetric(vertical: 13),
             shape:
@@ -4266,7 +4266,7 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+                      strokeWidth: 2, color: _c.onAccent))
               : Text(_saved ? 'Saved!' : 'Save Custom Link',
                   style: TextStyle(fontWeight: FontWeight.w700)),
         ),

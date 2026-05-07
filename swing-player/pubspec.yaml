@@ -61,6 +61,11 @@ dev_dependencies:
   custom_lint: ^0.6.4
   riverpod_lint: ^2.3.10
 
+dependency_overrides:
+  # 12.x ships Kotlin 2.2 + visionOS-only iOS APIs that need a newer
+  # toolchain. Pin to the last 11.x until host/Flutter is bumped.
+  device_info_plus: ^11.5.0
+
 flutter:
   uses-material-design: true
   assets:

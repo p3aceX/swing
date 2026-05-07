@@ -16,7 +16,6 @@ import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import '../../../core/router/app_router.dart';
-import 'matchups_tab.dart';
 import 'split_booking_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
@@ -78,8 +77,6 @@ final _bookingsProvider =
   }
 });
 
-/// Inner tab on the Bookings page. 0=Match-Up Requests, 1=Bookings.
-/// Exposed so the home screen "See all" link can jump straight to Bookings.
 final bookingsInnerTabProvider = StateProvider<int>((ref) => 0);
 
 // ─── Main page ───────────────────────────────────────────────────────────────
@@ -143,29 +140,18 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     _c = _C.of(context);
     final today = DateTime.now();
     final allBookingsAsync = ref.watch(_bookingsProvider);
-    final tab = ref.watch(bookingsInnerTabProvider);
 
     return Scaffold(
       backgroundColor: _c.bg,
       body: Column(
         children: [
-          // Big segmented tab header (replaces arena name + small tabs)
           _BigTabHeader(
-            selected: tab,
-            onSelect: (i) =>
-                ref.read(bookingsInnerTabProvider.notifier).state = i,
             arena: widget.arena,
             arenas: widget.arenas,
           ),
 
-          // Tab content
           Expanded(
-            child: AnimatedSwitcher(
-              duration: Duration(milliseconds: 200),
-              child: tab == 0
-                  ? _buildMatchUpRequestsTab()
-                  : _buildBookingsTab(context, today, allBookingsAsync),
-            ),
+            child: _buildBookingsTab(context, today, allBookingsAsync),
           ),
         ],
       ),
@@ -181,14 +167,14 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                     onPressed: () => _showBookingTypeModal(context, today),
                     style: FilledButton.styleFrom(
                       backgroundColor:
-                          Theme.of(context).colorScheme.onSurface,
+                          Theme.of(context).colorScheme.primary,
                       foregroundColor:
-                          Theme.of(context).colorScheme.surface,
+                          Theme.of(context).colorScheme.onPrimary,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                     ),
-                    icon: Icon(Icons.add_rounded, size: 22),
-                    label: Text(
+                    icon: const Icon(Icons.add_rounded, size: 22),
+                    label: const Text(
                       'Book',
                       style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w700),
@@ -332,15 +318,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildMatchUpRequestsTab() {
-    final filtered =
-        widget.arena == null ? widget.arenas : [widget.arena!];
-    return MatchUpsTab(
-      key: ValueKey(widget.arena?.id ?? 'all'),
-      arenas: filtered,
     );
   }
 
@@ -502,211 +479,83 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   }
 }
 
-// ─── Tab bar ─────────────────────────────────────────────────────────────────
+// ─── Header ───────────────────────────────────────────────────────────────────
 
 class _BigTabHeader extends ConsumerWidget {
-  const _BigTabHeader({
-    required this.selected,
-    required this.onSelect,
-    required this.arena,
-    required this.arenas,
-  });
-  final int selected;
-  final ValueChanged<int> onSelect;
+  const _BigTabHeader({required this.arena, required this.arenas});
   final ArenaListing? arena;
   final List<ArenaListing> arenas;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    _c = _C.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final top = MediaQuery.of(context).padding.top;
-    return Container(
-      color: _c.bg,
+    final selectedId = arena?.id;
+    final items = <({String? id, String label})>[
+      (id: null, label: 'All'),
+      ...arenas.map((a) => (id: a.id, label: a.name)),
+    ];
+
+    return ColoredBox(
+      color: scheme.surface,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(height: top + 16),
-
-          // Arena filter chips — All + individual arenas
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: arenas.length + 1,
-              separatorBuilder: (_, __) => SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                if (i == 0) {
-                  final active = arena == null;
+          SizedBox(height: top + 12),
+          if (arenas.length > 1)
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 24),
+                itemBuilder: (_, i) {
+                  final item = items[i];
+                  final selected = item.id == selectedId;
                   return GestureDetector(
-                    onTap: () =>
-                        ref.read(_selectedArenaProvider.notifier).state = null,
-                    child: AnimatedContainer(
-                      duration: Duration(milliseconds: 160),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: active ? _c.accent : _c.surface,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: active ? _c.accent : _c.border),
-                      ),
-                      child: Text(
-                        'All',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: active ? Colors.white : _c.muted,
-                        ),
-                      ),
-                    ),
-                  );
-                }
-                final a = arenas[i - 1];
-                final active = a.id == arena?.id;
-                return GestureDetector(
-                  onTap: () =>
-                      ref.read(_selectedArenaProvider.notifier).state = a.id,
-                  child: AnimatedContainer(
-                    duration: Duration(milliseconds: 160),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: active ? _c.accent : _c.surface,
-                      borderRadius: BorderRadius.circular(10),
-                      border:
-                          Border.all(color: active ? _c.accent : _c.border),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                    onTap: () => ref
+                        .read(_selectedArenaProvider.notifier)
+                        .state = item.id,
+                    behavior: HitTestBehavior.opaque,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.stadium_rounded,
-                            size: 13,
-                            color: active ? Colors.white : _c.muted),
-                        SizedBox(width: 5),
                         Text(
-                          a.name,
+                          item.label,
                           style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: active ? Colors.white : _c.muted,
+                            fontSize: 14,
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                            letterSpacing: -0.1,
+                            color: selected
+                                ? scheme.primary
+                                : scheme.onSurface.withValues(alpha: 0.45),
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          height: 2.5,
+                          width: selected ? 22 : 0,
+                          decoration: BoxDecoration(
+                            color: scheme.primary,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                );
-              },
-            ),
-          ),
-          SizedBox(height: 12),
-
-          // Bookings / MatchUp Requests tab bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Container(
-              height: 44,
-              decoration: BoxDecoration(
-                color: _c.border,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.all(3),
-              child: Row(
-                children: [
-                  _BigTab(
-                    label: 'Match-Up',
-                    active: selected == 0,
-                    onTap: () => onSelect(0),
-                  ),
-                  _BigTab(
-                    label: 'Bookings',
-                    active: selected == 1,
-                    onTap: () => onSelect(1),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showArenaPicker(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _c.surface,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Switch Arena',
-              style: TextStyle(
-                  color: _c.text, fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            SizedBox(height: 16),
-            ...arenas.map(
-              (a) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.stadium_rounded, color: _c.accent),
-                title: Text(a.name,
-                    style: TextStyle(
-                        color: _c.text, fontWeight: FontWeight.w600)),
-                trailing: a.id == arena?.id
-                    ? Icon(Icons.check_rounded, color: _c.accent)
-                    : null,
-                onTap: () {
-                  ref
-                      .read(_selectedArenaProvider.notifier)
-                      .state = a.id;
-                  Navigator.pop(context);
+                  );
                 },
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BigTab extends StatelessWidget {
-  const _BigTab(
-      {required this.label, required this.active, required this.onTap});
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    _c = _C.of(context);
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: active ? _c.accent : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: AnimatedDefaultTextStyle(
-            duration: Duration(milliseconds: 180),
-            style: TextStyle(
-              color: active ? Colors.white : _c.muted,
-              fontSize: 15,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-            ),
-            child: Text(label),
-          ),
-        ),
+            )
+          else
+            const SizedBox(height: 4),
+          Container(height: 1, color: scheme.outline),
+        ],
       ),
     );
   }
@@ -1428,24 +1277,15 @@ class _FilterBar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: sel ? _c.text : _c.surface,
+                color: sel ? _c.accent : _c.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: sel ? _c.text : _c.border),
-                boxShadow: sel
-                    ? [
-                        BoxShadow(
-                          color: _c.text.withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          offset: Offset(0, 4),
-                        )
-                      ]
-                    : null,
+                border: Border.all(color: sel ? _c.accent : _c.border),
               ),
               child: Row(
                 children: [
                   Text(f,
                       style: TextStyle(
-                        color: sel ? Colors.white : _c.muted,
+                        color: sel ? _c.onAccent : _c.muted,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                       )),
@@ -1454,12 +1294,14 @@ class _FilterBar extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: sel ? Colors.white.withValues(alpha: 0.2) : _c.bg,
+                      color: sel
+                          ? _c.onAccent.withValues(alpha: 0.18)
+                          : _c.accentLight,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text('$count',
                         style: TextStyle(
-                          color: sel ? Colors.white : _c.accent,
+                          color: sel ? _c.onAccent : _c.accent,
                           fontSize: 10,
                           fontWeight: FontWeight.w900,
                         )),

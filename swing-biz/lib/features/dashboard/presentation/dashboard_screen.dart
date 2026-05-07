@@ -11,6 +11,10 @@ import '../../arena/screens/arena_profile_page.dart';
 import '../../arena/services/arena_profile_providers.dart';
 import '../../../core/notifications/notifications_screen.dart';
 import '../../bookings/presentation/bookings_page.dart' as bookings;
+import '../../bookings/presentation/arena_lobbies_section.dart';
+import '../../bookings/presentation/arena_matches_section.dart';
+import '../../bookings/presentation/matchups_tab.dart';
+import '../../bookings/presentation/split_booking_sheet.dart';
 import '../../payments/presentation/payments_page.dart';
 import '../../play/presentation/biz_play_tab.dart';
 import 'app_drawer.dart';
@@ -136,8 +140,7 @@ class DashboardScreen extends ConsumerWidget {
     _NavItem(Icons.stadium_rounded, Icons.stadium_outlined, 'Arenas'),
     _NavItem(Icons.calendar_month_rounded, Icons.calendar_month_outlined,
         'Bookings'),
-    _NavItem(Icons.account_balance_wallet_rounded,
-        Icons.account_balance_wallet_outlined, 'Payments'),
+    _NavItem(Icons.bolt_rounded, Icons.bolt_outlined, 'Match-Up'),
     _NavItem(
         Icons.sports_cricket_rounded, Icons.sports_cricket_outlined, 'Play'),
   ];
@@ -150,7 +153,7 @@ class DashboardScreen extends ConsumerWidget {
       const _HomeTab(),
       const _ArenasTab(),
       const _BookingsTab(),
-      const _PaymentsTab(),
+      const _MatchUpsTab(),
       const BizPlayTab(),
     ];
     return Scaffold(
@@ -356,34 +359,48 @@ class _HomeTab extends ConsumerWidget {
                       slotsByUnit.values.expand((slots) => slots).toList()))
               .toList(),
         );
+        Future<void> onRefresh() async {
+          for (final a in selectedArenas) {
+            ref.invalidate(_homeAllBookingsProvider(a.id));
+            ref.invalidate(_homeTodayAvailabilityProvider(a.id));
+            ref.invalidate(_homeMonthSummaryProvider((arenaId: a.id, month: currentMonthKey)));
+            ref.invalidate(_homeMonthSummaryProvider((arenaId: a.id, month: previousMonthKey)));
+            ref.invalidate(_homeMonthPaymentsProvider((arenaId: a.id, month: currentMonthKey)));
+          }
+        }
+
         return Container(
           color: Theme.of(context).colorScheme.surface,
           child: Column(
             children: [
               _HeroHeader(businessName: businessName, ref: ref),
               Expanded(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    _HomeArenaFilter(
-                      arenas: arenas,
-                      selectedArenaId: selectedArenaId,
-                      onSelected: (id) =>
-                          ref.read(_homeArenaProvider.notifier).state = id,
-                    ),
-                    _TodaySection(
-                      currentMonthSummaryAsync: currentMonthSummary,
-                      previousMonthSummaryAsync: previousMonthSummary,
-                      currentMonthPaymentsAsync: currentMonthPayments,
-                      slotsAsync: todayAvailability,
-                    ),
-                    _BookingsSummaryCard(bookingsAsync: allBookings),
-                    const _ThinDivider(),
-                    _BookingsTrendSection(summaryAsync: currentMonthSummary),
-                    const _ThinDivider(),
-                    _SlotsDonutSection(slotsAsync: todayAvailability),
-                    const SizedBox(height: 32),
-                  ],
+                child: RefreshIndicator(
+                  onRefresh: onRefresh,
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      _HomeArenaFilter(
+                        arenas: arenas,
+                        selectedArenaId: selectedArenaId,
+                        onSelected: (id) =>
+                            ref.read(_homeArenaProvider.notifier).state = id,
+                      ),
+                      _BookingsSummaryCard(bookingsAsync: allBookings),
+                      const _ThinDivider(),
+                      _TodaySection(
+                        currentMonthSummaryAsync: currentMonthSummary,
+                        previousMonthSummaryAsync: previousMonthSummary,
+                        currentMonthPaymentsAsync: currentMonthPayments,
+                        slotsAsync: todayAvailability,
+                      ),
+                      const _ThinDivider(),
+                      _BookingsTrendSection(summaryAsync: currentMonthSummary),
+                      const _ThinDivider(),
+                      _SlotsDonutSection(slotsAsync: todayAvailability),
+                      const SizedBox(height: 32),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1565,9 +1582,9 @@ class _HeroHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.1,
                     color: scheme.onSurface,
                   ),
                 ),
@@ -1575,6 +1592,14 @@ class _HeroHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          _PaymentsButton(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const PaymentsRoute(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
           _NotificationBell(
             onTap: () => context
                 .push(AppRoutes.arenaNotifications)
@@ -1715,8 +1740,8 @@ class _ArenasTab extends ConsumerWidget {
                 child: FilledButton.icon(
                   onPressed: () => context.push(AppRoutes.createArena),
                   style: FilledButton.styleFrom(
-                    backgroundColor: scheme.onSurface,
-                    foregroundColor: scheme.surface,
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -2072,10 +2097,133 @@ class _BookingsTab extends StatelessWidget {
   Widget build(BuildContext context) => const bookings.BookingsPage();
 }
 
-class _PaymentsTab extends StatelessWidget {
-  const _PaymentsTab();
+class _PaymentsButton extends StatelessWidget {
+  const _PaymentsButton({required this.onTap});
+  final VoidCallback onTap;
+
   @override
-  Widget build(BuildContext context) => const PaymentsPage();
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          Icons.account_balance_wallet_outlined,
+          size: 22,
+          color: scheme.onSurface.withValues(alpha: 0.85),
+        ),
+      ),
+    );
+  }
+}
+
+class PaymentsRoute extends StatelessWidget {
+  const PaymentsRoute();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      backgroundColor: scheme.surface,
+      appBar: AppBar(
+        backgroundColor: scheme.surface,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text(
+          'Payments',
+          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+        ),
+      ),
+      body: const SafeArea(child: PaymentsPage()),
+    );
+  }
+}
+
+class _MatchUpsTab extends ConsumerWidget {
+  const _MatchUpsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final top = MediaQuery.of(context).padding.top;
+    final arenasAsync = ref.watch(ownedArenasProvider);
+    return arenasAsync.when(
+      loading: () =>
+          const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      error: (e, _) => Center(child: Text('$e')),
+      data: (arenas) {
+        if (arenas.isEmpty) {
+          return const _CenteredMessage(
+            title: 'No arenas yet',
+            message: 'Add an arena to start matching teams.',
+          );
+        }
+        return Scaffold(
+          backgroundColor: scheme.surface,
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(height: top + 12),
+              Container(height: 1, color: scheme.outline),
+              Expanded(
+                child: MatchUpsTab(
+                  key: ValueKey(arenas.map((a) => a.id).join(',')),
+                  arenas: arenas,
+                ),
+              ),
+            ],
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: FilledButton.icon(
+                  onPressed: () => _openSplitBookingSheet(context, ref, arenas),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.bolt_rounded, size: 22),
+                  label: const Text(
+                    'Add Match-Up',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openSplitBookingSheet(
+      BuildContext context, WidgetRef ref, List<ArenaListing> arenas) {
+    Navigator.of(context, rootNavigator: true)
+        .push(MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => SplitBookingSheet(initialDate: DateTime.now()),
+        ))
+        .then((created) {
+      if (created == true) {
+        for (final a in arenas) {
+          ref.invalidate(arenaLobbiesProvider(a.id));
+          ref.invalidate(arenaMatchesProvider(a.id));
+        }
+      }
+    });
+  }
 }
 
 class _CenteredMessage extends StatelessWidget {

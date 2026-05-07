@@ -16,18 +16,6 @@ import '../services/arena_profile_providers.dart';
 import '../../bookings/presentation/bookings_page.dart';
 import 'arena_profile_page.dart';
 
-// ─── Palette ──────────────────────────────────────────────────────────────────
-const _bg = Color(0xFFF3F4F6);
-const _surface = Color(0xFFFFFFFF);
-const _line = Color(0xFFE1E5EA);
-const _text = Color(0xFF0D1117);
-const _muted = Color(0xFF6E7685);
-const _accent = Color(0xFF059669);
-const _deep = Color(0xFF064E3B);
-const _red = Color(0xFFDC2626);
-const _redBg = Color(0xFFFEF2F2);
-const _redBorder = Color(0xFFFCA5A5);
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 class UnitDetailPage extends ConsumerStatefulWidget {
@@ -103,11 +91,12 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
   }
 
   void _openEditor(ArenaListing arena, ArenaUnitOption unit) async {
+    final scheme = Theme.of(context).colorScheme;
     final changed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: _bg,
+      backgroundColor: scheme.surface,
       builder: (ctx) => UnitEditorSheet(
         arenaId: arena.id,
         unit: unit,
@@ -135,11 +124,12 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
 
   void _openAddBlockSheet(
       String arenaId, String openTime, String closeTime) async {
+    final scheme = Theme.of(context).colorScheme;
     final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: _bg,
+      backgroundColor: scheme.surface,
       builder: (_) => _AddBlockSheet(
         arenaId: arenaId,
         unitId: widget.unitId,
@@ -163,42 +153,43 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final arenaAsync = ref.watch(arenaDetailByIdProvider(widget.arenaId));
     return arenaAsync.when(
-      loading: () => const Scaffold(
-        backgroundColor: _bg,
-        body: Center(child: CircularProgressIndicator()),
+      loading: () => Scaffold(
+        backgroundColor: scheme.surface,
+        body: const Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => Scaffold(
-        backgroundColor: _bg,
-        appBar: AppBar(backgroundColor: _bg),
+        backgroundColor: scheme.surface,
+        appBar: AppBar(backgroundColor: scheme.surface),
         body: Center(
-            child: Text(e.toString(), style: const TextStyle(color: _muted))),
+            child: Text(e.toString(), style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55)))),
       ),
       data: (arena) {
         final unit =
             arena.units.where((u) => u.id == widget.unitId).firstOrNull;
         if (unit == null) {
           return Scaffold(
-            backgroundColor: _bg,
-            appBar: AppBar(backgroundColor: _bg),
-            body: const Center(
-                child: Text('Unit not found', style: TextStyle(color: _muted))),
+            backgroundColor: scheme.surface,
+            appBar: AppBar(backgroundColor: scheme.surface),
+            body: Center(
+                child: Text('Unit not found', style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55)))),
           );
         }
         return Scaffold(
-          backgroundColor: _bg,
+          backgroundColor: scheme.surface,
           appBar: AppBar(
-            backgroundColor: _deep,
-            foregroundColor: Colors.white,
+            backgroundColor: scheme.primary,
+            foregroundColor: scheme.onPrimary,
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   unit.name,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: scheme.onPrimary,
                     fontSize: 17,
                     fontWeight: FontWeight.w900,
                     height: 1.1,
@@ -206,8 +197,8 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
                 ),
                 Text(
                   _unitSubtitle(unit),
-                  style: const TextStyle(
-                    color: Colors.white60,
+                  style: TextStyle(
+                    color: scheme.onPrimary.withValues(alpha: 0.6),
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
@@ -225,7 +216,7 @@ class _UnitDetailPageState extends ConsumerState<UnitDetailPage>
           body: Column(
             children: [
               Container(
-                color: _surface,
+                color: scheme.surfaceContainerHighest,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                 child: _UnitTabBar(controller: _tabs),
               ),
@@ -284,23 +275,24 @@ class _UnitTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: _bg,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _line),
+        border: Border.all(color: scheme.outline),
       ),
       child: TabBar(
         controller: controller,
         dividerColor: Colors.transparent,
         indicator: BoxDecoration(
-          color: _deep,
+          color: scheme.primary,
           borderRadius: BorderRadius.circular(9),
         ),
         indicatorSize: TabBarIndicatorSize.tab,
-        labelColor: Colors.white,
-        unselectedLabelColor: _muted,
+        labelColor: scheme.onPrimary,
+        unselectedLabelColor: scheme.onSurface.withValues(alpha: 0.55),
         labelPadding: EdgeInsets.zero,
         labelStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
         unselectedLabelStyle:
@@ -331,26 +323,27 @@ class _SummaryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final color = warning
-        ? _red
+        ? scheme.error
         : highlight
-            ? _accent
-            : _muted;
+            ? scheme.primary
+            : scheme.onSurface.withValues(alpha: 0.55);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: warning
-            ? _redBg
+            ? scheme.errorContainer
             : highlight
-                ? _accent.withValues(alpha: 0.08)
-                : _bg,
+                ? scheme.primary.withValues(alpha: 0.08)
+                : scheme.surface,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: warning
-              ? _redBorder
+              ? scheme.error.withValues(alpha: 0.4)
               : highlight
-                  ? _accent.withValues(alpha: 0.25)
-                  : _line,
+                  ? scheme.primary.withValues(alpha: 0.25)
+                  : scheme.outline,
         ),
       ),
       child: Row(
@@ -487,10 +480,11 @@ class _ScheduleTabState extends State<_ScheduleTab> {
     final openSlots = isOperatingDay ? (slots.length - blockedSlots) : 0;
     final isHoliday = selectedHoliday != null;
 
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       children: [
         Container(
-          color: _surface,
+          color: scheme.surfaceContainerHighest,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -503,8 +497,8 @@ class _ScheduleTabState extends State<_ScheduleTab> {
                       children: [
                         Text(
                           DateFormat('MMMM yyyy').format(_selectedDate),
-                          style: const TextStyle(
-                            color: _text,
+                          style: TextStyle(
+                            color: scheme.onSurface,
                             fontSize: 16,
                             fontWeight: FontWeight.w900,
                           ),
@@ -517,8 +511,8 @@ class _ScheduleTabState extends State<_ScheduleTab> {
                                   ? 'Holiday · ${DateFormat('EEE, d MMM').format(_selectedDate)}'
                                   : DateFormat('EEEE, d MMM')
                                       .format(_selectedDate),
-                          style: const TextStyle(
-                            color: _muted,
+                          style: TextStyle(
+                            color: scheme.onSurface.withValues(alpha: 0.55),
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
@@ -590,7 +584,7 @@ class _ScheduleTabState extends State<_ScheduleTab> {
             ],
           ),
         ),
-        const Divider(height: 1, color: _line),
+        Divider(height: 1, color: scheme.outline),
         Expanded(
           child: !isOperatingDay || isHoliday
               ? Center(
@@ -601,7 +595,7 @@ class _ScheduleTabState extends State<_ScheduleTab> {
                         isHoliday
                             ? Icons.wb_sunny_rounded
                             : Icons.event_busy_rounded,
-                        color: isHoliday ? const Color(0xFFF97316) : _muted,
+                        color: isHoliday ? const Color(0xFFF97316) : scheme.onSurface.withValues(alpha: 0.55),
                         size: 36,
                       ),
                       const SizedBox(height: 10),
@@ -610,7 +604,7 @@ class _ScheduleTabState extends State<_ScheduleTab> {
                             ? (selectedHoliday.reason ?? 'Holiday')
                             : 'Closed on ${DateFormat('EEEE').format(_selectedDate)}',
                         style: TextStyle(
-                          color: isHoliday ? const Color(0xFFC2410C) : _muted,
+                          color: isHoliday ? const Color(0xFFC2410C) : scheme.onSurface.withValues(alpha: 0.55),
                           fontWeight: FontWeight.w700,
                           fontSize: 14,
                         ),
@@ -635,18 +629,18 @@ class _ScheduleTabState extends State<_ScheduleTab> {
                   ? const Center(
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : slots.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.schedule_rounded,
-                                  color: _muted, size: 36),
-                              SizedBox(height: 10),
+                                  color: scheme.onSurface.withValues(alpha: 0.55), size: 36),
+                              const SizedBox(height: 10),
                               Text(
                                 'No slots — set open/close time\nin unit settings',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                    color: _muted,
+                                    color: scheme.onSurface.withValues(alpha: 0.55),
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600),
                               ),
@@ -701,13 +695,14 @@ class _CalendarDayTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final borderColor = selected
-        ? _deep
+        ? scheme.primary
         : hasBlock
-            ? _redBorder
+            ? scheme.error.withValues(alpha: 0.4)
             : isToday
-                ? _accent.withValues(alpha: 0.35)
-                : _line;
+                ? scheme.primary.withValues(alpha: 0.35)
+                : scheme.outline;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -717,16 +712,16 @@ class _CalendarDayTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 7),
         decoration: BoxDecoration(
           color: selected
-              ? _deep
+              ? scheme.primary
               : hasBlock
-                  ? _redBg
-                  : _surface,
+                  ? scheme.errorContainer
+                  : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: borderColor),
           boxShadow: selected
               ? [
                   BoxShadow(
-                    color: _deep.withValues(alpha: 0.18),
+                    color: scheme.primary.withValues(alpha: 0.18),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -740,10 +735,10 @@ class _CalendarDayTile extends StatelessWidget {
               DateFormat('E').format(day).substring(0, 3).toUpperCase(),
               style: TextStyle(
                 color: selected
-                    ? Colors.white70
+                    ? scheme.onPrimary.withValues(alpha: 0.7)
                     : isOperating
-                        ? _muted
-                        : _line,
+                        ? scheme.onSurface.withValues(alpha: 0.55)
+                        : scheme.outline,
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
               ),
@@ -753,10 +748,10 @@ class _CalendarDayTile extends StatelessWidget {
               '${day.day}',
               style: TextStyle(
                 color: selected
-                    ? Colors.white
+                    ? scheme.onPrimary
                     : isOperating
-                        ? _text
-                        : _muted,
+                        ? scheme.onSurface
+                        : scheme.onSurface.withValues(alpha: 0.55),
                 fontSize: 19,
                 fontWeight: FontWeight.w900,
               ),
@@ -766,7 +761,7 @@ class _CalendarDayTile extends StatelessWidget {
               Text(
                 'Closed',
                 style: TextStyle(
-                  color: selected ? Colors.white54 : _muted,
+                  color: selected ? scheme.onPrimary.withValues(alpha: 0.54) : scheme.onSurface.withValues(alpha: 0.55),
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
                 ),
@@ -792,7 +787,8 @@ class _CalendarCount extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = warning ? _red : _accent;
+    final scheme = Theme.of(context).colorScheme;
+    final color = warning ? scheme.error : scheme.primary;
     return Container(
       width: 66,
       padding: const EdgeInsets.symmetric(vertical: 7),
@@ -848,6 +844,7 @@ class _SlotRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isBlocked = block != null;
 
     Color bgColor;
@@ -855,21 +852,21 @@ class _SlotRow extends StatelessWidget {
     Color timeColor;
 
     if (isBlocked) {
-      bgColor = _redBg;
-      borderColor = _redBorder;
-      timeColor = _red;
+      bgColor = scheme.errorContainer;
+      borderColor = scheme.error.withValues(alpha: 0.4);
+      timeColor = scheme.error;
     } else if (isCurrent) {
-      bgColor = _accent.withValues(alpha: 0.06);
-      borderColor = _accent.withValues(alpha: 0.4);
-      timeColor = _accent;
+      bgColor = scheme.primary.withValues(alpha: 0.06);
+      borderColor = scheme.primary.withValues(alpha: 0.4);
+      timeColor = scheme.primary;
     } else if (isPast) {
-      bgColor = _bg;
-      borderColor = _line;
-      timeColor = _muted;
+      bgColor = scheme.surface;
+      borderColor = scheme.outline;
+      timeColor = scheme.onSurface.withValues(alpha: 0.55);
     } else {
-      bgColor = _surface;
-      borderColor = _line;
-      timeColor = _text;
+      bgColor = scheme.surfaceContainerHighest;
+      borderColor = scheme.outline;
+      timeColor = scheme.onSurface;
     }
 
     return Container(
@@ -918,9 +915,9 @@ class _SlotRow extends StatelessWidget {
                   height: 28,
                   decoration: BoxDecoration(
                     color: isBlocked
-                        ? _red
+                        ? scheme.error
                         : isCurrent
-                            ? _accent
+                            ? scheme.primary
                             : Colors.transparent,
                     borderRadius: BorderRadius.circular(3),
                   ),
@@ -945,17 +942,17 @@ class _SlotRow extends StatelessWidget {
                   child: isBlocked
                       ? Text(
                           block!.reason ?? 'Blocked',
-                          style: const TextStyle(
-                            color: _red,
+                          style: TextStyle(
+                            color: scheme.error,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
                         )
                       : isCurrent
-                          ? const Text(
+                          ? Text(
                               'Now',
                               style: TextStyle(
-                                color: _accent,
+                                color: scheme.primary,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -974,7 +971,7 @@ class _SlotRow extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(left: 6),
                     child: Icon(Icons.close_rounded,
-                        color: _red.withValues(alpha: 0.6), size: 16),
+                        color: scheme.error.withValues(alpha: 0.6), size: 16),
                   ),
               ],
             ),
@@ -998,26 +995,27 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final String label;
     final Color color;
     final Color bg;
 
     if (isBlocked) {
       label = 'Blocked';
-      color = _red;
-      bg = _redBorder.withValues(alpha: 0.25);
+      color = scheme.error;
+      bg = scheme.error.withValues(alpha: 0.25);
     } else if (isCurrent) {
       label = 'Live';
-      color = _accent;
-      bg = _accent.withValues(alpha: 0.1);
+      color = scheme.primary;
+      bg = scheme.primary.withValues(alpha: 0.1);
     } else if (isPast) {
       label = 'Past';
-      color = _muted;
-      bg = _line;
+      color = scheme.onSurface.withValues(alpha: 0.55);
+      bg = scheme.outline;
     } else {
       label = 'Open';
-      color = _accent;
-      bg = _accent.withValues(alpha: 0.08);
+      color = scheme.primary;
+      bg = scheme.primary.withValues(alpha: 0.08);
     }
 
     return Container(
@@ -1063,10 +1061,11 @@ class _BookingsTab extends StatelessWidget {
 
   void _openAddBooking(BuildContext context) {
     final today = DateTime.now();
+    final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: scheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => AddBookingSheet(
@@ -1079,6 +1078,7 @@ class _BookingsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     if (loading) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
@@ -1088,14 +1088,14 @@ class _BookingsTab extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.calendar_month_outlined, color: _muted, size: 40),
+            Icon(Icons.calendar_month_outlined, color: scheme.onSurface.withValues(alpha: 0.55), size: 40),
             const SizedBox(height: 12),
-            const Text('No bookings yet',
+            Text('No bookings yet',
                 style: TextStyle(
-                    color: _muted, fontSize: 15, fontWeight: FontWeight.w700)),
+                    color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 15, fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            const Text('Player and walk-in bookings appear here',
-                style: TextStyle(color: _muted, fontSize: 13)),
+            Text('Player and walk-in bookings appear here',
+                style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 13)),
             const SizedBox(height: 20),
             GestureDetector(
               onTap: () => _openAddBooking(context),
@@ -1103,15 +1103,15 @@ class _BookingsTab extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  color: _deep,
+                  color: scheme.primary,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text(
+                child: Text(
                   'Add walk-in booking',
                   style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: Colors.white),
+                      color: scheme.onPrimary),
                 ),
               ),
             ),
@@ -1177,27 +1177,27 @@ class _BookingsTab extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: _deep,
+                color: scheme.primary,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
+                    color: scheme.onSurface.withValues(alpha: 0.15),
                     blurRadius: 8,
                     offset: const Offset(0, 3),
                   ),
                 ],
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.add_rounded, size: 18, color: Colors.white),
-                  SizedBox(width: 6),
+                  Icon(Icons.add_rounded, size: 18, color: scheme.onPrimary),
+                  const SizedBox(width: 6),
                   Text(
                     'Add booking',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: Colors.white),
+                        color: scheme.onPrimary),
                   ),
                 ],
               ),
@@ -1242,6 +1242,7 @@ class _BlocksTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final recurring = blocks?.where((b) => b.isRecurring).toList() ?? [];
     final oneOff = blocks?.where((b) => !b.isRecurring).toList() ?? [];
     final holidayDates = oneOff
@@ -1257,22 +1258,22 @@ class _BlocksTab extends StatelessWidget {
           child: loading
               ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
               : blocks == null || blocks!.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.block_rounded, color: _muted, size: 40),
-                          SizedBox(height: 12),
+                          Icon(Icons.block_rounded, color: scheme.onSurface.withValues(alpha: 0.55), size: 40),
+                          const SizedBox(height: 12),
                           Text('No blocks yet',
                               style: TextStyle(
-                                  color: _muted,
+                                  color: scheme.onSurface.withValues(alpha: 0.55),
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700)),
-                          SizedBox(height: 4),
+                          const SizedBox(height: 4),
                           Text(
                               'Block time slots or add holidays\nfor this unit',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: _muted, fontSize: 13)),
+                              style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 13)),
                         ],
                       ),
                     )
@@ -1330,9 +1331,9 @@ class _BlocksTab extends StatelessWidget {
                     ),
         ),
         Container(
-          decoration: const BoxDecoration(
-            color: _surface,
-            border: Border(top: BorderSide(color: _line)),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            border: Border(top: BorderSide(color: scheme.outline)),
           ),
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
           child: SafeArea(
@@ -1342,8 +1343,8 @@ class _BlocksTab extends StatelessWidget {
               icon: const Icon(Icons.add_rounded, size: 18),
               label: const Text('Add block / holiday'),
               style: FilledButton.styleFrom(
-                backgroundColor: _deep,
-                foregroundColor: Colors.white,
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
@@ -1373,22 +1374,23 @@ class _BlockRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isHoliday = block.isHoliday;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: overridden
-            ? _bg
+            ? scheme.surface
             : isHoliday
                 ? const Color(0xFFFFF7ED)
-                : _redBg,
+                : scheme.errorContainer,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: overridden
-              ? _line
+              ? scheme.outline
               : isHoliday
                   ? const Color(0xFFFED7AA)
-                  : _redBorder,
+                  : scheme.error.withValues(alpha: 0.4),
         ),
       ),
       child: ListTile(
@@ -1400,8 +1402,8 @@ class _BlockRow extends StatelessWidget {
             color: isHoliday
                 ? const Color(0xFFF97316).withValues(alpha: 0.12)
                 : overridden
-                    ? _line.withValues(alpha: 0.55)
-                    : _red.withValues(alpha: 0.08),
+                    ? scheme.outline.withValues(alpha: 0.55)
+                    : scheme.error.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(
@@ -1410,8 +1412,8 @@ class _BlockRow extends StatelessWidget {
             color: isHoliday
                 ? const Color(0xFFF97316)
                 : overridden
-                    ? _muted
-                    : _red,
+                    ? scheme.onSurface.withValues(alpha: 0.55)
+                    : scheme.error,
           ),
         ),
         title: Text(
@@ -1422,8 +1424,8 @@ class _BlockRow extends StatelessWidget {
             color: isHoliday
                 ? const Color(0xFFC2410C)
                 : overridden
-                    ? _muted
-                    : _red,
+                    ? scheme.onSurface.withValues(alpha: 0.55)
+                    : scheme.error,
             fontWeight: FontWeight.w800,
             fontSize: 14,
           ),
@@ -1436,15 +1438,15 @@ class _BlockRow extends StatelessWidget {
             color: isHoliday
                 ? const Color(0xFFF97316)
                 : overridden
-                    ? _muted
-                    : _red.withValues(alpha: 0.7),
+                    ? scheme.onSurface.withValues(alpha: 0.55)
+                    : scheme.error.withValues(alpha: 0.7),
             fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
         ),
         trailing: IconButton(
           icon: const Icon(Icons.delete_outline_rounded),
-          color: _muted,
+          color: scheme.onSurface.withValues(alpha: 0.55),
           onPressed: () async {
             final confirmed = await showDialog<bool>(
               context: context,
@@ -1460,7 +1462,7 @@ class _BlockRow extends StatelessWidget {
                   ),
                   FilledButton(
                     onPressed: () => Navigator.pop(context, true),
-                    style: FilledButton.styleFrom(backgroundColor: _red),
+                    style: FilledButton.styleFrom(backgroundColor: scheme.error),
                     child: const Text('Remove'),
                   ),
                 ],
@@ -1495,6 +1497,7 @@ class _InfoTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final hours =
         '${unit.openTime ?? arena.openTime} – ${unit.closeTime ?? arena.closeTime}';
     final operatingDays = unit.operatingDays.isNotEmpty
@@ -1619,7 +1622,7 @@ class _InfoTab extends StatelessWidget {
                   errorBuilder: (_, __, ___) => Container(
                     width: 140,
                     height: 100,
-                    color: _line,
+                    color: scheme.outline,
                     child: const Icon(Icons.broken_image_outlined),
                   ),
                 ),
@@ -1783,6 +1786,7 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
@@ -1801,8 +1805,8 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                   Expanded(
                     child: Text(
                       _isHoliday ? 'Add Holiday' : 'Block Time',
-                      style: const TextStyle(
-                          color: _text,
+                      style: TextStyle(
+                          color: scheme.onSurface,
                           fontSize: 20,
                           fontWeight: FontWeight.w900),
                     ),
@@ -1814,7 +1818,7 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                 ],
               ),
             ),
-            const Divider(height: 1, color: _line),
+            Divider(height: 1, color: scheme.outline),
             Expanded(
               child: ListView(
                 controller: controller,
@@ -1824,9 +1828,9 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                   const _SectionLabel('WHEN'),
                   Container(
                     decoration: BoxDecoration(
-                      color: _surface,
+                      color: scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _line),
+                      border: Border.all(color: scheme.outline),
                     ),
                     child: Row(
                       children: [
@@ -1870,14 +1874,14 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                             });
                           },
                           label: Text(d.$2),
-                          backgroundColor: _surface,
-                          selectedColor: _deep,
-                          checkmarkColor: _accent,
+                          backgroundColor: scheme.surfaceContainerHighest,
+                          selectedColor: scheme.primary,
+                          checkmarkColor: scheme.primary,
                           labelStyle: TextStyle(
-                            color: sel ? Colors.white : _text,
+                            color: sel ? scheme.onPrimary : scheme.onSurface,
                             fontWeight: FontWeight.w800,
                           ),
-                          side: BorderSide(color: sel ? _deep : _line),
+                          side: BorderSide(color: sel ? scheme.primary : scheme.outline),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         );
@@ -1889,17 +1893,17 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: _isHoliday ? const Color(0xFFFFF7ED) : _surface,
+                      color: _isHoliday ? const Color(0xFFFFF7ED) : scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: _isHoliday ? const Color(0xFFFED7AA) : _line),
+                          color: _isHoliday ? const Color(0xFFFED7AA) : scheme.outline),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.wb_sunny_rounded,
                           size: 18,
-                          color: _isHoliday ? const Color(0xFFF97316) : _muted,
+                          color: _isHoliday ? const Color(0xFFF97316) : scheme.onSurface.withValues(alpha: 0.55),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -1910,7 +1914,7 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                                   style: TextStyle(
                                       color: _isHoliday
                                           ? const Color(0xFFC2410C)
-                                          : _text,
+                                          : scheme.onSurface,
                                       fontWeight: FontWeight.w800,
                                       fontSize: 14)),
                               Text(
@@ -1918,7 +1922,7 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                                 style: TextStyle(
                                     color: _isHoliday
                                         ? const Color(0xFFF97316)
-                                        : _muted,
+                                        : scheme.onSurface.withValues(alpha: 0.55),
                                     fontSize: 12),
                               ),
                             ],
@@ -1928,7 +1932,7 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                           value: _isHoliday,
                           onChanged: (v) => setState(() => _isHoliday = v),
                           activeTrackColor: const Color(0xFFF97316),
-                          activeThumbColor: Colors.white,
+                          activeThumbColor: scheme.surface,
                         ),
                       ],
                     ),
@@ -1957,8 +1961,8 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
                     const SizedBox(height: 6),
                     Text(
                       'Unit operates ${widget.openTime} – ${widget.closeTime}',
-                      style: const TextStyle(
-                          color: _muted,
+                      style: TextStyle(
+                          color: scheme.onSurface.withValues(alpha: 0.55),
                           fontSize: 11,
                           fontWeight: FontWeight.w600),
                     ),
@@ -1978,26 +1982,26 @@ class _AddBlockSheetState extends ConsumerState<_AddBlockSheet> {
               top: false,
               child: Container(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                decoration: const BoxDecoration(
-                  color: _bg,
-                  border: Border(top: BorderSide(color: _line)),
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  border: Border(top: BorderSide(color: scheme.outline)),
                 ),
                 child: FilledButton(
                   onPressed: _saving ? null : _save,
                   style: FilledButton.styleFrom(
                     backgroundColor:
-                        _isHoliday ? const Color(0xFFF97316) : _deep,
-                    foregroundColor: Colors.white,
+                        _isHoliday ? const Color(0xFFF97316) : scheme.primary,
+                    foregroundColor: scheme.onPrimary,
                     minimumSize: const Size.fromHeight(52),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
                   ),
                   child: _saving
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
+                              strokeWidth: 2, color: scheme.onPrimary))
                       : Text(_isHoliday ? 'Add Holiday' : 'Save Block'),
                 ),
               ),
@@ -2026,6 +2030,7 @@ class _BlockTypeTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -2034,18 +2039,18 @@ class _BlockTypeTab extends StatelessWidget {
           margin: const EdgeInsets.all(4),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? _deep : Colors.transparent,
+            color: selected ? scheme.primary : Colors.transparent,
             borderRadius: BorderRadius.circular(7),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 15, color: selected ? Colors.white : _muted),
+              Icon(icon, size: 15, color: selected ? scheme.onPrimary : scheme.onSurface.withValues(alpha: 0.55)),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
-                  color: selected ? Colors.white : _muted,
+                  color: selected ? scheme.onPrimary : scheme.onSurface.withValues(alpha: 0.55),
                   fontWeight: FontWeight.w800,
                   fontSize: 13,
                 ),
@@ -2068,6 +2073,7 @@ class _DatePickerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final hasDate = date != null;
     final dayName = hasDate ? DateFormat('EEE').format(date!) : null;
     final dayNum = hasDate ? DateFormat('d').format(date!) : null;
@@ -2078,9 +2084,9 @@ class _DatePickerButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: _surface,
+          color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: hasDate ? _deep : _line),
+          border: Border.all(color: hasDate ? scheme.primary : scheme.outline),
         ),
         child: Row(
           children: [
@@ -2088,7 +2094,7 @@ class _DatePickerButton extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: hasDate ? _deep : const Color(0xFFF1F5F9),
+                color: hasDate ? scheme.primary : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: hasDate
@@ -2096,20 +2102,20 @@ class _DatePickerButton extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(dayNum!,
-                            style: const TextStyle(
-                                color: Colors.white,
+                            style: TextStyle(
+                                color: scheme.onPrimary,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w900,
                                 height: 1)),
                         Text(dayName!,
-                            style: const TextStyle(
-                                color: Color(0xFFBBF7D0),
+                            style: TextStyle(
+                                color: scheme.primaryContainer,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700)),
                       ],
                     )
-                  : const Icon(Icons.calendar_month_rounded,
-                      color: _muted, size: 22),
+                  : Icon(Icons.calendar_month_rounded,
+                      color: scheme.onSurface.withValues(alpha: 0.55), size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -2118,22 +2124,22 @@ class _DatePickerButton extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(monthYear!,
-                            style: const TextStyle(
-                                color: _muted,
+                            style: TextStyle(
+                                color: scheme.onSurface.withValues(alpha: 0.55),
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700)),
                         Text(
                           DateFormat('EEEE, d MMMM').format(date!),
-                          style: const TextStyle(
-                              color: _text,
+                          style: TextStyle(
+                              color: scheme.onSurface,
                               fontSize: 15,
                               fontWeight: FontWeight.w800),
                         ),
                       ],
                     )
-                  : const Text('Tap to select date',
+                  : Text('Tap to select date',
                       style: TextStyle(
-                          color: _muted,
+                          color: scheme.onSurface.withValues(alpha: 0.55),
                           fontSize: 14,
                           fontWeight: FontWeight.w600)),
             ),
@@ -2141,7 +2147,7 @@ class _DatePickerButton extends StatelessWidget {
               hasDate
                   ? Icons.edit_calendar_rounded
                   : Icons.chevron_right_rounded,
-              color: hasDate ? _deep : _muted,
+              color: hasDate ? scheme.primary : scheme.onSurface.withValues(alpha: 0.55),
               size: 18,
             ),
           ],
@@ -2182,6 +2188,7 @@ class _TimePickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (context, val, _) {
@@ -2191,26 +2198,26 @@ class _TimePickerField extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             decoration: BoxDecoration(
-              color: _surface,
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: hasValue ? _deep : _line),
+              border: Border.all(color: hasValue ? scheme.primary : scheme.outline),
             ),
             child: Row(
               children: [
                 Icon(Icons.schedule_rounded,
-                    size: 16, color: hasValue ? _deep : _muted),
+                    size: 16, color: hasValue ? scheme.primary : scheme.onSurface.withValues(alpha: 0.55)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(label,
                       style: TextStyle(
-                          color: hasValue ? _muted : _muted,
+                          color: scheme.onSurface.withValues(alpha: 0.55),
                           fontSize: 13,
                           fontWeight: FontWeight.w600)),
                 ),
                 Text(
                   hasValue ? val.text : '--:--',
                   style: TextStyle(
-                    color: hasValue ? _text : _muted,
+                    color: hasValue ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.55),
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0.5,
@@ -2218,7 +2225,7 @@ class _TimePickerField extends StatelessWidget {
                 ),
                 const SizedBox(width: 2),
                 Icon(Icons.expand_more_rounded,
-                    size: 18, color: hasValue ? _deep : _muted),
+                    size: 18, color: hasValue ? scheme.primary : scheme.onSurface.withValues(alpha: 0.55)),
               ],
             ),
           ),
@@ -2275,10 +2282,11 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -2289,7 +2297,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: _line,
+              color: scheme.outline,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -2298,10 +2306,10 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
             padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text('Select time',
                       style: TextStyle(
-                          color: _text,
+                          color: scheme.onSurface,
                           fontSize: 18,
                           fontWeight: FontWeight.w900)),
                 ),
@@ -2311,7 +2319,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                     Navigator.pop(context);
                   },
                   style: TextButton.styleFrom(
-                    foregroundColor: _accent,
+                    foregroundColor: scheme.primary,
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   ),
@@ -2333,7 +2341,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                   height: 52,
                   margin: const EdgeInsets.symmetric(horizontal: 24),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
@@ -2356,7 +2364,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                               child: Text(
                                 i.toString().padLeft(2, '0'),
                                 style: TextStyle(
-                                  color: sel ? _text : _muted,
+                                  color: sel ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.55),
                                   fontSize: sel ? 28 : 22,
                                   fontWeight:
                                       sel ? FontWeight.w900 : FontWeight.w400,
@@ -2368,9 +2376,9 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                       ),
                     ),
                     // Separator
-                    const Text(':',
+                    Text(':',
                         style: TextStyle(
-                            color: _text,
+                            color: scheme.onSurface,
                             fontSize: 28,
                             fontWeight: FontWeight.w900)),
                     // Minutes in 5-min steps
@@ -2391,7 +2399,7 @@ class _TimeWheelSheetState extends State<_TimeWheelSheet> {
                               child: Text(
                                 _mins[i].toString().padLeft(2, '0'),
                                 style: TextStyle(
-                                  color: sel ? _text : _muted,
+                                  color: sel ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.55),
                                   fontSize: sel ? 28 : 22,
                                   fontWeight:
                                       sel ? FontWeight.w900 : FontWeight.w400,
@@ -2426,12 +2434,13 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Text(
         title,
-        style: const TextStyle(
-          color: _muted,
+        style: TextStyle(
+          color: scheme.onSurface.withValues(alpha: 0.55),
           fontSize: 11,
           fontWeight: FontWeight.w900,
           letterSpacing: 1.1,
@@ -2448,13 +2457,14 @@ class _InfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _surface,
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _line),
+        border: Border.all(color: scheme.outline),
       ),
       child: Column(children: children),
     );
@@ -2469,6 +2479,7 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
@@ -2477,14 +2488,14 @@ class _InfoRow extends StatelessWidget {
           SizedBox(
             width: 112,
             child: Text(label,
-                style: const TextStyle(
-                    color: _muted, fontSize: 12, fontWeight: FontWeight.w700)),
+                style: TextStyle(
+                    color: scheme.onSurface.withValues(alpha: 0.55), fontSize: 12, fontWeight: FontWeight.w700)),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(value,
-                style: const TextStyle(
-                    color: _text,
+                style: TextStyle(
+                    color: scheme.onSurface,
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
                     height: 1.35)),
@@ -2506,6 +2517,7 @@ class _SheetField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: TextField(
@@ -2513,12 +2525,12 @@ class _SheetField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: _surface,
+          fillColor: scheme.surfaceContainerHighest,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-          border: _inputBorder(_line),
-          enabledBorder: _inputBorder(_line),
-          focusedBorder: _inputBorder(_accent),
+          border: _inputBorder(scheme.outline),
+          enabledBorder: _inputBorder(scheme.outline),
+          focusedBorder: _inputBorder(scheme.primary),
         ),
       ),
     );

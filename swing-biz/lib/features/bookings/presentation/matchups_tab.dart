@@ -223,28 +223,46 @@ class _LaneTab extends StatelessWidget {
             ),
           ),
           alignment: Alignment.center,
-          child: RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: label,
-                  style: TextStyle(
-                    color: active ? accent : _c.muted,
-                    fontSize: 14,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                    letterSpacing: 0.1,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              RichText(
+                text: TextSpan(
+                  children: [
+                    TextSpan(
+                      text: label,
+                      style: TextStyle(
+                        color: active ? accent : _c.muted,
+                        fontSize: 14,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                        letterSpacing: 0.1,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '  $count',
+                      style: TextStyle(
+                        color: active ? _c.muted : _c.faint,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (count > 0 && !active)
+                Positioned(
+                  top: -3,
+                  right: -6,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                 ),
-                TextSpan(
-                  text: '  $count',
-                  style: TextStyle(
-                    color: active ? _c.muted : _c.faint,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
