@@ -2224,6 +2224,15 @@ model Team {
   skillLevel          String?   // BEGINNER | INTERMEDIATE | ADVANCED | PROFESSIONAL
   isPublic            Boolean   @default(true)
   isActive            Boolean   @default(true)
+  // Reputation rails. Updated on cancel/no-show events. credibilityScore
+  // is recomputed from counters; ranges 0–100 (lower = worse).
+  // matchupBanUntil is set when score drops below threshold — Discover
+  // refuses searches while now() < banUntil.
+  cancellationCount       Int       @default(0)
+  lateCancelCount         Int       @default(0)
+  noShowCount             Int       @default(0)
+  credibilityScore        Int       @default(100)
+  matchupBanUntil         DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -2352,6 +2361,9 @@ model Arena {
   // Lets specific arenas opt into different rates without touching the
   // global setting.
   commissionRateBpsOverride Int?
+  // Reputation rails. Bumped when arena cancels or no-shows on a match.
+  cancellationCount  Int       @default(0)
+  noShowCount        Int       @default(0)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

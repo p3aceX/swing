@@ -496,6 +496,7 @@ export class MatchmakingService {
         captainId: true,
         createdByUserId: true,
         playerIds: true,
+        matchupBanUntil: true,
       },
     })
     if (!team) throw Errors.notFound('Team')
@@ -504,6 +505,18 @@ export class MatchmakingService {
       team.createdByUserId === userId ||
       team.playerIds.includes(player.id)
     if (!isMember) throw Errors.forbidden()
+
+    // Soft-ban from matchmaking after repeat cancellations. The check looks
+    // forward — banUntil > now means the team is still in the cooldown
+    // window. credibilityScore on Team also reflects this.
+    if ((team as any).matchupBanUntil && (team as any).matchupBanUntil > new Date()) {
+      throw new AppError(
+        'TEAM_BANNED',
+        'This team is paused from match-ups due to recent cancellations. Try again after the cooldown.',
+        403,
+        { banUntil: (team as any).matchupBanUntil.toISOString() },
+      )
+    }
 
     const date = this.startOfDay(input.filters.date)
     const callerAge = await this.getTeamAgeGroup(team.id)
@@ -3457,7 +3470,20 @@ export class MatchmakingService {
           data: { status: 'CANCELLED' as any },
         })
       }
+      // Bump reputation counters on the cancelling team. Late cancels
+      // (after both teams confirmed) hit the score harder.
+      await tx.team.update({
+        where: { id: team.id },
+        data: {
+          cancellationCount: { increment: 1 },
+          lateCancelCount: wasPostPayment ? { increment: 1 } : undefined,
+        },
+      })
     })
+
+    // Recompute credibility outside the tx so we use the freshly-updated
+    // counters. Sets matchupBanUntil if score crosses threshold.
+    await this.recomputeTeamCredibility(team.id).catch(() => undefined)
 
     this.notifyMatchCancelledByPlayer(matchId, team.id, team.name ?? 'a team')
       .catch(() => undefined)
@@ -3466,6 +3492,39 @@ export class MatchmakingService {
       status: 'cancelled' as const,
       wasPostPayment,
     }
+  }
+
+  // Recomputes credibilityScore from cancellation counters and applies a
+  // soft ban when the team has shown a clear pattern of bailing on
+  // confirmed match-ups. Score formula:
+  //   score = 100 - 5*cancellationCount - 20*lateCancelCount - 25*noShowCount
+  // Floor at 0. matchupBanUntil = now + 14d when score < 40.
+  // Called as a fire-and-forget after every counter bump.
+  private async recomputeTeamCredibility(teamId: string): Promise<void> {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: {
+        cancellationCount: true,
+        lateCancelCount: true,
+        noShowCount: true,
+      },
+    })
+    if (!team) return
+    const raw =
+      100 -
+      5 * (team.cancellationCount ?? 0) -
+      20 * (team.lateCancelCount ?? 0) -
+      25 * (team.noShowCount ?? 0)
+    const score = Math.max(0, Math.min(100, raw))
+    const banUntil =
+      score < 40 ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null
+    await prisma.team.update({
+      where: { id: teamId },
+      data: {
+        credibilityScore: score,
+        ...(banUntil ? { matchupBanUntil: banUntil } : {}),
+      },
+    })
   }
 
   // Notify the OTHER team that this match-up was cancelled by the caller's
@@ -3541,6 +3600,12 @@ export class MatchmakingService {
           data: { status: 'CANCELLED' as any },
         })
       }
+      // Reputation: arena absorbs the cancellation. Counter is independent
+      // of team-side cancellations.
+      await tx.arena.update({
+        where: { id: unit.arena.id },
+        data: { cancellationCount: { increment: 1 } },
+      })
     })
 
     this.notifyMatchCancelledByOwner(matchId, unit.arena.name).catch(() => undefined)
