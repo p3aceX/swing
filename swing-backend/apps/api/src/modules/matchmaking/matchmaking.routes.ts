@@ -225,6 +225,16 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  // Player-side free-confirm. Used when the match's confirmation fee is 0
+  // (test mode) so the opponent can finalize without Razorpay.
+  app.post('/matches/:matchId/confirm-free', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { matchId } = request.params as { matchId: string }
+    const body = z.object({ lobbyId: z.string() }).parse(request.body)
+    const data = await svc.confirmMatchFree(user.userId, matchId, body.lobbyId)
+    return reply.send({ success: true, data })
+  })
+
   app.post('/matches/:matchId/mark-paid', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { matchId } = request.params as { matchId: string }

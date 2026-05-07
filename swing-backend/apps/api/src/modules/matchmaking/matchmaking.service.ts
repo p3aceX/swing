@@ -13,7 +13,10 @@ const MAX_ACTIVE_REQUESTS = 3
 const DEFAULT_MATCH_COST_PER_PLAYER_PAISE = 45000
 const LOBBY_EXPIRY_HOURS = 24
 const MATCH_PAYMENT_HOURS = 4
-const CONFIRMATION_FEE_PAISE = 50000 // ₹500 flat per team
+// TODO: set to 29900 (₹299) once we exit testing mode. While 0, the
+// lock-and-pay flow bypasses Razorpay and finalizes the match immediately —
+// see the zero-amount branch in acquireLockAndCreateOrder.
+const CONFIRMATION_FEE_PAISE = 0
 // V2 first-to-pay lock window. The team that taps Pay first holds the slot
 // for this many seconds while their Razorpay order is alive.
 const INTEREST_LOCK_SECONDS = 120
@@ -512,6 +515,38 @@ export class MatchmakingService {
         'The selected time window has already passed. Pick a future window or date.',
         400,
       )
+    }
+
+    // One active match-up per team. If this team is already in a non-final
+    // match (pending_payment / confirmed / setup / started), refuse to
+    // create or recycle a searching lobby — they need to finish or cancel
+    // the existing match-up first. Without this, the auto-refresh ticker
+    // would keep regenerating searching lobbies even after a match exists.
+    const lobbiesWithActiveMatch = await prisma.matchmakingLobby.findMany({
+      where: {
+        teamId: team.id,
+        matchId: { not: null },
+        status: { in: ['matched', 'confirmed'] },
+      },
+      select: { matchId: true },
+    })
+    if (lobbiesWithActiveMatch.length > 0) {
+      const matchIds = lobbiesWithActiveMatch
+        .map((l) => l.matchId)
+        .filter((id): id is string => !!id)
+      const activeMatch = await prisma.matchmakingMatch.findFirst({
+        where: {
+          id: { in: matchIds },
+          status: { in: ['pending_payment', 'confirmed', 'setup', 'started'] },
+        },
+      })
+      if (activeMatch) {
+        throw new AppError(
+          'TEAM_HAS_ACTIVE_MATCH',
+          'This team already has an active match-up. Finish or cancel it before searching again.',
+          400,
+        )
+      }
     }
 
     // Ensure team-uniqueness: find/update existing or create a new one.
@@ -2298,9 +2333,28 @@ export class MatchmakingService {
   async listMyConfirmedMatches(userId: string) {
     const player = await this.getPlayerProfile(userId)
 
-    // Find all lobbies belonging to this player (any status) that have a matchId
+    // Resolve every team the caller belongs to so we surface matches the team
+    // is in even when the specific lobby was created by someone else (e.g.
+    // an arena owner via the Biz app, or a different teammate). Filtering by
+    // playerId would hide those.
+    const myTeams = await prisma.team.findMany({
+      where: {
+        OR: [
+          { captainId: player.id },
+          { createdByUserId: userId },
+          { playerIds: { has: player.id } },
+        ],
+      },
+      select: { id: true },
+    })
+    if (myTeams.length === 0) return { matches: [] }
+    const myTeamIds = myTeams.map((t) => t.id)
+
+    // Find all lobbies for any of the user's teams that are linked to a
+    // match. Either the player- or the arena-created lobby will satisfy
+    // this — the caller's matches surface from either side.
     const lobbies = await prisma.matchmakingLobby.findMany({
-      where: { playerId: player.id, matchId: { not: null } },
+      where: { teamId: { in: myTeamIds }, matchId: { not: null } },
       select: { id: true, matchId: true },
       orderBy: { createdAt: 'desc' },
     })
@@ -2541,6 +2595,70 @@ export class MatchmakingService {
     return bookingId
   }
 
+  // Player-side confirmation when the match's per-team confirmation fee is
+  // 0 (test mode). Mirrors the lock-and-pay zero-amount bypass so the
+  // opponent's "Pay" button can finalize without going through Razorpay
+  // (which can't process ₹0). Refuses if the match has a non-zero fee.
+  async confirmMatchFree(userId: string, matchId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+    if (match.paymentAmountPerTeam > 0) {
+      throw new AppError(
+        'PAYMENT_REQUIRED',
+        'This match has a non-zero confirmation fee — pay via Razorpay',
+        400,
+      )
+    }
+    if (lobbyId !== match.lobbyAId && lobbyId !== match.lobbyBId) {
+      throw new AppError('INVALID_LOBBY', 'Lobby is not part of this match', 400)
+    }
+
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+      select: { teamId: true },
+    })
+    if (!lobby || !lobby.teamId) throw Errors.notFound('Lobby')
+
+    const team = await prisma.team.findFirst({
+      where: {
+        id: lobby.teamId,
+        OR: [
+          { captainId: player.id },
+          { createdByUserId: userId },
+          { playerIds: { has: player.id } },
+        ],
+      },
+    })
+    if (!team) throw Errors.forbidden()
+
+    if (match.status === 'confirmed') {
+      return { status: 'confirmed' as const, bookingId: (match as any).bookingId }
+    }
+
+    const updates: any = {}
+    if (match.lobbyAId === lobbyId) updates.teamAConfirmed = true
+    if (match.lobbyBId === lobbyId) updates.teamBConfirmed = true
+
+    const result = await prisma.$transaction(async (tx) => {
+      const after = await tx.matchmakingMatch.update({
+        where: { id: matchId },
+        data: updates,
+      })
+      if (after.teamAConfirmed && after.teamBConfirmed) {
+        const bookingId = await this.finalizeMatch(after, tx)
+        return { status: 'confirmed' as const, bookingId }
+      }
+      return { status: 'waiting_opponent' as const }
+    })
+
+    if (result.status === 'confirmed') {
+      this.notifyMatchConfirmed(matchId).catch(() => undefined)
+    }
+    return result
+  }
+
   async markMatchPaidOffline(userId: string, matchId: string, lobbyId: string) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
@@ -2680,6 +2798,43 @@ export class MatchmakingService {
         type: 'mm_match_confirmed',
         title: 'Match confirmed!',
         body: `${opponent?.team?.name ?? 'Your opponent'} at ${groundName} — ${dateLabel} ${slotDisplay}`,
+        entityType: 'match',
+        entityId: matchId,
+        data: { lobbyId: lobby.id },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+  }
+
+  // One-shot notification when the arena owner finishes match setup (i.e.
+  // status flips from 'confirmed' → 'setup'). Both team captains get pinged
+  // exactly once. Fires after notifyMatchConfirmed so the funnel reads:
+  //   match found → match confirmed → match setup → (player at venue).
+  private async notifyMatchSetup(matchId: string) {
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) return
+    const [lobbyA, lobbyB, unit] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId }, include: { team: true } }),
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId }, include: { team: true } }),
+      prisma.arenaUnit.findUnique({ where: { id: match.groundId }, select: { name: true } }),
+    ])
+    const groundName = unit?.name ?? 'the ground'
+    const captains = [
+      { lobby: lobbyA, opponent: lobbyB },
+      { lobby: lobbyB, opponent: lobbyA },
+    ]
+    for (const { lobby, opponent } of captains) {
+      if (!lobby?.playerId) continue
+      const profile = await prisma.playerProfile.findUnique({
+        where: { id: lobby.playerId },
+        select: { userId: true },
+      })
+      if (!profile?.userId) continue
+      await notificationService.createNotification(profile.userId, {
+        type: 'mm_match_setup',
+        title: 'Match is ready',
+        body: `${groundName} has set up your match-up vs ${opponent?.team?.name ?? 'your opponent'}. Pick your XI on match day.`,
         entityType: 'match',
         entityId: matchId,
         data: { lobbyId: lobby.id },
@@ -3040,6 +3195,7 @@ export class MatchmakingService {
       where: { id: matchId },
       data: { status: 'setup' },
     })
+    this.notifyMatchSetup(matchId).catch(() => undefined)
 
     return { status: 'setup', linkedMatchId }
   }
@@ -3304,6 +3460,127 @@ export class MatchmakingService {
     )
     const amountPaise = CONFIRMATION_FEE_PAISE
 
+    // ── TEST-MODE BYPASS ────────────────────────────────────────────────
+    // When the confirmation fee is ₹0, Razorpay can't process the order
+    // (minimum charge is ₹1). Skip the gateway entirely and finalize the
+    // win in-line: promote the holder, create the match, mark losers.
+    // This branch goes away the moment CONFIRMATION_FEE_PAISE returns to
+    // a non-zero value — the regular Razorpay path takes over.
+    if (amountPaise === 0) {
+      const finalize = await prisma.$transaction(async (tx) => {
+        const interest = await tx.matchmakingInterest.findUnique({
+          where: { id: result.interest.id },
+          include: { lobby: { include: { picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 } } } },
+        })
+        if (!interest) throw Errors.notFound('Interest')
+        const lobby = interest.lobby
+        if (lobby.status === 'matched') {
+          throw new AppError('SLOT_TAKEN', 'Slot was taken by another team', 409)
+        }
+        const pick = lobby.picks[0]
+        if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+
+        const joinerLobby = await tx.matchmakingLobby.create({
+          data: {
+            teamId: interest.teamId,
+            playerId: interest.playerId,
+            format: lobby.format,
+            ballType: lobby.ballType,
+            date: lobby.date,
+            status: 'matched',
+            expiresAt: new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000),
+            picks: {
+              create: [{ groundId: pick.groundId, slotTime: pick.slotTime, preferenceOrder: 1 }],
+            },
+          },
+        })
+
+        const remainingFeePaise = Math.max(0, groundFeePaise - amountPaise)
+
+        const match = await tx.matchmakingMatch.create({
+          data: {
+            lobbyAId: lobby.id,
+            lobbyBId: joinerLobby.id,
+            groundId: pick.groundId,
+            slotTime: pick.slotTime,
+            date: lobby.date,
+            format: lobby.format,
+            status: 'pending_payment',
+            confirmDeadline: new Date(Date.now() + MATCH_PAYMENT_HOURS * 60 * 60 * 1000),
+            teamAConfirmed: false,
+            teamBConfirmed: true,
+            paymentAmountPerTeam: amountPaise,
+            groundFeePaise,
+            remainingFeePaise,
+          },
+        })
+
+        await tx.matchmakingInterest.update({
+          where: { id: interest.id },
+          data: {
+            status: 'won',
+            razorpayPaymentId: 'free_test_mode',
+            paidAt: new Date(),
+          },
+        })
+        await tx.matchmakingInterest.updateMany({
+          where: {
+            lobbyId: lobby.id,
+            id: { not: interest.id },
+            status: { in: ['interested', 'locked'] },
+          },
+          data: { status: 'lost' },
+        })
+        await tx.matchmakingLobby.update({
+          where: { id: lobby.id },
+          data: {
+            status: 'matched',
+            matchId: match.id,
+            lockedByInterestId: null,
+            lockExpiresAt: null,
+          },
+        })
+        await tx.matchmakingLobby.update({
+          where: { id: joinerLobby.id },
+          data: { matchId: match.id },
+        })
+
+        // Cancel any other 'searching' lobbies held by either team — once a
+        // team has a confirmed match-up, their unrelated open searches
+        // shouldn't keep dragging Discover back into searching mode.
+        const teamIdsToClear = [lobby.teamId, joinerLobby.teamId]
+          .filter((id): id is string => !!id)
+        if (teamIdsToClear.length > 0) {
+          await tx.matchmakingLobby.updateMany({
+            where: {
+              teamId: { in: teamIdsToClear },
+              status: 'searching',
+              id: { notIn: [lobby.id, joinerLobby.id] },
+            },
+            data: { status: 'cancelled' },
+          })
+        }
+
+        return { match, lobby }
+      })
+
+      this.notifyMatchFound(finalize.match.id).catch(() => undefined)
+      this.notifyLosersOfSlotTaken(finalize.lobby.id, result.interest.id)
+        .catch(() => undefined)
+
+      return {
+        interestId: result.interest.id,
+        razorpayOrderId: '',
+        razorpayKey: '',
+        amountPaise: 0,
+        currency: 'INR',
+        groundFeePaise,
+        lockExpiresAt: result.lockExpiresAt.toISOString(),
+        lockSeconds: INTEREST_LOCK_SECONDS,
+        freeMatchId: finalize.match.id,
+      }
+    }
+
     const order = await getRazorpay().orders.create({
       amount: amountPaise,
       currency: 'INR',
@@ -3470,6 +3747,28 @@ export class MatchmakingService {
           lockExpiresAt: null,
         },
       })
+      // Joiner lobby (challenger's side) also needs matchId — without it
+      // listMyConfirmedMatches filters the challenger out and the match
+      // never appears on their My Match-Up tab.
+      await tx.matchmakingLobby.update({
+        where: { id: joinerLobby.id },
+        data: { matchId: match.id },
+      })
+
+      // Cancel any other 'searching' lobbies for both teams so they don't
+      // resurface in Discover while the match-up is active.
+      const teamIdsToClear = [lobby.teamId, joinerLobby.teamId]
+        .filter((id): id is string => !!id)
+      if (teamIdsToClear.length > 0) {
+        await tx.matchmakingLobby.updateMany({
+          where: {
+            teamId: { in: teamIdsToClear },
+            status: 'searching',
+            id: { notIn: [lobby.id, joinerLobby.id] },
+          },
+          data: { status: 'cancelled' },
+        })
+      }
 
       return { interest, match, lobby, pick, joinerLobby }
     })
