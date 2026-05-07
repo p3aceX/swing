@@ -264,10 +264,12 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       _error = null;
       _stage = _Stage.celebrating;
     });
-    // Run search + minimum theatre time in parallel.
+    // Run search + minimum theatre time (4.5s) in parallel. If the API
+    // resolves first, we still wait for the cycling-text animation to play
+    // through. If the API takes longer, we hold on the last phase.
     await Future.wait([
       _runDiscover(skipCelebrate: true),
-      Future<void>.delayed(const Duration(milliseconds: 1200)),
+      Future<void>.delayed(const Duration(milliseconds: 4500)),
     ]);
     if (!mounted) return;
     setState(() {
@@ -1082,6 +1084,28 @@ String _ballLabel(String bt) => switch (bt) {
 
 // ─── CELEBRATE ──────────────────────────────────────────────────────────────
 
+// Single expanding ring used by the searching screen. Phase 0..1 → ring grows
+// from 0 to its max radius and fades from full opacity to 0.
+class _RadarPulse extends StatelessWidget {
+  const _RadarPulse({required this.phase, required this.color});
+  final double phase;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = 96 + 220 * phase;
+    final opacity = (1 - phase).clamp(0.0, 1.0) * 0.45;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: opacity), width: 2),
+      ),
+    );
+  }
+}
+
 class _DiscoverCelebrate extends StatefulWidget {
   const _DiscoverCelebrate();
 
@@ -1090,98 +1114,181 @@ class _DiscoverCelebrate extends StatefulWidget {
 }
 
 class _DiscoverCelebrateState extends State<_DiscoverCelebrate>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
+    with TickerProviderStateMixin {
+  late final AnimationController _entry;     // 0 → 1 over 4.5s, drives lines
+  late final AnimationController _radar;     // continuous, drives the rings
+  static const _phases = [
+    'Posting your match-up…',
+    'Looking for grounds…',
+    'Analysing slots…',
+    'Reading other teams\' availability…',
+    'Almost there…',
+  ];
 
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(
+    _entry = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 4500),
     )..forward();
+    _radar = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
   }
 
   @override
   void dispose() {
-    _c.dispose();
+    _entry.dispose();
+    _radar.dispose();
     super.dispose();
   }
 
-  Animation<double> _slice(double a, double b, {Curve curve = Curves.easeOutCubic}) =>
-      CurvedAnimation(parent: _c, curve: Interval(a, b, curve: curve));
-
   @override
   Widget build(BuildContext context) {
-    final wash = _slice(0.0, 0.30);
-    final check = _slice(0.30, 0.80, curve: Curves.elasticOut);
-    final text = _slice(0.50, 1.0);
-
     return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) => Stack(
-        alignment: Alignment.center,
-        children: [
-          // Radial wash
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  colors: [
-                    context.ctaBg.withValues(alpha: 0.30 * wash.value),
-                    context.bg,
-                  ],
-                  stops: const [0.0, 1.0],
+      animation: Listenable.merge([_entry, _radar]),
+      builder: (_, __) {
+        final t = _entry.value; // 0..1 across 4.5s
+        // Phase index — clamp to last phase if API runs longer than theatre.
+        final phaseIdx = (t * _phases.length).clamp(0, _phases.length - 1).floor();
+        final phaseProgress = (t * _phases.length) - phaseIdx;
+        final wash = (t * 4).clamp(0.0, 1.0); // wash fades in across first 25%
+
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Radial wash — atmosphere
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    colors: [
+                      context.ctaBg.withValues(alpha: 0.18 * wash),
+                      context.bg,
+                    ],
+                    stops: const [0.0, 1.0],
+                  ),
                 ),
               ),
             ),
-          ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Transform.scale(
-                scale: 0.4 + 0.6 * check.value,
-                child: Container(
-                  width: 120,
-                  height: 120,
+
+            // Radar rings — three expanding, repeating
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    for (int i = 0; i < 3; i++)
+                      _RadarPulse(
+                        phase: ((_radar.value + i / 3) % 1),
+                        color: context.ctaBg,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Pulsing core
+                Container(
+                  width: 96,
+                  height: 96,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: context.ctaBg,
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.ctaBg.withValues(alpha: 0.35),
+                        blurRadius: 28,
+                        spreadRadius: 4,
+                      ),
+                    ],
                   ),
                   alignment: Alignment.center,
-                  child: Icon(Icons.check_rounded,
-                      color: context.ctaFg, size: 64),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Opacity(
-                opacity: text.value,
-                child: Text(
-                  'Match-up posted',
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.6,
+                  child: Icon(
+                    Icons.radar_rounded,
+                    color: context.ctaFg,
+                    size: 44,
                   ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Opacity(
-                opacity: text.value,
-                child: Text(
-                  'Looking for teams…',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                const SizedBox(height: 36),
+                // Hero label — fixed
+                Opacity(
+                  opacity: (wash).clamp(0.0, 1.0),
+                  child: Text(
+                    'Searching',
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.8,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
+                const SizedBox(height: 10),
+                // Cycling sub-text
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 260),
+                  switchInCurve: Curves.easeOutCubic,
+                  transitionBuilder: (child, anim) {
+                    final slide = Tween<Offset>(
+                      begin: const Offset(0, 0.35),
+                      end: Offset.zero,
+                    ).animate(anim);
+                    return FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(position: slide, child: child),
+                    );
+                  },
+                  child: Text(
+                    _phases[phaseIdx],
+                    key: ValueKey<int>(phaseIdx),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.1,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                // Progress dots
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (int i = 0; i < _phases.length; i++) ...[
+                      Container(
+                        width: i == phaseIdx ? 18 : 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: i < phaseIdx
+                              ? context.ctaBg
+                              : i == phaseIdx
+                                  ? Color.lerp(
+                                      context.stroke.withValues(alpha: 0.5),
+                                      context.ctaBg,
+                                      phaseProgress,
+                                    )
+                                  : context.stroke.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      if (i < _phases.length - 1) const SizedBox(width: 6),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1311,7 +1418,7 @@ class _DiscoverResults extends StatelessWidget {
 
                 if (closest.isNotEmpty) ...[
                   _ResultsHeader(
-                    label: 'CLOSEST MATCHES',
+                    label: 'EXACT MATCHES',
                     count: closest.length,
                     accent: true,
                   ),
@@ -1325,18 +1432,52 @@ class _DiscoverResults extends StatelessWidget {
                       differs: r.differs,
                       onTap: () => onChallenge(r.lobby),
                     ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 22),
                 ] else ...[
+                  // No exact matches — make it loud so user understands.
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                    child: Text(
-                      _emptyClosestText(alternativeReason, alternatives.isNotEmpty),
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        height: 1.4,
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Color.alphaBlend(
+                          context.warn.withValues(alpha: 0.10),
+                          context.bg,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.info_rounded,
+                                  color: context.warn, size: 18),
+                              const SizedBox(width: 8),
+                              Text(
+                                'No match available on your preferences',
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            alternatives.isNotEmpty
+                                ? 'Showing closest matches below — these are teams whose preferences are near yours.'
+                                : 'Your match-up is posted. We\'ll notify you when a team matches.',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -1344,17 +1485,17 @@ class _DiscoverResults extends StatelessWidget {
 
                 if (alternatives.isNotEmpty) ...[
                   _ResultsHeader(
-                    label: alternativeReason == 'no_exact_matches'
-                        ? 'OTHER MATCHES NEAR YOU'
+                    label: closest.isEmpty
+                        ? 'CLOSEST MATCHES'
                         : 'ALSO AVAILABLE',
                     count: alternatives.length,
-                    accent: false,
+                    accent: closest.isEmpty,
                   ),
                   const SizedBox(height: 8),
                   for (final r in alternatives)
                     _LobbyTile(
                       lobby: r.lobby,
-                      prominent: false,
+                      prominent: closest.isEmpty,
                       score: r.score,
                       matchedOn: r.matchedOn,
                       differs: r.differs,
@@ -1925,26 +2066,114 @@ class _LobbyTile extends StatelessWidget {
   final List<String> matchedOn;
   final List<String> differs;
 
+  ({String month, String day, String slot}) _dateBits() {
+    String month = '';
+    String day = '';
+    try {
+      final d = DateTime.parse(lobby.date);
+      const months = [
+        '', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+        'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+      ];
+      month = months[d.month];
+      day = d.day.toString();
+    } catch (_) {}
+    String slot = '';
+    if (lobby.displaySlot.isNotEmpty) {
+      // "7:00 AM" → keep AM/PM uppercase
+      slot = lobby.displaySlot.toUpperCase();
+    } else if (lobby.timeWindow != null) {
+      slot = switch (lobby.timeWindow) {
+        'MORNING' => 'MORN',
+        'AFTERNOON' => 'NOON',
+        'EVENING' => 'EVE',
+        _ => lobby.timeWindow!,
+      };
+    }
+    return (month: month, day: day, slot: slot);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bits = _dateBits();
+    final tileColor = prominent
+        ? Color.alphaBlend(context.ctaBg.withValues(alpha: 0.10), context.bg)
+        : Color.alphaBlend(context.fg.withValues(alpha: 0.04), context.bg);
+    final monthColor = prominent ? context.ctaBg : context.fgSub;
+    final dayColor = context.fg;
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: tileColor,
+          borderRadius: BorderRadius.circular(14),
+        ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (prominent) ...[
-              Container(
-                width: 3,
-                height: 48,
-                color: context.match,
+            // ── Date+time hero tile ────────────────────────────────
+            Container(
+              width: 64,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: prominent
+                    ? context.ctaBg
+                    : Color.alphaBlend(
+                        context.fg.withValues(alpha: 0.08), context.bg),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 12),
-            ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    bits.month,
+                    style: TextStyle(
+                      color: prominent ? context.ctaFg : monthColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    bits.day,
+                    style: TextStyle(
+                      color: prominent ? context.ctaFg : dayColor,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.8,
+                      height: 1.0,
+                    ),
+                  ),
+                  if (bits.slot.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      bits.slot,
+                      style: TextStyle(
+                        color: prominent
+                            ? context.ctaFg.withValues(alpha: 0.85)
+                            : context.fgSub,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                        height: 1.0,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 14),
+            // ── Right side: team / ground / format / price + differs ──
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     lobby.teamName,
@@ -1959,7 +2188,16 @@ class _LobbyTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${lobby.dateLabel} · ${lobby.displaySlot.isNotEmpty ? lobby.displaySlot : (lobby.timeWindow ?? '')} · ${lobby.arenaName.isNotEmpty ? lobby.arenaName : (lobby.preferredArenaName ?? 'Any ground')}',
+                    [
+                      lobby.format,
+                      if (lobby.arenaName.isNotEmpty)
+                        lobby.arenaName
+                      else if (lobby.preferredArenaName != null)
+                        lobby.preferredArenaName!
+                      else
+                        'Any ground',
+                      '₹${(lobby.pricePerTeamPaise / 100).round()}',
+                    ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -1969,32 +2207,38 @@ class _LobbyTile extends StatelessWidget {
                     ),
                   ),
                   if (differs.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'differs: ${differs.join(', ')}',
-                      style: TextStyle(
-                        color: context.warn,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.4,
-                      ),
+                    const SizedBox(height: 5),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        for (final d in differs)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: context.warn.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'DIFF · ${d.toUpperCase()}',
+                              style: TextStyle(
+                                color: context.warn,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            Text(
-              '₹${(lobby.pricePerTeamPaise / 100).round()}',
-              style: TextStyle(
-                color: context.fg,
-                fontSize: 15,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Icon(Icons.arrow_forward_rounded, size: 18, color: context.fgSub),
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right_rounded,
+                color: context.fgSub.withValues(alpha: 0.7), size: 22),
           ],
         ),
       ),
