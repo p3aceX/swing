@@ -752,12 +752,33 @@ export class MatchmakingService {
       c.teamId ? [c.teamId] : [],
     )
     const ages = await this.getTeamAgeGroupsMap(teamIds)
+    console.log(
+      `[discover] caller=${team.id} date=${input.filters.date} ` +
+        `format=${input.filters.format} windowsRanked=${JSON.stringify(windowsRanked)} ` +
+        `groundsRanked=${JSON.stringify(groundsRanked)} candidates=${candidates.length} ` +
+        `callerAge=${callerAge ?? 'null'}`,
+    )
+    for (const c of candidates) {
+      console.log(
+        `  [candidate] id=${c.id} teamId=${c.teamId} format=${c.format} ` +
+          `windowsRanked=${JSON.stringify(c.windowsRanked)} ` +
+          `windowsMatched=${JSON.stringify(c.windowsMatched ?? [])} ` +
+          `preferredArenaIds=${JSON.stringify(c.preferredArenaIds ?? [])} ` +
+          `age=${ages.get(c.teamId) ?? 'null'}`,
+      )
+    }
 
     const scored = candidates
       .filter((c) => {
         if (c.teamId == null) return true
         const cAge = ages.get(c.teamId) ?? null
-        return areAgeGroupsCompatible(callerAge ?? null, cAge ?? null)
+        const compat = areAgeGroupsCompatible(callerAge ?? null, cAge ?? null)
+        if (!compat) {
+          console.log(
+            `  [skip] candidate=${c.id} reason=ageGroupMismatch caller=${callerAge} cand=${cAge}`,
+          )
+        }
+        return compat
       })
       .map((c) => {
         const s = this.scoreRankedCandidate({
@@ -767,12 +788,21 @@ export class MatchmakingService {
           callerBallType: input.filters.ballType ?? null,
           candidate: c,
         })
+        console.log(
+          `  [score] candidate=${c.id} value=${s.value.toFixed(3)} ` +
+            `intersects=${s.intersects} isPrimary=${s.isPrimary} ` +
+            `matchedOn=${JSON.stringify(s.matchedOn)} differs=${JSON.stringify(s.differs)}`,
+        )
         return { lobby: c, ...s }
       })
       // intersects: there exists at least one (window, ground) pair that
       // both lobbies share. No intersection = not even an alternative.
       .filter((s) => s.intersects)
       .sort((a, b) => b.value - a.value)
+    console.log(
+      `[discover] result primary=${scored.filter((s) => s.isPrimary).length} ` +
+        `alternatives=${scored.filter((s) => !s.isPrimary).length}`,
+    )
 
     // primary = caller rank-1 window AND candidate rank-1 window mutually
     // present in the other's ranked list AND the same for ground rank-1.
