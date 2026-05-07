@@ -611,10 +611,16 @@ export class MatchmakingService {
       .filter((s) => s.value > 0)
       .sort((a, b) => b.value - a.value)
 
-    const CLOSEST_THRESHOLD = 0.85
-    const closest = scored.filter((s) => s.value >= CLOSEST_THRESHOLD)
+    // Exact match = same calendar date as the caller. Score-only thresholds
+    // misled users into thinking a ±2-day suggestion was "exact". Date is a
+    // hard requirement now; everything else is an alternative.
+    const CLOSEST_MIN_SCORE = 0.7
+    const closest = scored.filter(
+      (s) => s.matchedOn.includes('date') && s.value >= CLOSEST_MIN_SCORE,
+    )
+    const closestIds = new Set(closest.map((s) => s.lobby.id))
     const alternatives = scored
-      .filter((s) => s.value < CLOSEST_THRESHOLD)
+      .filter((s) => !closestIds.has(s.lobby.id))
       .slice(0, 10)
 
     let alternativeReason: string | null = null
