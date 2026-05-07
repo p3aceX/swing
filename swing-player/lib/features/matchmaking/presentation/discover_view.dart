@@ -357,13 +357,62 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     } catch (e) {
       _log('runDiscover error: $e');
       if (!mounted) return;
+      // Slot-conflict (409) gets a friendly dialog instead of a raw error.
+      // Backend response shape: { success:false, error:{ code, message, details } }
+      if (e is DioException) {
+        final data = e.response?.data;
+        if (data is Map && data['error'] is Map) {
+          final err = data['error'] as Map;
+          if (err['code'] == 'SLOT_CONFLICT') {
+            setState(() {
+              _submitting = false;
+              _error = null;
+              if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+            });
+            _showSlotConflictDialog(err);
+            return;
+          }
+        }
+      }
       setState(() {
         _submitting = false;
         _error = _extractServerError(e);
-        // If we were celebrating, fall back to setup so the user sees the error.
         if (_stage == _Stage.celebrating) _stage = _Stage.setup;
       });
     }
+  }
+
+  void _showSlotConflictDialog(Map err) {
+    final details = (err['details'] is Map) ? err['details'] as Map : const {};
+    final opponent = (details['opponentTeamName'] as String?) ?? 'another team';
+    final range = (details['conflictRange'] as String?) ?? '';
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ctx.bg,
+        title: Text(
+          'You\'re already booked',
+          style: TextStyle(
+            color: ctx.fg,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.3,
+          ),
+        ),
+        content: Text(
+          range.isNotEmpty
+              ? 'Your team has a match-up $range on this date vs $opponent. Pick another window or open the match-up.'
+              : 'Your team already has a match-up on this date vs $opponent.',
+          style: TextStyle(color: ctx.fgSub, fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Pick another window',
+                style: TextStyle(color: ctx.fg, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
   }
 
   // Surface the actual server reason instead of just "DioException".
@@ -371,8 +420,14 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     if (e is DioException) {
       final data = e.response?.data;
       if (data is Map) {
-        final msg = (data['error'] ?? data['message'])?.toString();
-        if (msg != null && msg.isNotEmpty) return msg;
+        // Backend shape: { error: { code, message, details } }
+        if (data['error'] is Map) {
+          final err = data['error'] as Map;
+          final msg = err['message']?.toString();
+          if (msg != null && msg.isNotEmpty) return msg;
+        }
+        final msg = (data['message'] ?? data['error'])?.toString();
+        if (msg != null && msg.isNotEmpty && msg != '{}') return msg;
       }
       final code = e.response?.statusCode;
       if (code != null) return 'Request failed ($code).';

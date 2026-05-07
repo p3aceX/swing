@@ -5,6 +5,13 @@ import { ArenaService } from '../arenas/arena.service'
 import { NotificationService } from '../notifications/notification.service'
 import Razorpay from 'razorpay'
 import { areAgeGroupsCompatible } from './matchmaking.utils'
+import {
+  unionWindowRange,
+  matchInterval,
+  intervalsOverlap,
+  formatRange,
+  type TimeWindow,
+} from './time-windows'
 
 const notificationService = new NotificationService()
 
@@ -517,11 +524,11 @@ export class MatchmakingService {
       )
     }
 
-    // One active match-up per team. If this team is already in a non-final
-    // match (pending_payment / confirmed / setup / started), refuse to
-    // create or recycle a searching lobby — they need to finish or cancel
-    // the existing match-up first. Without this, the auto-refresh ticker
-    // would keep regenerating searching lobbies even after a match exists.
+    // Slot-conflict guard. A team can have multiple match-ups across
+    // different dates and non-overlapping windows. Reject only when the
+    // requested time-window range overlaps an existing non-final match
+    // on the same date. Half-open intervals — back-to-back is allowed
+    // (existing match ending 10:00 doesn't conflict with new search at 10:00+).
     const lobbiesWithActiveMatch = await prisma.matchmakingLobby.findMany({
       where: {
         teamId: team.id,
@@ -530,22 +537,50 @@ export class MatchmakingService {
       },
       select: { matchId: true },
     })
-    if (lobbiesWithActiveMatch.length > 0) {
-      const matchIds = lobbiesWithActiveMatch
-        .map((l) => l.matchId)
-        .filter((id): id is string => !!id)
-      const activeMatch = await prisma.matchmakingMatch.findFirst({
+    const activeMatchIds = lobbiesWithActiveMatch
+      .map((l) => l.matchId)
+      .filter((id): id is string => !!id)
+    if (activeMatchIds.length > 0) {
+      const sameDateMatches = await prisma.matchmakingMatch.findMany({
         where: {
-          id: { in: matchIds },
+          id: { in: activeMatchIds },
           status: { in: ['pending_payment', 'confirmed', 'setup', 'started'] },
+          date,
         },
+        select: { id: true, slotTime: true, format: true, lobbyAId: true, lobbyBId: true },
       })
-      if (activeMatch) {
-        throw new AppError(
-          'TEAM_HAS_ACTIVE_MATCH',
-          'This team already has an active match-up. Finish or cancel it before searching again.',
-          400,
-        )
+      if (sameDateMatches.length > 0) {
+        const requestedRange = unionWindowRange(input.filters.timeWindows as TimeWindow[])
+        for (const m of sameDateMatches) {
+          const existing = matchInterval(m.slotTime, m.format)
+          if (!existing) continue
+          if (intervalsOverlap(
+            existing.startMin, existing.endMin,
+            requestedRange.startMin, requestedRange.endMin,
+          )) {
+            // Resolve opponent team name for a friendlier error.
+            const otherLobbyId = m.lobbyAId // start from A; pick the side that's NOT this team
+            const lobbies = await prisma.matchmakingLobby.findMany({
+              where: { id: { in: [m.lobbyAId, m.lobbyBId] } },
+              include: { team: { select: { name: true } } },
+            })
+            const opponentLobby = lobbies.find((l) => l.teamId !== team.id)
+              ?? lobbies.find((l) => l.id !== otherLobbyId)
+            const opponentName = opponentLobby?.team?.name ?? 'another team'
+            throw new AppError(
+              'SLOT_CONFLICT',
+              `Your team is already booked ${formatRange(existing.startMin, existing.endMin)} on this date vs ${opponentName}. Pick another window or open the match-up.`,
+              409,
+              {
+                existingMatchId: m.id,
+                opponentTeamName: opponentName,
+                conflictRange: formatRange(existing.startMin, existing.endMin),
+                conflictStartMin: existing.startMin,
+                conflictEndMin: existing.endMin,
+              },
+            )
+          }
+        }
       }
     }
 
