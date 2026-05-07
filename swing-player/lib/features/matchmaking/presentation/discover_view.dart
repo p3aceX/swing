@@ -746,6 +746,26 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           onRefresh: _runDiscover,
           onCancel: _cancelSearch,
           onChallenge: (lobby) => widget.onChallenge(lobby, _currentTeam),
+          onSwitchDate: (newDateApi) async {
+            // Move active results to the picked date and re-run discover.
+            DateTime? d;
+            try {
+              d = DateTime.parse(newDateApi);
+            } catch (_) {}
+            if (d == null) return;
+            setState(() {
+              _prefs.date = d!;
+              if (_prefs.dates.isNotEmpty &&
+                  !_prefs.dates.any(
+                      (x) => x.toIso8601String().startsWith(newDateApi))) {
+                _prefs.dates = [..._prefs.dates, d!];
+              }
+              // Clear current results while the new date loads.
+              _primary = const [];
+              _alternatives = const [];
+            });
+            await _runDiscover(skipCelebrate: true);
+          },
         ),
     };
   }
@@ -1976,6 +1996,7 @@ class _DiscoverResults extends StatelessWidget {
     required this.onRefresh,
     required this.onCancel,
     required this.onChallenge,
+    required this.onSwitchDate,
   });
 
   final _Prefs prefs;
@@ -1996,6 +2017,9 @@ class _DiscoverResults extends StatelessWidget {
   final Future<void> Function({bool skipCelebrate}) onRefresh;
   final VoidCallback onCancel;
   final ValueChanged<MmOpenLobby> onChallenge;
+  // Tap a date in the submitted-dates strip → switch active results to
+  // that date. Caller flips _prefs.date and re-runs discover.
+  final ValueChanged<String> onSwitchDate;
 
   @override
   Widget build(BuildContext context) {
@@ -2045,6 +2069,7 @@ class _DiscoverResults extends StatelessWidget {
             child: _OtherDatesStrip(
               submitted: submittedLobbies,
               activeDateApi: prefs.dateApi,
+              onSelect: onSwitchDate,
             ),
           ),
         Expanded(
@@ -2238,17 +2263,17 @@ class _IconPillButton extends StatelessWidget {
   }
 }
 
-// Read-only strip listing every date the user submitted via the multi-date
-// wizard. Highlights the date currently visible on the Results screen.
-// Tapping a chip is a no-op in v1 — the user uses the Modify wizard to
-// switch dates. See SUMMARY for the simplification rationale.
+// Strip listing every date the user submitted via the multi-date wizard.
+// Highlights the active date; tap any other to switch results to that date.
 class _OtherDatesStrip extends StatelessWidget {
   const _OtherDatesStrip({
     required this.submitted,
     required this.activeDateApi,
+    required this.onSelect,
   });
   final List<({String date, String lobbyId})> submitted;
   final String activeDateApi;
+  final ValueChanged<String> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -2266,26 +2291,30 @@ class _OtherDatesStrip extends StatelessWidget {
             dt = DateTime.parse(s.date);
           } catch (_) {}
           final label = dt != null ? _dateLabel(dt) : s.date;
-          return Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: active
-                  ? context.ctaBg
-                  : Color.alphaBlend(
-                      context.fg.withValues(alpha: 0.06),
-                      context.bg,
-                    ),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: active ? context.ctaFg : context.fg,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.1,
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: active ? null : () => onSelect(s.date),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: active
+                    ? context.ctaBg
+                    : Color.alphaBlend(
+                        context.fg.withValues(alpha: 0.06),
+                        context.bg,
+                      ),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: active ? context.ctaFg : context.fg,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.1,
+                ),
               ),
             ),
           );
