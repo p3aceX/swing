@@ -10,6 +10,8 @@ import {
   matchInterval,
   intervalsOverlap,
   formatRange,
+  bucketForSlotTime,
+  WINDOW_RANGES,
   type TimeWindow,
 } from './time-windows'
 
@@ -190,7 +192,7 @@ export class MatchmakingService {
     // Preference-lobby fields (Discover flow). When provided, picks may be
     // empty and the lobby is matched against other preference-lobbies on the
     // same date+format+window+arena (or any arena if both are null).
-    timeWindow?: 'MORNING' | 'AFTERNOON' | 'EVENING' | null
+    timeWindow?: TimeWindow | null
     preferredArenaId?: string | null
   }) {
     const isPreferenceMode = input.picks.length === 0
@@ -473,7 +475,7 @@ export class MatchmakingService {
         date: string
         format: MatchmakingFormat
         ballType?: string | null
-        timeWindows: Array<'MORNING' | 'AFTERNOON' | 'EVENING'>
+        timeWindows: Array<TimeWindow>
         preferredArenaId?: string | null
       }
       context?: { lat?: number; lng?: number }
@@ -768,16 +770,15 @@ export class MatchmakingService {
   // No windows → fall back to legacy 24h.
   private computeDiscoverExpiry(
     date: Date,
-    timeWindows: Array<'MORNING' | 'AFTERNOON' | 'EVENING'>,
+    timeWindows: Array<TimeWindow>,
   ): Date {
     if (timeWindows.length === 0) {
       return new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
     }
-    const latestEndHour = Math.max(
-      ...timeWindows.map((w) => this.timeWindowEndHour(w)),
+    const latestEndMin = Math.max(
+      ...timeWindows.map((w) => this.timeWindowEndMin(w)),
     )
-    const offsetMs =
-      latestEndHour * 60 * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
+    const offsetMs = latestEndMin * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
     return new Date(date.getTime() + offsetMs)
   }
 
@@ -936,7 +937,7 @@ export class MatchmakingService {
     ageGroup?: string
     arenaId?: string
     // Discover-flow filters:
-    timeWindow?: 'MORNING' | 'AFTERNOON' | 'EVENING'
+    timeWindow?: TimeWindow
     preferredArenaId?: string
   }) {
     // Arena owner path: return lobbies for this arena without player-specific filters
@@ -2247,40 +2248,40 @@ export class MatchmakingService {
   }
 
   // ── Time-window helpers (Discover-flow preferences) ────────────────────────
-  // Hour ranges (24h, IST-anchored):
-  //   MORNING   06:00 – 12:00
-  //   AFTERNOON 12:00 – 18:00
-  //   EVENING   18:00 – next-day 04:00 (covers night)
+  // Single source of truth for window ranges lives in time-windows.ts. The
+  // wrappers here just glue those minute-level helpers into the date+UTC
+  // expiry math that the lobby/sweeper code uses.
   //
-  // We work in UTC against a date that is already a UTC start-of-day. The
-  // window-end calculation just adds the right number of hours from that
-  // anchor, expressed as IST-aligned UTC.
-  private timeWindowEndHour(timeWindow: string): number {
-    if (timeWindow === 'MORNING') return 12
-    if (timeWindow === 'AFTERNOON') return 18
-    // EVENING ends at 04:00 the next day → 28 hours past start-of-day.
-    return 28
+  // 5-bucket model (IST-anchored):
+  //   MORNING    06:30 – 11:30
+  //   AFTERNOON  11:30 – 16:30
+  //   EVENING    16:30 – 20:30
+  //   NIGHT      20:30 – 23:30
+  //   LATE_NIGHT 23:30 – next-day 04:00
+
+  // End-of-window expressed as minutes-past-start-of-day in IST. LATE_NIGHT
+  // is 28*60 = 1680 because it bleeds past midnight.
+  private timeWindowEndMin(timeWindow: string): number {
+    const w = timeWindow as TimeWindow
+    return WINDOW_RANGES[w]?.endMin ?? WINDOW_RANGES.LATE_NIGHT.endMin
   }
 
   // Returns the UTC instant when a preference-lobby for `date` + `timeWindow`
   // should expire. Date is the lobby's startOfDay (UTC). IST is UTC+5:30 so
   // the window expressed in UTC is offset by -5:30.
   private timeWindowExpiry(date: Date, timeWindow: string): Date {
-    const endHour = this.timeWindowEndHour(timeWindow)
+    const endMin = this.timeWindowEndMin(timeWindow)
     // ms since the UTC start-of-day of `date`, minus IST offset (5h30m).
-    const offsetMs = endHour * 60 * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
+    const offsetMs = endMin * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
     return new Date(date.getTime() + offsetMs)
   }
 
   // Maps a slot start time ("HH:mm", IST) to the bucket that contains it.
-  // Used when bridging legacy slot-precise lobbies into the new window-based
-  // discovery filter.
-  private slotTimeWindow(slotTime: string): 'MORNING' | 'AFTERNOON' | 'EVENING' {
-    const [h] = slotTime.split(':').map(Number)
-    const hour = h ?? 0
-    if (hour >= 6 && hour < 12) return 'MORNING'
-    if (hour >= 12 && hour < 18) return 'AFTERNOON'
-    return 'EVENING'
+  // Used when bridging legacy slot-precise lobbies into window-based filters.
+  // Falls back to LATE_NIGHT for unparseable input (preserves prior behaviour
+  // where late-night-ish slots ended up in the old EVENING bucket).
+  private slotTimeWindow(slotTime: string): TimeWindow {
+    return bucketForSlotTime(slotTime) ?? 'LATE_NIGHT'
   }
 
   // Returns true when a lobby's slot time is in the past for today (IST).

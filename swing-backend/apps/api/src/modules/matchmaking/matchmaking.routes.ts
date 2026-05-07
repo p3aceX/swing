@@ -32,7 +32,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
   app.post('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const ballTypeSchema = z.enum(['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']).optional()
-    const timeWindowSchema = z.enum(['MORNING', 'AFTERNOON', 'EVENING']).optional()
+    const timeWindowSchema = z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'LATE_NIGHT']).optional()
     const body = z.object({
       teamId: z.string(),
       format: formatSchema,
@@ -79,7 +79,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
   app.post('/discover', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const ballTypeSchema = z.enum(['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']).optional()
-    const timeWindowVal = z.enum(['MORNING', 'AFTERNOON', 'EVENING'])
+    const timeWindowVal = z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'LATE_NIGHT'])
     const body = z.object({
       teamId: z.string(),
       filters: z.object({
@@ -142,7 +142,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
 
   app.get('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    const timeWindowSchema = z.enum(['MORNING', 'AFTERNOON', 'EVENING']).optional()
+    const timeWindowSchema = z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'LATE_NIGHT']).optional()
     const q = z.object({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       format: formatSchema.optional(),

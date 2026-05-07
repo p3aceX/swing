@@ -25,35 +25,43 @@ void _log(String msg) => debugPrint('[Discover] $msg');
 
 enum _Stage { intro, setup, celebrating, results }
 
-// Time-window enum mirrored from backend.
-enum DiscoverWindow { morning, afternoon, evening }
+// Time-window enum mirrored from backend (5-bucket model).
+enum DiscoverWindow { morning, afternoon, evening, night, lateNight }
 
 extension _DiscoverWindowApi on DiscoverWindow {
   String get apiValue => switch (this) {
         DiscoverWindow.morning => 'MORNING',
         DiscoverWindow.afternoon => 'AFTERNOON',
         DiscoverWindow.evening => 'EVENING',
+        DiscoverWindow.night => 'NIGHT',
+        DiscoverWindow.lateNight => 'LATE_NIGHT',
       };
   String get label => switch (this) {
         DiscoverWindow.morning => 'Morning',
         DiscoverWindow.afternoon => 'Afternoon',
         DiscoverWindow.evening => 'Evening',
+        DiscoverWindow.night => 'Night',
+        DiscoverWindow.lateNight => 'Late night',
       };
   String get hint => switch (this) {
-        DiscoverWindow.morning => '6 AM – 12 PM',
-        DiscoverWindow.afternoon => '12 PM – 6 PM',
-        DiscoverWindow.evening => '6 PM onwards',
+        DiscoverWindow.morning => '6:30 AM – 11:30 AM',
+        DiscoverWindow.afternoon => '11:30 AM – 4:30 PM',
+        DiscoverWindow.evening => '4:30 PM – 8:30 PM',
+        DiscoverWindow.night => '8:30 PM – 11:30 PM',
+        DiscoverWindow.lateNight => '11:30 PM – 4 AM',
       };
-  // Hour at which this window ends, expressed as hours past start-of-day in
-  // local clock (so EVENING is 28 = 04:00 next day).
-  int get _endHour => switch (this) {
-        DiscoverWindow.morning => 12,
-        DiscoverWindow.afternoon => 18,
-        DiscoverWindow.evening => 28,
+  // Minutes past start-of-day at which this window ends. LATE_NIGHT = 28*60
+  // since it bleeds into the next day.
+  int get _endMin => switch (this) {
+        DiscoverWindow.morning => 11 * 60 + 30,
+        DiscoverWindow.afternoon => 16 * 60 + 30,
+        DiscoverWindow.evening => 20 * 60 + 30,
+        DiscoverWindow.night => 23 * 60 + 30,
+        DiscoverWindow.lateNight => 28 * 60,
       };
   bool isPast(DateTime date) {
     final end = DateTime(date.year, date.month, date.day)
-        .add(Duration(hours: _endHour));
+        .add(Duration(minutes: _endMin));
     return DateTime.now().isAfter(end);
   }
 }
@@ -62,6 +70,8 @@ DiscoverWindow? _parseWindow(String? s) => switch (s) {
       'MORNING' => DiscoverWindow.morning,
       'AFTERNOON' => DiscoverWindow.afternoon,
       'EVENING' => DiscoverWindow.evening,
+      'NIGHT' => DiscoverWindow.night,
+      'LATE_NIGHT' => DiscoverWindow.lateNight,
       _ => null,
     };
 
@@ -273,16 +283,9 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   bool _isAllWindowsPassed(DateTime date, Set<DiscoverWindow> windows) {
     if (windows.isEmpty) return false;
     final now = DateTime.now();
-    return windows.every((w) {
-      final endHour = switch (w) {
-        DiscoverWindow.morning => 12,
-        DiscoverWindow.afternoon => 18,
-        DiscoverWindow.evening => 28,
-      };
-      final end = DateTime(date.year, date.month, date.day)
-          .add(Duration(hours: endHour));
-      return now.isAfter(end);
-    });
+    // Delegates to DiscoverWindow.isPast, which uses the canonical end
+    // minutes (matches backend WINDOW_RANGES).
+    return windows.every((w) => w.isPast(date));
   }
 
   // ── Stage transitions ──────────────────────────────────────────────────────
@@ -2013,10 +2016,24 @@ class _WindowCard extends StatelessWidget {
           ],
         ),
       DiscoverWindow.evening => (
+          icon: Icons.wb_twilight_rounded,
+          grad: [
+            const Color(0xFFE08A4F),
+            const Color(0xFF8E3D5A),
+          ],
+        ),
+      DiscoverWindow.night => (
           icon: Icons.nightlight_round,
           grad: [
             const Color(0xFF6E7CD9),
             const Color(0xFF3D2B6E),
+          ],
+        ),
+      DiscoverWindow.lateNight => (
+          icon: Icons.bedtime_rounded,
+          grad: [
+            const Color(0xFF2B2B5C),
+            const Color(0xFF14142B),
           ],
         ),
     };
