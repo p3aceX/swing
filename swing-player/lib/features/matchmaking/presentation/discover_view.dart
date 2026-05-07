@@ -75,6 +75,10 @@ DiscoverWindow? _parseWindow(String? s) => switch (s) {
       _ => null,
     };
 
+// One entry in the preferred-grounds list. Up to 3 of these are stored on
+// _Prefs.preferredArenas. Backed by the lobby's preferredArenaIds field.
+typedef MmArenaPick = ({String id, String name});
+
 // ── Preferences container ───────────────────────────────────────────────────
 
 class _Prefs {
@@ -84,10 +88,10 @@ class _Prefs {
     this.ballType,
     DateTime? date,
     Set<DiscoverWindow>? windows,
-    this.preferredArenaId,
-    this.preferredArenaName,
+    List<MmArenaPick>? preferredArenas,
   })  : date = date ?? DateTime.now(),
-        windows = windows ?? <DiscoverWindow>{};
+        windows = windows ?? <DiscoverWindow>{},
+        preferredArenas = preferredArenas ?? <MmArenaPick>[];
 
   // Team comes from the team-switcher chip on DiscoverView, NOT from prefs.
   MatchFormat format;
@@ -95,8 +99,22 @@ class _Prefs {
   String? ballType; // null = "All ball types" picked
   DateTime date;
   Set<DiscoverWindow> windows; // empty = open to any window
-  String? preferredArenaId;
-  String? preferredArenaName;
+  // Up to 3 grounds the team would accept. Empty = "Any nearby ground."
+  List<MmArenaPick> preferredArenas;
+
+  // Legacy accessors kept for places (Results header, etc.) that still expect
+  // a single ground for display. Returns first picked or null.
+  String? get preferredArenaId =>
+      preferredArenas.isEmpty ? null : preferredArenas.first.id;
+  String? get preferredArenaName =>
+      preferredArenas.isEmpty ? null : preferredArenas.first.name;
+  List<String> get preferredArenaIdList =>
+      preferredArenas.map((a) => a.id).toList();
+  String get preferredArenasLabel {
+    if (preferredArenas.isEmpty) return 'Any nearby';
+    if (preferredArenas.length == 1) return preferredArenas.first.name;
+    return '${preferredArenas.first.name} + ${preferredArenas.length - 1} more';
+  }
 
   // Multi-window: at least one window picked OR user is open to any (empty
   // also OK — empty means "any window"). For now require at least one to
@@ -227,10 +245,21 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     final w = _parseWindow(lobby.timeWindow);
     setState(() {
       _activeLobbyId = lobby.lobbyId;
+      // Single legacy preferredArenaId on the lobby summary becomes a
+      // 1-element preferredArenas list when present.
+      final hydratedArenas = <MmArenaPick>[];
+      if (lobby.preferredArenaId != null && lobby.preferredArenaId!.isNotEmpty) {
+        // MmTeamLobbySummary doesn't carry the arena name; placeholder until
+        // user re-opens the picker (which fetches names by ID).
+        hydratedArenas.add((
+          id: lobby.preferredArenaId!,
+          name: 'Selected ground',
+        ));
+      }
       _prefs
         ..date = d ?? _prefs.date
         ..ballType = lobby.ballType
-        ..preferredArenaId = lobby.preferredArenaId
+        ..preferredArenas = hydratedArenas
         // Multi-window stored as null on the lobby = "open to any". Single
         // window restores into the set; null leaves the set empty.
         ..windows = (w != null ? {w} : <DiscoverWindow>{})
@@ -332,6 +361,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         ballType: _prefs.ballType,
         timeWindows: _prefs.windowsApi,
         preferredArenaId: _prefs.preferredArenaId,
+        preferredArenaIds: _prefs.preferredArenaIdList,
       );
       if (!mounted) return;
       setState(() {
@@ -1122,44 +1152,65 @@ class _WhereStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final picks = prefs.preferredArenas;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _CardGroup(
           children: [
             _SetupRow(
-              label: 'PREFERRED GROUND',
-              value: prefs.preferredArenaName ?? 'Any nearby',
+              label: 'PREFERRED GROUNDS',
+              value: prefs.preferredArenasLabel,
               placeholder: 'Any nearby',
               icon: Icons.place_rounded,
               tint: context.accent,
               onTap: () async {
-                final picked = await _pickArena(
+                final picked = await _pickArenas(
                   context,
                   ref,
                   prefs.dateApi,
                   prefs.format.apiValue,
+                  prefs.preferredArenas,
                 );
                 if (picked == null) return;
-                if (picked.id == '') {
-                  prefs.preferredArenaId = null;
-                  prefs.preferredArenaName = null;
-                } else {
-                  prefs.preferredArenaId = picked.id;
-                  prefs.preferredArenaName = picked.name;
-                }
+                prefs.preferredArenas = picked;
                 onChanged();
               },
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        if (picks.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final p in picks)
+                  _GroundChip(
+                    label: p.name,
+                    onRemove: () {
+                      prefs.preferredArenas = [
+                        for (final x in prefs.preferredArenas)
+                          if (x.id != p.id) x,
+                      ];
+                      onChanged();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Text(
-            prefs.preferredArenaId != null
-                ? 'Filtering by ground reduces match chances.'
-                : 'Leave as "Any nearby" for the most matches. Pick a ground only if you must play there.',
+            picks.isEmpty
+                ? 'Leave empty for any nearby ground (most matches). Pick up to 3 grounds you\'d like to play at.'
+                : picks.length == 3
+                    ? '3 grounds picked — opponents who like any of these will match.'
+                    : 'Picked ${picks.length} ground${picks.length == 1 ? '' : 's'}. Tap above to add more (up to 3).',
             style: TextStyle(
               color: context.fgSub,
               fontSize: 12,
@@ -1169,6 +1220,50 @@ class _WhereStep extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _GroundChip extends StatelessWidget {
+  const _GroundChip({required this.label, required this.onRemove});
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: context.fg.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.1,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: onRemove,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Icon(Icons.close_rounded,
+                  size: 14, color: context.fgSub),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2782,6 +2877,243 @@ class _PickerRow extends StatelessWidget {
   }
 }
 
+// Multi-select picker. Returns the new list (0-3 grounds) or null if user
+// dismisses without saving. Empty list = "any nearby ground" (the default).
+Future<List<MmArenaPick>?> _pickArenas(
+  BuildContext context,
+  WidgetRef ref,
+  String dateApi,
+  String formatApi,
+  List<MmArenaPick> initial,
+) {
+  final query = (
+    date: dateApi,
+    format: formatApi,
+    teamId: null,
+    overs: null,
+  );
+  final selected = <String, String>{
+    for (final p in initial) p.id: p.name,
+  };
+  return showModalBottomSheet<List<MmArenaPick>>(
+    context: context,
+    backgroundColor: context.bg,
+    isScrollControlled: true,
+    builder: (sheetCtx) {
+      return StatefulBuilder(
+        builder: (ctxSB, setSB) {
+          return Consumer(
+            builder: (consumerCtx, ref, _) {
+              final asyncGrounds = ref.watch(mmGroundsProvider(query));
+              return SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Choose up to 3 grounds',
+                              style: TextStyle(
+                                color: context.fg,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${selected.length}/3',
+                            style: TextStyle(
+                              color: context.fgSub,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                      child: Text(
+                        'Empty = any nearby ground (most matches).',
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      height: 1,
+                      color: context.stroke.withValues(alpha: 0.18),
+                    ),
+                    Flexible(
+                      child: asyncGrounds.when(
+                        loading: () => const Padding(
+                          padding: EdgeInsets.all(28),
+                          child: Center(
+                              child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.2))),
+                        ),
+                        error: (_, __) => Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            'Could not load grounds.',
+                            style: TextStyle(
+                                color: context.fgSub, fontSize: 13),
+                          ),
+                        ),
+                        data: (grounds) {
+                          final arenas = <String, String>{};
+                          for (final g in grounds) {
+                            arenas[g.id] = g.name;
+                          }
+                          final entries = arenas.entries.toList()
+                            ..sort((a, b) => a.value.compareTo(b.value));
+                          if (entries.isEmpty) {
+                            return Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Text(
+                                'No grounds for this date.',
+                                style: TextStyle(
+                                    color: context.fgSub, fontSize: 13),
+                              ),
+                            );
+                          }
+                          return ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: entries.length,
+                            itemBuilder: (_, i) {
+                              final e = entries[i];
+                              final isSelected = selected.containsKey(e.key);
+                              final atCap =
+                                  selected.length >= 3 && !isSelected;
+                              return GestureDetector(
+                                onTap: atCap
+                                    ? null
+                                    : () {
+                                        setSB(() {
+                                          if (isSelected) {
+                                            selected.remove(e.key);
+                                          } else {
+                                            selected[e.key] = e.value;
+                                          }
+                                        });
+                                      },
+                                behavior: HitTestBehavior.opaque,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 20, vertical: 14),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        isSelected
+                                            ? Icons.check_box_rounded
+                                            : Icons
+                                                .check_box_outline_blank_rounded,
+                                        size: 22,
+                                        color: isSelected
+                                            ? context.ctaBg
+                                            : (atCap
+                                                ? context.fgSub
+                                                    .withValues(alpha: 0.4)
+                                                : context.fgSub),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Text(
+                                          e.value,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: atCap
+                                                ? context.fgSub
+                                                : context.fg,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    Container(
+                      height: 1,
+                      color: context.stroke.withValues(alpha: 0.18),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                      child: Row(
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.of(sheetCtx).pop(),
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          ElevatedButton(
+                            onPressed: () => Navigator.of(sheetCtx).pop([
+                              for (final entry in selected.entries)
+                                (id: entry.key, name: entry.value),
+                            ]),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: context.ctaBg,
+                              foregroundColor: context.ctaFg,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 22, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(
+                              selected.isEmpty
+                                  ? 'Use any nearby'
+                                  : 'Save (${selected.length})',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      );
+    },
+  );
+}
+
+// Old single-select picker (deprecated but kept for any legacy callsites
+// that haven't migrated to _pickArenas yet).
+// ignore: unused_element
 Future<({String id, String name})?> _pickArena(
   BuildContext context,
   WidgetRef ref,
