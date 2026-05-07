@@ -399,6 +399,429 @@ export class MatchmakingService {
     return out
   }
 
+  // ── Discover (preference-based search with ranking + alternatives) ─────────
+
+  // Returns one active (or recent) lobby per team the caller belongs to. Used
+  // by the team-switcher chip so the user can see, at a glance, which of
+  // their teams are currently searching.
+  async listMyActiveLobbies(userId: string) {
+    const player = await this.getPlayerProfile(userId)
+    const myTeams = await prisma.team.findMany({
+      where: {
+        OR: [
+          { captainId: player.id },
+          { createdByUserId: userId },
+          { playerIds: { has: player.id } },
+        ],
+      },
+      select: { id: true, name: true, logoUrl: true },
+    })
+    if (myTeams.length === 0) return { teams: [], lobbies: [] }
+    const lobbies = await prisma.matchmakingLobby.findMany({
+      where: {
+        teamId: { in: myTeams.map((t) => t.id) },
+        status: { in: ['searching', 'matched', 'confirmed'] },
+        expiresAt: { gt: new Date() },
+      },
+      include: { team: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    // De-dupe to one lobby per team (most recent wins).
+    const byTeam = new Map<string, any>()
+    for (const l of lobbies) {
+      if (!l.teamId) continue
+      if (!byTeam.has(l.teamId)) byTeam.set(l.teamId, l)
+    }
+    return {
+      teams: myTeams.map((t) => ({
+        id: t.id,
+        name: t.name,
+        logoUrl: t.logoUrl,
+      })),
+      lobbies: Array.from(byTeam.values()).map((l: any) => ({
+        lobbyId: l.id,
+        teamId: l.teamId,
+        teamName: l.team?.name ?? null,
+        status: l.status,
+        date: this.toDateOnly(l.date),
+        format: l.format,
+        ballType: l.ballType ?? null,
+        timeWindow: l.timeWindow ?? null,
+        preferredArenaId: l.preferredArenaId ?? null,
+      })),
+    }
+  }
+
+  // Single-shot discovery: ensures a team-owned lobby (find/create/update),
+  // then runs scored search across the open lobbies. Returns ranked closest +
+  // alternatives in one round trip.
+  async discoverLobbies(
+    userId: string,
+    input: {
+      teamId: string
+      filters: {
+        date: string
+        format: MatchmakingFormat
+        ballType?: string | null
+        timeWindows: Array<'MORNING' | 'AFTERNOON' | 'EVENING'>
+        preferredArenaId?: string | null
+      }
+      context?: { lat?: number; lng?: number }
+    },
+  ) {
+    const player = await this.getPlayerProfile(userId)
+    const team = await prisma.team.findUnique({
+      where: { id: input.teamId },
+      select: {
+        id: true,
+        captainId: true,
+        createdByUserId: true,
+        playerIds: true,
+      },
+    })
+    if (!team) throw Errors.notFound('Team')
+    const isMember =
+      team.captainId === player.id ||
+      team.createdByUserId === userId ||
+      team.playerIds.includes(player.id)
+    if (!isMember) throw Errors.forbidden()
+
+    const date = this.startOfDay(input.filters.date)
+    const callerAge = await this.getTeamAgeGroup(team.id)
+
+    // Multi-window: when user picks 1 window we store it; when multiple (or
+    // all 3) we store NULL meaning "team is flexible across windows" — that
+    // makes them match any other lobby's specific window in score logic.
+    const lobbyTimeWindow =
+      input.filters.timeWindows.length === 1
+        ? input.filters.timeWindows[0]
+        : null
+
+    const expiresAt = this.computeDiscoverExpiry(
+      date,
+      input.filters.timeWindows,
+    )
+
+    // Ensure team-uniqueness: find/update existing or create a new one.
+    const yourLobby = await prisma.$transaction(async (tx) => {
+      const existing = await tx.matchmakingLobby.findFirst({
+        where: {
+          teamId: team.id,
+          status: 'searching',
+          expiresAt: { gt: new Date() },
+        },
+      })
+      if (existing) {
+        return await tx.matchmakingLobby.update({
+          where: { id: existing.id },
+          data: {
+            playerId: player.id, // re-assign to current member
+            format: input.filters.format,
+            ballType: input.filters.ballType ?? null,
+            date,
+            expiresAt,
+            timeWindow: lobbyTimeWindow,
+            preferredArenaId: input.filters.preferredArenaId ?? null,
+          } as any,
+        })
+      }
+      return await tx.matchmakingLobby.create({
+        data: {
+          teamId: team.id,
+          playerId: player.id,
+          format: input.filters.format,
+          ballType: input.filters.ballType ?? null,
+          date,
+          status: 'searching',
+          expiresAt,
+          timeWindow: lobbyTimeWindow,
+          preferredArenaId: input.filters.preferredArenaId ?? null,
+        } as any,
+      })
+    })
+
+    // Pull candidate universe — wider date range (today → +7d) so we have
+    // alternatives to suggest if exact-day yields little.
+    const sevenDaysAhead = new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000)
+    const candidates: any[] = await prisma.matchmakingLobby.findMany({
+      where: {
+        id: { not: yourLobby.id },
+        teamId: { not: team.id },
+        status: 'searching',
+        expiresAt: { gt: new Date() },
+        date: { gte: date, lte: sevenDaysAhead },
+        ...(input.filters.format === 'ANY'
+          ? {}
+          : { format: { in: [input.filters.format, 'ANY'] } }),
+      },
+      include: { team: true, picks: { orderBy: { preferenceOrder: 'asc' } } },
+    })
+
+    const groundIds = candidates.flatMap((c) =>
+      c.picks.map((p: any) => p.groundId),
+    )
+    const units = groundIds.length
+      ? await prisma.arenaUnit.findMany({
+          where: { id: { in: groundIds } },
+          include: { arena: true },
+        })
+      : []
+    const unitsById = new Map(units.map((u) => [u.id, u]))
+
+    const arenaIds = [
+      ...new Set(
+        candidates.flatMap((c) =>
+          [c.preferredArenaId, c.arenaId].filter(
+            (x): x is string => typeof x === 'string',
+          ),
+        ),
+      ),
+    ]
+    const arenas = arenaIds.length
+      ? await prisma.arena.findMany({
+          where: { id: { in: arenaIds } },
+          select: { id: true, name: true },
+        })
+      : []
+    const arenasById = new Map(arenas.map((a) => [a.id, a]))
+
+    const teamIds: string[] = candidates.flatMap((c) =>
+      c.teamId ? [c.teamId] : [],
+    )
+    const ages = await this.getTeamAgeGroupsMap(teamIds)
+
+    const scored = candidates
+      .filter((c) => {
+        if (c.teamId == null) return true
+        const cAge = ages.get(c.teamId) ?? null
+        return areAgeGroupsCompatible(callerAge ?? null, cAge ?? null)
+      })
+      .map((c) => {
+        const s = this.scoreCandidateLobby({
+          callerDate: date,
+          callerWindows: input.filters.timeWindows,
+          callerArenaId: input.filters.preferredArenaId ?? null,
+          callerFormat: input.filters.format,
+          callerBallType: input.filters.ballType ?? null,
+          candidate: c,
+          unitsById,
+        })
+        return { lobby: c, ...s }
+      })
+      .filter((s) => s.value > 0)
+      .sort((a, b) => b.value - a.value)
+
+    const CLOSEST_THRESHOLD = 0.85
+    const closest = scored.filter((s) => s.value >= CLOSEST_THRESHOLD)
+    const alternatives = scored
+      .filter((s) => s.value < CLOSEST_THRESHOLD)
+      .slice(0, 10)
+
+    let alternativeReason: string | null = null
+    if (closest.length === 0) alternativeReason = 'no_exact_matches'
+    else if (closest.length < 3) alternativeReason = 'few_exact_matches'
+
+    const formatRanked = (s: {
+      lobby: any
+      value: number
+      matchedOn: string[]
+      differs: string[]
+    }) => {
+      const c = s.lobby
+      const pick = c.picks[0]
+      const unit = pick ? unitsById.get(pick.groundId) : null
+      const arena = c.arenaId ? arenasById.get(c.arenaId) : null
+      const arenaName = arena?.name ?? (unit as any)?.arena?.name ?? null
+      const preferredArena = c.preferredArenaId
+        ? arenasById.get(c.preferredArenaId)
+        : null
+      return {
+        lobbyId: c.id,
+        teamName: c.team?.name ?? (arena ? arena.name : 'TBD'),
+        isArenaLobby: c.arenaId != null,
+        arenaName,
+        ageGroup: c.teamId ? ages.get(c.teamId) ?? null : null,
+        format: c.format,
+        ballType: c.ballType ?? null,
+        groundName: unit?.name ?? null,
+        unitId: pick?.groundId ?? null,
+        pricePerTeam: unit
+          ? Math.round(
+              (unit.pricePerHourPaise *
+                this.formatDurationMins(c.format as MatchmakingFormat)) /
+                60 /
+                2,
+            )
+          : 90000,
+        slotTime: pick?.slotTime ?? null,
+        date: this.toDateOnly(c.date),
+        daysFromNow: this.daysFromNow(c.date),
+        timeWindow: c.timeWindow ?? null,
+        preferredArenaId: c.preferredArenaId ?? null,
+        preferredArenaName: preferredArena?.name ?? null,
+        score: s.value,
+        matchedOn: s.matchedOn,
+        differs: s.differs,
+      }
+    }
+
+    return {
+      yourLobbyId: yourLobby.id,
+      closest: closest.map(formatRanked),
+      alternatives: alternatives.map(formatRanked),
+      alternativeReason,
+    }
+  }
+
+  // Discover-flow expiry: lobby dies when the latest selected window passes.
+  // No windows → fall back to legacy 24h.
+  private computeDiscoverExpiry(
+    date: Date,
+    timeWindows: Array<'MORNING' | 'AFTERNOON' | 'EVENING'>,
+  ): Date {
+    if (timeWindows.length === 0) {
+      return new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
+    }
+    const latestEndHour = Math.max(
+      ...timeWindows.map((w) => this.timeWindowEndHour(w)),
+    )
+    const offsetMs =
+      latestEndHour * 60 * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
+    return new Date(date.getTime() + offsetMs)
+  }
+
+  // v0 scoring — date proximity, window overlap, ground match, format match,
+  // ball compat, recency. Composable; future factors (distance, IP rep, team
+  // performance) plug in here without changing callers.
+  private scoreCandidateLobby(p: {
+    callerDate: Date
+    callerWindows: string[]
+    callerArenaId: string | null
+    callerFormat: string
+    callerBallType: string | null
+    candidate: any
+    unitsById: Map<string, any>
+  }): { value: number; matchedOn: string[]; differs: string[] } {
+    const matchedOn: string[] = []
+    const differs: string[] = []
+    let total = 0
+    let weight = 0
+    const add = (s: number, w: number) => {
+      total += s * w
+      weight += w
+    }
+
+    // Date proximity (weight 30)
+    const dayDiff = Math.abs(
+      Math.round(
+        (p.candidate.date.getTime() - p.callerDate.getTime()) / 86400000,
+      ),
+    )
+    let dateScore = 0
+    if (dayDiff === 0) {
+      dateScore = 1.0
+      matchedOn.push('date')
+    } else if (dayDiff <= 1) {
+      dateScore = 0.85
+      differs.push('date')
+    } else if (dayDiff <= 3) {
+      dateScore = 0.6
+      differs.push('date')
+    } else if (dayDiff <= 7) {
+      dateScore = 0.3
+      differs.push('date')
+    }
+    add(dateScore, 30)
+
+    // Window overlap (weight 25)
+    const candidateWindow = p.candidate.timeWindow as string | null
+    let windowScore = 0
+    if (p.callerWindows.length === 0 || candidateWindow == null) {
+      windowScore = 1.0
+      matchedOn.push('window')
+    } else if (p.callerWindows.includes(candidateWindow)) {
+      windowScore = 1.0
+      matchedOn.push('window')
+    } else {
+      const inWindow = (p.candidate.picks as any[]).some((pp) =>
+        p.callerWindows.includes(this.slotTimeWindow(pp.slotTime)),
+      )
+      windowScore = inWindow ? 0.6 : 0.0
+      if (windowScore > 0) matchedOn.push('window')
+      else differs.push('window')
+    }
+    add(windowScore, 25)
+
+    // Ground match (weight 15)
+    let groundScore = 0
+    if (p.callerArenaId == null) {
+      groundScore = 1.0
+      matchedOn.push('ground')
+    } else {
+      const candArenaId = p.candidate.preferredArenaId as string | null
+      if (candArenaId === p.callerArenaId) {
+        groundScore = 1.0
+        matchedOn.push('ground')
+      } else if (candArenaId == null) {
+        const atOurArena = (p.candidate.picks as any[]).some((pp) => {
+          const u = p.unitsById.get(pp.groundId) as any
+          return u?.arena?.id === p.callerArenaId
+        })
+        groundScore = atOurArena ? 1.0 : 0.7
+        if (atOurArena) matchedOn.push('ground')
+      } else {
+        groundScore = 0.5
+        differs.push('ground')
+      }
+    }
+    add(groundScore, 15)
+
+    // Format match (weight 15)
+    let formatScore = 0
+    if (p.callerFormat === 'ANY' || p.candidate.format === 'ANY') {
+      formatScore = 0.85
+      matchedOn.push('format')
+    } else if (p.callerFormat === p.candidate.format) {
+      formatScore = 1.0
+      matchedOn.push('format')
+    } else {
+      formatScore = 0.0
+      differs.push('format')
+    }
+    add(formatScore, 15)
+
+    // Ball compatibility (weight 10) — null on either side = compatible
+    let ballScore = 0
+    if (
+      p.callerBallType == null ||
+      p.candidate.ballType == null ||
+      p.callerBallType === p.candidate.ballType
+    ) {
+      ballScore = 1.0
+      matchedOn.push('ball')
+    } else {
+      ballScore = 0.5
+      differs.push('ball')
+    }
+    add(ballScore, 10)
+
+    // Recency boost (weight 5) — fresh lobbies feel more "live"
+    const ageHours =
+      (Date.now() - p.candidate.createdAt.getTime()) / 3600000
+    const recencyScore =
+      ageHours < 1 ? 1.0 : ageHours < 6 ? 0.9 : ageHours < 24 ? 0.7 : 0.5
+    add(recencyScore, 5)
+
+    // Future hooks: distance, IP rep, team performance — add() with their
+    // weights here when those data sources are wired.
+
+    return {
+      value: weight > 0 ? total / weight : 0,
+      matchedOn: [...new Set(matchedOn)],
+      differs: [...new Set(differs)],
+    }
+  }
+
   async assertLobbyOwnership(userId: string, lobbyId: string) {
     const player = await this.getPlayerProfile(userId)
     const lobby = await prisma.matchmakingLobby.findUnique({ where: { id: lobbyId } })

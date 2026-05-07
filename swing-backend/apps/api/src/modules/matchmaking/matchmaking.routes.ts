@@ -65,6 +65,51 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  // Discover-flow: returns one active lobby per team the caller belongs to.
+  // Used by the team-switcher chip to show which of the user's teams are
+  // currently searching.
+  app.get('/lobbies/active-all', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const data = await svc.listMyActiveLobbies(user.userId)
+    return reply.send({ success: true, data })
+  })
+
+  // Discover-flow: ensures the team's active lobby (find/update/create), runs
+  // a scored search across open lobbies, returns ranked closest + alternatives.
+  app.post('/discover', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const ballTypeSchema = z.enum(['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']).optional()
+    const timeWindowVal = z.enum(['MORNING', 'AFTERNOON', 'EVENING'])
+    const body = z.object({
+      teamId: z.string(),
+      filters: z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        format: formatSchema,
+        ballType: ballTypeSchema,
+        timeWindows: z.array(timeWindowVal).default([]),
+        preferredArenaId: z.string().optional(),
+      }),
+      context: z
+        .object({
+          lat: z.number().optional(),
+          lng: z.number().optional(),
+        })
+        .optional(),
+    }).parse(request.body)
+    const data = await svc.discoverLobbies(user.userId, {
+      teamId: body.teamId,
+      filters: {
+        date: body.filters.date,
+        format: body.filters.format as MatchmakingFormat,
+        ballType: body.filters.ballType ?? null,
+        timeWindows: body.filters.timeWindows,
+        preferredArenaId: body.filters.preferredArenaId ?? null,
+      },
+      context: body.context,
+    })
+    return reply.send({ success: true, data })
+  })
+
   app.get('/lobbies/:lobbyId', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }
