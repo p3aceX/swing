@@ -1072,13 +1072,38 @@ class _DetailsStep extends StatelessWidget {
 typedef _FormatPick = ({bool all, MatchFormat? format});
 typedef _BallPick = ({bool all, String? value});
 
-class _WhenStep extends StatelessWidget {
+// Smart-window cache. Keyed by (dateApi, sorted arenaIds joined by '|') so the
+// same query returns cached results across rebuilds.
+typedef _AvailableBucketsKey = ({String date, String arenaKey});
+final _availableBucketsProvider = FutureProvider.family
+    .autoDispose<Set<DiscoverWindow>, _AvailableBucketsKey>((ref, key) async {
+  final repo = ref.read(matchmakingRepositoryProvider);
+  final ids = key.arenaKey.isEmpty ? <String>[] : key.arenaKey.split('|');
+  final res = await repo.availableBuckets(date: key.date, arenaIds: ids);
+  return {
+    for (final b in res)
+      if (b.arenaCount > 0)
+        if (_parseWindow(b.window) != null) _parseWindow(b.window)!,
+  };
+});
+
+class _WhenStep extends ConsumerWidget {
   const _WhenStep({required this.prefs, required this.onChanged});
   final _Prefs prefs;
   final VoidCallback onChanged;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Fetch once per (date, arenaIds) combo — refreshes if either changes.
+    final sortedIds = [...prefs.preferredArenaIdList]..sort();
+    final key = (date: prefs.dateApi, arenaKey: sortedIds.join('|'));
+    final availableAsync = ref.watch(_availableBucketsProvider(key));
+    // While loading or on error, show all 5 chips (don't punish user for
+    // a stale endpoint). Once data arrives, hide buckets with no arenas.
+    final available = availableAsync.maybeWhen(
+      data: (s) => s,
+      orElse: () => DiscoverWindow.values.toSet(),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1123,7 +1148,7 @@ class _WhenStep extends StatelessWidget {
           _WindowCard(
             window: w,
             selected: prefs.windows.contains(w),
-            disabled: w.isPast(prefs.date),
+            disabled: w.isPast(prefs.date) || !available.contains(w),
             onTap: () {
               if (prefs.windows.contains(w)) {
                 prefs.windows.remove(w);
