@@ -161,6 +161,9 @@ class MmOpenLobby {
     this.ballType,
     this.unitId,
     this.pricePerTeamPaise = 90000,
+    this.timeWindow,
+    this.preferredArenaId,
+    this.preferredArenaName,
   });
 
   final String lobbyId;
@@ -176,6 +179,10 @@ class MmOpenLobby {
   final String? ballType;
   final String? unitId;
   final int pricePerTeamPaise;
+  // Discover preference fields. Null on legacy slot-precise lobbies.
+  final String? timeWindow; // 'MORNING' | 'AFTERNOON' | 'EVENING'
+  final String? preferredArenaId;
+  final String? preferredArenaName;
 
   String get displaySlot {
     try {
@@ -229,6 +236,9 @@ class MmOpenLobby {
       ballType: j['ballType'] as String?,
       unitId: j['unitId'] as String?,
       pricePerTeamPaise: (j['pricePerTeam'] as num?)?.toInt() ?? 90000,
+      timeWindow: j['timeWindow'] as String?,
+      preferredArenaId: j['preferredArenaId'] as String?,
+      preferredArenaName: j['preferredArenaName'] as String?,
     );
   }
 }
@@ -337,20 +347,29 @@ class MmLobbyStatus {
     required this.status,
     this.match,
     this.format,
+    this.ballType,
     this.date,
     this.teamId,
     this.teamName,
     this.picks = const [],
+    this.timeWindow,
+    this.preferredArenaId,
+    this.preferredArenaName,
   });
 
   final String lobbyId;
   final String status; // searching | matched | confirmed | expired | cancelled
   final MmMatchSummary? match;
   final String? format;
+  final String? ballType;
   final String? date;
   final String? teamId;
   final String? teamName;
   final List<MmLobbyStatusPick> picks;
+  // Discover preference fields. Used to pre-fill Setup form on Modify-search.
+  final String? timeWindow;
+  final String? preferredArenaId;
+  final String? preferredArenaName;
 
   factory MmLobbyStatus.fromJson(Map<String, dynamic> j) => MmLobbyStatus(
         lobbyId: j['lobbyId'] as String,
@@ -359,6 +378,7 @@ class MmLobbyStatus {
             ? MmMatchSummary.fromJson(j['match'] as Map<String, dynamic>)
             : null,
         format: j['format'] as String?,
+        ballType: j['ballType'] as String?,
         date: j['date'] as String?,
         teamId: j['teamId'] as String?,
         teamName: j['teamName'] as String?,
@@ -367,6 +387,9 @@ class MmLobbyStatus {
                 .map(MmLobbyStatusPick.fromJson)
                 .toList() ??
             [],
+        timeWindow: j['timeWindow'] as String?,
+        preferredArenaId: j['preferredArenaId'] as String?,
+        preferredArenaName: j['preferredArenaName'] as String?,
       );
 }
 

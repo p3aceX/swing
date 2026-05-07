@@ -168,15 +168,31 @@ export class MatchmakingService {
     ballType?: string | null
     date: string
     picks: Array<{ groundId: string; slotTime: string }>
+    // Preference-lobby fields (Discover flow). When provided, picks may be
+    // empty and the lobby is matched against other preference-lobbies on the
+    // same date+format+window+arena (or any arena if both are null).
+    timeWindow?: 'MORNING' | 'AFTERNOON' | 'EVENING' | null
+    preferredArenaId?: string | null
   }) {
-    if (input.picks.length < 1 || input.picks.length > 3) {
-      throw new AppError('INVALID_PICKS', 'picks must contain 1 to 3 items', 400)
-    }
-    const seen = new Set<string>()
-    for (const p of input.picks) {
-      const key = `${p.groundId}:${p.slotTime}`
-      if (seen.has(key)) throw new AppError('INVALID_PICKS', 'Duplicate picks are not allowed', 400)
-      seen.add(key)
+    const isPreferenceMode = input.picks.length === 0
+    if (isPreferenceMode) {
+      if (!input.timeWindow) {
+        throw new AppError(
+          'INVALID_LOBBY',
+          'Either picks or timeWindow is required',
+          400,
+        )
+      }
+    } else {
+      if (input.picks.length > 3) {
+        throw new AppError('INVALID_PICKS', 'picks must contain 1 to 3 items', 400)
+      }
+      const seen = new Set<string>()
+      for (const p of input.picks) {
+        const key = `${p.groundId}:${p.slotTime}`
+        if (seen.has(key)) throw new AppError('INVALID_PICKS', 'Duplicate picks are not allowed', 400)
+        seen.add(key)
+      }
     }
 
     const player = await this.getPlayerProfile(userId)
@@ -184,7 +200,12 @@ export class MatchmakingService {
     if (!team || team.id !== input.teamId) throw Errors.forbidden()
     const callerAge = await this.getTeamAgeGroup(team.id)
     const date = this.startOfDay(input.date)
-    const expiresAt = new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
+    // For preference-lobbies, expiry is the end of the chosen window on the
+    // chosen date — once that window passes, the lobby is dead. For legacy
+    // slot-precise lobbies, keep the existing 24h TTL.
+    const expiresAt = isPreferenceMode
+      ? this.timeWindowExpiry(date, input.timeWindow!)
+      : new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
 
     const result = await prisma.$transaction(async (tx) => {
       const lobby = await tx.matchmakingLobby.create({
@@ -196,6 +217,8 @@ export class MatchmakingService {
           date,
           status: 'searching',
           expiresAt,
+          timeWindow: input.timeWindow ?? null,
+          preferredArenaId: input.preferredArenaId ?? null,
           picks: {
             create: input.picks.map((p, i) => ({
               groundId: p.groundId,
@@ -203,9 +226,16 @@ export class MatchmakingService {
               preferenceOrder: i + 1,
             })),
           },
-        },
+        } as any,
         include: { picks: { orderBy: { preferenceOrder: 'asc' } } },
       })
+
+      // Preference-lobbies do not attempt immediate slot-precise matching at
+      // creation time — they wait for another team to express interest via
+      // the existing first-to-pay flow.
+      if (isPreferenceMode) {
+        return { lobby, match: null }
+      }
 
       const candidateLobbies = await tx.matchmakingLobby.findMany({
         where: {
@@ -325,10 +355,20 @@ export class MatchmakingService {
         })
       : []
     const unitById = new Map(units.map((u) => [u.id, u]))
+    // Discover-flow preference fields, when set, let the client pre-fill the
+    // Setup form on Modify-search.
+    const preferredArenaName =
+      (lobby as any).preferredArenaId
+        ? (await prisma.arena.findUnique({
+            where: { id: (lobby as any).preferredArenaId },
+            select: { name: true },
+          }))?.name ?? null
+        : null
     const out: any = {
       lobbyId: lobby.id,
       status: lobby.status,
       format: lobby.format,
+      ballType: (lobby as any).ballType ?? null,
       date: this.toDateOnly(lobby.date),
       teamId: lobby.teamId ?? null,
       teamName: (lobby as any).team?.name ?? null,
@@ -337,6 +377,9 @@ export class MatchmakingService {
         groundName: unitById.get(p.groundId)?.arena?.name ?? unitById.get(p.groundId)?.name ?? null,
         slotTime: p.slotTime,
       })),
+      timeWindow: (lobby as any).timeWindow ?? null,
+      preferredArenaId: (lobby as any).preferredArenaId ?? null,
+      preferredArenaName,
     }
     if (lobby.matchId) out.match = await this.buildMatchSummary(lobby.matchId, lobby.id)
     return out
@@ -364,6 +407,9 @@ export class MatchmakingService {
     format?: MatchmakingFormat
     ageGroup?: string
     arenaId?: string
+    // Discover-flow filters:
+    timeWindow?: 'MORNING' | 'AFTERNOON' | 'EVENING'
+    preferredArenaId?: string
   }) {
     // Arena owner path: return lobbies for this arena without player-specific filters
     if (input.arenaId) {
@@ -398,7 +444,9 @@ export class MatchmakingService {
       },
       include: {
         team: true,
-        picks: { orderBy: { preferenceOrder: 'asc' }, take: 1 },
+        // Pull all picks so we can check if any pick falls inside the
+        // requested time-window when bridging legacy slot-precise lobbies.
+        picks: { orderBy: { preferenceOrder: 'asc' } },
       },
       orderBy: { createdAt: 'asc' },
     })
@@ -417,8 +465,16 @@ export class MatchmakingService {
       : []
     const unitsById = new Map(units.map((u) => [u.id, u]))
 
-    // Fetch arena names for owner-created lobbies
-    const arenaIds = [...new Set(lobbiesAny.flatMap((l) => l.arenaId ? [l.arenaId] : [] as string[]))]
+    // Fetch arena names for owner-created and preference-arena lobbies
+    const arenaIds = [
+      ...new Set(
+        lobbiesAny.flatMap((l) =>
+          [l.arenaId, l.preferredArenaId].filter(
+            (x): x is string => typeof x === 'string',
+          ),
+        ),
+      ),
+    ]
     const arenas = arenaIds.length
       ? await prisma.arena.findMany({ where: { id: { in: arenaIds } }, select: { id: true, name: true } })
       : []
@@ -428,6 +484,32 @@ export class MatchmakingService {
       .filter((l) => {
         const pick = l.picks[0]
         if (this.isSlotPast(l.date, pick?.slotTime ?? null)) return false
+
+        // ── Discover filters: timeWindow + preferredArenaId ─────────────
+        // A lobby matches the requested time-window when:
+        //   (a) its own preferred timeWindow equals the query, OR
+        //   (b) any of its slot picks falls within the query window
+        if (input.timeWindow) {
+          const lobbyWindow = l.timeWindow as string | null
+          const pickInWindow = (l.picks as any[]).some(
+            (p) => this.slotTimeWindow(p.slotTime) === input.timeWindow,
+          )
+          if (lobbyWindow !== input.timeWindow && !pickInWindow) return false
+        }
+        // A lobby matches the requested arena when:
+        //   (a) it has no arena preference (open to any), OR
+        //   (b) its preferred arena equals the query, OR
+        //   (c) any of its slot picks is hosted at that arena
+        if (input.preferredArenaId) {
+          const open = l.preferredArenaId == null
+          const samePref = l.preferredArenaId === input.preferredArenaId
+          const pickAtArena = (l.picks as any[]).some((p) => {
+            const u = unitsById.get(p.groundId) as any
+            return u?.arena?.id === input.preferredArenaId
+          })
+          if (!open && !samePref && !pickAtArena) return false
+        }
+
         // Arena-owner lobbies are always visible
         if (l.arenaId != null || l.teamId == null) return true
         const lobbyAge = ages.get(l.teamId) ?? null
@@ -439,6 +521,11 @@ export class MatchmakingService {
         const arena = l.arenaId ? arenasById.get(l.arenaId) : null
         // For player lobbies (no arenaId), derive arena name from the pick's unit
         const arenaName = arena?.name ?? (unit as any)?.arena?.name ?? null
+        // Discover-flow fields. preferredArenaName is the human-readable
+        // version of preferredArenaId for the result list.
+        const preferredArena = (l as any).preferredArenaId
+          ? arenasById.get((l as any).preferredArenaId)
+          : null
         return {
           lobbyId: l.id,
           teamName: l.team?.name ?? (arena ? arena.name : 'TBD'),
@@ -453,6 +540,10 @@ export class MatchmakingService {
           slotTime: pick?.slotTime ?? null,
           date: this.toDateOnly(l.date),
           daysFromNow: this.daysFromNow(l.date),
+          // Discover preference fields (null on legacy lobbies):
+          timeWindow: (l as any).timeWindow ?? null,
+          preferredArenaId: (l as any).preferredArenaId ?? null,
+          preferredArenaName: preferredArena?.name ?? null,
         }
       })
     return { lobbies: out }
@@ -1621,6 +1712,43 @@ export class MatchmakingService {
   private timeToMinutes(time: string) {
     const [h, m] = time.split(':').map(Number)
     return (h || 0) * 60 + (m || 0)
+  }
+
+  // ── Time-window helpers (Discover-flow preferences) ────────────────────────
+  // Hour ranges (24h, IST-anchored):
+  //   MORNING   06:00 – 12:00
+  //   AFTERNOON 12:00 – 18:00
+  //   EVENING   18:00 – next-day 04:00 (covers night)
+  //
+  // We work in UTC against a date that is already a UTC start-of-day. The
+  // window-end calculation just adds the right number of hours from that
+  // anchor, expressed as IST-aligned UTC.
+  private timeWindowEndHour(timeWindow: string): number {
+    if (timeWindow === 'MORNING') return 12
+    if (timeWindow === 'AFTERNOON') return 18
+    // EVENING ends at 04:00 the next day → 28 hours past start-of-day.
+    return 28
+  }
+
+  // Returns the UTC instant when a preference-lobby for `date` + `timeWindow`
+  // should expire. Date is the lobby's startOfDay (UTC). IST is UTC+5:30 so
+  // the window expressed in UTC is offset by -5:30.
+  private timeWindowExpiry(date: Date, timeWindow: string): Date {
+    const endHour = this.timeWindowEndHour(timeWindow)
+    // ms since the UTC start-of-day of `date`, minus IST offset (5h30m).
+    const offsetMs = endHour * 60 * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
+    return new Date(date.getTime() + offsetMs)
+  }
+
+  // Maps a slot start time ("HH:mm", IST) to the bucket that contains it.
+  // Used when bridging legacy slot-precise lobbies into the new window-based
+  // discovery filter.
+  private slotTimeWindow(slotTime: string): 'MORNING' | 'AFTERNOON' | 'EVENING' {
+    const [h] = slotTime.split(':').map(Number)
+    const hour = h ?? 0
+    if (hour >= 6 && hour < 12) return 'MORNING'
+    if (hour >= 12 && hour < 18) return 'AFTERNOON'
+    return 'EVENING'
   }
 
   // Returns true when a lobby's slot time is in the past for today (IST).

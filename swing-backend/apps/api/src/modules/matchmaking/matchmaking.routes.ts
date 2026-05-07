@@ -30,22 +30,29 @@ export async function matchmakingRoutes(app: FastifyInstance) {
   app.post('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const ballTypeSchema = z.enum(['LEATHER', 'TENNIS', 'TAPE', 'RUBBER']).optional()
+    const timeWindowSchema = z.enum(['MORNING', 'AFTERNOON', 'EVENING']).optional()
     const body = z.object({
       teamId: z.string(),
       format: formatSchema,
       ballType: ballTypeSchema,
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      // Picks are optional now — when omitted, the lobby is a preference-lobby
+      // (timeWindow becomes required in that case; validated in the service).
       picks: z.array(z.object({
         groundId: z.string(),
         slotTime: z.string().regex(/^\d{2}:\d{2}$/),
-      })).min(1).max(3),
+      })).max(3).optional(),
+      timeWindow: timeWindowSchema,
+      preferredArenaId: z.string().optional(),
     }).parse(request.body)
     const data = await svc.createLobby(user.userId, {
       teamId: body.teamId,
       format: body.format as MatchmakingFormat,
       ballType: body.ballType ?? null,
       date: body.date,
-      picks: body.picks,
+      picks: body.picks ?? [],
+      timeWindow: body.timeWindow ?? null,
+      preferredArenaId: body.preferredArenaId ?? null,
     })
     return reply.code(201).send({ success: true, data })
   })
@@ -88,17 +95,23 @@ export async function matchmakingRoutes(app: FastifyInstance) {
 
   app.get('/lobbies', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
+    const timeWindowSchema = z.enum(['MORNING', 'AFTERNOON', 'EVENING']).optional()
     const q = z.object({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       format: formatSchema.optional(),
       ageGroup: z.string().optional(),
       arenaId: z.string().optional(),
+      // Discover-flow filters (additive — old callers ignore these):
+      timeWindow: timeWindowSchema,
+      preferredArenaId: z.string().optional(),
     }).parse(request.query)
     const data = await svc.listOpenLobbies(user.userId, {
       date: q.date,
       format: q.format as MatchmakingFormat | undefined,
       ageGroup: q.ageGroup,
       arenaId: q.arenaId,
+      timeWindow: q.timeWindow,
+      preferredArenaId: q.preferredArenaId,
     })
     return reply.send({ success: true, data })
   })

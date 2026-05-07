@@ -156,8 +156,13 @@ class MatchmakingRepository {
     required String teamId,
     required String format,
     required String date,
-    required List<({String groundId, String slotTime})> picks,
+    List<({String groundId, String slotTime})> picks = const [],
     String? ballType,
+    // Discover-flow preference fields. When `timeWindow` is set and `picks` is
+    // empty, the backend records this as a preference-lobby that matches via
+    // window overlap rather than exact slot.
+    String? timeWindow,
+    String? preferredArenaId,
   }) async {
     final resp = await _dio.post(
       ApiEndpoints.matchmakingLobbies,
@@ -166,9 +171,12 @@ class MatchmakingRepository {
         'format': format,
         if (ballType != null) 'ballType': ballType,
         'date': date,
-        'picks': picks
-            .map((p) => {'groundId': p.groundId, 'slotTime': p.slotTime})
-            .toList(),
+        if (picks.isNotEmpty)
+          'picks': picks
+              .map((p) => {'groundId': p.groundId, 'slotTime': p.slotTime})
+              .toList(),
+        if (timeWindow != null) 'timeWindow': timeWindow,
+        if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
       },
     );
     return MmCreateLobbyResult.fromJson(_unwrap(resp.data));
@@ -194,14 +202,19 @@ class MatchmakingRepository {
   Future<List<MmOpenLobby>> listOpenLobbies({
     String? date,
     String? format,
+    String? timeWindow,
+    String? preferredArenaId,
   }) async {
-    _mmLog('listOpenLobbies → date=$date format=$format');
+    _mmLog(
+        'listOpenLobbies → date=$date format=$format timeWindow=$timeWindow preferredArenaId=$preferredArenaId');
     try {
       final resp = await _dio.get(
         ApiEndpoints.matchmakingLobbies,
         queryParameters: {
           if (date != null) 'date': date,
           if (format != null && format.isNotEmpty) 'format': format,
+          if (timeWindow != null) 'timeWindow': timeWindow,
+          if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
         },
       );
       _mmLog('listOpenLobbies → HTTP ${resp.statusCode}');
