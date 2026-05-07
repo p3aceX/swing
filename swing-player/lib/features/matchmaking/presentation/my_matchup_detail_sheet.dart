@@ -127,6 +127,81 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
     }
   }
 
+  bool get _canCancel => widget.status != 'started';
+  bool get _isPostPayment => _bothPaid;
+
+  Future<void> _onCancel() async {
+    if (_busy) return;
+    if (widget.myLobbyId == null) {
+      setState(() => _error = 'Could not resolve your lobby.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ctx.bg,
+        title: Text(
+          'Cancel match-up?',
+          style: TextStyle(
+            color: ctx.fg,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.3,
+          ),
+        ),
+        content: Text(
+          _isPostPayment
+              ? "Both teams have already confirmed. Cancelling now affects ${widget.opponentTeamName} and may lead to your account being banned from match-ups."
+              : "This will end the match-up and notify ${widget.opponentTeamName}.",
+          style: TextStyle(color: ctx.fgSub, fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Keep match-up',
+                style: TextStyle(color: ctx.fgSub)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              'Yes, cancel',
+              style: TextStyle(
+                color: ctx.danger,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final dio = ApiClient.instance.dio;
+      await dio.post(
+        '/matchmaking/matches/${widget.matchId}/cancel-by-player',
+        data: {'lobbyId': widget.myLobbyId},
+      );
+      widget.onRefresh();
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Match-up cancelled.')),
+      );
+    } catch (e) {
+      debugPrint('[MyMatchupDetail] cancel error: $e');
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = 'Could not cancel. Try again.';
+        });
+      }
+    }
+  }
+
   Future<void> _confirmFree() async {
     if (widget.myLobbyId == null) {
       setState(() {
@@ -274,6 +349,23 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
                   style: const TextStyle(
                     color: Color(0xFFDC2626),
                     fontSize: 12.5,
+                  ),
+                ),
+              ],
+
+              if (_canCancel) ...[
+                const SizedBox(height: 14),
+                Center(
+                  child: TextButton(
+                    onPressed: _busy ? null : _onCancel,
+                    child: Text(
+                      'Cancel match-up',
+                      style: TextStyle(
+                        color: context.danger,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
                 ),
               ],

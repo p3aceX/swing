@@ -258,6 +258,16 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  // Player: cancel an active match-up (own team's side). Refuses MATCH_IN_PROGRESS.
+  // Response includes wasPostPayment so the client can warn before submit.
+  app.post('/matches/:matchId/cancel-by-player', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { matchId } = request.params as { matchId: string }
+    const body = z.object({ lobbyId: z.string() }).parse(request.body)
+    const data = await svc.cancelMatchAsPlayer(user.userId, matchId, body.lobbyId)
+    return reply.send({ success: true, data })
+  })
+
   // Arena owner: start match once both advances received. Returns linkedMatchId
   // so client can navigate scorer to the scoring screen.
   app.post('/matches/:matchId/start', auth, async (request, reply) => {

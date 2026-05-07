@@ -3202,6 +3202,125 @@ export class MatchmakingService {
     return { status: 'setup', linkedMatchId }
   }
 
+  // Player-side cancellation. Either team's captain/member can cancel a
+  // non-final match-up. For pending_payment that's a clean exit. For
+  // confirmed/setup the match is locked and the team has already paid —
+  // we still allow it but flag wasPostPayment so the client can show the
+  // ban-warning copy. 'started' matches must be cancelled at the venue.
+  async cancelMatchAsPlayer(userId: string, matchId: string, lobbyId: string) {
+    const player = await this.getPlayerProfile(userId)
+
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) throw Errors.notFound('Match')
+
+    if (lobbyId !== match.lobbyAId && lobbyId !== match.lobbyBId) {
+      throw new AppError('INVALID_LOBBY', 'Lobby is not part of this match', 400)
+    }
+
+    const lobby = await prisma.matchmakingLobby.findUnique({
+      where: { id: lobbyId },
+      select: { teamId: true },
+    })
+    if (!lobby || !lobby.teamId) throw Errors.notFound('Lobby')
+
+    const team = await prisma.team.findFirst({
+      where: {
+        id: lobby.teamId,
+        OR: [
+          { captainId: player.id },
+          { createdByUserId: userId },
+          { playerIds: { has: player.id } },
+        ],
+      },
+    })
+    if (!team) throw Errors.forbidden()
+
+    if (match.status === 'started') {
+      throw new AppError(
+        'MATCH_IN_PROGRESS',
+        'Match is live — contact the venue to cancel.',
+        400,
+      )
+    }
+    if (match.status === 'cancelled') {
+      return {
+        status: 'cancelled' as const,
+        wasPostPayment: false,
+      }
+    }
+
+    const wasPostPayment = match.status !== 'pending_payment'
+
+    await prisma.$transaction(async (tx) => {
+      await tx.matchmakingMatch.update({
+        where: { id: matchId },
+        data: { status: 'cancelled' },
+      })
+      // Player-cancel: flip lobbies to 'cancelled' (NOT 'searching' like the
+      // arena-owner path), since the team has chosen to back out and we
+      // shouldn't keep their old prefs surfacing in Discover.
+      await tx.matchmakingLobby.updateMany({
+        where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
+        data: { status: 'cancelled' },
+      })
+      if ((match as any).bookingId) {
+        await tx.slotBooking.update({
+          where: { id: (match as any).bookingId },
+          data: { status: 'CANCELLED' },
+        })
+      }
+      if ((match as any).linkedMatchId) {
+        await tx.match.update({
+          where: { id: (match as any).linkedMatchId },
+          data: { status: 'CANCELLED' as any },
+        })
+      }
+    })
+
+    this.notifyMatchCancelledByPlayer(matchId, team.id, team.name ?? 'a team')
+      .catch(() => undefined)
+
+    return {
+      status: 'cancelled' as const,
+      wasPostPayment,
+    }
+  }
+
+  // Notify the OTHER team that this match-up was cancelled by the caller's
+  // team. Mirrors notifyMatchCancelledByOwner shape but with a different copy.
+  private async notifyMatchCancelledByPlayer(
+    matchId: string,
+    cancellingTeamId: string,
+    cancellingTeamName: string,
+  ) {
+    const match = await prisma.matchmakingMatch.findUnique({ where: { id: matchId } })
+    if (!match) return
+    const [lobbyA, lobbyB] = await Promise.all([
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyAId } }),
+      prisma.matchmakingLobby.findUnique({ where: { id: match.lobbyBId } }),
+    ])
+    for (const lobby of [lobbyA, lobbyB]) {
+      if (!lobby?.playerId) continue
+      // Don't ping the team that cancelled — they already know.
+      if (lobby.teamId === cancellingTeamId) continue
+      const profile = await prisma.playerProfile.findUnique({
+        where: { id: lobby.playerId },
+        select: { userId: true },
+      })
+      if (!profile?.userId) continue
+      await notificationService.createNotification(profile.userId, {
+        type: 'mm_match_cancelled_by_team',
+        title: 'Match-up cancelled',
+        body: `${cancellingTeamName} cancelled your match-up. You can search for a new opponent now.`,
+        entityType: 'match',
+        entityId: matchId,
+        data: { lobbyId: lobby.id },
+        sendPush: true,
+        audience: 'PLAYER',
+      }).catch(() => undefined)
+    }
+  }
+
   async cancelMatchAsArenaOwner(userId: string, matchId: string) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
