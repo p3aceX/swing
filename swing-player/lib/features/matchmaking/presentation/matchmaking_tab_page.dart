@@ -118,7 +118,7 @@ class MatchmakingTabPage extends ConsumerStatefulWidget {
 }
 
 class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
-  int _tab = 0; // 0=Discover  1=Create  2=My MatchUps
+  int _tab = 0; // 0=Discover  1=My MatchUps
 
   // Find tab state
   _LobbyState _lobbyState = _LobbyState.idle;
@@ -418,7 +418,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       _lobbyState = _LobbyState.entering;
       _error = null;
       _team = team;
-      _tab = 1;
+      _tab = 0; // stay on Discover during the express-interest → pay flow
     });
     try {
       final repo = ref.read(matchmakingRepositoryProvider);
@@ -463,7 +463,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _error = isLockRace
             ? 'Another team is paying for this slot — try again in a minute.'
             : msg;
-        _tab = 1;
+        _tab = 0;
         _activeInterestId = null;
         _activeInterestLobbyId = null;
         _activeInterestRazorpayOrderId = null;
@@ -547,7 +547,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
             _lobbyState = _LobbyState.idle;
             _matchSummary = null;
             _restoredPicks = [];
-            _tab = 2;
+            _tab = 1; // jump to My MatchUps after successful match
             _activeInterestId = null;
             _activeInterestLobbyId = null;
             _activeInterestRazorpayOrderId = null;
@@ -593,7 +593,7 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
         _lobbyState = _LobbyState.idle;
         _matchSummary = null;
         _restoredPicks = [];
-        _tab = 2;
+        _tab = 1; // jump to My MatchUps after successful match
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Advance paid — see My Match-Ups.')),
@@ -792,21 +792,11 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                     label: 'Discover',
                     active: _tab == 0,
                     onTap: () => setState(() => _tab = 0),
-                    badge: ref
-                        .watch(
-                            mmOpenLobbiesProvider((date: null, format: null)))
-                        .valueOrNull
-                        ?.length,
-                  ),
-                  _TabLabel(
-                    label: 'Create',
-                    active: _tab == 1,
-                    onTap: () => setState(() => _tab = 1),
                   ),
                   _TabLabel(
                     label: 'My MatchUps',
-                    active: _tab == 2,
-                    onTap: () => setState(() => _tab = 2),
+                    active: _tab == 1,
+                    onTap: () => setState(() => _tab = 1),
                   ),
                 ],
               ),
@@ -820,58 +810,13 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
             child: IndexedStack(
               index: _tab,
               children: [
-                _OpenTab(
-                  query: (date: null, format: null),
-                  ownLobbyId: _lobbyId,
-                  onCounter: (lobby) {
-                    showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      backgroundColor: Colors.transparent,
-                      builder: (_) => _PlayConfirmSheet(
-                        lobby: lobby,
-                        initialTeam: _team,
-                        onConfirm: (team) {
-                          Navigator.pop(context);
-                          _instantChallenge(lobby, withTeam: team);
-                        },
-                      ),
-                    );
+                DiscoverView(
+                  onChallenge: (lobby, team) {
+                    if (team != null) {
+                      setState(() => _team = team);
+                    }
+                    _instantChallenge(lobby, withTeam: team ?? _team);
                   },
-                ),
-                _FindTab(
-                  lobbyState: _lobbyState,
-                  team: _team,
-                  format: _format,
-                  ballType: _ballType,
-                  date: _date,
-                  picks: _picks,
-                  restoredPicks: _restoredPicks,
-                  matchSummary: _matchSummary,
-                  directMatchLobby: _directMatchLobby,
-                  error: _error,
-                  scanStep: _scanStep,
-                  scanStatus: _scanStatus,
-                  onTeam: (t) => setState(() => _team = t),
-                  onFormat: (f) => setState(() {
-                    _format = f;
-                    _picks =
-                        []; // slot availability changes with format duration
-                  }),
-                  onBallType: (bt) => setState(() => _ballType = bt),
-                  onDate: (d) => setState(() {
-                    _date = d;
-                    _picks = []; // slots are date-specific — clear stale picks
-                  }),
-                  onAddPick: _addPick,
-                  onRemovePick: _removePick,
-                  onEnter: _enterLobby,
-                  onInstantChallenge: _instantChallenge,
-                  onLeave: _leaveLobby,
-                  onConfirm: _confirmMatch,
-                  onDecline: _declineMatch,
-                  onBack: _goBackFromMatch,
-                  onDone: _resetToIdle,
                 ),
                 const _MatchesTab(),
               ],
