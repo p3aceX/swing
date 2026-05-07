@@ -994,7 +994,7 @@ export class BookingService {
       unit: { select: { name: true } },
       bookedBy: { include: { user: { select: { name: true, phone: true } } } },
       _count: { select: { bookingPayments: true } },
-      bookingPayments: { orderBy: { recordedAt: 'desc' as const }, take: 1, select: { recordedAt: true, amountPaise: true } },
+      bookingPayments: { orderBy: { recordedAt: 'desc' as const }, select: { recordedAt: true, amountPaise: true } },
     }
 
     // Checked-in = collection realized — filter by paidAt so a future booking

@@ -437,7 +437,7 @@ class _MatchupsLane extends StatelessWidget {
         .toList();
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 80),
+      padding: const EdgeInsets.only(top: 8, bottom: 80),
       children: [
         if (advancePending.isNotEmpty) ...[
           const _SectionHeader(label: 'ADVANCE PENDING'),
@@ -460,6 +460,49 @@ class _MatchupsLane extends StatelessWidget {
             _MatchRow(match: m, arenaId: arenaId),
         ],
       ],
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.match, required this.paidCount});
+  final ArenaMatch match;
+  final int paidCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final String label;
+    final Color bg;
+    final Color fg;
+
+    if (match.isSetUp) {
+      label = 'Setup Done';
+      bg = const Color(0xFFDCFCE7);
+      fg = const Color(0xFF059669);
+    } else if (match.isConfirmed) {
+      label = 'Ready to Setup';
+      bg = const Color(0xFFEFF6FF);
+      fg = const Color(0xFF2563EB);
+    } else {
+      label = '$paidCount/2 Paid';
+      bg = const Color(0xFFFEF3C7);
+      fg = const Color(0xFFD97706);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: fg,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }
@@ -588,22 +631,8 @@ class _MatchRow extends StatelessWidget {
     final paidCount =
         (match.teamAConfirmed ? 1 : 0) + (match.teamBConfirmed ? 1 : 0);
 
-    final String stateMeta;
-    if (match.isSetUp) {
-      stateMeta = 'setup done';
-    } else if (match.isConfirmed) {
-      stateMeta = 'advance received · ready to setup';
-    } else {
-      stateMeta = '$paidCount of 2 advance received';
-    }
-    final meta = [
-      match.format,
-      match.dateLabel,
-      match.displaySlot,
-      stateMeta,
-    ].join(' · ');
-
-    return InkWell(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => showModalBottomSheet(
         context: context,
         isScrollControlled: true,
@@ -611,59 +640,154 @@ class _MatchRow extends StatelessWidget {
         builder: (_) => MatchDetailSheet(match: match, arenaId: arenaId),
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: _c.hair, width: 0.5)),
+          color: _c.surface,
+          borderRadius: BorderRadius.circular(14),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${match.teamAName}  vs  ${match.teamBName}',
+            // Top row: status + chevron
+            Row(
+              children: [
+                _StatusPill(match: match, paidCount: paidCount),
+                const Spacer(),
+                Icon(Icons.chevron_right_rounded, size: 16, color: _c.faint),
+              ],
+            ),
+            const SizedBox(height: 14),
+            // Teams face-off
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    match.teamAName,
                     style: TextStyle(
                       color: _c.text,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  SizedBox(height: 3),
-                  Text(
-                    meta,
+                ),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _c.bg,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    'VS',
                     style: TextStyle(
-                      color: _c.muted,
-                      fontSize: 12.5,
+                      color: _c.faint,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
                     ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    match.teamBName,
+                    style: TextStyle(
+                      color: _c.text,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.end,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            SizedBox(width: 12),
+            const SizedBox(height: 8),
+            // Pay status per team
+            Row(
+              children: [
+                _PayChip(paid: match.teamAConfirmed, label: match.teamAName),
+                const Spacer(),
+                _PayChip(paid: match.teamBConfirmed, label: match.teamBName, alignEnd: true),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Divider
+            Divider(height: 1, color: _c.hair),
+            const SizedBox(height: 10),
+            // Meta: format · date · slot · ground
             Text(
-              match.isSetUp
-                  ? 'Open'
-                  : match.isConfirmed
-                      ? 'Setup'
-                      : 'Manage',
+              [
+                if (match.format.isNotEmpty) match.format,
+                match.dateLabel,
+                match.displaySlot,
+                if (match.groundName.isNotEmpty) match.groundName,
+              ].join('  ·  '),
               style: TextStyle(
-                color: _c.text,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+                color: _c.muted,
+                fontSize: 12,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            SizedBox(width: 4),
-            Icon(Icons.chevron_right_rounded, size: 18, color: _c.faint),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PayChip extends StatelessWidget {
+  const _PayChip({required this.paid, required this.label, this.alignEnd = false});
+  final bool paid;
+  final String label;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!alignEnd) ...[
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: paid ? const Color(0xFF059669) : _c.hair,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+        ],
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 90),
+          child: Text(
+            paid ? 'Paid' : 'Pending',
+            style: TextStyle(
+              color: paid ? const Color(0xFF059669) : _c.muted,
+              fontSize: 11,
+              fontWeight: paid ? FontWeight.w700 : FontWeight.w400,
+            ),
+            overflow: TextOverflow.ellipsis,
+            textAlign: alignEnd ? TextAlign.end : TextAlign.start,
+          ),
+        ),
+        if (alignEnd) ...[
+          const SizedBox(width: 5),
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: paid ? const Color(0xFF059669) : _c.hair,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

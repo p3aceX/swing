@@ -650,8 +650,15 @@ class ArenaReservation {
 
   bool get isSplit => bookingSource == 'SPLIT';
 
-  int get effectivePaidPaise =>
-      paymentsCount > 0 ? paidAmountPaise : advancePaise;
+  int get effectivePaidPaise {
+    // Detail endpoint includes full bookingPayments list but omits the
+    // server-computed summary fields (paymentsCount / paidAmountPaise).
+    // Prefer direct sum when the list is populated.
+    if (bookingPayments.isNotEmpty) {
+      return bookingPayments.fold(0, (s, p) => s + p.amountPaise);
+    }
+    return paymentsCount > 0 ? paidAmountPaise : advancePaise;
+  }
 
   int get balancePaise =>
       (totalAmountPaise - effectivePaidPaise).clamp(0, totalAmountPaise);
