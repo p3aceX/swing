@@ -158,9 +158,13 @@ class MatchmakingRepository {
     required String date,
     List<({String groundId, String slotTime})> picks = const [],
     String? ballType,
-    // Discover-flow preference fields. When `timeWindow` is set and `picks` is
-    // empty, the backend records this as a preference-lobby that matches via
-    // window overlap rather than exact slot.
+    // Discover-flow V2 ranked-preference fields. When [windowsRanked] is
+    // provided and [picks] is empty, the backend records this as a
+    // preference-lobby that matches via ranked window overlap.
+    List<String> windowsRanked = const [],
+    List<String> groundsRanked = const [],
+    // Legacy single-window / single-arena. Kept for back-compat with older
+    // call sites; new code should pass the ranked arrays above instead.
     String? timeWindow,
     String? preferredArenaId,
   }) async {
@@ -175,6 +179,8 @@ class MatchmakingRepository {
           'picks': picks
               .map((p) => {'groundId': p.groundId, 'slotTime': p.slotTime})
               .toList(),
+        if (windowsRanked.isNotEmpty) 'windowsRanked': windowsRanked,
+        if (groundsRanked.isNotEmpty) 'groundsRanked': groundsRanked,
         if (timeWindow != null) 'timeWindow': timeWindow,
         if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
       },
@@ -234,23 +240,25 @@ class MatchmakingRepository {
     required String date,
     required String format,
     String? ballType,
-    List<String> timeWindows = const [], // 5-bucket enum strings
-    String? preferredArenaId, // legacy single-ground (deprecated)
-    List<String> preferredArenaIds = const [], // up to 3 grounds
+    // V2 ranked windows (order = preference; first = strongest). At least 1
+    // element required by the backend.
+    List<String> windowsRanked = const [],
+    // V2 ranked grounds — up to 3 arenaIds, ordered by preference. Empty list
+    // means "any nearby ground."
+    List<String> groundsRanked = const [],
     double? lat,
     double? lng,
   }) async {
     _mmLog(
-        'discoverLobbies → teamId=$teamId date=$date format=$format windows=$timeWindows arenas=$preferredArenaIds');
+        'discoverLobbies → teamId=$teamId date=$date format=$format windowsRanked=$windowsRanked groundsRanked=$groundsRanked');
     final body = <String, dynamic>{
       'teamId': teamId,
       'filters': {
         'date': date,
         'format': format,
         if (ballType != null) 'ballType': ballType,
-        'timeWindows': timeWindows,
-        if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
-        if (preferredArenaIds.isNotEmpty) 'preferredArenaIds': preferredArenaIds,
+        'windowsRanked': windowsRanked,
+        'groundsRanked': groundsRanked,
       },
       if (lat != null && lng != null) 'context': {'lat': lat, 'lng': lng},
     };

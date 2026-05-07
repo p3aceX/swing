@@ -2716,6 +2716,15 @@ model MatchmakingLobby {
   timeWindow          String?
   preferredArenaId    String?
   preferredArenaIds   String[] @default([])
+  // Lobby-as-persistent-supply-spec: ranked time windows the team is happy
+  // to play in (order = preference; first element = strongest). When at
+  // least one element is set, this is the source of truth for matching;
+  // legacy `timeWindow` is read only as fallback.
+  windowsRanked       String[] @default([])
+  // Subset of windowsRanked that have already been consumed by a confirmed
+  // match. Lobby stays `searching` until windowsMatched.length ==
+  // windowsRanked.length, then flips to `matched`.
+  windowsMatched      String[] @default([])
 
   // First-to-pay lock (Plan B / V2). When an interested team taps "Pay" on
   // this lobby, we acquire a 120s lock so only their Razorpay order is alive

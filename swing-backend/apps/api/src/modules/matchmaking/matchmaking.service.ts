@@ -194,15 +194,30 @@ export class MatchmakingService {
     // empty and the lobby is matched against other preference-lobbies on the
     // same date+format+window+arena (or any arena if both are null).
     timeWindow?: TimeWindow | null
+    // V2: ranked time windows (order = preference; first = strongest). When
+    // provided, this is the source of truth for matching.
+    windowsRanked?: string[]
     preferredArenaId?: string | null
-    preferredArenaIds?: string[] // up to 3 grounds; empty = any
+    preferredArenaIds?: string[] // up to 3 grounds; empty = any (legacy)
+    // V2: ranked grounds (order = preference; first = strongest, max 3).
+    groundsRanked?: string[]
   }) {
     const isPreferenceMode = input.picks.length === 0
+    // Normalise inputs: prefer ranked arrays. Legacy callers can still pass
+    // singular timeWindow / preferredArenaIds and we backfill ranked arrays.
+    const windowsRanked: string[] = (input.windowsRanked && input.windowsRanked.length > 0)
+      ? [...input.windowsRanked]
+      : (input.timeWindow ? [input.timeWindow] : [])
+    const groundsRanked: string[] = (input.groundsRanked && input.groundsRanked.length > 0)
+      ? [...input.groundsRanked]
+      : (input.preferredArenaIds && input.preferredArenaIds.length > 0
+          ? [...input.preferredArenaIds]
+          : (input.preferredArenaId ? [input.preferredArenaId] : []))
     if (isPreferenceMode) {
-      if (!input.timeWindow) {
+      if (windowsRanked.length === 0) {
         throw new AppError(
           'INVALID_LOBBY',
-          'Either picks or timeWindow is required',
+          'Either picks or windowsRanked is required',
           400,
         )
       }
@@ -223,11 +238,19 @@ export class MatchmakingService {
     if (!team || team.id !== input.teamId) throw Errors.forbidden()
     const callerAge = await this.getTeamAgeGroup(team.id)
     const date = this.startOfDay(input.date)
-    // For preference-lobbies, expiry is the end of the chosen window on the
-    // chosen date — once that window passes, the lobby is dead. For legacy
-    // slot-precise lobbies, keep the existing 24h TTL.
+
+    // Date horizon: lobby `date` must be in [today, today+14d].
+    this.assertDateInHorizon(date)
+
+    // For preference-lobbies, expiry is the end of the LAST window in
+    // windowsRanked on the chosen date — once every preferred window has
+    // passed, the lobby is dead. For legacy slot-precise lobbies, keep the
+    // existing 24h TTL.
+    const lobbyTimeWindow = windowsRanked.length === 1
+      ? (windowsRanked[0] as TimeWindow)
+      : (input.timeWindow ?? null)
     const expiresAt = isPreferenceMode
-      ? this.timeWindowExpiry(date, input.timeWindow!)
+      ? this.computeDiscoverExpiry(date, windowsRanked as TimeWindow[])
       : new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000)
 
     const result = await prisma.$transaction(async (tx) => {
@@ -240,9 +263,11 @@ export class MatchmakingService {
           date,
           status: 'searching',
           expiresAt,
-          timeWindow: input.timeWindow ?? null,
-          preferredArenaId: input.preferredArenaId ?? null,
-          preferredArenaIds: input.preferredArenaIds ?? [],
+          timeWindow: lobbyTimeWindow,
+          windowsRanked,
+          windowsMatched: [],
+          preferredArenaId: input.preferredArenaId ?? (groundsRanked[0] ?? null),
+          preferredArenaIds: groundsRanked,
           picks: {
             create: input.picks.map((p, i) => ({
               groundId: p.groundId,
@@ -481,9 +506,16 @@ export class MatchmakingService {
         date: string
         format: MatchmakingFormat
         ballType?: string | null
-        timeWindows: Array<TimeWindow>
+        // V2: ranked time windows the team prefers. Order = preference;
+        // first element is strongest. At least 1 element required.
+        windowsRanked?: Array<TimeWindow | string>
+        // V2: ranked grounds (max 3). Empty = any nearby.
+        groundsRanked?: string[]
+        // Legacy (back-compat) fields. timeWindows is unranked array; the
+        // singular preferredArenaId / preferredArenaIds also still accepted.
+        timeWindows?: Array<TimeWindow>
         preferredArenaId?: string | null
-        preferredArenaIds?: string[] // up to 3 preferred grounds, empty = any
+        preferredArenaIds?: string[]
       }
       context?: { lat?: number; lng?: number }
     },
@@ -519,20 +551,39 @@ export class MatchmakingService {
     }
 
     const date = this.startOfDay(input.filters.date)
+    // Date horizon: caller can only search within [today, today+14d].
+    this.assertDateInHorizon(date)
     const callerAge = await this.getTeamAgeGroup(team.id)
 
-    // Multi-window: when user picks 1 window we store it; when multiple (or
-    // all 3) we store NULL meaning "team is flexible across windows" — that
-    // makes them match any other lobby's specific window in score logic.
-    const lobbyTimeWindow =
-      input.filters.timeWindows.length === 1
-        ? input.filters.timeWindows[0]
-        : null
+    // Normalise ranked inputs. Frontend always sends `windowsRanked`; legacy
+    // fallbacks (timeWindows array, singular preferredArenaId/preferredArenaIds)
+    // are accepted to avoid hard-breaking older clients.
+    const windowsRanked: TimeWindow[] = (
+      (input.filters.windowsRanked && input.filters.windowsRanked.length > 0)
+        ? input.filters.windowsRanked
+        : (input.filters.timeWindows && input.filters.timeWindows.length > 0
+            ? input.filters.timeWindows
+            : [])
+    ) as TimeWindow[]
+    if (windowsRanked.length === 0) {
+      throw new AppError(
+        'INVALID_INPUT',
+        'At least one time window is required',
+        400,
+      )
+    }
+    const groundsRanked: string[] = (input.filters.groundsRanked && input.filters.groundsRanked.length > 0)
+      ? [...input.filters.groundsRanked]
+      : (input.filters.preferredArenaIds && input.filters.preferredArenaIds.length > 0
+          ? [...input.filters.preferredArenaIds]
+          : (input.filters.preferredArenaId ? [input.filters.preferredArenaId] : []))
 
-    const expiresAt = this.computeDiscoverExpiry(
-      date,
-      input.filters.timeWindows,
-    )
+    // Single-element windowsRanked still maps onto the legacy `timeWindow`
+    // column for back-compat reads. Multi-element keeps it null.
+    const lobbyTimeWindow: TimeWindow | null =
+      windowsRanked.length === 1 ? windowsRanked[0] : null
+
+    const expiresAt = this.computeDiscoverExpiry(date, windowsRanked)
 
     // Reject already-expired requests up front. Without this, lobbies were
     // being persisted with expiresAt in the past (e.g. searching for today's
@@ -572,7 +623,7 @@ export class MatchmakingService {
         select: { id: true, slotTime: true, format: true, lobbyAId: true, lobbyBId: true },
       })
       if (sameDateMatches.length > 0) {
-        const requestedRange = unionWindowRange(input.filters.timeWindows as TimeWindow[])
+        const requestedRange = unionWindowRange(windowsRanked)
         for (const m of sameDateMatches) {
           const existing = matchInterval(m.slotTime, m.format)
           if (!existing) continue
@@ -606,15 +657,18 @@ export class MatchmakingService {
       }
     }
 
-    // Ensure team-uniqueness: find/update existing or create a new one.
-    // Search WITHOUT the expiresAt filter so we recycle a stale row instead
-    // of creating a duplicate. We only re-use rows in 'searching' state — a
-    // matched/confirmed lobby stays untouched.
+    // V2: lobby key is (teamId, date, format, ballType, status='searching').
+    // Re-submitting the same key UPDATES the existing lobby with the new
+    // ranked preferences. Different keys produce separate lobbies (a team
+    // can advertise supply for multiple dates / formats simultaneously).
     const yourLobby = await prisma.$transaction(async (tx) => {
       const existing = await tx.matchmakingLobby.findFirst({
         where: {
           teamId: team.id,
           status: 'searching',
+          date,
+          format: input.filters.format,
+          ballType: input.filters.ballType ?? null,
         },
         orderBy: { createdAt: 'desc' },
       })
@@ -623,13 +677,12 @@ export class MatchmakingService {
           where: { id: existing.id },
           data: {
             playerId: player.id, // re-assign to current member
-            format: input.filters.format,
-            ballType: input.filters.ballType ?? null,
-            date,
             expiresAt,
             timeWindow: lobbyTimeWindow,
-            preferredArenaId: input.filters.preferredArenaId ?? null,
-            preferredArenaIds: input.filters.preferredArenaIds ?? [],
+            windowsRanked,
+            // Preserve any windows that were already consumed by partial matches.
+            preferredArenaId: groundsRanked[0] ?? null,
+            preferredArenaIds: groundsRanked,
           } as any,
         })
       }
@@ -643,22 +696,23 @@ export class MatchmakingService {
           status: 'searching',
           expiresAt,
           timeWindow: lobbyTimeWindow,
-          preferredArenaId: input.filters.preferredArenaId ?? null,
-          preferredArenaIds: input.filters.preferredArenaIds ?? [],
+          windowsRanked,
+          windowsMatched: [],
+          preferredArenaId: groundsRanked[0] ?? null,
+          preferredArenaIds: groundsRanked,
         } as any,
       })
     })
 
-    // Pull candidate universe — wider date range (today → +7d) so we have
-    // alternatives to suggest if exact-day yields little.
-    const sevenDaysAhead = new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000)
+    // Pull candidate universe — same calendar date as caller; the V2 model
+    // is date-precise (lobbies with different dates are separate entities).
     const candidates: any[] = await prisma.matchmakingLobby.findMany({
       where: {
         id: { not: yourLobby.id },
         teamId: { not: team.id },
         status: 'searching',
         expiresAt: { gt: new Date() },
-        date: { gte: date, lte: sevenDaysAhead },
+        date,
         ...(input.filters.format === 'ANY'
           ? {}
           : { format: { in: [input.filters.format, 'ANY'] } }),
@@ -706,35 +760,28 @@ export class MatchmakingService {
         return areAgeGroupsCompatible(callerAge ?? null, cAge ?? null)
       })
       .map((c) => {
-        const s = this.scoreCandidateLobby({
-          callerDate: date,
-          callerWindows: input.filters.timeWindows,
-          callerArenaId: input.filters.preferredArenaId ?? null,
+        const s = this.scoreRankedCandidate({
+          callerWindowsRanked: windowsRanked,
+          callerGroundsRanked: groundsRanked,
           callerFormat: input.filters.format,
           callerBallType: input.filters.ballType ?? null,
           candidate: c,
-          unitsById,
         })
         return { lobby: c, ...s }
       })
-      .filter((s) => s.value > 0)
+      // intersects: there exists at least one (window, ground) pair that
+      // both lobbies share. No intersection = not even an alternative.
+      .filter((s) => s.intersects)
       .sort((a, b) => b.value - a.value)
 
-    // Exact match = same calendar date as the caller. Score-only thresholds
-    // misled users into thinking a ±2-day suggestion was "exact". Date is a
-    // hard requirement now; everything else is an alternative.
-    const CLOSEST_MIN_SCORE = 0.7
-    const closest = scored.filter(
-      (s) => s.matchedOn.includes('date') && s.value >= CLOSEST_MIN_SCORE,
-    )
-    const closestIds = new Set(closest.map((s) => s.lobby.id))
+    // primary = caller rank-1 window AND candidate rank-1 window mutually
+    // present in the other's ranked list AND the same for ground rank-1.
+    // Anything else with at least one window+ground pair → alternative.
+    const primary = scored.filter((s) => s.isPrimary)
+    const primaryIds = new Set(primary.map((s) => s.lobby.id))
     const alternatives = scored
-      .filter((s) => !closestIds.has(s.lobby.id))
-      .slice(0, 10)
-
-    let alternativeReason: string | null = null
-    if (closest.length === 0) alternativeReason = 'no_exact_matches'
-    else if (closest.length < 3) alternativeReason = 'few_exact_matches'
+      .filter((s) => !primaryIds.has(s.lobby.id))
+      .slice(0, 20)
 
     const formatRanked = (s: {
       lobby: any
@@ -750,30 +797,46 @@ export class MatchmakingService {
       const preferredArena = c.preferredArenaId
         ? arenasById.get(c.preferredArenaId)
         : null
+      const cWindowsRanked = (c.windowsRanked && c.windowsRanked.length > 0)
+        ? (c.windowsRanked as string[])
+        : (c.timeWindow ? [c.timeWindow as string] : [])
+      const cWindowsMatched = (c.windowsMatched ?? []) as string[]
+      const cGroundsRanked = (c.preferredArenaIds ?? []) as string[]
+
       return {
-        lobbyId: c.id,
-        teamName: c.team?.name ?? (arena ? arena.name : 'TBD'),
-        isArenaLobby: c.arenaId != null,
-        arenaName,
-        ageGroup: c.teamId ? ages.get(c.teamId) ?? null : null,
-        format: c.format,
-        ballType: c.ballType ?? null,
-        groundName: unit?.name ?? null,
-        unitId: pick?.groundId ?? null,
-        pricePerTeam: unit
-          ? Math.round(
-              (unit.pricePerHourPaise *
-                this.formatDurationMins(c.format as MatchmakingFormat)) /
-                60 /
-                2,
-            )
-          : 90000,
-        slotTime: pick?.slotTime ?? null,
-        date: this.toDateOnly(c.date),
-        daysFromNow: this.daysFromNow(c.date),
-        timeWindow: c.timeWindow ?? null,
-        preferredArenaId: c.preferredArenaId ?? null,
-        preferredArenaName: preferredArena?.name ?? null,
+        // V2 wire-contract Lobby JSON.
+        lobby: {
+          lobbyId: c.id,
+          teamId: c.teamId ?? null,
+          format: c.format,
+          ballType: c.ballType ?? null,
+          date: this.toDateOnly(c.date),
+          windowsRanked: cWindowsRanked,
+          windowsMatched: cWindowsMatched,
+          groundsRanked: cGroundsRanked,
+          status: c.status,
+          // Helpful denormalised fields for the client (non-breaking; old
+          // `MmRankedLobby` shape is preserved while clients migrate).
+          teamName: c.team?.name ?? (arena ? arena.name : 'TBD'),
+          isArenaLobby: c.arenaId != null,
+          arenaName,
+          ageGroup: c.teamId ? ages.get(c.teamId) ?? null : null,
+          groundName: unit?.name ?? null,
+          unitId: pick?.groundId ?? null,
+          pricePerTeam: unit
+            ? Math.round(
+                (unit.pricePerHourPaise *
+                  this.formatDurationMins(c.format as MatchmakingFormat)) /
+                  60 /
+                  2,
+              )
+            : 90000,
+          slotTime: pick?.slotTime ?? null,
+          daysFromNow: this.daysFromNow(c.date),
+          timeWindow: c.timeWindow ?? null,
+          preferredArenaId: c.preferredArenaId ?? null,
+          preferredArenaName: preferredArena?.name ?? null,
+        },
         score: s.value,
         matchedOn: s.matchedOn,
         differs: s.differs,
@@ -782,9 +845,8 @@ export class MatchmakingService {
 
     return {
       yourLobbyId: yourLobby.id,
-      closest: closest.map(formatRanked),
+      primary: primary.map(formatRanked),
       alternatives: alternatives.map(formatRanked),
-      alternativeReason,
     }
   }
 
@@ -802,6 +864,161 @@ export class MatchmakingService {
     )
     const offsetMs = latestEndMin * 60 * 1000 - (5 * 60 + 30) * 60 * 1000
     return new Date(date.getTime() + offsetMs)
+  }
+
+  // V2 ranked-pair scoring. For windows + grounds independently, compute the
+  // best (myRank, theirRank) pair where both lists contain the same value.
+  // Combine + tag matchedOn / differs / isPrimary / intersects.
+  //
+  // Lower rank index = stronger preference (rank 0 is rank-1 in spec parlance).
+  // Score components:
+  //   • windowScore — 1.0 when both rank-0 align, decays with rank index.
+  //   • groundScore — 1.0 when both rank-0 align; 0.7 when no candidate ground
+  //     pref (any nearby), decays with rank index when both have prefs.
+  //   • formatScore + ballScore — same logic as legacy scorer.
+  private scoreRankedCandidate(p: {
+    callerWindowsRanked: string[]
+    callerGroundsRanked: string[]
+    callerFormat: string
+    callerBallType: string | null
+    candidate: any
+  }): {
+    value: number
+    matchedOn: string[]
+    differs: string[]
+    isPrimary: boolean
+    intersects: boolean
+  } {
+    const matchedOn: string[] = []
+    const differs: string[] = []
+
+    const candWindows: string[] = (p.candidate.windowsRanked && p.candidate.windowsRanked.length > 0)
+      ? (p.candidate.windowsRanked as string[])
+      : (p.candidate.timeWindow ? [p.candidate.timeWindow as string] : [])
+    const candWindowsMatched: string[] = (p.candidate.windowsMatched ?? []) as string[]
+    const candWindowsActive = candWindows.filter((w) => !candWindowsMatched.includes(w))
+    const candGrounds: string[] = (p.candidate.preferredArenaIds && p.candidate.preferredArenaIds.length > 0)
+      ? (p.candidate.preferredArenaIds as string[])
+      : (p.candidate.preferredArenaId ? [p.candidate.preferredArenaId as string] : [])
+
+    // Best (myRank, theirRank) for windows.
+    let bestWindow: { myRank: number; theirRank: number } | null = null
+    p.callerWindowsRanked.forEach((w, myRank) => {
+      const theirRank = candWindowsActive.indexOf(w)
+      if (theirRank < 0) return
+      if (
+        bestWindow === null ||
+        myRank + theirRank < bestWindow.myRank + bestWindow.theirRank
+      ) {
+        bestWindow = { myRank, theirRank }
+      }
+    })
+
+    // Best (myRank, theirRank) for grounds. Empty groundsRanked on either
+    // side = "any nearby" — treated as a soft match (rank-1 by convention).
+    let bestGround: { myRank: number; theirRank: number; soft: boolean } | null = null
+    if (p.callerGroundsRanked.length === 0 && candGrounds.length === 0) {
+      bestGround = { myRank: 0, theirRank: 0, soft: true }
+    } else if (p.callerGroundsRanked.length === 0) {
+      bestGround = { myRank: 0, theirRank: 0, soft: true }
+    } else if (candGrounds.length === 0) {
+      bestGround = { myRank: 0, theirRank: 0, soft: true }
+    } else {
+      p.callerGroundsRanked.forEach((g, myRank) => {
+        const theirRank = candGrounds.indexOf(g)
+        if (theirRank < 0) return
+        if (
+          bestGround === null ||
+          myRank + theirRank < bestGround.myRank + bestGround.theirRank
+        ) {
+          bestGround = { myRank, theirRank, soft: false }
+        }
+      })
+    }
+
+    const intersects = bestWindow !== null && bestGround !== null
+    if (!intersects) {
+      // Diagnostic differs labels even on no-intersect, so the client can
+      // surface "windows don't match" / "ground doesn't match" if needed.
+      if (bestWindow === null) differs.push('window')
+      if (bestGround === null) differs.push('ground')
+    } else {
+      matchedOn.push('window')
+      matchedOn.push('ground')
+    }
+
+    // Format match
+    let formatScore = 0
+    if (p.callerFormat === 'ANY' || p.candidate.format === 'ANY') {
+      formatScore = 0.85
+      matchedOn.push('format')
+    } else if (p.callerFormat === p.candidate.format) {
+      formatScore = 1.0
+      matchedOn.push('format')
+    } else {
+      formatScore = 0.0
+      differs.push('format')
+    }
+
+    // Ball compat — null on either side = compatible.
+    let ballScore = 0
+    if (
+      p.callerBallType == null ||
+      p.candidate.ballType == null ||
+      p.callerBallType === p.candidate.ballType
+    ) {
+      ballScore = 1.0
+      matchedOn.push('ball')
+    } else {
+      ballScore = 0.5
+      differs.push('ball')
+    }
+
+    // Decay by combined rank distance. rank-0 + rank-0 = score 1.0; each
+    // unit of distance trims 0.15 to a floor of 0.4.
+    const rankDecay = (myRank: number, theirRank: number) =>
+      Math.max(0.4, 1.0 - 0.15 * (myRank + theirRank))
+    const windowScore = bestWindow
+      ? rankDecay((bestWindow as { myRank: number; theirRank: number }).myRank, (bestWindow as { myRank: number; theirRank: number }).theirRank)
+      : 0
+    const groundScore = bestGround
+      ? ((bestGround as { myRank: number; theirRank: number; soft: boolean }).soft
+          ? 0.7
+          : rankDecay((bestGround as { myRank: number; theirRank: number; soft: boolean }).myRank, (bestGround as { myRank: number; theirRank: number; soft: boolean }).theirRank))
+      : 0
+
+    // Recency boost (weight 5)
+    const ageHours = (Date.now() - p.candidate.createdAt.getTime()) / 3600000
+    const recencyScore = ageHours < 1 ? 1.0 : ageHours < 6 ? 0.9 : ageHours < 24 ? 0.7 : 0.5
+
+    const total = windowScore * 30 + groundScore * 20 + formatScore * 15 + ballScore * 10 + recencyScore * 5
+    const weight = 30 + 20 + 15 + 10 + 5
+    const value = weight > 0 ? total / weight : 0
+
+    // primary IFF caller's rank-1 window is in candidate's active windowsRanked
+    //          AND candidate's rank-1 (active) window is in caller's
+    //          AND analogous for grounds (with non-empty grounds on both sides).
+    const callerW0 = p.callerWindowsRanked[0]
+    const candW0 = candWindowsActive[0]
+    const windowsPrimary =
+      !!callerW0 && !!candW0 &&
+      candWindowsActive.includes(callerW0) &&
+      p.callerWindowsRanked.includes(candW0)
+    const callerG0 = p.callerGroundsRanked[0]
+    const candG0 = candGrounds[0]
+    const groundsPrimary =
+      !!callerG0 && !!candG0 &&
+      candGrounds.includes(callerG0) &&
+      p.callerGroundsRanked.includes(candG0)
+    const isPrimary = windowsPrimary && groundsPrimary && intersects
+
+    return {
+      value,
+      matchedOn: [...new Set(matchedOn)],
+      differs: [...new Set(differs)],
+      isPrimary,
+      intersects,
+    }
   }
 
   // v0 scoring — date proximity, window overlap, ground match, format match,
@@ -2183,15 +2400,20 @@ export class MatchmakingService {
     lobby: {
       preferredArenaIds: string[]
       timeWindow: string | null
+      windowsRanked?: string[] | null
+      windowsMatched?: string[] | null
+      groundsRanked?: string[] | null
     },
     tx?: any,
-  ): Promise<{ groundId: string; slotTime: string } | null> {
+  ): Promise<{ groundId: string; slotTime: string; window: TimeWindow } | null> {
     const client = tx ?? prisma
-    const preferred = lobby.preferredArenaIds ?? []
+    const groundsRanked = (lobby.groundsRanked && lobby.groundsRanked.length > 0)
+      ? lobby.groundsRanked
+      : (lobby.preferredArenaIds ?? [])
 
-    // 1. Pick the candidate arenas: preferred first, then a small fallback
-    //    pool of active arenas if the team didn't pin any.
-    let candidateArenaIds = preferred
+    // 1. Pick the candidate arenas: groundsRanked first, then a small
+    //    fallback pool of active arenas if the team didn't pin any.
+    let candidateArenaIds: string[] = [...groundsRanked]
     if (candidateArenaIds.length === 0) {
       const fallback = await client.arena.findMany({
         where: { isActive: true },
@@ -2202,29 +2424,147 @@ export class MatchmakingService {
     }
     if (candidateArenaIds.length === 0) return null
 
-    // 2. Pick the first available unit. We sort by price ascending so a
-    //    deterministic tiebreaker exists (cheapest wins).
-    const unit = await client.arenaUnit.findFirst({
-      where: {
-        arenaId: { in: candidateArenaIds },
-        // Filter to active units. Schema doesn't have an explicit isActive
-        // on ArenaUnit (yet), so any unit at an active arena is eligible.
-      },
+    // 2. Pick the first available unit at the rank-1 ground (groundsRanked[0])
+    //    if possible; falls back to cheapest within the candidate pool.
+    let unit = await client.arenaUnit.findFirst({
+      where: { arenaId: candidateArenaIds[0] },
       orderBy: { pricePerHourPaise: 'asc' },
       select: { id: true },
     })
+    if (!unit) {
+      unit = await client.arenaUnit.findFirst({
+        where: { arenaId: { in: candidateArenaIds } },
+        orderBy: { pricePerHourPaise: 'asc' },
+        select: { id: true },
+      })
+    }
     if (!unit) return null
 
-    // 3. Slot start time: bucket-start of the lobby's window. Multi-window
-    //    lobbies (timeWindow = null) default to MORNING.
-    const w = (lobby.timeWindow as TimeWindow | null) ?? 'MORNING'
+    // 3. Window choice = first member of windowsRanked NOT in windowsMatched.
+    //    Falls back to legacy `timeWindow`, then MORNING as a last resort.
+    const windowsRanked = (lobby.windowsRanked ?? []) as string[]
+    const windowsMatched = (lobby.windowsMatched ?? []) as string[]
+    const nextActive = windowsRanked.find((w) => !windowsMatched.includes(w))
+    const w: TimeWindow =
+      (nextActive as TimeWindow | undefined)
+      ?? ((lobby.timeWindow as TimeWindow | null) ?? 'MORNING')
     const startMin =
       WINDOW_RANGES[w]?.startMin ?? WINDOW_RANGES.MORNING.startMin
     const hh = Math.floor(startMin / 60)
     const mm = startMin % 60
     const slotTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 
-    return { groundId: unit.id, slotTime }
+    return { groundId: unit.id, slotTime, window: w }
+  }
+
+  // V2 lobby consumption: when a match is created, append the matched window
+  // to each side's windowsMatched (idempotent), flip status to 'matched' if
+  // every window in windowsRanked has been consumed, and auto-cancel sibling
+  // lobbies whose remaining windows overlap the consumed slot.
+  //
+  // Auto-cancelled siblings use status 'auto_cancelled' (not 'cancelled') so
+  // they don't ding reputation.
+  private async consumeLobbyWindows(
+    tx: any,
+    args: {
+      lobbyId: string
+      window: string
+      slotTime: string | null
+      format: string
+    },
+  ): Promise<void> {
+    const lobby = await tx.matchmakingLobby.findUnique({
+      where: { id: args.lobbyId },
+      select: {
+        id: true,
+        teamId: true,
+        date: true,
+        windowsRanked: true,
+        windowsMatched: true,
+        timeWindow: true,
+        status: true,
+      },
+    })
+    if (!lobby) return
+
+    // If the row pre-dates the V2 migration (windowsRanked still empty), seed
+    // it from the legacy `timeWindow` so the rest of the math works.
+    let ranked: string[] = (lobby.windowsRanked && lobby.windowsRanked.length > 0)
+      ? [...lobby.windowsRanked]
+      : (lobby.timeWindow ? [lobby.timeWindow] : [])
+    let matched: string[] = [...(lobby.windowsMatched ?? [])]
+    if (ranked.length === 0) ranked = [args.window]
+    // Idempotent append.
+    if (!matched.includes(args.window)) matched = [...matched, args.window]
+
+    // Status flips to 'matched' only when every ranked window has been
+    // matched. Until then the lobby stays 'searching' and remains visible
+    // in Discover for additional consumers.
+    const allConsumed = ranked.every((w) => matched.includes(w))
+    const nextStatus = allConsumed ? 'matched' : (lobby.status === 'searching' ? 'searching' : lobby.status)
+
+    await tx.matchmakingLobby.update({
+      where: { id: lobby.id },
+      data: {
+        windowsRanked: ranked,
+        windowsMatched: matched,
+        status: nextStatus,
+      } as any,
+    })
+
+    // Auto-cancellation cascade for sibling lobbies of the same team. Cancel
+    // *other* searching lobbies on the same date whose remaining windows
+    // (windowsRanked − windowsMatched) overlap the consumed slot's interval.
+    if (!lobby.teamId) return
+    const slotTime = args.slotTime
+    const formatStr = args.format
+    const consumedRange = slotTime
+      ? matchInterval(slotTime, formatStr)
+      : (() => {
+          const r = WINDOW_RANGES[args.window as TimeWindow]
+          return r ? { startMin: r.startMin, endMin: r.endMin } : null
+        })()
+    if (!consumedRange) return
+
+    const siblings = await tx.matchmakingLobby.findMany({
+      where: {
+        teamId: lobby.teamId,
+        status: 'searching',
+        date: lobby.date,
+        id: { not: lobby.id },
+      },
+      select: {
+        id: true,
+        windowsRanked: true,
+        windowsMatched: true,
+        timeWindow: true,
+      },
+    })
+    for (const sib of siblings) {
+      const sibRanked: string[] = (sib.windowsRanked && sib.windowsRanked.length > 0)
+        ? sib.windowsRanked
+        : (sib.timeWindow ? [sib.timeWindow] : [])
+      const sibMatched: string[] = sib.windowsMatched ?? []
+      const remaining = sibRanked.filter((w) => !sibMatched.includes(w))
+      if (remaining.length === 0) continue
+      // Sibling overlaps if any of its remaining windows shares an interval
+      // with the consumed slot.
+      const overlapsConsumed = remaining.some((w) => {
+        const r = WINDOW_RANGES[w as TimeWindow]
+        if (!r) return false
+        return intervalsOverlap(
+          consumedRange.startMin,
+          consumedRange.endMin,
+          r.startMin,
+          r.endMin,
+        )
+      })
+      if (!overlapsConsumed) continue
+      await tx.matchmakingLobby.update({
+        where: { id: sib.id },
+        data: { status: 'auto_cancelled' },
+      })
+    }
   }
 
   // Smart-window scanner. For each of the 5 time buckets, count how many
@@ -2393,6 +2733,24 @@ export class MatchmakingService {
 
   private toDateOnly(d: Date) {
     return d.toISOString().slice(0, 10)
+  }
+
+  // Date horizon enforcement: lobby's `date` (UTC start-of-day) must be in
+  // [today, today+14d]. Throws DATE_OUT_OF_HORIZON 400 otherwise. Today is
+  // computed in UTC since startOfDay uses Date.UTC for the input.
+  private assertDateInHorizon(date: Date) {
+    const now = new Date()
+    const todayUTC = new Date(Date.UTC(
+      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+    ))
+    const horizonUTC = new Date(todayUTC.getTime() + 14 * 24 * 60 * 60 * 1000)
+    if (date.getTime() < todayUTC.getTime() || date.getTime() > horizonUTC.getTime()) {
+      throw new AppError(
+        'DATE_OUT_OF_HORIZON',
+        'Lobby date must be within the next 14 days',
+        400,
+      )
+    }
   }
 
   private daysFromNow(d: Date) {
@@ -3817,11 +4175,14 @@ export class MatchmakingService {
     // from the lobby's preferredArenaIds + timeWindow so finalize can write
     // a real SlotBooking. Persist as a pick row so subsequent reads (and
     // the bypass / verify paths below) find it normally.
-    let resolvedPick = result.pick as { groundId: string; slotTime: string } | null
+    let resolvedPick = result.pick as { groundId: string; slotTime: string; window?: TimeWindow } | null
     if (!resolvedPick) {
       const r = await this.resolveSlotForPicklessLobby({
         preferredArenaIds: (result.lobby as any).preferredArenaIds ?? [],
         timeWindow: (result.lobby as any).timeWindow ?? null,
+        windowsRanked: (result.lobby as any).windowsRanked ?? [],
+        windowsMatched: (result.lobby as any).windowsMatched ?? [],
+        groundsRanked: (result.lobby as any).preferredArenaIds ?? [],
       })
       if (!r) {
         throw new AppError(
@@ -3876,6 +4237,16 @@ export class MatchmakingService {
         const pick = lobby.picks[0]
         if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
 
+        // Resolve the matched window from the picked slot time so we can
+        // append it to both lobbies' windowsMatched.
+        const matchedWindow = (this.slotTimeWindow(pick.slotTime) as string)
+          ?? ((lobby as any).windowsRanked?.[0] as string | undefined)
+          ?? (lobby.timeWindow as string | undefined)
+          ?? 'MORNING'
+
+        // The joiner side is a fresh "matched" lobby for this slot only.
+        // Seed its windowsRanked with the matched window so the V2 model
+        // stays consistent (one ranked window, one matched).
         const joinerLobby = await tx.matchmakingLobby.create({
           data: {
             teamId: interest.teamId,
@@ -3885,10 +4256,14 @@ export class MatchmakingService {
             date: lobby.date,
             status: 'matched',
             expiresAt: new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000),
+            timeWindow: matchedWindow,
+            windowsRanked: [matchedWindow],
+            windowsMatched: [matchedWindow],
+            preferredArenaIds: [],
             picks: {
               create: [{ groundId: pick.groundId, slotTime: pick.slotTime, preferenceOrder: 1 }],
             },
-          },
+          } as any,
         })
 
         const remainingFeePaise = Math.max(0, groundFeePaise - amountPaise)
@@ -3929,10 +4304,11 @@ export class MatchmakingService {
           },
           data: { status: 'lost' },
         })
+        // Clear lock + persist matchId on both sides. Status flip is delegated
+        // to consumeLobbyWindows (which also handles partial-consumption).
         await tx.matchmakingLobby.update({
           where: { id: lobby.id },
           data: {
-            status: 'matched',
             matchId: match.id,
             lockedByInterestId: null,
             lockExpiresAt: null,
@@ -3943,21 +4319,21 @@ export class MatchmakingService {
           data: { matchId: match.id },
         })
 
-        // Cancel any other 'searching' lobbies held by either team — once a
-        // team has a confirmed match-up, their unrelated open searches
-        // shouldn't keep dragging Discover back into searching mode.
-        const teamIdsToClear = [lobby.teamId, joinerLobby.teamId]
-          .filter((id): id is string => !!id)
-        if (teamIdsToClear.length > 0) {
-          await tx.matchmakingLobby.updateMany({
-            where: {
-              teamId: { in: teamIdsToClear },
-              status: 'searching',
-              id: { notIn: [lobby.id, joinerLobby.id] },
-            },
-            data: { status: 'cancelled' },
-          })
-        }
+        // V2 consumption: append the matched window to both sides'
+        // windowsMatched and flip status only when fully consumed. Also
+        // auto-cancels overlapping sibling lobbies of the same team.
+        await this.consumeLobbyWindows(tx, {
+          lobbyId: lobby.id,
+          window: matchedWindow,
+          slotTime: pick.slotTime,
+          format: lobby.format,
+        })
+        await this.consumeLobbyWindows(tx, {
+          lobbyId: joinerLobby.id,
+          window: matchedWindow,
+          slotTime: pick.slotTime,
+          format: lobby.format,
+        })
 
         return { match, lobby }
       })
@@ -4075,6 +4451,12 @@ export class MatchmakingService {
       const unit = await tx.arenaUnit.findUnique({ where: { id: pick.groundId } })
       if (!unit) throw Errors.notFound('Arena unit')
 
+      // Resolve the matched window so we can stamp both lobbies' V2 fields.
+      const matchedWindow = (this.slotTimeWindow(pick.slotTime) as string)
+        ?? ((lobby as any).windowsRanked?.[0] as string | undefined)
+        ?? (lobby.timeWindow as string | undefined)
+        ?? 'MORNING'
+
       // Build a "joiner" lobby for the winning team (mirrors joinOpenLobby).
       const joinerLobby = await tx.matchmakingLobby.create({
         data: {
@@ -4085,10 +4467,14 @@ export class MatchmakingService {
           date: lobby.date,
           status: 'matched',
           expiresAt: new Date(Date.now() + LOBBY_EXPIRY_HOURS * 60 * 60 * 1000),
+          timeWindow: matchedWindow,
+          windowsRanked: [matchedWindow],
+          windowsMatched: [matchedWindow],
+          preferredArenaIds: [],
           picks: {
             create: [{ groundId: pick.groundId, slotTime: pick.slotTime, preferenceOrder: 1 }],
           },
-        },
+        } as any,
       })
 
       const groundFeePaise = Math.floor(
@@ -4138,11 +4524,11 @@ export class MatchmakingService {
         data: { status: 'lost' },
       })
 
-      // Original lobby flips to matched, lock cleared, link to match.
+      // Clear lock + persist matchId on both sides. Status flip is delegated
+      // to consumeLobbyWindows below (which handles partial-consumption).
       await tx.matchmakingLobby.update({
         where: { id: lobby.id },
         data: {
-          status: 'matched',
           matchId: match.id,
           lockedByInterestId: null,
           lockExpiresAt: null,
@@ -4156,20 +4542,25 @@ export class MatchmakingService {
         data: { matchId: match.id },
       })
 
-      // Cancel any other 'searching' lobbies for both teams so they don't
-      // resurface in Discover while the match-up is active.
-      const teamIdsToClear = [lobby.teamId, joinerLobby.teamId]
-        .filter((id): id is string => !!id)
-      if (teamIdsToClear.length > 0) {
-        await tx.matchmakingLobby.updateMany({
-          where: {
-            teamId: { in: teamIdsToClear },
-            status: 'searching',
-            id: { notIn: [lobby.id, joinerLobby.id] },
-          },
-          data: { status: 'cancelled' },
-        })
-      }
+      // V2 consumption: append matched window, flip status only when fully
+      // consumed, auto-cancel overlapping sibling lobbies of the same team
+      // with status='auto_cancelled' (so reputation isn't impacted).
+      await this.consumeLobbyWindows(tx, {
+        lobbyId: lobby.id,
+        window: matchedWindow,
+        slotTime: pick.slotTime,
+        format: lobby.format,
+      })
+      await this.consumeLobbyWindows(tx, {
+        lobbyId: joinerLobby.id,
+        window: matchedWindow,
+        slotTime: pick.slotTime,
+        format: lobby.format,
+      })
+
+      // Note: cross-key sibling lobbies (different date/format) stay open by
+      // design. consumeLobbyWindows already auto-cancels same-date sibling
+      // lobbies whose remaining windows overlap the consumed slot.
 
       return { interest, match, lobby, pick, joinerLobby }
     })

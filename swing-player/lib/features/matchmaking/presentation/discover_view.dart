@@ -87,19 +87,26 @@ class _Prefs {
     this.allFormats = false,
     this.ballType,
     DateTime? date,
-    Set<DiscoverWindow>? windows,
+    List<DateTime>? dates,
+    List<DiscoverWindow>? windowsRanked,
     List<MmArenaPick>? preferredArenas,
   })  : date = date ?? DateTime.now(),
-        windows = windows ?? <DiscoverWindow>{},
+        dates = dates ?? <DateTime>[date ?? DateTime.now()],
+        windowsRanked = windowsRanked ?? <DiscoverWindow>[],
         preferredArenas = preferredArenas ?? <MmArenaPick>[];
 
   // Team comes from the team-switcher chip on DiscoverView, NOT from prefs.
   MatchFormat format;
   bool allFormats; // true = "All formats" picked; ignore format on search
   String? ballType; // null = "All ball types" picked
+  // V2: the wizard supports picking N dates in one go. The legacy [date]
+  // singular remains as the "active" date used for headers / results paging
+  // and stays in sync with [dates.first] after submission.
   DateTime date;
-  Set<DiscoverWindow> windows; // empty = open to any window
-  // Up to 3 grounds the team would accept. Empty = "Any nearby ground."
+  List<DateTime> dates;
+  // Ordered list of preferred windows (order = rank; first = strongest).
+  List<DiscoverWindow> windowsRanked;
+  // Up to 3 grounds the team would accept (ordered = rank). Empty = any.
   List<MmArenaPick> preferredArenas;
 
   // Legacy accessors kept for places (Results header, etc.) that still expect
@@ -116,25 +123,24 @@ class _Prefs {
     return '${preferredArenas.first.name} + ${preferredArenas.length - 1} more';
   }
 
-  // Multi-window: at least one window picked OR user is open to any (empty
-  // also OK — empty means "any window"). For now require at least one to
-  // keep the user explicit; can relax to allow "any" via a separate toggle.
-  bool get isComplete => windows.isNotEmpty;
+  // Wizard completeness: needs at least one date AND at least one window.
+  bool get isComplete => windowsRanked.isNotEmpty && dates.isNotEmpty;
 
   String get dateApi => DateFormat('yyyy-MM-dd').format(date);
+  List<String> get datesApi =>
+      dates.map((d) => DateFormat('yyyy-MM-dd').format(d)).toList();
 
   String get formatLabel => allFormats ? 'All formats' : format.label;
   String get ballLabel =>
       ballType == null ? 'All ball types' : _ballLabel(ballType!);
 
   String get windowsLabel {
-    if (windows.isEmpty) return 'Any time';
-    final all = DiscoverWindow.values.toSet();
-    if (windows.length == all.length) return 'Anytime';
-    return windows.map((w) => w.label).join(' · ');
+    if (windowsRanked.isEmpty) return 'Any time';
+    return windowsRanked.map((w) => w.label).join(' · ');
   }
 
-  List<String> get windowsApi => windows.map((w) => w.apiValue).toList();
+  List<String> get windowsApi =>
+      windowsRanked.map((w) => w.apiValue).toList();
 }
 
 // ── Top-level widget ────────────────────────────────────────────────────────
@@ -160,12 +166,20 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   final Map<String, MmTeamLobbySummary> _teamLobbies = {};
 
   String? _activeLobbyId;
-  List<MmRankedLobby> _closest = [];
+  List<MmRankedLobby> _primary = [];
   List<MmRankedLobby> _alternatives = [];
   String? _alternativeReason;
   String? _error;
   bool _submitting = false;
   Timer? _expiryTicker;
+  // Edit-aware Setup. True when the wizard is opened on top of an existing
+  // (team, date, format, ballType) lobby. Drives Submit copy ("Save changes"
+  // vs "Find a match") and skips creating a brand new lobby on submit.
+  bool _isEditing = false;
+  // Multi-date submission: lobby ids returned by each per-date discover call,
+  // kept so Results can offer a "switch date" strip across submitted lobbies.
+  List<({String date, String lobbyId})> _submittedLobbies =
+      const <({String date, String lobbyId})>[];
 
   @override
   void initState() {
@@ -242,27 +256,45 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     try {
       d = DateTime.parse(lobby.date);
     } catch (_) {}
-    final w = _parseWindow(lobby.timeWindow);
+    // V2 ranked windows come straight from the lobby. Legacy single-window
+    // lobbies fall back to the singular [timeWindow] string.
+    final hydratedWindows = <DiscoverWindow>[];
+    if (lobby.windowsRanked.isNotEmpty) {
+      for (final s in lobby.windowsRanked) {
+        final w = _parseWindow(s);
+        if (w != null && !hydratedWindows.contains(w)) {
+          hydratedWindows.add(w);
+        }
+      }
+    } else {
+      final w = _parseWindow(lobby.timeWindow);
+      if (w != null) hydratedWindows.add(w);
+    }
     setState(() {
       _activeLobbyId = lobby.lobbyId;
-      // Single legacy preferredArenaId on the lobby summary becomes a
-      // 1-element preferredArenas list when present.
+      _isEditing = true;
+      // Hydrate ranked grounds. The summary doesn't carry arena names, so we
+      // use a placeholder that the picker overwrites when re-opened.
       final hydratedArenas = <MmArenaPick>[];
-      if (lobby.preferredArenaId != null && lobby.preferredArenaId!.isNotEmpty) {
-        // MmTeamLobbySummary doesn't carry the arena name; placeholder until
-        // user re-opens the picker (which fetches names by ID).
+      if (lobby.groundsRanked.isNotEmpty) {
+        for (final id in lobby.groundsRanked) {
+          if (id.isEmpty) continue;
+          hydratedArenas.add((id: id, name: 'Selected ground'));
+        }
+      } else if (lobby.preferredArenaId != null &&
+          lobby.preferredArenaId!.isNotEmpty) {
         hydratedArenas.add((
           id: lobby.preferredArenaId!,
           name: 'Selected ground',
         ));
       }
+      final hydratedDate = d ?? _prefs.date;
       _prefs
-        ..date = d ?? _prefs.date
+        ..date = hydratedDate
+        ..dates = [hydratedDate]
         ..ballType = lobby.ballType
         ..preferredArenas = hydratedArenas
-        // Multi-window stored as null on the lobby = "open to any". Single
-        // window restores into the set; null leaves the set empty.
-        ..windows = (w != null ? {w} : <DiscoverWindow>{})
+        ..windowsRanked = hydratedWindows
         ..format = _formatFromApi(lobby.format) ?? _prefs.format
         ..allFormats = lobby.format == 'ANY';
     });
@@ -273,13 +305,13 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   // interrupt. Instead the user sees the banner and chooses Modify or Cancel.
   bool get _hasExpired =>
       _activeLobbyId != null &&
-      _isAllWindowsPassed(_prefs.date, _prefs.windows);
+      _isAllWindowsPassed(_prefs.date, _prefs.windowsRanked.toSet());
 
   void _maybeExpire() {
     // Lightweight tick to nudge a rebuild so the expired banner shows up
     // exactly when the last window passes (without waiting for user input).
     if (_stage != _Stage.results || _activeLobbyId == null) return;
-    if (!_isAllWindowsPassed(_prefs.date, _prefs.windows)) return;
+    if (!_isAllWindowsPassed(_prefs.date, _prefs.windowsRanked.toSet())) return;
     if (mounted) setState(() {});
   }
 
@@ -299,9 +331,11 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     setState(() {
       if (tid != null) _teamLobbies.remove(tid);
       _activeLobbyId = null;
-      _closest = [];
+      _primary = [];
       _alternatives = [];
       _alternativeReason = null;
+      _isEditing = false;
+      _submittedLobbies = const [];
       _stage = _Stage.intro;
     });
   }
@@ -311,7 +345,6 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   // expiresAt on the server handles that).
   bool _isAllWindowsPassed(DateTime date, Set<DiscoverWindow> windows) {
     if (windows.isEmpty) return false;
-    final now = DateTime.now();
     // Delegates to DiscoverWindow.isPast, which uses the canonical end
     // minutes (matches backend WINDOW_RANGES).
     return windows.every((w) => w.isPast(date));
@@ -319,7 +352,15 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
 
   // ── Stage transitions ──────────────────────────────────────────────────────
 
-  void _goSetup() => setState(() => _stage = _Stage.setup);
+  void _goSetup() {
+    setState(() {
+      // Edit-aware Setup: if there's an active lobby for the current team
+      // matching (date, format, ballType), the wizard pre-fills from it and
+      // the Submit copy reads "Save changes" instead of "Find a match".
+      _isEditing = _activeLobbyId != null;
+      _stage = _Stage.setup;
+    });
+  }
   void _goIntro() => setState(() => _stage = _Stage.intro);
 
   Future<void> _submit() async {
@@ -337,7 +378,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     // resolves first, we still wait for the cycling-text animation to play
     // through. If the API takes longer, we hold on the last phase.
     await Future.wait([
-      _runDiscover(skipCelebrate: true),
+      _runDiscoverForAllDates(),
       Future<void>.delayed(const Duration(milliseconds: 4500)),
     ]);
     if (!mounted) return;
@@ -347,9 +388,109 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     });
   }
 
-  // Calls /matchmaking/discover. Handles both first submit and Modify-search
-  // (the backend service does find/update/create internally based on
-  // teamId).
+  // Submits one POST /matchmaking/discover per selected date (multi-date
+  // wizard support). The first date's response drives the visible Results
+  // screen; the rest just kick off lobbies in the background.
+  //
+  // Multi-date UX simplification (v1): we display the first submitted date's
+  // results immediately. The user can re-enter the wizard / use the
+  // team-switcher to inspect other submitted dates' lobbies.
+  Future<void> _runDiscoverForAllDates() async {
+    if (_currentTeam == null) return;
+    final dates = List<DateTime>.from(_prefs.dates);
+    if (dates.isEmpty) return;
+    // First date drives the visible UI.
+    final first = dates.first;
+    _prefs.date = first;
+    final submitted = <({String date, String lobbyId})>[];
+    // Sequential — keeps backend log lines in order and avoids burst limits.
+    for (var i = 0; i < dates.length; i++) {
+      final d = dates[i];
+      final isFirst = i == 0;
+      final dateApi = DateFormat('yyyy-MM-dd').format(d);
+      final ok = await _runDiscoverForDate(
+        d,
+        recordResponse: isFirst,
+      );
+      if (!ok) {
+        // First-date error already surfaced through _runDiscoverForDate.
+        // Continue trying later dates — they may still succeed and the user
+        // can switch to them from the Results "other dates" strip.
+        continue;
+      }
+      if (_activeLobbyId != null && isFirst) {
+        submitted.add((date: dateApi, lobbyId: _activeLobbyId!));
+      } else if (!isFirst && _lastBackgroundLobbyId != null) {
+        submitted.add((date: dateApi, lobbyId: _lastBackgroundLobbyId!));
+      }
+    }
+    if (!mounted) return;
+    setState(() => _submittedLobbies = submitted);
+  }
+
+  // Holds the lobbyId of the most recent background per-date discover call so
+  // [_runDiscoverForAllDates] can record it into [_submittedLobbies].
+  String? _lastBackgroundLobbyId;
+
+  Future<bool> _runDiscoverForDate(
+    DateTime date, {
+    required bool recordResponse,
+  }) async {
+    if (_currentTeam == null) return false;
+    final repo = ref.read(matchmakingRepositoryProvider);
+    final dateApi = DateFormat('yyyy-MM-dd').format(date);
+    try {
+      final res = await repo.discoverLobbies(
+        teamId: _currentTeam!.id,
+        date: dateApi,
+        format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
+        ballType: _prefs.ballType,
+        windowsRanked: _prefs.windowsApi,
+        groundsRanked: _prefs.preferredArenaIdList,
+      );
+      if (!mounted) return false;
+      if (recordResponse) {
+        setState(() {
+          _activeLobbyId = res.yourLobbyId;
+          _primary = res.primary;
+          _alternatives = res.alternatives;
+          _alternativeReason = res.alternativeReason;
+          // Refresh team-lobbies map so chip reflects this newly-active lobby.
+          _teamLobbies[_currentTeam!.id] = MmTeamLobbySummary(
+            lobbyId: res.yourLobbyId,
+            teamId: _currentTeam!.id,
+            teamName: _currentTeam!.name,
+            status: 'searching',
+            date: dateApi,
+            format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
+            ballType: _prefs.ballType,
+            timeWindow: _prefs.windowsRanked.length == 1
+                ? _prefs.windowsRanked.first.apiValue
+                : null,
+            preferredArenaId: _prefs.preferredArenaId,
+            windowsRanked: _prefs.windowsApi,
+            groundsRanked: _prefs.preferredArenaIdList,
+          );
+        });
+      } else {
+        _lastBackgroundLobbyId = res.yourLobbyId;
+      }
+      return true;
+    } catch (e) {
+      _log('runDiscoverForDate error ($dateApi): $e');
+      if (!mounted) return false;
+      // Only surface errors for the first-date (visible) call; background
+      // failures stay silent — the user can re-enter the wizard for them.
+      if (recordResponse) {
+        _handleDiscoverError(e);
+      }
+      return false;
+    }
+  }
+
+  // Calls /matchmaking/discover for the currently-selected single date. Used
+  // by Results-screen pull-to-refresh and by team-switcher hydration. Multi-
+  // date submission goes through [_runDiscoverForAllDates] instead.
   Future<void> _runDiscover({bool skipCelebrate = false}) async {
     if (_currentTeam == null) return;
     final repo = ref.read(matchmakingRepositoryProvider);
@@ -359,14 +500,13 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         date: _prefs.dateApi,
         format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
         ballType: _prefs.ballType,
-        timeWindows: _prefs.windowsApi,
-        preferredArenaId: _prefs.preferredArenaId,
-        preferredArenaIds: _prefs.preferredArenaIdList,
+        windowsRanked: _prefs.windowsApi,
+        groundsRanked: _prefs.preferredArenaIdList,
       );
       if (!mounted) return;
       setState(() {
         _activeLobbyId = res.yourLobbyId;
-        _closest = res.closest;
+        _primary = res.primary;
         _alternatives = res.alternatives;
         _alternativeReason = res.alternativeReason;
         // Refresh team-lobbies map so chip reflects this newly-active lobby.
@@ -378,10 +518,12 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           date: _prefs.dateApi,
           format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
           ballType: _prefs.ballType,
-          timeWindow: _prefs.windows.length == 1
-              ? _prefs.windows.first.apiValue
+          timeWindow: _prefs.windowsRanked.length == 1
+              ? _prefs.windowsRanked.first.apiValue
               : null,
           preferredArenaId: _prefs.preferredArenaId,
+          windowsRanked: _prefs.windowsApi,
+          groundsRanked: _prefs.preferredArenaIdList,
         );
         if (!skipCelebrate && _stage != _Stage.celebrating) {
           _stage = _Stage.results;
@@ -390,47 +532,52 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     } catch (e) {
       _log('runDiscover error: $e');
       if (!mounted) return;
-      // Slot-conflict (409) gets a friendly dialog instead of a raw error.
-      // Backend response shape: { success:false, error:{ code, message, details } }
-      if (e is DioException) {
-        final data = e.response?.data;
-        if (data is Map && data['error'] is Map) {
-          final err = data['error'] as Map;
-          if (err['code'] == 'SLOT_CONFLICT') {
-            setState(() {
-              _submitting = false;
-              _error = null;
-              if (_stage == _Stage.celebrating) _stage = _Stage.setup;
-            });
-            _showSlotConflictDialog(err);
-            return;
-          }
-          if (err['code'] == 'TEAM_BANNED') {
-            setState(() {
-              _submitting = false;
-              _error = null;
-              if (_stage == _Stage.celebrating) _stage = _Stage.setup;
-            });
-            _showTeamBannedDialog(err);
-            return;
-          }
-          if (err['code'] == 'NO_AVAILABLE_SLOT') {
-            setState(() {
-              _submitting = false;
-              _error = (err['message'] as String?) ??
-                  'No available slot for these grounds. Pick different grounds.';
-              if (_stage == _Stage.celebrating) _stage = _Stage.setup;
-            });
-            return;
-          }
+      _handleDiscoverError(e);
+    }
+  }
+
+  // Surfaces a discover-flow error to the user. Maps the known backend codes
+  // (SLOT_CONFLICT / TEAM_BANNED / NO_AVAILABLE_SLOT) to a friendly dialog
+  // or banner; everything else falls back to the raw server message.
+  void _handleDiscoverError(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map && data['error'] is Map) {
+        final err = data['error'] as Map;
+        if (err['code'] == 'SLOT_CONFLICT') {
+          setState(() {
+            _submitting = false;
+            _error = null;
+            if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+          });
+          _showSlotConflictDialog(err);
+          return;
+        }
+        if (err['code'] == 'TEAM_BANNED') {
+          setState(() {
+            _submitting = false;
+            _error = null;
+            if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+          });
+          _showTeamBannedDialog(err);
+          return;
+        }
+        if (err['code'] == 'NO_AVAILABLE_SLOT') {
+          setState(() {
+            _submitting = false;
+            _error = (err['message'] as String?) ??
+                'No available slot for these grounds. Pick different grounds.';
+            if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+          });
+          return;
         }
       }
-      setState(() {
-        _submitting = false;
-        _error = _extractServerError(e);
-        if (_stage == _Stage.celebrating) _stage = _Stage.setup;
-      });
     }
+    setState(() {
+      _submitting = false;
+      _error = _extractServerError(e);
+      if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+    });
   }
 
   void _showTeamBannedDialog(Map err) {
@@ -532,9 +679,11 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     setState(() {
       _currentTeam = team;
       _activeLobbyId = null;
-      _closest = [];
+      _primary = [];
       _alternatives = [];
       _alternativeReason = null;
+      _isEditing = false;
+      _submittedLobbies = const [];
     });
     final active = _teamLobbies[team.id];
     if (active != null) {
@@ -569,6 +718,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           onSwitchTeam: _switchTeam,
           submitting: _submitting,
           error: _error,
+          isEditing: _isEditing,
           onChanged: () => setState(() {}),
           onCancel: _activeLobbyId != null
               ? () => setState(() => _stage = _Stage.results)
@@ -583,9 +733,10 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           teamLobbies: _teamLobbies,
           expired: _hasExpired,
           onSwitchTeam: _switchTeam,
-          closest: _closest,
+          primary: _primary,
           alternatives: _alternatives,
           alternativeReason: _alternativeReason,
+          submittedLobbies: _submittedLobbies,
           onModify: _goSetup,
           onRefresh: _runDiscover,
           onCancel: _cancelSearch,
@@ -856,6 +1007,7 @@ class _DiscoverSetup extends ConsumerStatefulWidget {
     required this.onSwitchTeam,
     required this.submitting,
     required this.error,
+    required this.isEditing,
     required this.onChanged,
     required this.onCancel,
     required this.onSubmit,
@@ -868,6 +1020,8 @@ class _DiscoverSetup extends ConsumerStatefulWidget {
   final ValueChanged<MmTeam> onSwitchTeam;
   final bool submitting;
   final String? error;
+  // True when the wizard is editing an existing lobby. Drives Submit copy.
+  final bool isEditing;
   final VoidCallback onChanged;
   final VoidCallback onCancel;
   final VoidCallback onSubmit;
@@ -877,12 +1031,16 @@ class _DiscoverSetup extends ConsumerStatefulWidget {
 }
 
 class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
-  // 0 = Match details (team/format/ball)
-  // 1 = When (date + window)
-  // 2 = Where (optional ground)
+  // V2 step order: Match-type → Where (grounds) → Dates → Windows.
+  // Picking grounds first lets the smart-window scanner filter chips by the
+  // user's chosen grounds × dates instead of guessing.
+  // 0 = Match details (format + ball type)
+  // 1 = Where (ranked grounds, 0–3)
+  // 2 = Dates (multi-select, today..+14d)
+  // 3 = Windows (ranked, 5 buckets)
   int _step = 0;
 
-  static const _stepLabels = ['Match details', 'When', 'Where'];
+  static const _stepLabels = ['Match details', 'Where', 'Dates', 'Windows'];
 
   bool _stepReady() {
     switch (_step) {
@@ -892,9 +1050,11 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
         // the box, so the only hard requirement is that a team is picked.
         return widget.team != null;
       case 1:
-        return widget.prefs.windows.isNotEmpty;
+        return true; // grounds are optional
       case 2:
-        return true; // ground is optional
+        return widget.prefs.dates.isNotEmpty;
+      case 3:
+        return widget.prefs.windowsRanked.isNotEmpty;
     }
     return false;
   }
@@ -984,11 +1144,18 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
             padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
             child: switch (_step) {
               0 => _DetailsStep(prefs: p, onChanged: () => setState(() {})),
-              1 => _WhenStep(prefs: p, onChanged: () => setState(() {})),
-              _ => _WhereStep(
+              1 => _WhereStep(
                   prefs: p,
                   onChanged: () => setState(() {}),
                   ref: ref,
+                ),
+              2 => _WhenDatesStep(
+                  prefs: p,
+                  onChanged: () => setState(() {}),
+                ),
+              _ => _WhenWindowsStep(
+                  prefs: p,
+                  onChanged: () => setState(() {}),
                 ),
             },
           ),
@@ -1041,7 +1208,9 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
                       children: [
                         Text(
                           _step == _stepLabels.length - 1
-                              ? 'Find matches'
+                              ? (widget.isEditing
+                                  ? 'Save changes'
+                                  : 'Find a match')
                               : 'Continue',
                           style: TextStyle(
                             color: _stepReady()
@@ -1055,7 +1224,9 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
                         const SizedBox(width: 10),
                         Icon(
                           _step == _stepLabels.length - 1
-                              ? Icons.search_rounded
+                              ? (widget.isEditing
+                                  ? Icons.check_rounded
+                                  : Icons.search_rounded)
                               : Icons.arrow_forward_rounded,
                           color:
                               _stepReady() ? context.ctaFg : context.fgSub,
@@ -1144,44 +1315,24 @@ final _availableBucketsProvider = FutureProvider.family
   };
 });
 
-class _WhenStep extends ConsumerWidget {
-  const _WhenStep({required this.prefs, required this.onChanged});
+// Multi-date picker — chip strip for the next 14 days. Multi-select.
+// At least one date required to advance the wizard.
+class _WhenDatesStep extends StatelessWidget {
+  const _WhenDatesStep({required this.prefs, required this.onChanged});
   final _Prefs prefs;
   final VoidCallback onChanged;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Fetch once per (date, arenaIds) combo — refreshes if either changes.
-    final sortedIds = [...prefs.preferredArenaIdList]..sort();
-    final key = (date: prefs.dateApi, arenaKey: sortedIds.join('|'));
-    final availableAsync = ref.watch(_availableBucketsProvider(key));
-    // While loading or on error, show all 5 chips (don't punish user for
-    // a stale endpoint). Once data arrives, hide buckets with no arenas.
-    final available = availableAsync.maybeWhen(
-      data: (s) => s,
-      orElse: () => DiscoverWindow.values.toSet(),
-    );
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _GroupHeading('Choose date'),
-        Padding(
-          padding: const EdgeInsets.only(left: 16),
-          child: _DateStripSimple(
-            selected: prefs.date,
-            onSelect: (d) {
-              prefs.date = d;
-              onChanged();
-            },
-          ),
-        ),
-        const SizedBox(height: 22),
         Padding(
           padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
           child: Row(
             children: [
               Text(
-                'TIME WINDOW',
+                'PICK THE DATES YOU WANT TO PLAY',
                 style: TextStyle(
                   color: context.fgSub,
                   fontSize: 11,
@@ -1191,7 +1342,106 @@ class _WhenStep extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                'pick one or more',
+                'next 14 days',
+                style: TextStyle(
+                  color: context.fgSub.withValues(alpha: 0.7),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Text(
+            prefs.dates.isEmpty
+                ? 'Tap one or more dates. We\'ll find a match-up on each.'
+                : '${prefs.dates.length} date${prefs.dates.length == 1 ? '' : 's'} picked.',
+            style: TextStyle(
+              color: prefs.dates.isEmpty ? context.fgSub : context.fg,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: _MultiDateStrip(
+            selected: prefs.dates,
+            onToggle: (d) {
+              final idx = prefs.dates
+                  .indexWhere((x) => DateUtils.isSameDay(x, d));
+              if (idx >= 0) {
+                prefs.dates.removeAt(idx);
+              } else {
+                prefs.dates.add(d);
+              }
+              // Keep dates sorted ascending so submission order is predictable.
+              prefs.dates.sort((a, b) => a.compareTo(b));
+              // Mirror the first selected date into singular [date] field so
+              // legacy result headers stay accurate.
+              if (prefs.dates.isNotEmpty) {
+                prefs.date = prefs.dates.first;
+              }
+              onChanged();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Ranked windows picker. Tap order = preference; first tap = rank-1. Re-tap
+// removes and renumbers. Past windows + no-arena windows are disabled. The
+// scanner is scoped to (dates × groundsRanked) — picks the union of all
+// selected dates' available windows.
+class _WhenWindowsStep extends ConsumerWidget {
+  const _WhenWindowsStep({required this.prefs, required this.onChanged});
+  final _Prefs prefs;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // For each selected date, run the smart-window scanner with the chosen
+    // grounds. A window is enabled if it's available on at least one of the
+    // selected dates. Falls back to all 5 buckets while loading.
+    final sortedIds = [...prefs.preferredArenaIdList]..sort();
+    final arenaKey = sortedIds.join('|');
+    final dates = prefs.dates.isEmpty ? [prefs.date] : prefs.dates;
+    final available = <DiscoverWindow>{};
+    var anyData = false;
+    for (final d in dates) {
+      final dateApi = DateFormat('yyyy-MM-dd').format(d);
+      final res = ref
+          .watch(_availableBucketsProvider((date: dateApi, arenaKey: arenaKey)));
+      res.whenData((s) {
+        anyData = true;
+        available.addAll(s);
+      });
+    }
+    final effectiveAvailable =
+        anyData ? available : DiscoverWindow.values.toSet();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
+          child: Row(
+            children: [
+              Text(
+                'PICK YOUR TIME WINDOWS IN ORDER',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'first is most preferred',
                 style: TextStyle(
                   color: context.fgSub.withValues(alpha: 0.7),
                   fontSize: 11,
@@ -1202,22 +1452,94 @@ class _WhenStep extends ConsumerWidget {
           ),
         ),
         for (final w in DiscoverWindow.values) ...[
-          _WindowCard(
-            window: w,
-            selected: prefs.windows.contains(w),
-            disabled: w.isPast(prefs.date) || !available.contains(w),
-            onTap: () {
-              if (prefs.windows.contains(w)) {
-                prefs.windows.remove(w);
-              } else {
-                prefs.windows.add(w);
-              }
-              onChanged();
-            },
-          ),
+          Builder(builder: (ctx) {
+            final rankIdx = prefs.windowsRanked.indexOf(w);
+            final isSelected = rankIdx >= 0;
+            // Past on ALL selected dates → disabled.
+            final pastOnAll = dates.every((d) => w.isPast(d));
+            return _WindowCard(
+              window: w,
+              selected: isSelected,
+              rank: isSelected ? rankIdx + 1 : null,
+              disabled: pastOnAll || !effectiveAvailable.contains(w),
+              onTap: () {
+                if (isSelected) {
+                  prefs.windowsRanked.removeAt(rankIdx);
+                } else {
+                  prefs.windowsRanked.add(w);
+                }
+                onChanged();
+              },
+            );
+          }),
           const SizedBox(height: 10),
         ],
       ],
+    );
+  }
+}
+
+// Multi-select chip strip. Same visual as [_DateStripSimple] but supports
+// many selected dates with an order-agnostic toggle.
+class _MultiDateStrip extends StatelessWidget {
+  const _MultiDateStrip({required this.selected, required this.onToggle});
+  final List<DateTime> selected;
+  final ValueChanged<DateTime> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final days = List.generate(
+        14, (i) => DateTime(today.year, today.month, today.day + i));
+    return SizedBox(
+      height: 76,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: days.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final d = days[i];
+          final sel =
+              selected.any((x) => DateUtils.isSameDay(x, d));
+          return GestureDetector(
+            onTap: () => onToggle(d),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 56,
+              decoration: BoxDecoration(
+                color: sel ? context.ctaBg : Colors.transparent,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    i == 0
+                        ? 'TODAY'
+                        : DateFormat('EEE').format(d).toUpperCase(),
+                    style: TextStyle(
+                      color: sel ? context.ctaFg : context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${d.day}',
+                    style: TextStyle(
+                      color: sel ? context.ctaFg : context.fg,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.6,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -1238,6 +1560,18 @@ class _WhereStep extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
+          child: Text(
+            'PICK UP TO 3 GROUNDS — ORDER MATTERS, FIRST IS MOST PREFERRED',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+            ),
+          ),
+        ),
         _CardGroup(
           children: [
             _SetupRow(
@@ -1269,13 +1603,14 @@ class _WhereStep extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final p in picks)
+                for (var i = 0; i < picks.length; i++)
                   _GroundChip(
-                    label: p.name,
+                    label: picks[i].name,
+                    rank: i + 1,
                     onRemove: () {
                       prefs.preferredArenas = [
                         for (final x in prefs.preferredArenas)
-                          if (x.id != p.id) x,
+                          if (x.id != picks[i].id) x,
                       ];
                       onChanged();
                     },
@@ -1289,10 +1624,10 @@ class _WhereStep extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Text(
             picks.isEmpty
-                ? 'Leave empty for any nearby ground (most matches). Pick up to 3 grounds you\'d like to play at.'
+                ? 'Leave empty for any nearby ground (most matches). Pick up to 3 grounds you\'d like to play at — order matters.'
                 : picks.length == 3
-                    ? '3 grounds picked — opponents who like any of these will match.'
-                    : 'Picked ${picks.length} ground${picks.length == 1 ? '' : 's'}. Tap above to add more (up to 3).',
+                    ? '3 grounds picked — opponents who like any of these will match. First = most preferred.'
+                    : 'Picked ${picks.length} ground${picks.length == 1 ? '' : 's'}. Tap above to add more (up to 3). First = most preferred.',
             style: TextStyle(
               color: context.fgSub,
               fontSize: 12,
@@ -1307,14 +1642,20 @@ class _WhereStep extends StatelessWidget {
 }
 
 class _GroundChip extends StatelessWidget {
-  const _GroundChip({required this.label, required this.onRemove});
+  const _GroundChip({
+    required this.label,
+    required this.onRemove,
+    this.rank,
+  });
   final String label;
   final VoidCallback onRemove;
+  // 1-based rank badge ("1", "2", "3"). When null, no badge is rendered.
+  final int? rank;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
       decoration: BoxDecoration(
         color: context.fg.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
@@ -1322,6 +1663,28 @@ class _GroundChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (rank != null) ...[
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: context.ctaBg,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                '$rank',
+                style: TextStyle(
+                  color: context.ctaFg,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+          ] else
+            const SizedBox(width: 4),
           Flexible(
             child: Text(
               label,
@@ -1581,9 +1944,10 @@ class _DiscoverResults extends StatelessWidget {
     required this.teamLobbies,
     required this.expired,
     required this.onSwitchTeam,
-    required this.closest,
+    required this.primary,
     required this.alternatives,
     required this.alternativeReason,
+    required this.submittedLobbies,
     required this.onModify,
     required this.onRefresh,
     required this.onCancel,
@@ -1596,9 +1960,14 @@ class _DiscoverResults extends StatelessWidget {
   final Map<String, MmTeamLobbySummary> teamLobbies;
   final bool expired;
   final ValueChanged<MmTeam> onSwitchTeam;
-  final List<MmRankedLobby> closest;
+  // V2 wire shape: lobbies whose rank-1 window+ground both intersect the
+  // caller's. Backend field name: `primary`.
+  final List<MmRankedLobby> primary;
   final List<MmRankedLobby> alternatives;
   final String? alternativeReason;
+  // Lobby ids submitted via multi-date wizard, in date order. Drives the
+  // "Other dates" strip at the top of Results.
+  final List<({String date, String lobbyId})> submittedLobbies;
   final VoidCallback onModify;
   final Future<void> Function({bool skipCelebrate}) onRefresh;
   final VoidCallback onCancel;
@@ -1642,6 +2011,18 @@ class _DiscoverResults extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: _StatusBanner(expired: expired),
         ),
+        // Other-dates strip — visible only when the wizard submitted >1 date.
+        // v1 simplification: tapping a chip just shows which date is being
+        // viewed. The user re-enters Setup to switch into a different date's
+        // results. (See SUMMARY for the simplification rationale.)
+        if (submittedLobbies.length > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: _OtherDatesStrip(
+              submitted: submittedLobbies,
+              activeDateApi: prefs.dateApi,
+            ),
+          ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => onRefresh(skipCelebrate: true),
@@ -1685,25 +2066,26 @@ class _DiscoverResults extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
 
-                if (closest.isNotEmpty) ...[
+                if (primary.isNotEmpty) ...[
                   _ResultsHeader(
-                    label: 'EXACT MATCHES',
-                    count: closest.length,
+                    label: 'PRIMARY MATCHES',
+                    count: primary.length,
                     accent: true,
                   ),
                   const SizedBox(height: 8),
-                  for (final r in closest)
+                  for (final r in primary)
                     _LobbyTile(
                       lobby: r.lobby,
                       prominent: true,
                       score: r.score,
                       matchedOn: r.matchedOn,
                       differs: r.differs,
+                      callerWindowsRanked: prefs.windowsApi,
+                      callerGroundsRanked: prefs.preferredArenaIdList,
                       onTap: () => onChallenge(r.lobby),
                     ),
                   const SizedBox(height: 22),
                 ] else ...[
-                  // No exact matches — make it loud so user understands.
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
                     child: Container(
@@ -1724,7 +2106,7 @@ class _DiscoverResults extends StatelessWidget {
                                   color: context.warn, size: 18),
                               const SizedBox(width: 8),
                               Text(
-                                'No match available on your preferences',
+                                'No primary matches yet',
                                 style: TextStyle(
                                   color: context.fg,
                                   fontSize: 14,
@@ -1737,7 +2119,7 @@ class _DiscoverResults extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             alternatives.isNotEmpty
-                                ? 'Showing closest matches below — these are teams whose preferences are near yours.'
+                                ? 'Showing alternatives below — teams whose preferences overlap yours but don\'t share your top window+ground.'
                                 : 'Your match-up is posted. We\'ll notify you when a team matches.',
                             style: TextStyle(
                               color: context.fgSub,
@@ -1754,20 +2136,20 @@ class _DiscoverResults extends StatelessWidget {
 
                 if (alternatives.isNotEmpty) ...[
                   _ResultsHeader(
-                    label: closest.isEmpty
-                        ? 'CLOSEST MATCHES'
-                        : 'ALSO AVAILABLE',
+                    label: 'ALTERNATIVES',
                     count: alternatives.length,
-                    accent: closest.isEmpty,
+                    accent: primary.isEmpty,
                   ),
                   const SizedBox(height: 8),
                   for (final r in alternatives)
                     _LobbyTile(
                       lobby: r.lobby,
-                      prominent: closest.isEmpty,
+                      prominent: primary.isEmpty,
                       score: r.score,
                       matchedOn: r.matchedOn,
                       differs: r.differs,
+                      callerWindowsRanked: prefs.windowsApi,
+                      callerGroundsRanked: prefs.preferredArenaIdList,
                       onTap: () => onChallenge(r.lobby),
                     ),
                 ],
@@ -1827,6 +2209,63 @@ class _IconPillButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// Read-only strip listing every date the user submitted via the multi-date
+// wizard. Highlights the date currently visible on the Results screen.
+// Tapping a chip is a no-op in v1 — the user uses the Modify wizard to
+// switch dates. See SUMMARY for the simplification rationale.
+class _OtherDatesStrip extends StatelessWidget {
+  const _OtherDatesStrip({
+    required this.submitted,
+    required this.activeDateApi,
+  });
+  final List<({String date, String lobbyId})> submitted;
+  final String activeDateApi;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: submitted.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final s = submitted[i];
+          final active = s.date == activeDateApi;
+          DateTime? dt;
+          try {
+            dt = DateTime.parse(s.date);
+          } catch (_) {}
+          final label = dt != null ? _dateLabel(dt) : s.date;
+          return Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: active
+                  ? context.ctaBg
+                  : Color.alphaBlend(
+                      context.fg.withValues(alpha: 0.06),
+                      context.bg,
+                    ),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: active ? context.ctaFg : context.fg,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.1,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -2169,12 +2608,16 @@ class _WindowCard extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.disabled = false,
+    this.rank,
   });
 
   final DiscoverWindow window;
   final bool selected;
   final VoidCallback onTap;
   final bool disabled;
+  // 1-based rank for the numbered badge on selected chips. Null when the
+  // chip is unselected or rendered without a rank (legacy callers).
+  final int? rank;
 
   ({IconData icon, List<Color> grad}) _theme(BuildContext context) {
     return switch (window) {
@@ -2310,8 +2753,8 @@ class _WindowCard extends StatelessWidget {
                 ),
                 if (selected)
                   Container(
-                    width: 22,
-                    height: 22,
+                    width: 24,
+                    height: 24,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: t.grad,
@@ -2321,8 +2764,18 @@ class _WindowCard extends StatelessWidget {
                       shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.check_rounded,
-                        color: Colors.white, size: 14),
+                    child: rank != null
+                        ? Text(
+                            '$rank',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              height: 1,
+                            ),
+                          )
+                        : const Icon(Icons.check_rounded,
+                            color: Colors.white, size: 14),
                   ),
               ],
             ),
@@ -2396,6 +2849,10 @@ class _Chip extends StatelessWidget {
   }
 }
 
+// Single-select date strip. No longer used by the V2 multi-date Setup wizard
+// (replaced by [_MultiDateStrip]); retained in case any modal flow still
+// needs a single-date picker. Kept private — analyzer may flag it as unused.
+// ignore: unused_element
 class _DateStripSimple extends StatelessWidget {
   const _DateStripSimple({required this.selected, required this.onSelect});
   final DateTime selected;
@@ -2515,6 +2972,8 @@ class _LobbyTile extends StatelessWidget {
     this.score,
     this.matchedOn = const [],
     this.differs = const [],
+    this.callerWindowsRanked = const [],
+    this.callerGroundsRanked = const [],
   });
   final MmOpenLobby lobby;
   final bool prominent;
@@ -2522,6 +2981,35 @@ class _LobbyTile extends StatelessWidget {
   final double? score;
   final List<String> matchedOn;
   final List<String> differs;
+  // Caller's ranked preferences. Used to derive the matched window/ground
+  // when the response doesn't include explicit fields.
+  final List<String> callerWindowsRanked;
+  final List<String> callerGroundsRanked;
+
+  // The window where matching actually happened. Reads `matchedOn` first, and
+  // if absent falls back to the first overlap of caller/lobby ranked windows.
+  String? get _matchedWindow {
+    const windowKeys = {
+      'MORNING',
+      'AFTERNOON',
+      'EVENING',
+      'NIGHT',
+      'LATE_NIGHT',
+    };
+    // matchedOn might be ['date', 'window:MORNING', 'ground:foo'] — try the
+    // 'window:' prefix shape first.
+    for (final m in matchedOn) {
+      if (m.startsWith('window:')) {
+        return m.substring(7);
+      }
+      if (windowKeys.contains(m)) return m;
+    }
+    // Fallback: first window present in BOTH ranked arrays.
+    for (final w in callerWindowsRanked) {
+      if (lobby.windowsRanked.contains(w)) return w;
+    }
+    return null;
+  }
 
   ({String month, String day, String slot}) _dateBits() {
     String month = '';
@@ -2539,13 +3027,21 @@ class _LobbyTile extends StatelessWidget {
     if (lobby.displaySlot.isNotEmpty) {
       // "7:00 AM" → keep AM/PM uppercase
       slot = lobby.displaySlot.toUpperCase();
-    } else if (lobby.timeWindow != null) {
-      slot = switch (lobby.timeWindow) {
-        'MORNING' => 'MORN',
-        'AFTERNOON' => 'NOON',
-        'EVENING' => 'EVE',
-        _ => lobby.timeWindow!,
-      };
+    } else {
+      // Prefer the actually-matched window over the lobby's legacy single-
+      // window field. matchedOn is the source of truth for what the backend
+      // matched on; falling back to overlap is a v2-shape best-effort.
+      final win = _matchedWindow ?? lobby.timeWindow;
+      if (win != null) {
+        slot = switch (win) {
+          'MORNING' => 'MORN',
+          'AFTERNOON' => 'NOON',
+          'EVENING' => 'EVE',
+          'NIGHT' => 'NIGHT',
+          'LATE_NIGHT' => 'L.NITE',
+          _ => win,
+        };
+      }
     }
     return (month: month, day: day, slot: slot);
   }
@@ -2959,8 +3455,11 @@ class _PickerRow extends StatelessWidget {
   }
 }
 
-// Multi-select picker. Returns the new list (0-3 grounds) or null if user
-// dismisses without saving. Empty list = "any nearby ground" (the default).
+// Multi-select picker with RANKED tap order. Tapping an unselected ground
+// appends it to the list; the visible numbered badge ("1"/"2"/"3") reflects
+// position. Re-tapping a selected ground removes it AND re-numbers the rest.
+// Returns the new list (0-3 grounds) or null if user dismisses without
+// saving. Empty list = "any nearby ground" (the default).
 Future<List<MmArenaPick>?> _pickArenas(
   BuildContext context,
   WidgetRef ref,
@@ -2974,6 +3473,8 @@ Future<List<MmArenaPick>?> _pickArenas(
     teamId: null,
     overs: null,
   );
+  // LinkedHashMap-style insertion order is preserved by Dart's default Map.
+  // We rely on that to keep the rank order across rebuilds inside the sheet.
   final selected = <String, String>{
     for (final p in initial) p.id: p.name,
   };
@@ -3078,6 +3579,11 @@ Future<List<MmArenaPick>?> _pickArenas(
                               final isSelected = selected.containsKey(e.key);
                               final atCap =
                                   selected.length >= 3 && !isSelected;
+                              // Rank = 1-based position in the insertion-order
+                              // map. Re-tap removes & the next render renumbers.
+                              final rank = isSelected
+                                  ? selected.keys.toList().indexOf(e.key) + 1
+                                  : null;
                               return GestureDetector(
                                 onTap: atCap
                                     ? null
@@ -3096,18 +3602,40 @@ Future<List<MmArenaPick>?> _pickArenas(
                                       horizontal: 20, vertical: 14),
                                   child: Row(
                                     children: [
-                                      Icon(
-                                        isSelected
-                                            ? Icons.check_box_rounded
-                                            : Icons
-                                                .check_box_outline_blank_rounded,
-                                        size: 22,
-                                        color: isSelected
-                                            ? context.ctaBg
-                                            : (atCap
-                                                ? context.fgSub
-                                                    .withValues(alpha: 0.4)
-                                                : context.fgSub),
+                                      // Numbered badge for selected; empty
+                                      // square for unselected. Reflects rank.
+                                      Container(
+                                        width: 24,
+                                        height: 24,
+                                        decoration: BoxDecoration(
+                                          color: isSelected
+                                              ? context.ctaBg
+                                              : Colors.transparent,
+                                          shape: BoxShape.circle,
+                                          border: isSelected
+                                              ? null
+                                              : Border.all(
+                                                  color: (atCap
+                                                          ? context.fgSub
+                                                              .withValues(
+                                                                  alpha: 0.4)
+                                                          : context.fgSub)
+                                                      .withValues(alpha: 0.6),
+                                                  width: 1.4,
+                                                ),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: isSelected
+                                            ? Text(
+                                                '$rank',
+                                                style: TextStyle(
+                                                  color: context.ctaFg,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w900,
+                                                  height: 1,
+                                                ),
+                                              )
+                                            : null,
                                       ),
                                       const SizedBox(width: 14),
                                       Expanded(

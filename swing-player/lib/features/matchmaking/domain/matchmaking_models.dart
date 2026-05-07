@@ -164,6 +164,11 @@ class MmOpenLobby {
     this.timeWindow,
     this.preferredArenaId,
     this.preferredArenaName,
+    this.windowsRanked = const [],
+    this.windowsMatched = const [],
+    this.groundsRanked = const [],
+    this.teamId,
+    this.status,
   });
 
   final String lobbyId;
@@ -179,10 +184,20 @@ class MmOpenLobby {
   final String? ballType;
   final String? unitId;
   final int pricePerTeamPaise;
-  // Discover preference fields. Null on legacy slot-precise lobbies.
+  // Legacy single-window field kept for back-compat. Null on V2 multi-window
+  // lobbies; consumers in the discover flow read [windowsRanked] instead.
   final String? timeWindow; // 'MORNING' | 'AFTERNOON' | 'EVENING'
   final String? preferredArenaId;
   final String? preferredArenaName;
+  // V2: ranked time-window preferences (order = preference, first strongest).
+  final List<String> windowsRanked;
+  // V2: subset of [windowsRanked] already consumed by partial matches.
+  final List<String> windowsMatched;
+  // V2: ranked grounds (arenaId list, max 3, first = preferred).
+  final List<String> groundsRanked;
+  // Optional V2 fields (not always present on legacy responses).
+  final String? teamId;
+  final String? status;
 
   String get displaySlot {
     try {
@@ -239,6 +254,17 @@ class MmOpenLobby {
       timeWindow: j['timeWindow'] as String?,
       preferredArenaId: j['preferredArenaId'] as String?,
       preferredArenaName: j['preferredArenaName'] as String?,
+      windowsRanked: ((j['windowsRanked'] as List?) ?? const [])
+          .whereType<String>()
+          .toList(),
+      windowsMatched: ((j['windowsMatched'] as List?) ?? const [])
+          .whereType<String>()
+          .toList(),
+      groundsRanked: ((j['groundsRanked'] as List?) ?? const [])
+          .whereType<String>()
+          .toList(),
+      teamId: j['teamId'] as String?,
+      status: j['status'] as String?,
     );
   }
 }
@@ -355,6 +381,9 @@ class MmLobbyStatus {
     this.timeWindow,
     this.preferredArenaId,
     this.preferredArenaName,
+    this.windowsRanked = const [],
+    this.windowsMatched = const [],
+    this.groundsRanked = const [],
   });
 
   final String lobbyId;
@@ -366,10 +395,14 @@ class MmLobbyStatus {
   final String? teamId;
   final String? teamName;
   final List<MmLobbyStatusPick> picks;
-  // Discover preference fields. Used to pre-fill Setup form on Modify-search.
+  // Legacy single-window field. V2 multi-window lobbies leave this null and
+  // populate [windowsRanked] / [windowsMatched] / [groundsRanked] instead.
   final String? timeWindow;
   final String? preferredArenaId;
   final String? preferredArenaName;
+  final List<String> windowsRanked;
+  final List<String> windowsMatched;
+  final List<String> groundsRanked;
 
   factory MmLobbyStatus.fromJson(Map<String, dynamic> j) => MmLobbyStatus(
         lobbyId: j['lobbyId'] as String,
@@ -390,13 +423,25 @@ class MmLobbyStatus {
         timeWindow: j['timeWindow'] as String?,
         preferredArenaId: j['preferredArenaId'] as String?,
         preferredArenaName: j['preferredArenaName'] as String?,
+        windowsRanked: ((j['windowsRanked'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
+        windowsMatched: ((j['windowsMatched'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
+        groundsRanked: ((j['groundsRanked'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
       );
 }
 
 // ── Discover-flow models ───────────────────────────────────────────────────
 
 /// One open lobby with its match score and which factors matched/differed.
-/// Returned by POST /matchmaking/discover.
+/// Returned by POST /matchmaking/discover. The V2 wire shape wraps the
+/// lobby JSON under a `lobby` key alongside `score` / `matchedOn` / `differs`,
+/// e.g. `{ lobby: {...}, score, matchedOn, differs }`. Older responses
+/// inlined the lobby fields at the top level — both shapes are accepted here.
 class MmRankedLobby {
   const MmRankedLobby({
     required this.lobby,
@@ -410,40 +455,52 @@ class MmRankedLobby {
   final List<String> matchedOn; // e.g. ['date', 'window', 'ground']
   final List<String> differs;   // e.g. ['date'] when an alternative
 
-  factory MmRankedLobby.fromJson(Map<String, dynamic> j) => MmRankedLobby(
-        lobby: MmOpenLobby.fromJson(j),
-        score: ((j['score'] as num?) ?? 0).toDouble(),
-        matchedOn: ((j['matchedOn'] as List?) ?? []).whereType<String>().toList(),
-        differs: ((j['differs'] as List?) ?? []).whereType<String>().toList(),
-      );
+  factory MmRankedLobby.fromJson(Map<String, dynamic> j) {
+    // V2 wraps lobby fields under `lobby`; legacy shape inlines them.
+    final lobbyJson = (j['lobby'] is Map<String, dynamic>)
+        ? j['lobby'] as Map<String, dynamic>
+        : j;
+    return MmRankedLobby(
+      lobby: MmOpenLobby.fromJson(lobbyJson),
+      score: ((j['score'] as num?) ?? 0).toDouble(),
+      matchedOn:
+          ((j['matchedOn'] as List?) ?? []).whereType<String>().toList(),
+      differs: ((j['differs'] as List?) ?? []).whereType<String>().toList(),
+    );
+  }
 }
 
 class MmDiscoverResponse {
   const MmDiscoverResponse({
     required this.yourLobbyId,
-    required this.closest,
+    required this.primary,
     required this.alternatives,
     this.alternativeReason,
   });
 
   final String yourLobbyId;
-  final List<MmRankedLobby> closest;
+  // V2 wire-contract: lobbies whose rank-1 window+ground both intersect.
+  // Backend field name is `primary` (was `closest` in the legacy response).
+  final List<MmRankedLobby> primary;
   final List<MmRankedLobby> alternatives;
   final String? alternativeReason; // 'no_exact_matches' | 'few_exact_matches' | null
 
-  factory MmDiscoverResponse.fromJson(Map<String, dynamic> j) =>
-      MmDiscoverResponse(
-        yourLobbyId: j['yourLobbyId'] as String,
-        closest: ((j['closest'] as List?) ?? [])
-            .whereType<Map<String, dynamic>>()
-            .map(MmRankedLobby.fromJson)
-            .toList(),
-        alternatives: ((j['alternatives'] as List?) ?? [])
-            .whereType<Map<String, dynamic>>()
-            .map(MmRankedLobby.fromJson)
-            .toList(),
-        alternativeReason: j['alternativeReason'] as String?,
-      );
+  factory MmDiscoverResponse.fromJson(Map<String, dynamic> j) {
+    // Accept both V2 (`primary`) and legacy (`closest`) field names.
+    final primaryRaw = (j['primary'] as List?) ?? (j['closest'] as List?) ?? [];
+    return MmDiscoverResponse(
+      yourLobbyId: j['yourLobbyId'] as String,
+      primary: primaryRaw
+          .whereType<Map<String, dynamic>>()
+          .map(MmRankedLobby.fromJson)
+          .toList(),
+      alternatives: ((j['alternatives'] as List?) ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(MmRankedLobby.fromJson)
+          .toList(),
+      alternativeReason: j['alternativeReason'] as String?,
+    );
+  }
 }
 
 /// One team-active-lobby summary for the team-switcher chip.
@@ -458,6 +515,9 @@ class MmTeamLobbySummary {
     this.ballType,
     this.timeWindow,
     this.preferredArenaId,
+    this.windowsRanked = const [],
+    this.windowsMatched = const [],
+    this.groundsRanked = const [],
   });
 
   final String lobbyId;
@@ -467,8 +527,13 @@ class MmTeamLobbySummary {
   final String date;
   final String format;
   final String? ballType;
+  // Legacy back-compat single-window string. Null on V2 multi-window lobbies.
   final String? timeWindow;
   final String? preferredArenaId;
+  // V2 ranked preferences. Used by the Discover wizard to pre-fill on edit.
+  final List<String> windowsRanked;
+  final List<String> windowsMatched;
+  final List<String> groundsRanked;
 
   factory MmTeamLobbySummary.fromJson(Map<String, dynamic> j) =>
       MmTeamLobbySummary(
@@ -481,6 +546,15 @@ class MmTeamLobbySummary {
         ballType: j['ballType'] as String?,
         timeWindow: j['timeWindow'] as String?,
         preferredArenaId: j['preferredArenaId'] as String?,
+        windowsRanked: ((j['windowsRanked'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
+        windowsMatched: ((j['windowsMatched'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
+        groundsRanked: ((j['groundsRanked'] as List?) ?? const [])
+            .whereType<String>()
+            .toList(),
       );
 }
 
