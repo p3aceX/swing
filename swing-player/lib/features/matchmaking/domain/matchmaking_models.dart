@@ -393,6 +393,127 @@ class MmLobbyStatus {
       );
 }
 
+// ── Discover-flow models ───────────────────────────────────────────────────
+
+/// One open lobby with its match score and which factors matched/differed.
+/// Returned by POST /matchmaking/discover.
+class MmRankedLobby {
+  const MmRankedLobby({
+    required this.lobby,
+    required this.score,
+    required this.matchedOn,
+    required this.differs,
+  });
+
+  final MmOpenLobby lobby;
+  final double score;
+  final List<String> matchedOn; // e.g. ['date', 'window', 'ground']
+  final List<String> differs;   // e.g. ['date'] when an alternative
+
+  factory MmRankedLobby.fromJson(Map<String, dynamic> j) => MmRankedLobby(
+        lobby: MmOpenLobby.fromJson(j),
+        score: ((j['score'] as num?) ?? 0).toDouble(),
+        matchedOn: ((j['matchedOn'] as List?) ?? []).whereType<String>().toList(),
+        differs: ((j['differs'] as List?) ?? []).whereType<String>().toList(),
+      );
+}
+
+class MmDiscoverResponse {
+  const MmDiscoverResponse({
+    required this.yourLobbyId,
+    required this.closest,
+    required this.alternatives,
+    this.alternativeReason,
+  });
+
+  final String yourLobbyId;
+  final List<MmRankedLobby> closest;
+  final List<MmRankedLobby> alternatives;
+  final String? alternativeReason; // 'no_exact_matches' | 'few_exact_matches' | null
+
+  factory MmDiscoverResponse.fromJson(Map<String, dynamic> j) =>
+      MmDiscoverResponse(
+        yourLobbyId: j['yourLobbyId'] as String,
+        closest: ((j['closest'] as List?) ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(MmRankedLobby.fromJson)
+            .toList(),
+        alternatives: ((j['alternatives'] as List?) ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(MmRankedLobby.fromJson)
+            .toList(),
+        alternativeReason: j['alternativeReason'] as String?,
+      );
+}
+
+/// One team-active-lobby summary for the team-switcher chip.
+class MmTeamLobbySummary {
+  const MmTeamLobbySummary({
+    required this.lobbyId,
+    required this.teamId,
+    required this.teamName,
+    required this.status,
+    required this.date,
+    required this.format,
+    this.ballType,
+    this.timeWindow,
+    this.preferredArenaId,
+  });
+
+  final String lobbyId;
+  final String teamId;
+  final String? teamName;
+  final String status;
+  final String date;
+  final String format;
+  final String? ballType;
+  final String? timeWindow;
+  final String? preferredArenaId;
+
+  factory MmTeamLobbySummary.fromJson(Map<String, dynamic> j) =>
+      MmTeamLobbySummary(
+        lobbyId: j['lobbyId'] as String,
+        teamId: j['teamId'] as String,
+        teamName: j['teamName'] as String?,
+        status: (j['status'] as String?) ?? 'searching',
+        date: (j['date'] as String?) ?? '',
+        format: (j['format'] as String?) ?? 'T20',
+        ballType: j['ballType'] as String?,
+        timeWindow: j['timeWindow'] as String?,
+        preferredArenaId: j['preferredArenaId'] as String?,
+      );
+}
+
+/// Response body for GET /matchmaking/lobbies/active-all.
+class MmActiveLobbiesResponse {
+  const MmActiveLobbiesResponse({
+    required this.teams,
+    required this.lobbies,
+  });
+
+  /// Compact info for every team the user belongs to (whether searching or not).
+  final List<({String id, String name, String? logoUrl})> teams;
+
+  /// Active lobbies, deduped to one per team.
+  final List<MmTeamLobbySummary> lobbies;
+
+  factory MmActiveLobbiesResponse.fromJson(Map<String, dynamic> j) =>
+      MmActiveLobbiesResponse(
+        teams: ((j['teams'] as List?) ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map((t) => (
+                  id: t['id'] as String,
+                  name: (t['name'] as String?) ?? 'Team',
+                  logoUrl: t['logoUrl'] as String?,
+                ))
+            .toList(),
+        lobbies: ((j['lobbies'] as List?) ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(MmTeamLobbySummary.fromJson)
+            .toList(),
+      );
+}
+
 class MmCreateLobbyResult {
   const MmCreateLobbyResult({
     required this.lobbyId,

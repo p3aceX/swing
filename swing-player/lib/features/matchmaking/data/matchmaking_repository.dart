@@ -194,6 +194,45 @@ class MatchmakingRepository {
     return MmLobbyStatus.fromJson(data);
   }
 
+  // ── Discover-flow ──────────────────────────────────────────────────────────
+
+  /// Lists the user's teams and one active lobby per team. Drives the
+  /// team-switcher chip on the Discover tab.
+  Future<MmActiveLobbiesResponse> getActiveLobbiesAll() async {
+    _mmLog('getActiveLobbiesAll → GET ${ApiEndpoints.matchmakingActiveLobbiesAll}');
+    final resp = await _dio.get(ApiEndpoints.matchmakingActiveLobbiesAll);
+    return MmActiveLobbiesResponse.fromJson(_unwrap(resp.data));
+  }
+
+  /// Single-shot discovery: ensures the team's active lobby (find/update/create)
+  /// and returns ranked closest matches + alternatives in one round trip.
+  Future<MmDiscoverResponse> discoverLobbies({
+    required String teamId,
+    required String date,
+    required String format, // T10|T20|ODI|Test|Custom|ANY
+    String? ballType,
+    List<String> timeWindows = const [], // 'MORNING'|'AFTERNOON'|'EVENING'
+    String? preferredArenaId,
+    double? lat,
+    double? lng,
+  }) async {
+    _mmLog(
+        'discoverLobbies → teamId=$teamId date=$date format=$format windows=$timeWindows arena=$preferredArenaId');
+    final body = <String, dynamic>{
+      'teamId': teamId,
+      'filters': {
+        'date': date,
+        'format': format,
+        if (ballType != null) 'ballType': ballType,
+        'timeWindows': timeWindows,
+        if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
+      },
+      if (lat != null && lng != null) 'context': {'lat': lat, 'lng': lng},
+    };
+    final resp = await _dio.post(ApiEndpoints.matchmakingDiscover, data: body);
+    return MmDiscoverResponse.fromJson(_unwrap(resp.data));
+  }
+
   Future<MmLobbyStatus> getLobbyStatus(String lobbyId) async {
     final resp = await _dio.get(ApiEndpoints.matchmakingLobby(lobbyId));
     return MmLobbyStatus.fromJson(_unwrap(resp.data));

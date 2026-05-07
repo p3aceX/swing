@@ -57,31 +57,44 @@ DiscoverWindow? _parseWindow(String? s) => switch (s) {
 
 class _Prefs {
   _Prefs({
-    this.team,
     this.format = MatchFormat.t20,
     this.allFormats = false,
     this.ballType,
     DateTime? date,
-    this.window,
+    Set<DiscoverWindow>? windows,
     this.preferredArenaId,
     this.preferredArenaName,
-  }) : date = date ?? DateTime.now();
+  })  : date = date ?? DateTime.now(),
+        windows = windows ?? <DiscoverWindow>{};
 
-  MmTeam? team;
+  // Team comes from the team-switcher chip on DiscoverView, NOT from prefs.
   MatchFormat format;
   bool allFormats; // true = "All formats" picked; ignore format on search
   String? ballType; // null = "All ball types" picked
   DateTime date;
-  DiscoverWindow? window;
+  Set<DiscoverWindow> windows; // empty = open to any window
   String? preferredArenaId;
   String? preferredArenaName;
 
-  bool get isComplete => team != null && window != null;
+  // Multi-window: at least one window picked OR user is open to any (empty
+  // also OK — empty means "any window"). For now require at least one to
+  // keep the user explicit; can relax to allow "any" via a separate toggle.
+  bool get isComplete => windows.isNotEmpty;
 
   String get dateApi => DateFormat('yyyy-MM-dd').format(date);
 
   String get formatLabel => allFormats ? 'All formats' : format.label;
-  String get ballLabel => ballType == null ? 'All ball types' : _ballLabel(ballType!);
+  String get ballLabel =>
+      ballType == null ? 'All ball types' : _ballLabel(ballType!);
+
+  String get windowsLabel {
+    if (windows.isEmpty) return 'Any time';
+    final all = DiscoverWindow.values.toSet();
+    if (windows.length == all.length) return 'Anytime';
+    return windows.map((w) => w.label).join(' · ');
+  }
+
+  List<String> get windowsApi => windows.map((w) => w.apiValue).toList();
 }
 
 // ── Top-level widget ────────────────────────────────────────────────────────
@@ -101,9 +114,15 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   _Stage _stage = _Stage.intro;
   final _Prefs _prefs = _Prefs();
 
+  // Team-switcher state
+  MmTeam? _currentTeam;
+  // teamId → its active lobby summary (one per team)
+  final Map<String, MmTeamLobbySummary> _teamLobbies = {};
+
   String? _activeLobbyId;
-  List<MmOpenLobby> _matches = [];
-  List<MmOpenLobby> _alsoAvailable = [];
+  List<MmRankedLobby> _closest = [];
+  List<MmRankedLobby> _alternatives = [];
+  String? _alternativeReason;
   String? _error;
   bool _submitting = false;
   Timer? _expiryTicker;
@@ -111,7 +130,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreActive());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
     // Re-check expiry every 60s when on results page so an expired lobby
     // bounces the user back to Intro automatically.
     _expiryTicker =
@@ -126,59 +145,107 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  Future<void> _restoreActive() async {
+  // Loads the user's teams + per-team active lobbies. Picks a default
+  // currentTeam (most-recent team with an active lobby, else first team).
+  // If currentTeam has an active lobby, restores prefs and jumps to Results.
+  Future<void> _bootstrap() async {
     try {
       final repo = ref.read(matchmakingRepositoryProvider);
-      final active = await repo.getActiveLobby();
-      if (!mounted || active == null) return;
-      // Only auto-restore preference-lobbies — slot-precise lobbies belong to
-      // the legacy flow which we'll let stay on Intro.
-      final w = _parseWindow(active.timeWindow);
-      if (w == null) return;
-      // Restore prefs from active lobby for Modify pre-fill.
-      DateTime? d;
-      try {
-        if (active.date != null) d = DateTime.parse(active.date!);
-      } catch (_) {}
-      setState(() {
-        _activeLobbyId = active.lobbyId;
-        _prefs
-          ..window = w
-          ..date = d ?? _prefs.date
-          ..preferredArenaId = active.preferredArenaId
-          ..preferredArenaName = active.preferredArenaName
-          ..ballType = active.ballType ?? _prefs.ballType
-          ..format = _formatFromApi(active.format) ?? _prefs.format;
-        _stage = _Stage.results;
-      });
-      await _refreshResults();
+      final res = await repo.getActiveLobbiesAll();
+      if (!mounted) return;
+      _teamLobbies.clear();
+      for (final l in res.lobbies) {
+        _teamLobbies[l.teamId] = l;
+      }
+      MmTeam? chosen;
+      // Prefer a team with an active lobby
+      if (res.lobbies.isNotEmpty) {
+        final activeTeamId = res.lobbies.first.teamId;
+        final activeRaw = res.teams.firstWhere(
+          (t) => t.id == activeTeamId,
+          orElse: () => (
+            id: activeTeamId,
+            name: res.lobbies.first.teamName ?? 'Team',
+            logoUrl: null,
+          ),
+        );
+        chosen = MmTeam(
+          id: activeRaw.id,
+          name: activeRaw.name,
+          ageGroupLabel: 'Open',
+          logoUrl: activeRaw.logoUrl,
+        );
+      } else if (res.teams.isNotEmpty) {
+        final t = res.teams.first;
+        chosen = MmTeam(
+          id: t.id,
+          name: t.name,
+          ageGroupLabel: 'Open',
+          logoUrl: t.logoUrl,
+        );
+      }
+      if (!mounted) return;
+      setState(() => _currentTeam = chosen);
+      // If the chosen team has an active lobby, hydrate prefs + jump to results.
+      final active = chosen != null ? _teamLobbies[chosen.id] : null;
+      if (active != null) {
+        _hydratePrefsFromLobby(active);
+        await _runDiscover(skipCelebrate: true);
+      }
     } catch (e) {
-      _log('restoreActive error: $e');
+      _log('bootstrap error: $e');
     }
+  }
+
+  void _hydratePrefsFromLobby(MmTeamLobbySummary lobby) {
+    DateTime? d;
+    try {
+      d = DateTime.parse(lobby.date);
+    } catch (_) {}
+    final w = _parseWindow(lobby.timeWindow);
+    setState(() {
+      _activeLobbyId = lobby.lobbyId;
+      _prefs
+        ..date = d ?? _prefs.date
+        ..ballType = lobby.ballType
+        ..preferredArenaId = lobby.preferredArenaId
+        // Multi-window stored as null on the lobby = "open to any". Single
+        // window restores into the set; null leaves the set empty.
+        ..windows = (w != null ? {w} : <DiscoverWindow>{})
+        ..format = _formatFromApi(lobby.format) ?? _prefs.format
+        ..allFormats = lobby.format == 'ANY';
+    });
   }
 
   void _maybeExpire() {
     if (_stage != _Stage.results || _activeLobbyId == null) return;
-    if (!_isWindowPassed(_prefs.date, _prefs.window)) return;
-    _log('window passed → reset to intro');
+    if (!_isAllWindowsPassed(_prefs.date, _prefs.windows)) return;
+    _log('all windows passed → reset to intro');
     setState(() {
       _activeLobbyId = null;
-      _matches = [];
-      _alsoAvailable = [];
+      _closest = [];
+      _alternatives = [];
+      _alternativeReason = null;
       _stage = _Stage.intro;
     });
   }
 
-  bool _isWindowPassed(DateTime date, DiscoverWindow? w) {
-    if (w == null) return false;
-    final endHour = switch (w) {
-      DiscoverWindow.morning => 12,
-      DiscoverWindow.afternoon => 18,
-      DiscoverWindow.evening => 28, // next day 04:00
-    };
-    final end = DateTime(date.year, date.month, date.day, endHour ~/ 24 == 0 ? endHour : endHour - 24)
-        .add(endHour >= 24 ? const Duration(days: 1) : Duration.zero);
-    return DateTime.now().isAfter(end);
+  // True if every selected window has ended on the lobby's date. Empty set
+  // (open to any) → never auto-expires from this rule (the lobby's
+  // expiresAt on the server handles that).
+  bool _isAllWindowsPassed(DateTime date, Set<DiscoverWindow> windows) {
+    if (windows.isEmpty) return false;
+    final now = DateTime.now();
+    return windows.every((w) {
+      final endHour = switch (w) {
+        DiscoverWindow.morning => 12,
+        DiscoverWindow.afternoon => 18,
+        DiscoverWindow.evening => 28,
+      };
+      final end = DateTime(date.year, date.month, date.day)
+          .add(Duration(hours: endHour));
+      return now.isAfter(end);
+    });
   }
 
   // ── Stage transitions ──────────────────────────────────────────────────────
@@ -187,49 +254,75 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   void _goIntro() => setState(() => _stage = _Stage.intro);
 
   Future<void> _submit() async {
+    if (_currentTeam == null) {
+      setState(() => _error = 'Pick a team first.');
+      return;
+    }
     if (!_prefs.isComplete) return;
     setState(() {
       _submitting = true;
       _error = null;
+      _stage = _Stage.celebrating;
     });
+    // Run search + minimum theatre time in parallel.
+    await Future.wait([
+      _runDiscover(skipCelebrate: true),
+      Future<void>.delayed(const Duration(milliseconds: 1200)),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _submitting = false;
+      _stage = _Stage.results;
+    });
+  }
+
+  // Calls /matchmaking/discover. Handles both first submit and Modify-search
+  // (the backend service does find/update/create internally based on
+  // teamId).
+  Future<void> _runDiscover({bool skipCelebrate = false}) async {
+    if (_currentTeam == null) return;
+    final repo = ref.read(matchmakingRepositoryProvider);
     try {
-      final repo = ref.read(matchmakingRepositoryProvider);
-      // If we already have a lobby (Modify path), drop it before posting fresh.
-      if (_activeLobbyId != null) {
-        try {
-          await repo.leaveLobby(_activeLobbyId!);
-        } catch (e) {
-          _log('leaveLobby (modify) error: $e');
-        }
-        _activeLobbyId = null;
-      }
-      final created = await repo.createLobby(
-        teamId: _prefs.team!.id,
-        // 'ANY' is the wildcard the backend accepts when "All formats" is on.
-        format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
-        ballType: _prefs.ballType, // null = no ball preference
+      final res = await repo.discoverLobbies(
+        teamId: _currentTeam!.id,
         date: _prefs.dateApi,
-        picks: const [],
-        timeWindow: _prefs.window!.apiValue,
+        format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
+        ballType: _prefs.ballType,
+        timeWindows: _prefs.windowsApi,
         preferredArenaId: _prefs.preferredArenaId,
       );
-      _activeLobbyId = created.lobbyId;
-      // Cinematic celebrate then results.
+      if (!mounted) return;
       setState(() {
-        _submitting = false;
-        _stage = _Stage.celebrating;
+        _activeLobbyId = res.yourLobbyId;
+        _closest = res.closest;
+        _alternatives = res.alternatives;
+        _alternativeReason = res.alternativeReason;
+        // Refresh team-lobbies map so chip reflects this newly-active lobby.
+        _teamLobbies[_currentTeam!.id] = MmTeamLobbySummary(
+          lobbyId: res.yourLobbyId,
+          teamId: _currentTeam!.id,
+          teamName: _currentTeam!.name,
+          status: 'searching',
+          date: _prefs.dateApi,
+          format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
+          ballType: _prefs.ballType,
+          timeWindow: _prefs.windows.length == 1
+              ? _prefs.windows.first.apiValue
+              : null,
+          preferredArenaId: _prefs.preferredArenaId,
+        );
+        if (!skipCelebrate && _stage != _Stage.celebrating) {
+          _stage = _Stage.results;
+        }
       });
-      await Future<void>.delayed(const Duration(milliseconds: 1200));
-      if (!mounted) return;
-      await _refreshResults();
-      if (!mounted) return;
-      setState(() => _stage = _Stage.results);
     } catch (e) {
-      _log('submit error: $e');
+      _log('runDiscover error: $e');
       if (!mounted) return;
       setState(() {
         _submitting = false;
         _error = _extractServerError(e);
+        // If we were celebrating, fall back to setup so the user sees the error.
+        if (_stage == _Stage.celebrating) _stage = _Stage.setup;
       });
     }
   }
@@ -248,32 +341,25 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     return e.toString();
   }
 
-  Future<void> _refreshResults() async {
-    final repo = ref.read(matchmakingRepositoryProvider);
-    try {
-      final formatFilter =
-          _prefs.allFormats ? null : _prefs.format.apiValue;
-      // Lobbies that match preferences exactly (window + ground if pinned)
-      final matches = await repo.listOpenLobbies(
-        date: _prefs.dateApi,
-        format: formatFilter,
-        timeWindow: _prefs.window!.apiValue,
-        preferredArenaId: _prefs.preferredArenaId,
-      );
-      // Also-available: same date+format, any window/arena → minus the matches
-      final all = await repo.listOpenLobbies(
-        date: _prefs.dateApi,
-        format: formatFilter,
-      );
-      final matchIds = matches.map((l) => l.lobbyId).toSet();
-      final others = all.where((l) => !matchIds.contains(l.lobbyId)).toList();
+  // Switch to a different team. If that team has an active lobby, hydrate
+  // prefs from it and jump to results. Else go to Intro for that team.
+  Future<void> _switchTeam(MmTeam team) async {
+    if (team.id == _currentTeam?.id) return;
+    setState(() {
+      _currentTeam = team;
+      _activeLobbyId = null;
+      _closest = [];
+      _alternatives = [];
+      _alternativeReason = null;
+    });
+    final active = _teamLobbies[team.id];
+    if (active != null) {
+      _hydratePrefsFromLobby(active);
+      await _runDiscover(skipCelebrate: true);
       if (!mounted) return;
-      setState(() {
-        _matches = matches;
-        _alsoAvailable = others;
-      });
-    } catch (e) {
-      _log('refreshResults error: $e');
+      setState(() => _stage = _Stage.results);
+    } else {
+      setState(() => _stage = _Stage.intro);
     }
   }
 
@@ -281,10 +367,22 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
 
   @override
   Widget build(BuildContext context) {
+    final teamsAsync = ref.watch(mmTeamsProvider);
+    final allTeams = teamsAsync.valueOrNull ?? const <MmTeam>[];
     return switch (_stage) {
-      _Stage.intro => _DiscoverIntro(onStart: _goSetup),
+      _Stage.intro => _DiscoverIntro(
+          team: _currentTeam,
+          allTeams: allTeams,
+          teamLobbies: _teamLobbies,
+          onSwitchTeam: _switchTeam,
+          onStart: _goSetup,
+        ),
       _Stage.setup => _DiscoverSetup(
           prefs: _prefs,
+          team: _currentTeam,
+          allTeams: allTeams,
+          teamLobbies: _teamLobbies,
+          onSwitchTeam: _switchTeam,
           submitting: _submitting,
           error: _error,
           onChanged: () => setState(() {}),
@@ -296,11 +394,16 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       _Stage.celebrating => const _DiscoverCelebrate(),
       _Stage.results => _DiscoverResults(
           prefs: _prefs,
-          matches: _matches,
-          alsoAvailable: _alsoAvailable,
+          team: _currentTeam,
+          allTeams: allTeams,
+          teamLobbies: _teamLobbies,
+          onSwitchTeam: _switchTeam,
+          closest: _closest,
+          alternatives: _alternatives,
+          alternativeReason: _alternativeReason,
           onModify: _goSetup,
-          onRefresh: _refreshResults,
-          onChallenge: (lobby) => widget.onChallenge(lobby, _prefs.team),
+          onRefresh: _runDiscover,
+          onChallenge: (lobby) => widget.onChallenge(lobby, _currentTeam),
         ),
     };
   }
@@ -328,13 +431,39 @@ extension _FormatApi on MatchFormat {
 // ─── INTRO ──────────────────────────────────────────────────────────────────
 
 class _DiscoverIntro extends StatelessWidget {
-  const _DiscoverIntro({required this.onStart});
+  const _DiscoverIntro({
+    required this.team,
+    required this.allTeams,
+    required this.teamLobbies,
+    required this.onSwitchTeam,
+    required this.onStart,
+  });
+  final MmTeam? team;
+  final List<MmTeam> allTeams;
+  final Map<String, MmTeamLobbySummary> teamLobbies;
+  final ValueChanged<MmTeam> onSwitchTeam;
   final VoidCallback onStart;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
+              children: [
+                _TeamChip(
+                  team: team,
+                  allTeams: allTeams,
+                  teamLobbies: teamLobbies,
+                  onSwitch: onSwitchTeam,
+                ),
+              ],
+            ),
+          ),
+        ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
@@ -387,19 +516,23 @@ class _DiscoverIntro extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(
               20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
           child: GestureDetector(
-            onTap: onStart,
+            onTap: team == null ? null : onStart,
             behavior: HitTestBehavior.opaque,
             child: Container(
               height: 56,
               alignment: Alignment.center,
-              decoration: BoxDecoration(color: context.ctaBg),
+              decoration: BoxDecoration(
+                color: team == null
+                    ? context.stroke.withValues(alpha: 0.18)
+                    : context.ctaBg,
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Get started',
+                    team == null ? 'Pick a team to start' : 'Get started',
                     style: TextStyle(
-                      color: context.ctaFg,
+                      color: team == null ? context.fgSub : context.ctaFg,
                       fontSize: 16,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.2,
@@ -407,7 +540,8 @@ class _DiscoverIntro extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Icon(Icons.arrow_forward_rounded,
-                      color: context.ctaFg, size: 18),
+                      color: team == null ? context.fgSub : context.ctaFg,
+                      size: 18),
                 ],
               ),
             ),
@@ -418,11 +552,122 @@ class _DiscoverIntro extends StatelessWidget {
   }
 }
 
+// ─── TEAM CHIP ──────────────────────────────────────────────────────────────
+
+class _TeamChip extends StatelessWidget {
+  const _TeamChip({
+    required this.team,
+    required this.allTeams,
+    required this.teamLobbies,
+    required this.onSwitch,
+  });
+  final MmTeam? team;
+  final List<MmTeam> allTeams;
+  final Map<String, MmTeamLobbySummary> teamLobbies;
+  final ValueChanged<MmTeam> onSwitch;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: allTeams.isEmpty ? null : () => _open(context),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            context.fg.withValues(alpha: 0.05),
+            context.bg,
+          ),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: context.ctaBg.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.groups_rounded,
+                  color: context.ctaBg, size: 12),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              team?.name ?? 'Pick a team',
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.1,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.keyboard_arrow_down_rounded,
+                color: context.fgSub, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _open(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.bg,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Text(
+                  'Switch team',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              Container(
+                height: 1,
+                color: context.stroke.withValues(alpha: 0.18),
+              ),
+              for (final t in allTeams)
+                _PickerRow(
+                  label: t.name,
+                  subtitle: teamLobbies.containsKey(t.id)
+                      ? '● Searching now'
+                      : '${t.memberCount} member${t.memberCount == 1 ? '' : 's'}',
+                  selected: team?.id == t.id,
+                  onTap: () {
+                    Navigator.of(sheetCtx).pop();
+                    onSwitch(t);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 // ─── SETUP ──────────────────────────────────────────────────────────────────
 
 class _DiscoverSetup extends ConsumerStatefulWidget {
   const _DiscoverSetup({
     required this.prefs,
+    required this.team,
+    required this.allTeams,
+    required this.teamLobbies,
+    required this.onSwitchTeam,
     required this.submitting,
     required this.error,
     required this.onChanged,
@@ -431,6 +676,10 @@ class _DiscoverSetup extends ConsumerStatefulWidget {
   });
 
   final _Prefs prefs;
+  final MmTeam? team;
+  final List<MmTeam> allTeams;
+  final Map<String, MmTeamLobbySummary> teamLobbies;
+  final ValueChanged<MmTeam> onSwitchTeam;
   final bool submitting;
   final String? error;
   final VoidCallback onChanged;
@@ -452,9 +701,11 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
   bool _stepReady() {
     switch (_step) {
       case 0:
-        return widget.prefs.team != null && widget.prefs.ballType != null;
+        // Team is now picked via the chip (handled in DiscoverView). Step 1
+        // gates on ball type — format always has a default.
+        return widget.team != null && widget.prefs.ballType != null;
       case 1:
-        return widget.prefs.window != null;
+        return widget.prefs.windows.isNotEmpty;
       case 2:
         return true; // ground is optional
     }
@@ -482,77 +733,64 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
     final p = widget.prefs;
     return Column(
       children: [
-        // ── Header ─────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: Row(
-            children: [
-              GestureDetector(
-                onTap: _back,
-                behavior: HitTestBehavior.opaque,
-                child: SizedBox(
-                  width: 36,
-                  height: 36,
-                  child: Icon(Icons.arrow_back_rounded,
-                      size: 22, color: context.fg),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'STEP 0${_step + 1} OF 0${_stepLabels.length}',
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.6,
-                        height: 1.0,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _stepLabels[_step],
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.8,
-                        height: 1.0,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        // ── Progress dots ──────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              for (int i = 0; i < _stepLabels.length; i++) ...[
-                Expanded(
-                  child: Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: i <= _step
-                          ? context.ctaBg
-                          : context.stroke.withValues(alpha: 0.22),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+        // ── Top bar — back chevron + team chip + slim progress ─────
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 16, 0),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: _back,
+                  behavior: HitTestBehavior.opaque,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(Icons.arrow_back_ios_new_rounded,
+                        size: 20, color: context.fg),
                   ),
                 ),
-                if (i < _stepLabels.length - 1) const SizedBox(width: 6),
+                _TeamChip(
+                  team: widget.team,
+                  allTeams: widget.allTeams,
+                  teamLobbies: widget.teamLobbies,
+                  onSwitch: widget.onSwitchTeam,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Row(
+                    children: [
+                      for (int i = 0; i < _stepLabels.length; i++) ...[
+                        Expanded(
+                          child: Container(
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: i <= _step
+                                  ? context.ctaBg
+                                  : context.stroke.withValues(alpha: 0.22),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        if (i < _stepLabels.length - 1)
+                          const SizedBox(width: 6),
+                      ],
+                    ],
+                  ),
+                ),
               ],
-            ],
+            ),
           ),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 18),
+        // ── Poster header per step ─────────────────────────────────
+        Align(
+          alignment: Alignment.centerLeft,
+          child: _PosterHeader(
+            eyebrow: 'Step 0${_step + 1} of 0${_stepLabels.length}',
+            title: _stepLabels[_step],
+          ),
+        ),
         // ── Body ───────────────────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
@@ -648,55 +886,52 @@ class _DiscoverSetupState extends ConsumerState<_DiscoverSetup> {
 
 // ─── Setup sub-steps ────────────────────────────────────────────────────────
 
-class _DetailsStep extends ConsumerWidget {
+class _DetailsStep extends StatelessWidget {
   const _DetailsStep({required this.prefs, required this.onChanged});
   final _Prefs prefs;
   final VoidCallback onChanged;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final teamsAsync = ref.watch(mmTeamsProvider);
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SetupRow(
-          label: 'Team',
-          value: prefs.team?.name,
-          placeholder: 'Tap to pick team',
-          onTap: () async {
-            final teams = teamsAsync.valueOrNull ?? const <MmTeam>[];
-            final picked = await _pickTeam(context, teams);
-            if (picked != null) {
-              prefs.team = picked;
-              onChanged();
-            }
-          },
+        _CardGroup(
+          children: [
+            _SetupRow(
+              label: 'FORMAT',
+              value: prefs.formatLabel,
+              placeholder: 'Tap to choose format',
+              icon: Icons.sports_cricket_rounded,
+              tint: context.match,
+              onTap: () async {
+                final r = await _pickFormat(context,
+                    allSelected: prefs.allFormats, current: prefs.format);
+                if (r == null) return;
+                prefs.allFormats = r.all;
+                if (r.format != null) prefs.format = r.format!;
+                onChanged();
+              },
+            ),
+          ],
         ),
-        _RowDivider(),
-        _SetupRow(
-          label: 'Format',
-          value: prefs.formatLabel,
-          placeholder: 'Tap to choose format',
-          onTap: () async {
-            final r = await _pickFormat(context,
-                allSelected: prefs.allFormats, current: prefs.format);
-            if (r == null) return;
-            prefs.allFormats = r.all;
-            if (r.format != null) prefs.format = r.format!;
-            onChanged();
-          },
-        ),
-        _RowDivider(),
-        _SetupRow(
-          label: 'Ball type',
-          value: prefs.ballLabel,
-          placeholder: 'Tap to pick ball type',
-          onTap: () async {
-            final r = await _pickBallType(context, prefs.ballType);
-            if (r == null) return;
-            prefs.ballType = r.all ? null : r.value;
-            onChanged();
-          },
+        const SizedBox(height: 12),
+        _CardGroup(
+          children: [
+            _SetupRow(
+              label: 'BALL TYPE',
+              value: prefs.ballLabel,
+              placeholder: 'Tap to pick ball type',
+              icon: Icons.circle,
+              tint: context.warn,
+              onTap: () async {
+                final r = await _pickBallType(context, prefs.ballType);
+                if (r == null) return;
+                prefs.ballType = r.all ? null : r.value;
+                onChanged();
+              },
+            ),
+          ],
         ),
       ],
     );
@@ -717,9 +952,9 @@ class _WhenStep extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionLabel('Choose date'),
+        _GroupHeading('Choose date'),
         Padding(
-          padding: const EdgeInsets.only(left: 20),
+          padding: const EdgeInsets.only(left: 16),
           child: _DateStripSimple(
             selected: prefs.date,
             onSelect: (d) {
@@ -728,28 +963,47 @@ class _WhenStep extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(height: 26),
-        _SectionLabel('Time window'),
+        const SizedBox(height: 22),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
+          child: Row(
             children: [
-              for (final w in DiscoverWindow.values) ...[
-                _Chip(
-                  label: w.label,
-                  subLabel: w.hint,
-                  selected: prefs.window == w,
-                  onTap: () {
-                    prefs.window = w;
-                    onChanged();
-                  },
+              Text(
+                'TIME WINDOW',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
                 ),
-                const SizedBox(height: 8),
-              ],
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'pick one or more',
+                style: TextStyle(
+                  color: context.fgSub.withValues(alpha: 0.7),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
         ),
+        for (final w in DiscoverWindow.values) ...[
+          _WindowCard(
+            window: w,
+            selected: prefs.windows.contains(w),
+            onTap: () {
+              if (prefs.windows.contains(w)) {
+                prefs.windows.remove(w);
+              } else {
+                prefs.windows.add(w);
+              }
+              onChanged();
+            },
+          ),
+          const SizedBox(height: 10),
+        ],
       ],
     );
   }
@@ -770,31 +1024,37 @@ class _WhereStep extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SetupRow(
-          label: 'Preferred ground',
-          value: prefs.preferredArenaName ?? 'Any nearby',
-          placeholder: 'Any nearby',
-          onTap: () async {
-            final picked = await _pickArena(
-              context,
-              ref,
-              prefs.dateApi,
-              prefs.format.apiValue,
-            );
-            if (picked == null) return;
-            if (picked.id == '') {
-              prefs.preferredArenaId = null;
-              prefs.preferredArenaName = null;
-            } else {
-              prefs.preferredArenaId = picked.id;
-              prefs.preferredArenaName = picked.name;
-            }
-            onChanged();
-          },
+        _CardGroup(
+          children: [
+            _SetupRow(
+              label: 'PREFERRED GROUND',
+              value: prefs.preferredArenaName ?? 'Any nearby',
+              placeholder: 'Any nearby',
+              icon: Icons.place_rounded,
+              tint: context.accent,
+              onTap: () async {
+                final picked = await _pickArena(
+                  context,
+                  ref,
+                  prefs.dateApi,
+                  prefs.format.apiValue,
+                );
+                if (picked == null) return;
+                if (picked.id == '') {
+                  prefs.preferredArenaId = null;
+                  prefs.preferredArenaName = null;
+                } else {
+                  prefs.preferredArenaId = picked.id;
+                  prefs.preferredArenaName = picked.name;
+                }
+                onChanged();
+              },
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Text(
             prefs.preferredArenaId != null
                 ? 'Filtering by ground reduces match chances.'
@@ -931,63 +1191,47 @@ class _DiscoverCelebrateState extends State<_DiscoverCelebrate>
 class _DiscoverResults extends StatelessWidget {
   const _DiscoverResults({
     required this.prefs,
-    required this.matches,
-    required this.alsoAvailable,
+    required this.team,
+    required this.allTeams,
+    required this.teamLobbies,
+    required this.onSwitchTeam,
+    required this.closest,
+    required this.alternatives,
+    required this.alternativeReason,
     required this.onModify,
     required this.onRefresh,
     required this.onChallenge,
   });
 
   final _Prefs prefs;
-  final List<MmOpenLobby> matches;
-  final List<MmOpenLobby> alsoAvailable;
+  final MmTeam? team;
+  final List<MmTeam> allTeams;
+  final Map<String, MmTeamLobbySummary> teamLobbies;
+  final ValueChanged<MmTeam> onSwitchTeam;
+  final List<MmRankedLobby> closest;
+  final List<MmRankedLobby> alternatives;
+  final String? alternativeReason;
   final VoidCallback onModify;
-  final Future<void> Function() onRefresh;
+  final Future<void> Function({bool skipCelebrate}) onRefresh;
   final ValueChanged<MmOpenLobby> onChallenge;
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
-        children: [
-          // ── Preferences chip strip + Modify button ─────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+    return Column(
+      children: [
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${prefs.team?.name ?? '—'} · ${prefs.format.label}${prefs.ballType != null ? ' · ${_ballLabel(prefs.ballType!)}' : ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.fg,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${_dateLabel(prefs.date)} · ${prefs.window?.label ?? ''} · ${prefs.preferredArenaName ?? 'Any ground'}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.fgSub,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
+                _TeamChip(
+                  team: team,
+                  allTeams: allTeams,
+                  teamLobbies: teamLobbies,
+                  onSwitch: onSwitchTeam,
                 ),
-                const SizedBox(width: 10),
+                const Spacer(),
                 GestureDetector(
                   onTap: onModify,
                   behavior: HitTestBehavior.opaque,
@@ -1021,55 +1265,121 @@ class _DiscoverResults extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          Container(
-            height: 1,
-            color: context.stroke.withValues(alpha: 0.18),
-          ),
-          const SizedBox(height: 18),
-
-          // ── Matches your preferences ───────────────────────────────
-          if (matches.isNotEmpty) ...[
-            _ResultsHeader(
-              label: 'MATCHES YOUR PREFERENCES',
-              count: matches.length,
-              accent: true,
-            ),
-            const SizedBox(height: 8),
-            for (final l in matches)
-              _LobbyTile(
-                  lobby: l, prominent: true, onTap: () => onChallenge(l)),
-            const SizedBox(height: 18),
-          ] else ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 20, vertical: 12),
-              child: Text(
-                'No teams want this window yet. Your match-up is posted — we\'ll ping you when one shows up.',
-                style: TextStyle(
-                  color: context.fgSub,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  height: 1.4,
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => onRefresh(skipCelebrate: true),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${prefs.formatLabel} · ${_ballLabelFor(prefs)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_dateLabel(prefs.date)} · ${prefs.windowsLabel} · ${prefs.preferredArenaName ?? 'Any ground'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(height: 14),
+                Container(
+                  height: 1,
+                  color: context.stroke.withValues(alpha: 0.18),
+                ),
+                const SizedBox(height: 18),
+
+                if (closest.isNotEmpty) ...[
+                  _ResultsHeader(
+                    label: 'CLOSEST MATCHES',
+                    count: closest.length,
+                    accent: true,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final r in closest)
+                    _LobbyTile(
+                      lobby: r.lobby,
+                      prominent: true,
+                      score: r.score,
+                      matchedOn: r.matchedOn,
+                      differs: r.differs,
+                      onTap: () => onChallenge(r.lobby),
+                    ),
+                  const SizedBox(height: 18),
+                ] else ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
+                    child: Text(
+                      _emptyClosestText(alternativeReason, alternatives.isNotEmpty),
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+
+                if (alternatives.isNotEmpty) ...[
+                  _ResultsHeader(
+                    label: alternativeReason == 'no_exact_matches'
+                        ? 'OTHER MATCHES NEAR YOU'
+                        : 'ALSO AVAILABLE',
+                    count: alternatives.length,
+                    accent: false,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final r in alternatives)
+                    _LobbyTile(
+                      lobby: r.lobby,
+                      prominent: false,
+                      score: r.score,
+                      matchedOn: r.matchedOn,
+                      differs: r.differs,
+                      onTap: () => onChallenge(r.lobby),
+                    ),
+                ],
+              ],
             ),
-          ],
-          if (alsoAvailable.isNotEmpty) ...[
-            _ResultsHeader(
-              label: 'ALSO AVAILABLE',
-              count: alsoAvailable.length,
-              accent: false,
-            ),
-            const SizedBox(height: 8),
-            for (final l in alsoAvailable)
-              _LobbyTile(
-                  lobby: l, prominent: false, onTap: () => onChallenge(l)),
-          ],
-        ],
-      ),
+          ),
+        ),
+      ],
     );
   }
+}
+
+String _ballLabelFor(_Prefs p) =>
+    p.ballType == null ? 'Any ball' : _ballLabel(p.ballType!);
+
+String _emptyClosestText(String? reason, bool hasAlts) {
+  if (reason == 'no_exact_matches') {
+    return hasAlts
+        ? 'No exact matches yet. Here are the closest alternatives:'
+        : 'No teams want these prefs yet. Your match-up is posted — we\'ll notify you when one shows up.';
+  }
+  return 'No exact matches yet. Your match-up is posted — we\'ll notify you when one shows up.';
 }
 
 String _dateLabel(DateTime d) {
@@ -1104,62 +1414,40 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class _SetupRow extends StatelessWidget {
-  const _SetupRow({
-    required this.label,
-    required this.value,
-    required this.placeholder,
-    required this.onTap,
-  });
-  final String label;
-  final String? value;
-  final String placeholder;
-  final VoidCallback onTap;
+// ─── Apple Settings-style components ────────────────────────────────────────
+
+class _CardGroup extends StatelessWidget {
+  const _CardGroup({required this.children});
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    final hasValue = value != null && value!.isNotEmpty;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Row(
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          context.fg.withValues(alpha: 0.04),
+          context.bg,
+        ),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label.toUpperCase(),
-                    style: TextStyle(
-                      color: context.fgSub,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
-                      height: 1.0,
-                    ),
+            for (int i = 0; i < children.length; i++) ...[
+              children[i],
+              if (i < children.length - 1)
+                Padding(
+                  // Inset the divider so it starts after the icon column —
+                  // matches iOS Settings exactly.
+                  padding: const EdgeInsets.only(left: 64),
+                  child: Container(
+                    height: 0.5,
+                    color: context.stroke.withValues(alpha: 0.18),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    hasValue ? value! : placeholder,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: hasValue ? context.fg : context.fgSub,
-                      fontSize: 17,
-                      fontWeight:
-                          hasValue ? FontWeight.w800 : FontWeight.w500,
-                      letterSpacing: -0.2,
-                      height: 1.0,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Icon(Icons.chevron_right_rounded,
-                color: context.fgSub, size: 22),
+                ),
+            ],
           ],
         ),
       ),
@@ -1167,13 +1455,282 @@ class _SetupRow extends StatelessWidget {
   }
 }
 
-class _RowDivider extends StatelessWidget {
+class _SetupRow extends StatelessWidget {
+  const _SetupRow({
+    required this.label,
+    required this.value,
+    required this.placeholder,
+    required this.icon,
+    required this.tint,
+    required this.onTap,
+  });
+
+  final String label;
+  final String? value;
+  final String placeholder;
+  final IconData icon;
+  final Color tint;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 1,
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      color: context.stroke.withValues(alpha: 0.14),
+    final hasValue = value != null && value!.isNotEmpty;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: tint.withValues(alpha: 0.06),
+        highlightColor: tint.withValues(alpha: 0.04),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              // Leading icon tile
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: tint.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, color: tint, size: 18),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                        height: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      hasValue ? value! : placeholder,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: hasValue ? context.fg : context.fgSub,
+                        fontSize: 16,
+                        fontWeight:
+                            hasValue ? FontWeight.w700 : FontWeight.w500,
+                        letterSpacing: -0.2,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(Icons.chevron_right_rounded,
+                  color: context.fgSub.withValues(alpha: 0.6), size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PosterHeader extends StatelessWidget {
+  const _PosterHeader({required this.eyebrow, required this.title});
+  final String eyebrow;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            eyebrow.toUpperCase(),
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.6,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 34,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -1.2,
+              height: 1.0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupHeading extends StatelessWidget {
+  const _GroupHeading(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          color: context.fgSub,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+}
+
+class _WindowCard extends StatelessWidget {
+  const _WindowCard({
+    required this.window,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final DiscoverWindow window;
+  final bool selected;
+  final VoidCallback onTap;
+
+  ({IconData icon, List<Color> grad}) _theme(BuildContext context) {
+    return switch (window) {
+      DiscoverWindow.morning => (
+          icon: Icons.wb_sunny_rounded,
+          grad: [
+            const Color(0xFFFFB857),
+            const Color(0xFFFF8A4C),
+          ],
+        ),
+      DiscoverWindow.afternoon => (
+          icon: Icons.wb_cloudy_rounded,
+          grad: [
+            const Color(0xFF5DBBE8),
+            const Color(0xFF3C8DCB),
+          ],
+        ),
+      DiscoverWindow.evening => (
+          icon: Icons.nightlight_round,
+          grad: [
+            const Color(0xFF6E7CD9),
+            const Color(0xFF3D2B6E),
+          ],
+        ),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _theme(context);
+    final iconBg = t.grad[0].withValues(alpha: selected ? 1.0 : 0.18);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          decoration: BoxDecoration(
+            color: selected
+                ? Color.alphaBlend(
+                    t.grad[0].withValues(alpha: 0.12), context.bg)
+                : Color.alphaBlend(
+                    context.fg.withValues(alpha: 0.04), context.bg),
+            borderRadius: BorderRadius.circular(14),
+            border: selected
+                ? Border.all(
+                    color: t.grad[1].withValues(alpha: 0.4), width: 1.4)
+                : null,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: selected
+                      ? LinearGradient(
+                          colors: t.grad,
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : null,
+                  color: selected ? null : iconBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  t.icon,
+                  color: selected ? Colors.white : t.grad[1],
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      window.label,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      window.hint,
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: t.grad,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 14),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1357,10 +1914,16 @@ class _LobbyTile extends StatelessWidget {
     required this.lobby,
     required this.prominent,
     required this.onTap,
+    this.score,
+    this.matchedOn = const [],
+    this.differs = const [],
   });
   final MmOpenLobby lobby;
   final bool prominent;
   final VoidCallback onTap;
+  final double? score;
+  final List<String> matchedOn;
+  final List<String> differs;
 
   @override
   Widget build(BuildContext context) {
@@ -1405,6 +1968,18 @@ class _LobbyTile extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
+                  if (differs.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'differs: ${differs.join(', ')}',
+                      style: TextStyle(
+                        color: context.warn,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
