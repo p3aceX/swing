@@ -760,9 +760,9 @@ class ArenaPaymentsData {
   final List<ArenaReservation> pendingBookings;
 
   int get totalCollectedPaise =>
-      checkedInBookings.fold(0, (s, b) => s + b.totalAmountPaise);
+      checkedInBookings.fold(0, (s, b) => s + b.effectivePaidPaise);
   int get totalBalancePaise =>
-      pendingBookings.fold(0, (s, b) => s + b.totalAmountPaise);
+      pendingBookings.fold(0, (s, b) => s + b.balancePaise);
 }
 
 class ArenaGuest {
