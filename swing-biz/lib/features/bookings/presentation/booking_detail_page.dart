@@ -1076,14 +1076,32 @@ class _RecordPaymentSheetState extends ConsumerState<RecordPaymentSheet> {
       _payerCtrl.text = widget.defaultPayerName
           ?? mi.teamACaptain?.name?.trim()
           ?? '';
+      _amountCtrl.text = _formatPaise(_outstandingForTeam(mi.teamAId));
     } else {
       _payerCtrl.text = widget.defaultPayerName ?? widget.booking.displayName;
-    }
-    final balance = widget.booking.balancePaise;
-    if (balance > 0) {
-      _amountCtrl.text = (balance / 100).toStringAsFixed(0);
+      final balance = widget.booking.balancePaise;
+      if (balance > 0) {
+        _amountCtrl.text = _formatPaise(balance);
+      }
     }
   }
+
+  /// Each team's share of the booking total — half of total for splits.
+  int get _perTeamSharePaise =>
+      (widget.booking.totalAmountPaise / 2).round();
+
+  /// What this team still owes: their share minus what they've already paid.
+  int _outstandingForTeam(String? teamId) {
+    if (teamId == null) return widget.booking.balancePaise;
+    final paidByTeam = widget.booking.bookingPayments
+        .where((p) => p.payerTeamId == teamId)
+        .fold<int>(0, (sum, p) => sum + p.amountPaise);
+    final remaining = _perTeamSharePaise - paidByTeam;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  String _formatPaise(int paise) =>
+      (paise / 100).toStringAsFixed(0);
 
   void _selectTeam(String? teamId) {
     final mi = widget.booking.matchInfo;
@@ -1094,10 +1112,14 @@ class _RecordPaymentSheetState extends ConsumerState<RecordPaymentSheet> {
           ? mi.teamACaptain
           : (teamId == mi.teamBId ? mi.teamBCaptain : null);
       final captainName = captain?.name?.trim() ?? '';
-      // Only overwrite if the user hasn't typed something custom yet.
+      // Only overwrite payer if the user hasn't typed a custom name yet.
       if (_payerCtrl.text.trim().isEmpty || _isCaptainName(_payerCtrl.text)) {
         _payerCtrl.text = captainName;
       }
+      // Re-default the amount to this team's outstanding share. Skip the
+      // overwrite if the user has already typed a custom amount that doesn't
+      // match the previous team's outstanding (so we don't clobber edits).
+      _amountCtrl.text = _formatPaise(_outstandingForTeam(teamId));
     });
   }
 
