@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
@@ -12,10 +13,12 @@ import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:swing_coach/components/feedback/feedback_form.dart';
 import 'package:swing_coach/modules/play/navigation/play_route_scope.dart';
+import 'package:swing_coach/modules/play/services/play_dio_override.dart';
 import 'package:swing_coach/modules/play/screens/coach_create_match_screen.dart';
 import 'package:swing_coach/modules/play/screens/coach_create_tournament_screen.dart';
 import 'package:swing_coach/modules/play/screens/coach_play_entry_screen.dart';
 import 'package:swing_coach/services/feedback_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const SwingCoachApp());
@@ -220,6 +223,7 @@ class _SwingCoachAppState extends State<SwingCoachApp> {
         overrides: [
           initialAuthSessionProvider.overrideWithValue(_session!),
           settingsStoreProvider.overrideWithValue(_settingsStore),
+          ...hostPlayOverridesForCoachToken(_session!.accessToken),
         ],
         child: CoachRouterApp(
           session: _session!,
@@ -719,6 +723,9 @@ class LocalSettingsStore {
   static const _biometricKey = 'biometric_enabled';
   static const _oneOnOneSetupKey = 'one_on_one_setup_completed';
   static const _oneOnOneSetupDataKey = 'one_on_one_setup_data';
+  static const _quickBatchSetupDataKey = 'quick_batch_setup_data';
+  static const _demoOneOnOneBookingsKey = 'demo_one_on_one_bookings';
+  static const _demoReportCardsKey = 'demo_report_cards';
 
   Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
 
@@ -788,6 +795,68 @@ class LocalSettingsStore {
     final prefs = await _prefs;
     await prefs.setBool(_oneOnOneSetupKey, true);
     await prefs.setString(_oneOnOneSetupDataKey, jsonEncode(data));
+  }
+
+  Future<Map<String, dynamic>> loadQuickBatchSetupData() async {
+    final raw = (await _prefs).getString(_quickBatchSetupDataKey);
+    if (raw == null || raw.isEmpty) return const <String, dynamic>{};
+    try {
+      return (jsonDecode(raw) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
+  Future<void> saveQuickBatchSetupData(Map<String, dynamic> data) async {
+    await (await _prefs).setString(_quickBatchSetupDataKey, jsonEncode(data));
+  }
+
+  Future<List<Map<String, dynamic>>> loadDemoOneOnOneBookings() async {
+    return _loadJsonList(_demoOneOnOneBookingsKey);
+  }
+
+  Future<void> saveDemoOneOnOneBooking(Map<String, dynamic> data) async {
+    final items = await loadDemoOneOnOneBookings();
+    items.removeWhere((item) => item['id'] == data['id']);
+    items.insert(0, data);
+    await (await _prefs).setString(
+      _demoOneOnOneBookingsKey,
+      jsonEncode(items),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> loadDemoReportCards() async {
+    return _loadJsonList(_demoReportCardsKey);
+  }
+
+  Future<void> saveDemoReportCard(Map<String, dynamic> data) async {
+    final items = await loadDemoReportCards();
+    items.removeWhere((item) => item['id'] == data['id']);
+    items.insert(0, data);
+    await (await _prefs).setString(_demoReportCardsKey, jsonEncode(items));
+  }
+
+  Future<void> saveDemoReportCards(List<Map<String, dynamic>> reports) async {
+    final items = await loadDemoReportCards();
+    final ids = reports.map((item) => item['id']).toSet();
+    items.removeWhere((item) => ids.contains(item['id']));
+    items.insertAll(0, reports);
+    await (await _prefs).setString(_demoReportCardsKey, jsonEncode(items));
+  }
+
+  Future<List<Map<String, dynamic>>> _loadJsonList(String key) async {
+    final raw = (await _prefs).getString(key);
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return <Map<String, dynamic>>[];
+      return decoded
+          .whereType<Map>()
+          .map((item) => item.cast<String, dynamic>())
+          .toList();
+    } catch (_) {
+      return <Map<String, dynamic>>[];
+    }
   }
 }
 
@@ -1390,8 +1459,7 @@ class _CoachRouterAppState extends ConsumerState<CoachRouterApp> {
                     builder: (context, ref, _) {
                       final session = ref.watch(sessionStateProvider);
                       return CoachPlayEntryScreen(
-                        accessToken: session?.accessToken ?? '',
-                        currentUserId: session?.phone,
+                        currentUserId: session?.userId ?? session?.phone,
                       );
                     },
                   ),
@@ -1417,12 +1485,120 @@ class _CoachRouterAppState extends ConsumerState<CoachRouterApp> {
           ],
         ),
         GoRoute(
+          path: '/play/create-match',
+          builder: (context, state) => Consumer(
+            builder: (context, ref, _) {
+              final session = ref.watch(sessionStateProvider);
+              return PlayRouteScope(
+                child: CoachCreateMatchScreen(
+                  existingMatchId: state.uri.queryParameters['matchId'],
+                  currentUserId: session?.userId ?? session?.phone,
+                ),
+              );
+            },
+          ),
+        ),
+        GoRoute(
+          path: '/play/score/:matchId',
+          builder: (context, state) => PlayRouteScope(
+            child: ScoringScreen(matchId: state.pathParameters['matchId']!),
+          ),
+        ),
+        GoRoute(
+          path: '/play/matches/:matchId',
+          builder: (context, state) => PlayRouteScope(
+            child: HostMatchDetailScreen(
+              matchId: state.pathParameters['matchId']!,
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/play/create-team',
+          builder: (context, state) => Consumer(
+            builder: (context, ref, _) {
+              final session = ref.watch(sessionStateProvider);
+              return PlayRouteScope(
+                child: HostCreateTeamScreen(
+                  academyId: session?.academyId,
+                  coachId: session?.coachProfileId,
+                  onCreated: (teamId) {
+                    GoRouter.of(context).pop();
+                    GoRouter.of(
+                      context,
+                    ).push('/play/teams/${Uri.encodeComponent(teamId)}');
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        GoRoute(
+          path: '/play/teams/:teamId',
+          builder: (context, state) => Consumer(
+            builder: (context, ref, _) {
+              final session = ref.watch(sessionStateProvider);
+              return PlayRouteScope(
+                child: HostTeamDetailScreen(
+                  teamId: state.pathParameters['teamId']!,
+                  currentUserId: session?.userId ?? session?.phone,
+                ),
+              );
+            },
+          ),
+        ),
+        GoRoute(
+          path: '/play/create-tournament',
+          builder: (context, state) =>
+              const PlayRouteScope(child: CoachCreateTournamentScreen()),
+        ),
+        GoRoute(
+          path: '/play/tournaments/:slug',
+          builder: (context, state) {
+            final extra = state.extra as Map<String, dynamic>?;
+            final slug = state.pathParameters['slug']!;
+            final isHost = extra?['isHost'] as bool? ?? false;
+            final tournamentId = extra?['tournamentId'] as String? ?? slug;
+            return PlayRouteScope(
+              child: HostTournamentViewerScreen(
+                slug: slug,
+                isHost: isHost,
+                callbacks: TournamentViewerCallbacks(
+                  onBack: () => GoRouter.of(context).pop(),
+                  onNavigateToMatch: (matchId) => context.push(
+                    '/play/matches/${Uri.encodeComponent(matchId)}',
+                  ),
+                  onNavigateToTeam: (teamId) => context.push(
+                    '/play/teams/${Uri.encodeComponent(teamId)}',
+                  ),
+                  onManage: isHost
+                      ? () => context.push(
+                          '/play/host-tournament/${Uri.encodeComponent(tournamentId)}',
+                          extra: extra,
+                        )
+                      : null,
+                ),
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          path: '/play/host-tournament/:tournamentId',
+          builder: (context, state) => PlayRouteScope(
+            child: HostTournamentDetailScreen(
+              tournamentId: state.pathParameters['tournamentId']!,
+              initialData: state.extra as Map<String, dynamic>?,
+            ),
+          ),
+        ),
+        GoRoute(
           path: '/sessions',
           builder: (context, state) => const SessionsScreen(),
           routes: [
             GoRoute(
               path: 'start',
-              builder: (context, state) => const AutoSessionFlowScreen(),
+              builder: (context, state) => AutoSessionFlowScreen(
+                initialSession: (state.extra as Map?)?.cast<String, dynamic>(),
+              ),
             ),
             GoRoute(
               path: ':sessionId',
@@ -1470,8 +1646,22 @@ class _CoachRouterAppState extends ConsumerState<CoachRouterApp> {
           ],
         ),
         GoRoute(
+          path: '/students',
+          builder: (context, state) => const StudentsScreen(),
+          routes: [
+            GoRoute(
+              path: ':playerProfileId',
+              builder: (context, state) => StudentDetailScreen(
+                playerProfileId: state.pathParameters['playerProfileId']!,
+              ),
+            ),
+          ],
+        ),
+        GoRoute(
           path: '/batch-setup',
-          builder: (context, state) => const QuickBatchSetupScreen(),
+          builder: (context, state) => QuickBatchSetupScreen(
+            focusBatchId: (state.extra as Map?)?['batchId']?.toString(),
+          ),
         ),
         GoRoute(
           path: '/gigs',
@@ -1648,9 +1838,6 @@ class HomeScreen extends ConsumerWidget {
               (data['revenueSeries'] as List?)?.cast<Map<String, dynamic>>() ??
               const <Map<String, dynamic>>[];
           final hasRevenueData = data['hasRevenueData'] == true;
-          final todaySessions =
-              (data['todaySessions'] as List?)?.cast<Map<String, dynamic>>() ??
-              const [];
           final batchSetupComplete = data['batchSetupComplete'] == true;
           final oneOnOneSetupComplete = data['oneOnOneSetupComplete'] == true;
           final showSetupSection =
@@ -1674,7 +1861,7 @@ class HomeScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   RevenueChartCard(
-                    enabled: hasRevenueData,
+                    enabled: true,
                     monthlyRevenuePaise: monthlyRevenuePaise,
                     series: revenueSeries,
                   ),
@@ -1720,39 +1907,15 @@ class HomeScreen extends ConsumerWidget {
                         trailing: const Icon(Icons.chevron_right_rounded),
                         onTap: () => context.push('/one-on-one/activate'),
                       ),
-                  ] else ...[
-                    UpcomingSessionsCard(items: upcomingFromTimetable),
                   ],
-                  const SizedBox(height: 16),
-                  SectionTitle('Quick Actions'),
-                  QuickAction(
-                    icon: Icons.play_arrow_rounded,
-                    label: 'Start Session',
-                    onTap: () => context.push('/sessions/start'),
-                  ),
-                  QuickAction(
-                    icon: Icons.add_task_rounded,
-                    label: 'Create Drill',
-                    onTap: () => context.push('/drills/create'),
-                  ),
-                  QuickAction(
-                    icon: Icons.rate_review_outlined,
-                    label: 'Give Feedback',
-                    onTap: () => showFeedbackSheet(context, ref),
-                  ),
-                  const SizedBox(height: 10),
-                  SectionTitle('Sessions Overview'),
-                  if (todaySessions.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Text('No session scheduled right now.'),
+                  if (upcomingFromTimetable.isNotEmpty || !showSetupSection) ...[
+                    if (showSetupSection) const SizedBox(height: 16),
+                    UpcomingSessionsCard(
+                      title: 'Upcoming Sessions',
+                      emptyLabel: 'No upcoming batch or 1-to-1 sessions.',
+                      items: upcomingFromTimetable,
                     ),
-                  ...todaySessions.map(
-                    (item) => SessionRow(
-                      item: item,
-                      onTap: () => context.push('/sessions/${_idOf(item)}'),
-                    ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -1764,29 +1927,75 @@ class HomeScreen extends ConsumerWidget {
 
   Future<Map<String, dynamic>> _loadHomeDashboard(WidgetRef ref) async {
     final api = ref.read(apiClientProvider);
+    Future<Map<String, dynamic>> safeMap(
+      Future<Map<String, dynamic>> Function() load,
+    ) async {
+      try {
+        return await load();
+      } catch (_) {
+        return const <String, dynamic>{};
+      }
+    }
+
+    Future<List<Map<String, dynamic>>> safeList(
+      Future<List<Map<String, dynamic>>> Function() load,
+    ) async {
+      try {
+        return await load();
+      } catch (_) {
+        return <Map<String, dynamic>>[];
+      }
+    }
+
+    final settings = ref.read(settingsStoreProvider);
     final data = await Future.wait([
-      api.get('/coach/profile'),
-      api.get('/coach/earnings'),
-      api.getList('/coach/sessions', query: {'page': '1', 'limit': '50'}),
-      api.getList('/coach/batches'),
-      api.getList('/coach/schedules'),
-      api.getList('/coach/gig-bookings', query: {'page': '1', 'limit': '50'}),
+      safeMap(() => api.get('/coach/profile')),
+      safeMap(() => api.get('/coach/earnings')),
+      safeList(() => api.getList('/coach/batches')),
+      safeList(() => api.getList('/coach/schedules')),
+      safeList(
+        () => api.getList('/coach/gig-bookings', query: {'page': '1', 'limit': '50'}),
+      ),
+      settings.loadDemoOneOnOneBookings(),
     ]);
     final profile = data[0] as Map<String, dynamic>;
     final earnings = data[1] as Map<String, dynamic>;
-    final sessions = (data[2] as List).cast<Map<String, dynamic>>();
-    final batches = (data[3] as List).cast<Map<String, dynamic>>();
-    final schedules = (data[4] as List).cast<Map<String, dynamic>>();
-    final oneOnOneBookings = (data[5] as List).cast<Map<String, dynamic>>();
+    final batches = (data[2] as List).cast<Map<String, dynamic>>();
+    final schedules = (data[3] as List).cast<Map<String, dynamic>>();
+    final oneOnOneBookings = [
+      ...(data[4] as List).cast<Map<String, dynamic>>(),
+      ...(data[5] as List).cast<Map<String, dynamic>>(),
+    ];
     final revenueSeries = _revenueTrend(earnings);
     final monthlyRevenue = _extractMonthlyRevenuePaise(earnings);
-    final oneOnOneSetupComplete = await ref
-        .read(settingsStoreProvider)
-        .isOneOnOneSetupCompleted();
+    final oneOnOneSetupComplete = await settings.isOneOnOneSetupCompleted();
+    final quickBatchSetup = await settings.loadQuickBatchSetupData();
+    final savedBatches = _batchesFromSavedQuickBatchSetup(quickBatchSetup);
+    final effectiveBatches = batches.isEmpty ? savedBatches : batches;
+    final scheduledBatchIds =
+        schedules.map((s) => _read(s, ['batchId'])?.toString()).toSet();
+    final savedSchedules =
+        _schedulesFromSavedQuickBatchSetup(quickBatchSetup, effectiveBatches);
+    final effectiveSchedules = [
+      ...schedules,
+      ...savedSchedules.where(
+        (s) => !scheduledBatchIds.contains(_read(s, ['batchId'])?.toString()),
+      ),
+    ];
+    final batchSetupComplete = _isBatchSetupComplete(
+      effectiveBatches,
+      effectiveSchedules,
+      quickBatchSetup,
+    );
+    final upcomingTimetable = _upcomingTimetableForWeek(
+      effectiveSchedules,
+      effectiveBatches,
+      oneOnOneBookings,
+    );
     return {
       'coachName': _labelOf(profile, ['name', 'coachName', 'fullName']),
       'profileSummary': _profileSummary(profile),
-      'activeBatches': batches
+      'activeBatches': effectiveBatches
           .where((batch) => _read(batch, ['isActive']) != false)
           .length,
       'monthlyOneOnOneBookings': oneOnOneBookings
@@ -1797,13 +2006,14 @@ class HomeScreen extends ConsumerWidget {
       'hasRevenueData':
           monthlyRevenue > 0 ||
           revenueSeries.any((item) => (item['amountPaise'] as num? ?? 0) > 0),
-      'todaySessions': sessions.where(_isTodaySession).toList(),
-      'batchSetupComplete': _isBatchSetupComplete(batches, schedules),
+      'batchSetupComplete': batchSetupComplete,
       'oneOnOneSetupComplete': oneOnOneSetupComplete,
-      'upcomingTimetable': [
-        ..._upcomingTimetableToday(schedules),
-        ...oneOnOneBookings.where(_isTodaySession).map(_oneOnOneSessionCard),
-      ],
+      'upcomingTimetable': upcomingTimetable.isNotEmpty
+          ? upcomingTimetable
+          : _demoUpcomingSessionsFromQuickBatchSetup(
+              quickBatchSetup,
+              effectiveBatches,
+            ),
     };
   }
 }
@@ -1831,7 +2041,7 @@ class SessionsScreen extends ConsumerWidget {
       },
       itemBuilder: (context, item) => SessionRow(
         item: item,
-        onTap: () => context.push('/sessions/${_idOf(item)}'),
+        onTap: () => context.push('/sessions/start', extra: item),
       ),
       fab: FloatingActionButton(
         onPressed: () => context.push('/sessions/start'),
@@ -2056,8 +2266,8 @@ class StudentsScreen extends ConsumerWidget {
   }
 }
 
-class StudentDetailScreen extends ConsumerWidget {
-  const StudentDetailScreen({required this.playerProfileId, super.key});
+class LegacyStudentDetailScreen extends ConsumerWidget {
+  const LegacyStudentDetailScreen({required this.playerProfileId, super.key});
 
   final String playerProfileId;
 
@@ -2113,6 +2323,2169 @@ class StudentDetailScreen extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class StudentDetailScreen extends ConsumerStatefulWidget {
+  const StudentDetailScreen({required this.playerProfileId, super.key});
+
+  final String playerProfileId;
+
+  @override
+  ConsumerState<StudentDetailScreen> createState() =>
+      _StudentDetailScreenState();
+}
+
+class _StudentDetailScreenState extends ConsumerState<StudentDetailScreen> {
+  var _tab = StudentDetailTab.profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          _tab == StudentDetailTab.profile ? 'Student Detail' : 'Monthly Report',
+        ),
+      ),
+      body: FutureBuilder<StudentDetailData>(
+        future: _loadStudentDetail(ref, widget.playerProfileId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            if (snapshot.error is AuthException) {
+              return const SessionRedirectView();
+            }
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                InlineError(
+                  message: _errorMessage(snapshot.error),
+                  onRetry: () => setState(() {}),
+                ),
+              ],
+            );
+          }
+          final data =
+              snapshot.data ?? _demoStudentDetail(widget.playerProfileId);
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+            children: [
+              _StudentProfileHero(profile: data.profile),
+              const SizedBox(height: 12),
+              _SegmentedToggle<StudentDetailTab>(
+                values: StudentDetailTab.values,
+                selected: _tab,
+                label: (tab) => tab.label,
+                onChanged: (tab) => setState(() => _tab = tab),
+              ),
+              const SizedBox(height: 12),
+              if (_tab == StudentDetailTab.profile)
+                _StudentProfileTab(data: data)
+              else
+                _StudentReportTab(data: data),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+enum StudentDetailTab {
+  profile('Profile'),
+  report('Monthly Report');
+
+  const StudentDetailTab(this.label);
+  final String label;
+}
+
+class _StudentProfileTab extends StatelessWidget {
+  const _StudentProfileTab({required this.data});
+
+  final StudentDetailData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = data.profile;
+    final stats = data.stats;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _InfoCard(
+          title: 'Overview',
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoPill(
+                Icons.cake_outlined,
+                p.age == null ? 'Age not set' : '${p.age} years',
+              ),
+              _InfoPill(Icons.sports_cricket_rounded, p.role),
+              _InfoPill(Icons.location_city_outlined, p.cityAcademy),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _InfoCard(
+          title: 'Cricket Profile',
+          child: Column(
+            children: [
+              _CompactInfoRow('Batting style', p.battingStyle),
+              _CompactInfoRow('Bowling style', p.bowlingStyle),
+              _CompactInfoRow('Academy', p.academy),
+              _CompactInfoRow('City', p.city),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _StatsGrid(
+          items: [
+            ('IP Points', '${stats.ipPoints}'),
+            ('Matches', '${stats.matches}'),
+            ('Runs', '${stats.runs}'),
+            ('Wickets', '${stats.wickets}'),
+            ('Catches', '${stats.catches}'),
+            ('Strike Rate', stats.strikeRate.toStringAsFixed(1)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _InfoCard(
+          title: 'Performance Summary',
+          child: Text(
+            data.performanceSummary,
+            style: TextStyle(
+              height: 1.35,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.76),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StudentReportTab extends StatefulWidget {
+  const _StudentReportTab({required this.data});
+
+  final StudentDetailData data;
+
+  @override
+  State<_StudentReportTab> createState() => _StudentReportTabState();
+}
+
+class _StudentReportTabState extends State<_StudentReportTab> {
+  late final List<MonthlyReportData> _reports;
+  late int _monthIndex;
+  late MonthlyReportSection _section;
+
+  @override
+  void initState() {
+    super.initState();
+    _reports = _monthlyReportsFrom(widget.data);
+    _monthIndex = _reports.length - 1;
+    _section = MonthlyReportSection.overview;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final report = _reports[_monthIndex];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _MonthlyReportHeader(
+          report: report,
+          onBack: () => Navigator.maybePop(context),
+          onShare: () => _shareMonthlyReport(report),
+          onMonthSelected: (index) => setState(() => _monthIndex = index),
+          reports: _reports,
+          selectedMonthIndex: _monthIndex,
+        ),
+        const SizedBox(height: 12),
+        _MonthlySummaryCard(report: report),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final maxWidth = constraints.maxWidth;
+            final tileWidth = maxWidth >= 840 ? (maxWidth - 24) / 2 : maxWidth;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                  width: tileWidth,
+                  child: _MiniKpiCard(
+                    icon: Icons.checklist_rounded,
+                    label: 'Attendance',
+                    value: '${report.attendancePercent.round()}%',
+                    subtitle:
+                        '${report.presentCount}/${report.totalSessions} sessions',
+                    accent: const Color(0xFF2BB673),
+                  ),
+                ),
+                SizedBox(
+                  width: tileWidth,
+                  child: _MiniKpiCard(
+                    icon: Icons.star_rounded,
+                    label: 'Overall Score',
+                    value: report.overallScore.round().toString(),
+                    subtitle: 'Current month performance',
+                    accent: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                SizedBox(
+                  width: tileWidth,
+                  child: _MiniKpiCard(
+                    icon: Icons.trending_up_rounded,
+                    label: 'Improvement',
+                    value: '${report.improvementPercent.round()}%',
+                    subtitle: 'Month over month',
+                    accent: const Color(0xFFF5A524),
+                  ),
+                ),
+                SizedBox(
+                  width: tileWidth,
+                  child: _MiniKpiCard(
+                    icon: Icons.repeat_rounded,
+                    label: 'Consistency',
+                    value: '${report.consistency.round()}%',
+                    subtitle: 'Stable session output',
+                    accent: const Color(0xFF2BB673),
+                  ),
+                ),
+                SizedBox(
+                  width: tileWidth,
+                  child: _MiniKpiCard(
+                    icon: Icons.event_available_rounded,
+                    label: 'Next Review',
+                    value: _formatShortDate(report.nextReviewDate),
+                    subtitle: 'Coach review scheduled',
+                    accent: const Color(0xFF4DD6C4),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _MonthlyReportTabs(
+          selected: _section,
+          onChanged: (section) => setState(() => _section = section),
+        ),
+        const SizedBox(height: 12),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          child: _MonthlyReportSection(
+            key: ValueKey('${report.monthLabel}-${_section.name}'),
+            report: report,
+            section: _section,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum MonthlyReportSection {
+  overview('Overview'),
+  batting('Batting'),
+  bowling('Bowling'),
+  fielding('Fielding'),
+  fitness('Fitness'),
+  nets('Nets'),
+  summary('Summary');
+
+  const MonthlyReportSection(this.label);
+  final String label;
+}
+
+class MonthlyReportData {
+  const MonthlyReportData({
+    required this.playerName,
+    required this.role,
+    required this.batchName,
+    required this.coachName,
+    required this.monthLabel,
+    required this.month,
+    required this.totalSessions,
+    required this.overallScore,
+    required this.previousOverallScore,
+    required this.attendancePercent,
+    required this.improvementPercent,
+    required this.consistency,
+    required this.nextReviewDate,
+    required this.skillScores,
+    required this.previousSkillScores,
+    required this.trend,
+    required this.sessionDistribution,
+    required this.attendanceMarkers,
+    required this.strengths,
+    required this.areasToImprove,
+    required this.improvementPlan,
+    required this.presentCount,
+    required this.absentCount,
+  });
+
+  final String playerName;
+  final String role;
+  final String batchName;
+  final String coachName;
+  final String monthLabel;
+  final DateTime month;
+  final int totalSessions;
+  final double overallScore;
+  final double previousOverallScore;
+  final double attendancePercent;
+  final double improvementPercent;
+  final double consistency;
+  final DateTime nextReviewDate;
+  final Map<String, double> skillScores;
+  final Map<String, double> previousSkillScores;
+  final List<MonthlyTrendPoint> trend;
+  final Map<String, int> sessionDistribution;
+  final List<AttendanceMarker> attendanceMarkers;
+  final List<String> strengths;
+  final List<String> areasToImprove;
+  final List<String> improvementPlan;
+  final int presentCount;
+  final int absentCount;
+}
+
+class MonthlyTrendPoint {
+  const MonthlyTrendPoint({
+    required this.label,
+    required this.overallScore,
+    required this.attendancePercent,
+  });
+
+  final String label;
+  final double overallScore;
+  final double attendancePercent;
+}
+
+class AttendanceMarker {
+  const AttendanceMarker({required this.label, required this.present});
+
+  final String label;
+  final bool present;
+}
+
+MonthlyReportData _monthlyReportFor(StudentDetailData data) {
+  final latestReport =
+      data.reports.isNotEmpty ? data.reports.first : <String, dynamic>{};
+  final coachName = _safeDisplayValue(
+    _read(latestReport, ['coachName', 'coach.name']),
+    fallback: 'Coach Arjun',
+  );
+  final batchName = _safeDisplayValue(
+    _read(latestReport, ['batchName', 'batch.name']),
+    fallback: 'Swing Academy Batch A',
+  );
+  final base = data.radarValues;
+  final attendance = data.attendance.percentage;
+  final presentCount = data.attendance.presentSessions;
+  final absentCount = data.attendance.absentSessions;
+  return MonthlyReportData(
+    playerName: data.profile.name,
+    role: data.profile.role,
+    batchName: batchName,
+    coachName: coachName,
+    monthLabel: 'May 2026',
+    month: DateTime(2026, 5),
+    totalSessions: presentCount + absentCount == 0
+        ? 12
+        : presentCount + absentCount,
+    overallScore: (_doubleOrNull(_read(latestReport, ['overallScore'])) ?? 86.0),
+    previousOverallScore: 81.0,
+    attendancePercent: attendance,
+    improvementPercent: 12.0,
+    consistency: 84.0,
+    nextReviewDate: DateTime(2026, 6, 2),
+    skillScores: {
+      'Batting': (base['Batting'] ?? 78).toDouble(),
+      'Bowling': (base['Bowling'] ?? 66).toDouble(),
+      'Fielding': (base['Fielding'] ?? 74).toDouble(),
+      'Fitness': (base['Fitness'] ?? 82).toDouble(),
+      'Nets': 79.0,
+      'Skill': (base['Skill'] ?? 80).toDouble(),
+    },
+    previousSkillScores: {
+      'Batting': ((base['Batting'] ?? 78) - 4).clamp(0, 100).toDouble(),
+      'Bowling': ((base['Bowling'] ?? 66) - 5).clamp(0, 100).toDouble(),
+      'Fielding': ((base['Fielding'] ?? 74) - 3).clamp(0, 100).toDouble(),
+      'Fitness': ((base['Fitness'] ?? 82) - 2).clamp(0, 100).toDouble(),
+      'Nets': 74.0,
+      'Skill': ((base['Skill'] ?? 80) - 3).clamp(0, 100).toDouble(),
+    },
+    trend: const [
+      MonthlyTrendPoint(label: 'Jan', overallScore: 78.0, attendancePercent: 79.0),
+      MonthlyTrendPoint(label: 'Feb', overallScore: 80.0, attendancePercent: 82.0),
+      MonthlyTrendPoint(label: 'Mar', overallScore: 82.0, attendancePercent: 81.0),
+      MonthlyTrendPoint(label: 'Apr', overallScore: 84.0, attendancePercent: 84.0),
+      MonthlyTrendPoint(label: 'May', overallScore: 86.0, attendancePercent: 83.0),
+    ],
+    sessionDistribution: const {
+      'Nets': 8,
+      'Batting': 7,
+      'Bowling': 4,
+      'Fielding': 3,
+      'Fitness': 2,
+    },
+    attendanceMarkers: const [
+      AttendanceMarker(label: '1', present: true),
+      AttendanceMarker(label: '2', present: true),
+      AttendanceMarker(label: '3', present: false),
+      AttendanceMarker(label: '4', present: true),
+      AttendanceMarker(label: '5', present: true),
+      AttendanceMarker(label: '6', present: true),
+      AttendanceMarker(label: '7', present: false),
+      AttendanceMarker(label: '8', present: true),
+      AttendanceMarker(label: '9', present: true),
+      AttendanceMarker(label: '10', present: true),
+    ],
+    strengths: const [
+      'Good Execution',
+      'Shot Selection',
+      'Batting Consistency',
+      'Fitness Improvement',
+    ],
+    areasToImprove: const [
+      'Execution Errors',
+      'Footwork',
+      'Bowling Line Consistency',
+      'Fielding Under Pressure',
+    ],
+    improvementPlan: const [
+      'Focus on footwork and balance',
+      'Practice assigned drills regularly',
+      'Improve bowling line and length',
+      'Attend all upcoming sessions',
+    ],
+    presentCount: presentCount,
+    absentCount: absentCount,
+  );
+}
+
+List<MonthlyReportData> _monthlyReportsFrom(StudentDetailData data) {
+  final may = _monthlyReportFor(data);
+  final april = MonthlyReportData(
+    playerName: may.playerName,
+    role: may.role,
+    batchName: may.batchName,
+    coachName: may.coachName,
+    monthLabel: 'April 2026',
+    month: DateTime(2026, 4),
+    totalSessions: may.totalSessions,
+    overallScore: 84.0,
+    previousOverallScore: 79.0,
+    attendancePercent: (may.attendancePercent - 1).clamp(0, 100).toDouble(),
+    improvementPercent: 10.0,
+    consistency: 82.0,
+    nextReviewDate: DateTime(2026, 5, 26),
+    skillScores: may.skillScores.map(
+      (key, value) => MapEntry(key, (value - 2).clamp(0, 100).toDouble()),
+    ),
+    previousSkillScores: may.previousSkillScores.map(
+      (key, value) => MapEntry(key, (value - 2).clamp(0, 100).toDouble()),
+    ),
+    trend: const [
+      MonthlyTrendPoint(label: 'Jan', overallScore: 78.0, attendancePercent: 79.0),
+      MonthlyTrendPoint(label: 'Feb', overallScore: 80.0, attendancePercent: 82.0),
+      MonthlyTrendPoint(label: 'Mar', overallScore: 82.0, attendancePercent: 81.0),
+      MonthlyTrendPoint(label: 'Apr', overallScore: 84.0, attendancePercent: 84.0),
+      MonthlyTrendPoint(label: 'May', overallScore: 86.0, attendancePercent: 83.0),
+    ],
+    sessionDistribution: may.sessionDistribution,
+    attendanceMarkers: may.attendanceMarkers,
+    strengths: may.strengths,
+    areasToImprove: may.areasToImprove,
+    improvementPlan: may.improvementPlan,
+    presentCount: may.presentCount,
+    absentCount: may.absentCount,
+  );
+  final march = MonthlyReportData(
+    playerName: may.playerName,
+    role: may.role,
+    batchName: may.batchName,
+    coachName: may.coachName,
+    monthLabel: 'March 2026',
+    month: DateTime(2026, 3),
+    totalSessions: may.totalSessions,
+    overallScore: 81.0,
+    previousOverallScore: 77.0,
+    attendancePercent: (may.attendancePercent - 3).clamp(0, 100).toDouble(),
+    improvementPercent: 7.0,
+    consistency: 79.0,
+    nextReviewDate: DateTime(2026, 4, 28),
+    skillScores: may.skillScores.map(
+      (key, value) => MapEntry(key, (value - 4).clamp(0, 100).toDouble()),
+    ),
+    previousSkillScores: may.previousSkillScores.map(
+      (key, value) => MapEntry(key, (value - 4).clamp(0, 100).toDouble()),
+    ),
+    trend: const [
+      MonthlyTrendPoint(label: 'Jan', overallScore: 78.0, attendancePercent: 79.0),
+      MonthlyTrendPoint(label: 'Feb', overallScore: 80.0, attendancePercent: 82.0),
+      MonthlyTrendPoint(label: 'Mar', overallScore: 82.0, attendancePercent: 81.0),
+      MonthlyTrendPoint(label: 'Apr', overallScore: 84.0, attendancePercent: 84.0),
+      MonthlyTrendPoint(label: 'May', overallScore: 86.0, attendancePercent: 83.0),
+    ],
+    sessionDistribution: may.sessionDistribution,
+    attendanceMarkers: may.attendanceMarkers,
+    strengths: may.strengths,
+    areasToImprove: may.areasToImprove,
+    improvementPlan: may.improvementPlan,
+    presentCount: may.presentCount,
+    absentCount: may.absentCount,
+  );
+  return [march, april, may];
+}
+
+class _MonthlyReportHeader extends StatelessWidget {
+  const _MonthlyReportHeader({
+    required this.report,
+    required this.onBack,
+    required this.onShare,
+    required this.onMonthSelected,
+    required this.reports,
+    required this.selectedMonthIndex,
+  });
+
+  final MonthlyReportData report;
+  final VoidCallback onBack;
+  final VoidCallback onShare;
+  final ValueChanged<int> onMonthSelected;
+  final List<MonthlyReportData> reports;
+  final int selectedMonthIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton.filledTonal(
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Monthly Report',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                report.playerName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withValues(
+                    alpha: 0.66,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _MonthSelectorButton(
+          label: report.monthLabel,
+          reports: reports,
+          selectedIndex: selectedMonthIndex,
+          onSelected: onMonthSelected,
+        ),
+        const SizedBox(width: 8),
+        IconButton.filled(
+          onPressed: onShare,
+          icon: const Icon(Icons.share_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+class _MonthSelectorButton extends StatelessWidget {
+  const _MonthSelectorButton({
+    required this.label,
+    required this.reports,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final String label;
+  final List<MonthlyReportData> reports;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      initialValue: selectedIndex,
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        for (var i = 0; i < reports.length; i++)
+          PopupMenuItem<int>(
+            value: i,
+            child: Text(reports[i].monthLabel),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.28),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.calendar_month_rounded, size: 18),
+            const SizedBox(width: 8),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MonthlySummaryCard extends StatelessWidget {
+  const _MonthlySummaryCard({required this.report});
+
+  final MonthlyReportData report;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = (report.overallScore / 100).clamp(0.0, 1.0);
+    return _MonthlyCard(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 440;
+          final content = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (compact) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    StudentAvatar(
+                      name: report.playerName,
+                      imageUrl: null,
+                      radius: 30,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            report.playerName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            report.role,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _SummaryMetaRow(icon: Icons.groups_rounded, label: report.batchName),
+                const SizedBox(height: 6),
+                _SummaryMetaRow(icon: Icons.person_rounded, label: report.coachName),
+                const SizedBox(height: 6),
+                _SummaryMetaRow(
+                  icon: Icons.calendar_today_rounded,
+                  label: report.monthLabel,
+                ),
+                const SizedBox(height: 6),
+                _SummaryMetaRow(
+                  icon: Icons.event_note_rounded,
+                  label: '${report.totalSessions} sessions',
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: 96,
+                        height: 96,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            SizedBox(
+                              width: 96,
+                              height: 96,
+                              child: CircularProgressIndicator(
+                                value: progress,
+                                strokeWidth: 8,
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.08),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '${report.overallScore.round()}',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.headlineSmall?.copyWith(
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                ),
+                                Text(
+                                  'Overall',
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${report.attendancePercent.round()}% attendance',
+                        style: TextStyle(
+                          color: const Color(0xFF2BB673),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    StudentAvatar(
+                      name: report.playerName,
+                      imageUrl: null,
+                      radius: 30,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            report.playerName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            report.role,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          _SummaryMetaRow(
+                            icon: Icons.groups_rounded,
+                            label: report.batchName,
+                          ),
+                          const SizedBox(height: 6),
+                          _SummaryMetaRow(
+                            icon: Icons.person_rounded,
+                            label: report.coachName,
+                          ),
+                          const SizedBox(height: 6),
+                          _SummaryMetaRow(
+                            icon: Icons.calendar_today_rounded,
+                            label: report.monthLabel,
+                          ),
+                          const SizedBox(height: 6),
+                          _SummaryMetaRow(
+                            icon: Icons.event_note_rounded,
+                            label: '${report.totalSessions} sessions',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Column(
+                      children: [
+                        SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              SizedBox(
+                                width: 96,
+                                height: 96,
+                                child: CircularProgressIndicator(
+                                  value: progress,
+                                  strokeWidth: 8,
+                                  backgroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withValues(alpha: 0.08),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '${report.overallScore.round()}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.headlineSmall?.copyWith(
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                  ),
+                                  Text(
+                                    'Overall',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${report.attendancePercent.round()}% attendance',
+                          style: TextStyle(
+                            color: const Color(0xFF2BB673),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          );
+          return content;
+        },
+      ),
+    );
+  }
+}
+
+class _SummaryMetaRow extends StatelessWidget {
+  const _SummaryMetaRow({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MiniKpiCard extends StatelessWidget {
+  const _MiniKpiCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.subtitle,
+    required this.accent,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String subtitle;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return _MonthlyCard(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthlyReportTabs extends StatelessWidget {
+  const _MonthlyReportTabs({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final MonthlyReportSection selected;
+  final ValueChanged<MonthlyReportSection> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final section in MonthlyReportSection.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                selected: selected == section,
+                onSelected: (_) => onChanged(section),
+                label: Text(section.label),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: selected == section
+                      ? Colors.white
+                      : Theme.of(context).colorScheme.onSurface,
+                ),
+                selectedColor: Theme.of(context).colorScheme.primary,
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.onSurface.withValues(
+                    alpha: 0.10,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthlyReportSection extends StatelessWidget {
+  const _MonthlyReportSection({
+    super.key,
+    required this.report,
+    required this.section,
+  });
+
+  final MonthlyReportData report;
+  final MonthlyReportSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (section) {
+      MonthlyReportSection.overview => _overview(context, report),
+      MonthlyReportSection.batting => _skillSection(context, report, 'Batting'),
+      MonthlyReportSection.bowling => _skillSection(context, report, 'Bowling'),
+      MonthlyReportSection.fielding => _skillSection(context, report, 'Fielding'),
+      MonthlyReportSection.fitness => _skillSection(context, report, 'Fitness'),
+      MonthlyReportSection.nets => _skillSection(context, report, 'Nets'),
+      MonthlyReportSection.summary => _summarySection(context, report),
+    };
+  }
+
+  Widget _overview(BuildContext context, MonthlyReportData report) {
+    return Column(
+      key: const ValueKey('overview'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _MonthlyCard(
+          title: 'Performance Overview',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 280,
+                child: MonthlyRadarComparisonChart(
+                  current: report.skillScores,
+                  previous: report.previousSkillScores,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _LegendRow(
+                leftLabel: 'Current month',
+                leftColor: Theme.of(context).colorScheme.primary,
+                rightLabel: 'Previous month',
+                rightColor: const Color(0xFFF5A524),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Skill Wise Scores',
+          child: Column(
+            children: [
+              for (final entry in report.skillScores.entries) ...[
+                _SkillProgressRow(
+                  label: entry.key,
+                  value: entry.value,
+                  previous: report.previousSkillScores[entry.key] ?? entry.value,
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Month Progress Trend',
+          child: SizedBox(
+            height: 240,
+            child: MonthlyProgressLineChart(points: report.trend),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Session Distribution',
+          child: SizedBox(
+            height: 220,
+            child: SessionDonutChart(distribution: report.sessionDistribution),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Strengths',
+          child: _BulletList(
+            items: report.strengths,
+            color: const Color(0xFF2BB673),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Areas to Improve',
+          child: _BulletList(
+            items: report.areasToImprove,
+            color: const Color(0xFFF56A4A),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Improvement Plan',
+          child: _BulletList(
+            items: report.improvementPlan,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Attendance Overview',
+          child: _AttendanceOverview(report: report),
+        ),
+      ],
+    );
+  }
+
+  Widget _skillSection(
+    BuildContext context,
+    MonthlyReportData report,
+    String skill,
+  ) {
+    final score = report.skillScores[skill] ?? 0;
+    final previous = report.previousSkillScores[skill] ?? 0;
+    return Column(
+      key: ValueKey(skill),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _MonthlyCard(
+          title: '$skill Focus',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  _MiniScoreBadge(
+                    label: 'Current',
+                    value: '${score.round()}',
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  _MiniScoreBadge(
+                    label: 'Previous',
+                    value: '${previous.round()}',
+                    color: const Color(0xFFF5A524),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _SkillProgressRow(
+                label: skill,
+                value: score,
+                previous: previous,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                switch (skill) {
+                  'Batting' => 'Footwork, balance and clean shot selection are improving steadily.',
+                  'Bowling' => 'Line and length need a tighter repeatable release point.',
+                  'Fielding' => 'Catching under pressure will benefit from more reaction drills.',
+                  'Fitness' => 'Movement efficiency is strong and should be maintained.',
+                  'Nets' => 'Net volume is healthy and can be used to sharpen execution.',
+                  _ => 'Overall skill execution is trending in the right direction.',
+                },
+                style: TextStyle(
+                  height: 1.4,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(
+                    alpha: 0.76,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: '$skill Recommendations',
+          child: _BulletList(
+            items: switch (skill) {
+              'Batting' => const [
+                  'Take the front foot early and stay balanced through contact',
+                  'Choose scoring options with less risk under pressure',
+                ],
+              'Bowling' => const [
+                  'Use a consistent wrist position',
+                  'Practice target line drills for match length',
+                ],
+              'Fielding' => const [
+                  'Close the bat-pad gap with quicker first steps',
+                  'Train with moving catches and pickups',
+                ],
+              'Fitness' => const [
+                  'Keep the current conditioning load',
+                  'Add short recovery routines after nets',
+                ],
+              'Nets' => const [
+                  'Track drill completion for every session',
+                  'Review one execution point after each net',
+                ],
+              _ => const [
+                  'Keep building repetition through structured practice',
+                  'Review coach notes before the next session',
+                ],
+            },
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _summarySection(BuildContext context, MonthlyReportData report) {
+    return Column(
+      key: const ValueKey('summary'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _MonthlyCard(
+          title: 'Overall Review',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'The player is showing a stable upward trend with strong batting execution and improving fitness. Bowling line consistency and pressure fielding should stay in focus for the next cycle.',
+                style: TextStyle(
+                  height: 1.45,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(
+                    alpha: 0.76,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SkillProgressRow(
+                label: 'Attendance',
+                value: report.attendancePercent,
+                previous: report.attendancePercent,
+                positiveLabel: '${report.presentCount} present',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Strengths and Gaps',
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _SectionList(
+                  title: 'Strengths',
+                  items: report.strengths,
+                  color: const Color(0xFF2BB673),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _SectionList(
+                  title: 'Areas to Improve',
+                  items: report.areasToImprove,
+                  color: const Color(0xFFF56A4A),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MonthlyCard(
+          title: 'Improvement Plan',
+          child: _BulletList(
+            items: report.improvementPlan,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MonthlyCard extends StatelessWidget {
+  const _MonthlyCard({
+    required this.child,
+    this.title,
+    this.trailing,
+    this.padding = const EdgeInsets.all(16),
+  });
+
+  final String? title;
+  final Widget? trailing;
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.onSurface.withValues(alpha: 0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (title != null) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title!,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendRow extends StatelessWidget {
+  const _LegendRow({
+    required this.leftLabel,
+    required this.leftColor,
+    required this.rightLabel,
+    required this.rightColor,
+  });
+
+  final String leftLabel;
+  final Color leftColor;
+  final String rightLabel;
+  final Color rightColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 14,
+      runSpacing: 8,
+      children: [
+        _LegendChip(label: leftLabel, color: leftColor),
+        _LegendChip(label: rightLabel, color: rightColor),
+      ],
+    );
+  }
+}
+
+class _LegendChip extends StatelessWidget {
+  const _LegendChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.72),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SkillProgressRow extends StatelessWidget {
+  const _SkillProgressRow({
+    required this.label,
+    required this.value,
+    required this.previous,
+    this.positiveLabel,
+  });
+
+  final String label;
+  final double value;
+  final double previous;
+  final String? positiveLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final delta = value - previous;
+    final deltaText = delta >= 0 ? '+${delta.toStringAsFixed(0)}' : delta.toStringAsFixed(0);
+    final deltaColor = delta >= 0 ? const Color(0xFF2BB673) : const Color(0xFFF56A4A);
+    final showDelta = positiveLabel == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            if (positiveLabel != null) ...[
+              Text(
+                positiveLabel!,
+                style: TextStyle(
+                  color: deltaColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Text(
+              '${value.round()}',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            if (showDelta) ...[
+              const SizedBox(width: 8),
+              Text(
+                deltaText,
+                style: TextStyle(
+                  color: deltaColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: (value / 100).clamp(0.0, 1.0),
+            minHeight: 10,
+            backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(
+                  alpha: 0.08,
+                ),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MiniScoreBadge extends StatelessWidget {
+  const _MiniScoreBadge({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w900,
+                fontSize: 18,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BulletList extends StatelessWidget {
+  const _BulletList({required this.items, required this.color});
+
+  final List<String> items;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (final item in items) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Icon(Icons.circle, size: 8, color: color),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  item,
+                  style: TextStyle(
+                    height: 1.4,
+                    color: Theme.of(context).colorScheme.onSurface.withValues(
+                      alpha: 0.76,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (item != items.last) const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _SectionList extends StatelessWidget {
+  const _SectionList({
+    required this.title,
+    required this.items,
+    required this.color,
+  });
+
+  final String title;
+  final List<String> items;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _BulletList(items: items, color: color),
+      ],
+    );
+  }
+}
+
+class _AttendanceOverview extends StatelessWidget {
+  const _AttendanceOverview({required this.report});
+
+  final MonthlyReportData report;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = math.max(1, report.presentCount + report.absentCount);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _MiniScoreBadge(
+                label: 'Present',
+                value: '${report.presentCount}',
+                color: const Color(0xFF2BB673),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _MiniScoreBadge(
+                label: 'Absent',
+                value: '${report.absentCount}',
+                color: const Color(0xFFF56A4A),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _MiniScoreBadge(
+                label: 'Attendance',
+                value: '${report.attendancePercent.round()}%',
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: (report.attendancePercent / 100).clamp(0.0, 1.0),
+            minHeight: 12,
+            backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(
+                  alpha: 0.08,
+                ),
+            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF2BB673)),
+          ),
+        ),
+        const SizedBox(height: 14),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final marker in report.attendanceMarkers)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: marker.present
+                              ? const Color(0xFF2BB673).withValues(alpha: 0.14)
+                              : const Color(0xFFF56A4A).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          marker.present
+                              ? Icons.check_rounded
+                              : Icons.close_rounded,
+                          color: marker.present
+                              ? const Color(0xFF2BB673)
+                              : const Color(0xFFF56A4A),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        marker.label,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${report.presentCount} present out of $total sessions',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class MonthlyRadarComparisonChart extends StatelessWidget {
+  const MonthlyRadarComparisonChart({
+    required this.current,
+    required this.previous,
+    super.key,
+  });
+
+  final Map<String, double> current;
+  final Map<String, double> previous;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _MonthlyRadarComparisonPainter(
+        current: current,
+        previous: previous,
+        currentColor: Theme.of(context).colorScheme.primary,
+        previousColor: const Color(0xFFF5A524),
+        gridColor: Theme.of(context).colorScheme.onSurface.withValues(
+              alpha: 0.14,
+            ),
+        textColor: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+}
+
+class _MonthlyRadarComparisonPainter extends CustomPainter {
+  const _MonthlyRadarComparisonPainter({
+    required this.current,
+    required this.previous,
+    required this.currentColor,
+    required this.previousColor,
+    required this.gridColor,
+    required this.textColor,
+  });
+
+  final Map<String, double> current;
+  final Map<String, double> previous;
+  final Color currentColor;
+  final Color previousColor;
+  final Color gridColor;
+  final Color textColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final labels = current.keys.toList();
+    if (labels.length < 3) return;
+    final center = Offset(size.width / 2, size.height / 2 - 4);
+    final radius = math.min(size.width, size.height) * 0.30;
+    final gridPaint = Paint()
+      ..color = gridColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final currentFill = Paint()
+      ..color = currentColor.withValues(alpha: 0.16)
+      ..style = PaintingStyle.fill;
+    final previousFill = Paint()
+      ..color = previousColor.withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+    final currentLine = Paint()
+      ..color = currentColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6;
+    final previousLine = Paint()
+      ..color = previousColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+
+    for (var ring = 1; ring <= 4; ring++) {
+      final path = Path();
+      final ringRadius = radius * ring / 4;
+      for (var i = 0; i < labels.length; i++) {
+        final point = _radarPoint(center, ringRadius, i, labels.length);
+        if (i == 0) {
+          path.moveTo(point.dx, point.dy);
+        } else {
+          path.lineTo(point.dx, point.dy);
+        }
+      }
+      path.close();
+      canvas.drawPath(path, gridPaint);
+    }
+
+    final currentPath = _polygonPath(center, radius, current, labels);
+    final previousPath = _polygonPath(center, radius, previous, labels);
+    canvas.drawPath(previousPath, previousFill);
+    canvas.drawPath(currentPath, currentFill);
+    canvas.drawPath(previousPath, previousLine);
+    canvas.drawPath(currentPath, currentLine);
+
+    for (var i = 0; i < labels.length; i++) {
+      canvas.drawLine(
+        center,
+        _radarPoint(center, radius, i, labels.length),
+        gridPaint,
+      );
+      _drawLabel(
+        canvas,
+        labels[i],
+        _radarPoint(center, radius + 28, i, labels.length),
+      );
+    }
+  }
+
+  Path _polygonPath(
+    Offset center,
+    double radius,
+    Map<String, double> values,
+    List<String> labels,
+  ) {
+    final path = Path();
+    for (var i = 0; i < labels.length; i++) {
+      final value = (values[labels[i]] ?? 0).clamp(0, 100) / 100;
+      final point = _radarPoint(center, radius * value, i, labels.length);
+      if (i == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    path.close();
+    return path;
+  }
+
+  Offset _radarPoint(Offset center, double radius, int index, int total) {
+    final angle = -math.pi / 2 + (math.pi * 2 * index / total);
+    return Offset(
+      center.dx + math.cos(angle) * radius,
+      center.dy + math.sin(angle) * radius,
+    );
+  }
+
+  void _drawLabel(Canvas canvas, String label, Offset offset) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 78);
+    painter.paint(
+      canvas,
+      offset - Offset(painter.width / 2, painter.height / 2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _MonthlyRadarComparisonPainter oldDelegate) {
+    return oldDelegate.current != current ||
+        oldDelegate.previous != previous ||
+        oldDelegate.currentColor != currentColor ||
+        oldDelegate.previousColor != previousColor;
+  }
+}
+
+class MonthlyProgressLineChart extends StatelessWidget {
+  const MonthlyProgressLineChart({required this.points, super.key});
+
+  final List<MonthlyTrendPoint> points;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _MonthlyProgressLinePainter(
+        points: points,
+        overallColor: Theme.of(context).colorScheme.primary,
+        attendanceColor: const Color(0xFF2BB673),
+        gridColor: Theme.of(context).colorScheme.onSurface.withValues(
+              alpha: 0.12,
+            ),
+        textColor: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+}
+
+class _MonthlyProgressLinePainter extends CustomPainter {
+  const _MonthlyProgressLinePainter({
+    required this.points,
+    required this.overallColor,
+    required this.attendanceColor,
+    required this.gridColor,
+    required this.textColor,
+  });
+
+  final List<MonthlyTrendPoint> points;
+  final Color overallColor;
+  final Color attendanceColor;
+  final Color gridColor;
+  final Color textColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final chartTop = 16.0;
+    final chartBottom = size.height - 34;
+    final chartHeight = chartBottom - chartTop;
+    final slot = size.width / math.max(1, points.length - 1);
+    final gridPaint = Paint()
+      ..color = gridColor
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(0, chartBottom),
+      Offset(size.width, chartBottom),
+      gridPaint,
+    );
+    for (var i = 0; i < 4; i++) {
+      final y = chartTop + (chartHeight * i / 3);
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    final overallPath = Path();
+    final attendancePath = Path();
+    for (var i = 0; i < points.length; i++) {
+      final point = points[i];
+      final x = points.length == 1 ? size.width / 2 : i * slot;
+      final overallY = chartBottom - chartHeight * (point.overallScore / 100);
+      final attendanceY =
+          chartBottom - chartHeight * (point.attendancePercent / 100);
+      if (i == 0) {
+        overallPath.moveTo(x, overallY);
+        attendancePath.moveTo(x, attendanceY);
+      } else {
+        overallPath.lineTo(x, overallY);
+        attendancePath.lineTo(x, attendanceY);
+      }
+      canvas.drawCircle(Offset(x, overallY), 3.5, Paint()..color = overallColor);
+      canvas.drawCircle(
+        Offset(x, attendanceY),
+        3.5,
+        Paint()..color = attendanceColor,
+      );
+      _drawLabel(canvas, point.label, Offset(x, chartBottom + 16));
+    }
+    canvas.drawPath(
+      overallPath,
+      Paint()
+        ..color = overallColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.6,
+    );
+    canvas.drawPath(
+      attendancePath,
+      Paint()
+        ..color = attendanceColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+  }
+
+  void _drawLabel(Canvas canvas, String label, Offset offset) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(
+      canvas,
+      offset - Offset(painter.width / 2, painter.height / 2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _MonthlyProgressLinePainter oldDelegate) {
+    return oldDelegate.points != points ||
+        oldDelegate.overallColor != overallColor ||
+        oldDelegate.attendanceColor != attendanceColor;
+  }
+}
+
+class SessionDonutChart extends StatelessWidget {
+  const SessionDonutChart({required this.distribution, super.key});
+
+  final Map<String, int> distribution;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = [
+      Theme.of(context).colorScheme.primary,
+      const Color(0xFF2BB673),
+      const Color(0xFFF5A524),
+      const Color(0xFF5B8DEF),
+      const Color(0xFFF56A4A),
+    ];
+    final total = math.max(1, distribution.values.fold<int>(0, (a, b) => a + b));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final chartSize = constraints.maxWidth >= 520 ? 160.0 : 132.0;
+        final scheme = Theme.of(context).colorScheme;
+        return Wrap(
+          spacing: 18,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: chartSize,
+              height: chartSize,
+              child: CustomPaint(
+                painter: _SessionDonutPainter(
+                  distribution: distribution,
+                  colors: colors,
+                  total: total,
+                  backgroundColor: scheme.onSurface.withValues(alpha: 0.08),
+                  centerFillColor: scheme.surface,
+                  centerTextColor: scheme.onSurface,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: math.min(constraints.maxWidth, 320).toDouble(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < distribution.entries.length; i++) ...[
+                    _LegendLine(
+                      color: colors[i % colors.length],
+                      label: distribution.entries.elementAt(i).key,
+                      value: distribution.entries.elementAt(i).value,
+                      total: total,
+                    ),
+                    if (i != distribution.entries.length - 1)
+                      const SizedBox(height: 10),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SessionDonutPainter extends CustomPainter {
+  const _SessionDonutPainter({
+    required this.distribution,
+    required this.colors,
+    required this.total,
+    required this.backgroundColor,
+    required this.centerFillColor,
+    required this.centerTextColor,
+  });
+
+  final Map<String, int> distribution;
+  final List<Color> colors;
+  final int total;
+  final Color backgroundColor;
+  final Color centerFillColor;
+  final Color centerTextColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - 10;
+    final ringRect = Rect.fromCircle(center: center, radius: radius);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 20
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(
+      ringRect,
+      0,
+      math.pi * 2,
+      false,
+      paint..color = backgroundColor,
+    );
+    var start = -math.pi / 2;
+    var index = 0;
+    for (final entry in distribution.entries) {
+      final sweep = (entry.value / total) * math.pi * 2;
+      paint.color = colors[index % colors.length];
+      canvas.drawArc(ringRect, start, sweep, false, paint);
+      start += sweep;
+      index++;
+    }
+    final centerPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = centerFillColor;
+    canvas.drawCircle(center, radius - 26, centerPaint);
+    final painter = TextPainter(
+      text: TextSpan(
+        text: '$total',
+        style: TextStyle(
+          color: centerTextColor,
+          fontSize: 24,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(canvas, center - Offset(painter.width / 2, painter.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _SessionDonutPainter oldDelegate) {
+    return oldDelegate.distribution != distribution;
+  }
+}
+
+class _LegendLine extends StatelessWidget {
+  const _LegendLine({
+    required this.color,
+    required this.label,
+    required this.value,
+    required this.total,
+  });
+
+  final Color color;
+  final String label;
+  final int value;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = (value / total) * 100;
+    return Row(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+        Text(
+          '$value',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${percent.toStringAsFixed(0)}%',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2285,7 +4658,13 @@ class BatchesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return RefreshableListPage(
       title: 'Batches',
-      load: () => ref.read(apiClientProvider).getList('/coach/batches'),
+      load: () async {
+        try {
+          final batches = await ref.read(apiClientProvider).getList('/coach/batches');
+          if (batches.isNotEmpty) return batches;
+        } catch (_) {}
+        return _demoCoachBatches();
+      },
       itemBuilder: (context, item) => ActionRow(
         title: _labelOf(item, ['name', 'batchName']),
         subtitle:
@@ -2300,8 +4679,8 @@ class BatchesScreen extends ConsumerWidget {
   }
 }
 
-class BatchDetailScreen extends ConsumerWidget {
-  const BatchDetailScreen({required this.batchId, super.key});
+class LegacyBatchDetailScreen extends ConsumerWidget {
+  const LegacyBatchDetailScreen({required this.batchId, super.key});
 
   final String batchId;
 
@@ -2328,6 +4707,240 @@ class BatchDetailScreen extends ConsumerWidget {
   }
 }
 
+class BatchDetailScreen extends ConsumerStatefulWidget {
+  const BatchDetailScreen({required this.batchId, super.key});
+
+  final String batchId;
+
+  @override
+  ConsumerState<BatchDetailScreen> createState() => _BatchDetailScreenState();
+}
+
+class _BatchDetailScreenState extends ConsumerState<BatchDetailScreen> {
+  var _section = BatchDetailSection.students;
+  var _leaderboardTab = LeaderboardTab.overall;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Batch Detail')),
+      body: FutureBuilder<BatchDetailData>(
+        future: _loadBatchDetail(ref, widget.batchId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            if (snapshot.error is AuthException) {
+              return const SessionRedirectView();
+            }
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                InlineError(
+                  message: _errorMessage(snapshot.error),
+                  onRetry: () => setState(() {}),
+                ),
+              ],
+            );
+          }
+          final data = snapshot.data ?? _demoBatchDetail(widget.batchId);
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+            children: [
+              PageHeader(
+                title: data.name,
+                subtitle: data.academyName,
+              ),
+              DetailInfoCard(
+                title: 'Batch Details',
+                rows: [
+                  ('Batch name', data.name),
+                  ('Academy name', data.academyName),
+                  (
+                    'Session timetable',
+                    data.sessionInfo.isEmpty
+                        ? 'No timetable set yet.'
+                        : data.sessionInfo,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => context.push(
+                  '/batch-setup',
+                  extra: {'batchId': data.id},
+                ),
+                icon: const Icon(Icons.edit_calendar_outlined),
+                label: const Text('Edit Timetable'),
+              ),
+              const SizedBox(height: 12),
+              _SegmentedToggle<BatchDetailSection>(
+                values: BatchDetailSection.values,
+                selected: _section,
+                label: (section) => section.label,
+                onChanged: (section) => setState(() => _section = section),
+              ),
+              const SizedBox(height: 12),
+              if (_section == BatchDetailSection.students)
+                _BatchStudentList(students: data.students)
+              else
+                _BatchLeaderboardView(
+                  entries: data.leaderboard[_leaderboardTab] ?? const [],
+                  selected: _leaderboardTab,
+                  onChanged: (tab) => setState(() => _leaderboardTab = tab),
+                ),
+            ],
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/sessions/start'),
+        icon: const Icon(Icons.play_arrow_rounded),
+        label: const Text('Start Session'),
+      ),
+    );
+  }
+}
+
+enum BatchDetailSection {
+  students('Students'),
+  leaderboard('Leaderboard');
+
+  const BatchDetailSection(this.label);
+  final String label;
+}
+
+enum LeaderboardTab {
+  overall('Overall', 'IP Points'),
+  runs('Run Wise', 'Runs'),
+  wickets('Wicket Wise', 'Wickets'),
+  fielding('Fielding Wise', 'Fielding');
+
+  const LeaderboardTab(this.label, this.valueLabel);
+  final String label;
+  final String valueLabel;
+}
+
+class _BatchStudentList extends StatelessWidget {
+  const _BatchStudentList({required this.students});
+
+  final List<StudentSummary> students;
+
+  @override
+  Widget build(BuildContext context) {
+    if (students.isEmpty) {
+      return const _EmptyCard('No students in this batch yet.');
+    }
+    return Column(
+      children: students
+          .map(
+            (student) => _InfoCard(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: StudentAvatar(
+                  name: student.name,
+                  imageUrl: student.avatarUrl,
+                ),
+                title: Text(
+                  student.name,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: Text(student.subtitle),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => context.push(
+                  '/students/${Uri.encodeComponent(student.id)}',
+                ),
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _BatchLeaderboardView extends StatelessWidget {
+  const _BatchLeaderboardView({
+    required this.entries,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final List<LeaderboardEntryData> entries;
+  final LeaderboardTab selected;
+  final ValueChanged<LeaderboardTab> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SegmentedToggle<LeaderboardTab>(
+          values: LeaderboardTab.values,
+          selected: selected,
+          label: (tab) => tab.label,
+          onChanged: onChanged,
+        ),
+        const SizedBox(height: 12),
+        if (entries.isEmpty)
+          const _EmptyCard('Leaderboard data is not available yet.')
+        else
+          ...entries.map(
+            (entry) => _LeaderboardCard(entry: entry, tab: selected),
+          ),
+      ],
+    );
+  }
+}
+
+class _LeaderboardCard extends StatelessWidget {
+  const _LeaderboardCard({required this.entry, required this.tab});
+
+  final LeaderboardEntryData entry;
+  final LeaderboardTab tab;
+
+  @override
+  Widget build(BuildContext context) {
+    return _InfoCard(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              '#${entry.rank}',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            ),
+          ),
+          StudentAvatar(name: entry.name, imageUrl: entry.avatarUrl),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.name,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 4),
+                StatusBadge(entry.badge),
+              ],
+            ),
+          ),
+          Text(
+            '${entry.value} ${tab.valueLabel}',
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class BatchTabScreen extends ConsumerWidget {
   const BatchTabScreen({super.key});
 
@@ -2338,38 +4951,27 @@ class BatchTabScreen extends ConsumerWidget {
       body: RefreshableListPage(
         title: '',
         load: () async {
-          final data = await Future.wait([
-            ref.read(apiClientProvider).getList('/coach/batches'),
-            ref.read(apiClientProvider).getList('/coach/schedules'),
-          ]);
-          final batches = (data[0] as List).cast<Map<String, dynamic>>();
-          final schedules = (data[1] as List).cast<Map<String, dynamic>>();
-          return batches.map((batch) {
-            final batchId = _idOf(batch);
-            final batchSchedules = schedules
-                .where((s) => _read(s, ['batchId'])?.toString() == batchId)
-                .toList();
-            final byDay = <String, String>{};
-            for (final s in batchSchedules) {
-              final type = _titleCase(
-                (_read(s, ['sessionType'])?.toString().toLowerCase() ?? ''),
-              );
-              for (final d in _listAt(s, ['daysOfWeek'])) {
-                final dayIndex = int.tryParse('$d');
-                if (dayIndex != null &&
-                    dayIndex >= 0 &&
-                    dayIndex < _days.length) {
-                  byDay[_days[dayIndex]] = type;
-                }
-              }
-            }
-            return {
-              ...batch,
-              '_days': byDay.entries
-                  .map((e) => '${e.key}:${e.value}')
-                  .join('  '),
-            };
-          }).toList();
+          try {
+            final data = await Future.wait([
+              ref.read(apiClientProvider).getList('/coach/batches'),
+              ref.read(apiClientProvider).getList('/coach/schedules'),
+            ]);
+            final batches = (data[0] as List).cast<Map<String, dynamic>>();
+            if (batches.isEmpty) return _demoCoachBatches();
+            final schedules = (data[1] as List).cast<Map<String, dynamic>>();
+            return batches.map((batch) {
+              final batchId = _idOf(batch);
+              final batchSchedules = schedules
+                  .where((s) => _read(s, ['batchId'])?.toString() == batchId)
+                  .toList();
+              return {
+                ...batch,
+                '_sessionInfo': _batchSessionInfo(batchId, batch, batchSchedules),
+              };
+            }).toList();
+          } catch (_) {
+            return _demoCoachBatches();
+          }
         },
         itemBuilder: (context, item) => Card(
           margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
@@ -2379,7 +4981,7 @@ class BatchTabScreen extends ConsumerWidget {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             subtitle: Text(
-              '${_labelOf(item, ['academyName', 'academy.name'])}\n${_read(item, ['_days'])?.toString() ?? ''}',
+              '${_labelOf(item, ['academyName', 'academy.name'])}\n${_listAt(item, ['students']).length} students',
             ),
             isThreeLine: true,
             trailing: const Icon(Icons.chevron_right_rounded),
@@ -2679,9 +5281,19 @@ class OneToOneTabScreen extends ConsumerWidget {
     return FilteredListScreen(
       title: '1-to-1 Sessions',
       tabs: const ['Upcoming', 'Completed'],
-      load: (tab) => ref
-          .read(apiClientProvider)
-          .getList('/coach/gig-bookings', query: {'page': '1', 'limit': '30'}),
+      load: (tab) async {
+        final local = await ref
+            .read(settingsStoreProvider)
+            .loadDemoOneOnOneBookings();
+        try {
+          final remote = await ref
+              .read(apiClientProvider)
+              .getList('/coach/gig-bookings', query: {'page': '1', 'limit': '30'});
+          return _mergeById(local, remote);
+        } catch (_) {
+          return local;
+        }
+      },
       filter: (item, tab, query) {
         final status = _statusOf(item);
         return tab == 'Upcoming' ? status == 'UPCOMING' : status == 'COMPLETED';
@@ -2787,7 +5399,9 @@ class PaymentTabScreen extends ConsumerWidget {
 }
 
 class AutoSessionFlowScreen extends ConsumerStatefulWidget {
-  const AutoSessionFlowScreen({super.key});
+  const AutoSessionFlowScreen({this.initialSession, super.key});
+
+  final Map<String, dynamic>? initialSession;
 
   @override
   ConsumerState<AutoSessionFlowScreen> createState() =>
@@ -2798,8 +5412,12 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
   bool _loading = true;
   String? _error;
   _LiveSessionContext? _ctx;
+  _StartSessionStep _step = _StartSessionStep.attendance;
   final Map<String, bool> _attendance = {};
-  bool _savingAttendance = false;
+  final Map<String, PlayerFeedbackPayload> _feedbackByPlayer = {};
+  bool _saving = false;
+  bool _feedbackSkipped = false;
+  bool _demoMode = false;
 
   @override
   void initState() {
@@ -2813,11 +5431,15 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
       _error = null;
     });
     try {
-      final loaded = await _detectOrCreateLiveSession(ref);
+      final loaded = await _loadStartSessionContext(ref, widget.initialSession);
       _ctx = loaded;
+      _demoMode = loaded.demoMode;
       _attendance
         ..clear()
         ..addEntries(loaded.players.map((p) => MapEntry(_idOf(p), true)));
+      _feedbackByPlayer.clear();
+      _feedbackSkipped = false;
+      _step = _StartSessionStep.attendance;
     } catch (e) {
       _error = _errorMessage(e);
     } finally {
@@ -2825,67 +5447,162 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
     }
   }
 
-  Future<void> _saveAttendanceAndContinue() async {
-    if (_ctx == null || _savingAttendance) return;
-    setState(() => _savingAttendance = true);
+  Future<void> _startFeedback() async {
+    if (_ctx == null || _saving || _presentPlayers.isEmpty) return;
+    setState(() => _saving = true);
     try {
       final api = ref.read(apiClientProvider);
-      for (final player in _ctx!.players) {
-        await api.post('/coach/sessions/${_ctx!.sessionId}/attendance', {
-          'playerProfileId': _idOf(player),
-          'status': _attendance[_idOf(player)] == true ? 'PRESENT' : 'ABSENT',
+      var next = _ctx!;
+      if (next.sessionId.isEmpty || next.demoMode) {
+        next = await _tryCreateSession(api, next);
+        _ctx = next;
+      }
+      if (!next.demoMode && next.sessionId.isNotEmpty) {
+        for (final player in next.players) {
+          await api.post('/coach/sessions/${next.sessionId}/attendance', {
+            'playerProfileId': _idOf(player),
+            'status': _attendance[_idOf(player)] == true ? 'PRESENT' : 'ABSENT',
+          });
+        }
+      }
+      if (mounted) setState(() => _step = _StartSessionStep.feedback);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _demoMode = true;
+          _ctx = _ctx?.copyWith(demoMode: true);
+          _step = _StartSessionStep.feedback;
         });
       }
-      if (!mounted) return;
-      final present = _ctx!.players
-          .where((p) => _attendance[_idOf(p)] == true)
-          .toList();
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => CoachFeedbackFlowScreen(
-            sessionId: _ctx!.sessionId,
-            sessionType: _toFeedbackTemplateType(_ctx!.sessionType),
-            players: present
-                .map(
-                  (p) => FeedbackPlayer(
-                    playerId: _idOf(p),
-                    playerName: _studentName(p),
-                  ),
-                )
-                .toList(),
-            submitRows: (rows) async {
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openFeedbackForm(Map<String, dynamic> player) async {
+    final ctx = _ctx;
+    if (ctx == null) return;
+    final playerId = _idOf(player);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: Text('${_studentName(player)} Feedback')),
+          body: FeedbackForm(
+            sessionType: _toFeedbackTemplateType(ctx.sessionType),
+            players: [
+              FeedbackPlayer(
+                playerId: playerId,
+                playerName: _studentName(player),
+              ),
+            ],
+            draftKey: '${ctx.sessionId}|${ctx.sessionType}|$playerId',
+            onSkip: () async {},
+            onSubmit: (rows) async {
+              if (rows.isEmpty) return;
+              final row = rows.first;
               final auth = ref.read(sessionStateProvider);
               await submitFeedback(
                 SessionFeedbackPayload(
-                  sessionId: _ctx!.sessionId,
-                  sessionType: _toFeedbackTemplateType(_ctx!.sessionType),
+                  sessionId: ctx.sessionId,
+                  sessionType: _toFeedbackTemplateType(ctx.sessionType),
                   coachId: auth?.phone ?? auth?.userName ?? 'coach',
-                  players: rows,
+                  players: [row],
                 ),
-                apiSubmit: (data) => api.post('/feedback', data),
+                apiSubmit: ctx.demoMode || _demoMode
+                    ? null
+                    : (data) =>
+                          ref.read(apiClientProvider).post('/feedback', data),
               );
-            },
-            onSubmitted: () async {
-              try {
-                await api.post(
-                  '/coach/sessions/${_ctx!.sessionId}/complete',
-                  {},
-                );
-              } catch (_) {}
+              if (mounted) {
+                setState(() {
+                  _feedbackByPlayer[playerId] = row;
+                  _feedbackSkipped = false;
+                });
+              }
             },
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _saveSession() async {
+    final ctx = _ctx;
+    if (ctx == null || _saving) return;
+    setState(() => _saving = true);
+    try {
+      if (!ctx.demoMode && !_demoMode && ctx.sessionId.isNotEmpty) {
+        await ref
+            .read(apiClientProvider)
+            .post('/coach/sessions/${ctx.sessionId}/complete', {
+              'sessionType': ctx.sessionType.toUpperCase(),
+              'presentPlayerIds': _presentPlayers.map(_idOf).toList(),
+              'absentPlayerIds': _absentPlayers.map(_idOf).toList(),
+              'feedbackSkipped': _feedbackSkipped,
+            });
+      } else {
+        debugPrint('Mock Session Save: ${_sessionOverviewPayload(ctx)}');
+      }
+      await ref.read(settingsStoreProvider).saveDemoReportCards(
+        _batchReportsFrom(
+          ctx: ctx,
+          presentPlayers: _presentPlayers,
+          absentPlayers: _absentPlayers,
+          feedbackByPlayer: _feedbackByPlayer,
+        ),
       );
-      if (mounted) context.go('/home');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            (ctx.demoMode || _demoMode)
+                ? 'Session saved in demo mode.'
+                : 'Session saved.',
+          ),
+        ),
+      );
+      context.go('/home');
+    } catch (_) {
+      if (!mounted) return;
+      debugPrint('Mock Session Save: ${_sessionOverviewPayload(ctx)}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session saved in demo mode.')),
+      );
+      context.go('/home');
     } finally {
-      if (mounted) setState(() => _savingAttendance = false);
+      if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Map<String, dynamic> _sessionOverviewPayload(_LiveSessionContext ctx) {
+    return {
+      'sessionId': ctx.sessionId,
+      'sessionType': ctx.sessionType,
+      'batchName': ctx.batchName,
+      'timeLabel': ctx.timeLabel,
+      'presentPlayerIds': _presentPlayers.map(_idOf).toList(),
+      'absentPlayerIds': _absentPlayers.map(_idOf).toList(),
+      'feedbackCount': _feedbackByPlayer.length,
+      'feedbackSkipped': _feedbackSkipped,
+    };
+  }
+
+  List<Map<String, dynamic>> get _presentPlayers {
+    final ctx = _ctx;
+    if (ctx == null) return const [];
+    return ctx.players.where((p) => _attendance[_idOf(p)] == true).toList();
+  }
+
+  List<Map<String, dynamic>> get _absentPlayers {
+    final ctx = _ctx;
+    if (ctx == null) return const [];
+    return ctx.players.where((p) => _attendance[_idOf(p)] != true).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading)
-      return const Scaffold(body: LoadingView(label: 'Detecting session'));
+      return const Scaffold(body: LoadingView(label: 'Opening session'));
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Start Session')),
@@ -2912,10 +5629,41 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
         ),
       );
     }
+    if (_step == _StartSessionStep.feedback) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Session Feedback')),
+        body: _feedbackStep(_ctx!),
+        bottomNavigationBar: _flowButton('Next', () {
+          setState(() => _step = _StartSessionStep.overview);
+        }),
+      );
+    }
+    if (_step == _StartSessionStep.overview) {
+      return Scaffold(
+        appBar: AppBar(title: Text(_step.title(_ctx!.sessionType))),
+        body: _overviewStep(_ctx!),
+        bottomNavigationBar: _flowButton(
+          _saving ? 'Saving...' : 'Save Session',
+          _saving ? null : _saveSession,
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Start Session')),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: DetailInfoCard(
+              title: 'Session Details',
+              rows: [
+                ('Batch name', _ctx!.batchName),
+                ('Academy name', _ctx!.academyName),
+                ('Schedule', '${_ctx!.dateLabel} · ${_ctx!.timeLabel}'),
+                ('Session type', _titleCase(_ctx!.sessionType)),
+              ],
+            ),
+          ),
           Container(
             margin: const EdgeInsets.all(12),
             padding: const EdgeInsets.all(14),
@@ -2944,10 +5692,49 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
                   ),
                 ),
                 FilledButton(
-                  onPressed: () {},
+                  onPressed: _presentPlayers.isEmpty || _saving
+                      ? null
+                      : _startFeedback,
                   child: const Text('Start Session'),
                 ),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: DropdownButtonFormField<String>(
+              value: _sessionTypeOptions.contains(_ctx!.sessionType)
+                  ? _ctx!.sessionType
+                  : 'drills',
+              decoration: const InputDecoration(labelText: 'Session type'),
+              items: _sessionTypeOptions
+                  .map(
+                    (type) => DropdownMenuItem(
+                      value: type,
+                      child: Text(_titleCase(type)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() {
+                  _ctx = _ctx!.copyWith(sessionType: value);
+                  _feedbackByPlayer.clear();
+                  _feedbackSkipped = false;
+                });
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Edit the session type if needed, then toggle off absent students before starting.',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
             ),
           ),
           Expanded(
@@ -2959,9 +5746,7 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
                 final id = _idOf(player);
                 return Card(
                   child: ListTile(
-                    leading: CircleAvatar(
-                      child: Text(_avatarLetter(_studentName(player))),
-                    ),
+                    leading: _studentAvatar(player),
                     title: Text(
                       _studentName(player),
                       style: const TextStyle(fontWeight: FontWeight.w700),
@@ -2982,12 +5767,169 @@ class _AutoSessionFlowScreenState extends ConsumerState<AutoSessionFlowScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
           child: FilledButton(
-            onPressed: _savingAttendance ? null : _saveAttendanceAndContinue,
-            child: Text(_savingAttendance ? 'Saving...' : 'Save & Continue'),
+            onPressed: _presentPlayers.isEmpty || _saving
+                ? null
+                : _startFeedback,
+            child: Text(_saving ? 'Starting...' : 'Start Session'),
           ),
         ),
       ),
     );
+  }
+
+  Widget _feedbackStep(_LiveSessionContext ctx) {
+    final players = _presentPlayers;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              setState(() {
+                _feedbackSkipped = true;
+                _step = _StartSessionStep.overview;
+              });
+            },
+            icon: const Icon(Icons.skip_next_rounded),
+            label: const Text('Skip Feedback'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${_titleCase(ctx.sessionType)} - ${ctx.batchName}',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        ...players.map((player) {
+          final id = _idOf(player);
+          final completed = _feedbackByPlayer.containsKey(id);
+          return Card(
+            child: ListTile(
+              leading: _studentAvatar(player),
+              title: Text(
+                _studentName(player),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: Text(
+                completed ? 'Feedback filled' : 'Tap to add feedback',
+              ),
+              trailing: Icon(
+                completed
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
+              ),
+              onTap: () => _openFeedbackForm(player),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _overviewStep(_LiveSessionContext ctx) {
+    final status = _feedbackSkipped
+        ? 'Skipped'
+        : _feedbackByPlayer.length == _presentPlayers.length
+        ? 'Completed'
+        : 'Partially completed';
+    final reports = _batchReportsFrom(
+      ctx: ctx,
+      presentPlayers: _presentPlayers,
+      absentPlayers: _absentPlayers,
+      feedbackByPlayer: _feedbackByPlayer,
+    );
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+      children: [
+        Text(
+          '${_titleCase(ctx.sessionType)} Session Overview',
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 12),
+        _overviewTile('Session type', _titleCase(ctx.sessionType)),
+        _overviewTile('Batch/session name', ctx.batchName),
+        _overviewTile('Date and time', '${ctx.dateLabel}, ${ctx.timeLabel}'),
+        _overviewTile(
+          'Present students',
+          _presentPlayers.map(_studentName).join(', '),
+        ),
+        _overviewTile(
+          'Absent students',
+          _absentPlayers.isEmpty
+              ? 'None'
+              : _absentPlayers.map(_studentName).join(', '),
+        ),
+        _overviewTile(
+          'Feedback filled count',
+          '${_feedbackByPlayer.length} of ${_presentPlayers.length}',
+        ),
+        _overviewTile('Feedback status', status),
+        const SizedBox(height: 12),
+        StrengthWeaknessTable(
+          rows: reports.map((report) => _reportTableRow(report)).toList(),
+        ),
+        const SizedBox(height: 12),
+        if (ctx.demoMode || _demoMode)
+          const Padding(
+            padding: EdgeInsets.only(top: 10),
+            child: Text(
+              'Demo mode: this session will be saved locally for this run.',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _studentAvatar(Map<String, dynamic> player) {
+    final image = _read(player, [
+      'avatar',
+      'avatarUrl',
+      'profileImage',
+      'profileImageUrl',
+      'playerProfile.avatarUrl',
+    ])?.toString();
+    if (image != null && image.isNotEmpty) {
+      return CircleAvatar(backgroundImage: NetworkImage(image));
+    }
+    return CircleAvatar(child: Text(_avatarLetter(_studentName(player))));
+  }
+
+  Widget _overviewTile(String label, String value) {
+    return Card(
+      child: ListTile(
+        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+        subtitle: Text(value.isEmpty ? 'None' : value),
+      ),
+    );
+  }
+
+  Widget _flowButton(String label, VoidCallback? onPressed) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        child: FilledButton(onPressed: onPressed, child: Text(label)),
+      ),
+    );
+  }
+}
+
+enum _StartSessionStep { attendance, feedback, overview }
+
+extension _StartSessionStepTitle on _StartSessionStep {
+  String title(String sessionType) {
+    return switch (this) {
+      _StartSessionStep.attendance => 'Start Session',
+      _StartSessionStep.feedback => 'Session Feedback',
+      _StartSessionStep.overview =>
+        '${_titleCase(sessionType)} Session Overview',
+    };
   }
 }
 
@@ -2999,9 +5941,19 @@ class GigBookingsScreen extends ConsumerWidget {
     return FilteredListScreen(
       title: 'Gig Bookings',
       tabs: const ['Upcoming', 'Completed', 'Cancelled'],
-      load: (tab) => ref
-          .read(apiClientProvider)
-          .getList('/coach/gig-bookings', query: {'page': '1', 'limit': '20'}),
+      load: (tab) async {
+        final local = await ref
+            .read(settingsStoreProvider)
+            .loadDemoOneOnOneBookings();
+        try {
+          final remote = await ref
+              .read(apiClientProvider)
+              .getList('/coach/gig-bookings', query: {'page': '1', 'limit': '20'});
+          return _mergeById(local, remote);
+        } catch (_) {
+          return local;
+        }
+      },
       filter: (item, tab, query) =>
           _statusOf(item) ==
           (tab == 'Upcoming' ? 'UPCOMING' : tab.toUpperCase()),
@@ -3026,17 +5978,231 @@ class GigBookingDetailScreen extends ConsumerWidget {
     return DetailPage(
       title: 'Booking Detail',
       load: () async {
-        final bookings = await ref
-            .read(apiClientProvider)
-            .getList(
-              '/coach/gig-bookings',
-              query: {'page': '1', 'limit': '50'},
-            );
+        final local = await ref
+            .read(settingsStoreProvider)
+            .loadDemoOneOnOneBookings();
+        var bookings = <Map<String, dynamic>>[];
+        try {
+          bookings = await ref
+              .read(apiClientProvider)
+              .getList(
+                '/coach/gig-bookings',
+                query: {'page': '1', 'limit': '50'},
+              );
+        } catch (_) {}
+        bookings = _mergeById(local, bookings);
         return bookings.firstWhere(
           (e) => _idOf(e) == bookingId,
           orElse: () => {'id': bookingId},
         );
       },
+      actionsBuilder: (item, reload) => [
+        ActionChip(
+          avatar: const Icon(Icons.done_all_rounded, size: 18),
+          label: const Text('Mark Completed'),
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => OneOnOneCompletionScreen(booking: item),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class OneOnOneCompletionScreen extends ConsumerStatefulWidget {
+  const OneOnOneCompletionScreen({required this.booking, super.key});
+
+  final Map<String, dynamic> booking;
+
+  @override
+  ConsumerState<OneOnOneCompletionScreen> createState() =>
+      _OneOnOneCompletionScreenState();
+}
+
+class _OneOnOneCompletionScreenState
+    extends ConsumerState<OneOnOneCompletionScreen> {
+  final _selectedTypes = <String>{};
+  var _step = 0;
+  bool _saving = false;
+  Map<String, dynamic>? _report;
+
+  void _next() {
+    if (_selectedTypes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one session type.')),
+      );
+      return;
+    }
+    setState(() => _step = 1);
+  }
+
+  Future<void> _saveFeedbackRows(List<PlayerFeedbackPayload> rows) async {
+    setState(() => _saving = true);
+    final feedback = rows.isEmpty
+        ? null
+        : rows.firstWhere(
+            (row) => row.playerId == _idOf(widget.booking),
+            orElse: () => rows.first,
+          );
+    final performance = _prettyToken(feedback?.performance ?? '');
+    final report = _oneOnOneReportFrom(
+      booking: widget.booking,
+      coachName: ref.read(sessionStateProvider)?.userName ?? 'Coach',
+      sessionTypes: _selectedTypes.toList(),
+      feedback: {
+        for (final type in _selectedTypes)
+          type: performance.isEmpty ? 'Feedback recorded.' : performance,
+      },
+      strengths: feedback?.strengths.map(_prettyToken).join(', ') ?? '',
+      weaknesses: feedback?.mistakes.map(_prettyToken).join(', ') ?? '',
+      plan: 'Continue targeted 1-to-1 practice and reassess next session.',
+      remarks: performance.isEmpty ? 'Feedback saved.' : performance,
+    );
+    try {
+      try {
+        final bookingId = _idOf(widget.booking);
+        if (bookingId.isNotEmpty && !bookingId.startsWith('demo-')) {
+          await ref
+              .read(apiClientProvider)
+              .patch('/coach/gig-bookings/$bookingId', {
+                'status': 'COMPLETED',
+                'sessionTypes': _selectedTypes.toList(),
+                'feedback': report['feedback'],
+              });
+        }
+      } catch (_) {}
+      await ref.read(settingsStoreProvider).saveDemoOneOnOneBooking({
+        ...widget.booking,
+        'status': 'COMPLETED',
+        'completedAt': DateTime.now().toIso8601String(),
+      });
+      final auth = ref.read(sessionStateProvider);
+      await submitFeedback(
+        SessionFeedbackPayload(
+          sessionId: _idOf(widget.booking),
+          sessionType: _oneOnOneFeedbackTemplateType(_selectedTypes),
+          coachId: auth?.phone ?? auth?.userName ?? 'unknown_coach',
+          players: rows,
+        ),
+        apiSubmit: (data) => ref.read(apiClientProvider).post('/feedback', data),
+      );
+      await ref.read(settingsStoreProvider).saveDemoReportCard(report);
+      if (!mounted) return;
+      setState(() {
+        _report = report;
+        _step = 2;
+      });
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Complete 1-to-1 Session')),
+      body: _step == 0
+          ? _typeStep()
+          : _step == 1
+          ? _feedbackStep()
+          : _reportStep(),
+      bottomNavigationBar: _step == 1
+          ? null
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: FilledButton(
+                  onPressed: _saving
+                      ? null
+                      : _step == 0
+                      ? _next
+                      : () => _shareReport(_report ?? const {}),
+                  child: Text(_step == 0 ? 'Next' : 'Share Report Card'),
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _typeStep() {
+    const options = [
+      'Nets',
+      'Drills',
+      'Fitness',
+      'Fielding',
+      'Bowling',
+      'Batting',
+      'Wicket keeping',
+      'Conditioning',
+    ];
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const PageHeader(
+          title: 'Session types covered',
+          subtitle: 'Select every area covered in this 1-to-1 session.',
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: options
+              .map(
+                (type) => FilterChip(
+                  label: Text(type),
+                  selected: _selectedTypes.contains(type),
+                  onSelected: (_) => setState(() {
+                    _selectedTypes.contains(type)
+                        ? _selectedTypes.remove(type)
+                        : _selectedTypes.add(type);
+                  }),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _feedbackStep() {
+    final playerId = _idOf(widget.booking);
+    final feedbackPlayerId =
+        playerId.isEmpty ? '1to1-${_studentName(widget.booking)}' : playerId;
+    return FeedbackForm(
+      sessionType: _oneOnOneFeedbackTemplateType(_selectedTypes),
+      players: [
+        FeedbackPlayer(
+          playerId: feedbackPlayerId,
+          playerName: _studentName(widget.booking),
+        ),
+      ],
+      draftKey: '${_idOf(widget.booking)}|1-to-1|${_selectedTypes.join(',')}',
+      closeOnSubmit: false,
+      closeOnSkip: false,
+      onSkip: () async {
+        final empty = PlayerFeedbackPayload(
+          playerId: feedbackPlayerId,
+          mistakes: const [],
+          strengths: const [],
+          performance: '',
+        );
+        await _saveFeedbackRows([empty]);
+      },
+      onSubmit: _saveFeedbackRows,
+    );
+  }
+
+  Widget _reportStep() {
+    final report = _report ?? const <String, dynamic>{};
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      children: [
+        FormalReportCard(report: report),
+      ],
     );
   }
 }
@@ -3110,6 +6276,8 @@ class _ActivateOneOnOneSessionScreenState
   final _coachLevels = <String>{};
   final _emailCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _onlineRateCtrl = TextEditingController();
+  final _offlineRateCtrl = TextEditingController();
   String? _experience;
   bool _saving = false;
   String? _error;
@@ -3118,6 +6286,8 @@ class _ActivateOneOnOneSessionScreenState
   void dispose() {
     _emailCtrl.dispose();
     _addressCtrl.dispose();
+    _onlineRateCtrl.dispose();
+    _offlineRateCtrl.dispose();
     super.dispose();
   }
 
@@ -3134,11 +6304,23 @@ class _ActivateOneOnOneSessionScreenState
       setState(() => _error = 'Select at least one coaching level.');
       return;
     }
+    final onlineRate = int.tryParse(_onlineRateCtrl.text.trim());
+    final offlineRate = int.tryParse(_offlineRateCtrl.text.trim());
+    if (onlineRate == null || onlineRate <= 0) {
+      setState(() => _error = 'Enter online hourly rate.');
+      return;
+    }
+    if (offlineRate == null || offlineRate <= 0) {
+      setState(() => _error = 'Enter offline hourly rate.');
+      return;
+    }
 
     final setupData = <String, dynamic>{
       'specializations': _specializations.toList(),
       'coachingExperience': _experience,
       'coachLevels': _coachLevels.toList(),
+      'onlineHourlyRatePaise': onlineRate * 100,
+      'offlineHourlyRatePaise': offlineRate * 100,
       if (_emailCtrl.text.trim().isNotEmpty) 'email': _emailCtrl.text.trim(),
       if (_addressCtrl.text.trim().isNotEmpty)
         'address': _addressCtrl.text.trim(),
@@ -3157,6 +6339,9 @@ class _ActivateOneOnOneSessionScreenState
           'expertiseTags': _specializations.toList(),
           'coachingExperience': _experience,
           'coachLevels': _coachLevels.toList(),
+          'onlineHourlyRate': onlineRate * 100,
+          'offlineHourlyRate': offlineRate * 100,
+          'hourlyRate': onlineRate * 100,
           if (_emailCtrl.text.trim().isNotEmpty)
             'email': _emailCtrl.text.trim(),
           if (_addressCtrl.text.trim().isNotEmpty)
@@ -3230,6 +6415,37 @@ class _ActivateOneOnOneSessionScreenState
             ),
             ActivationStepCard(
               step: '4',
+              title: 'Set hourly rates',
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _onlineRateCtrl,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                        labelText: 'Online rate per hour',
+                        prefixText: 'Rs ',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _offlineRateCtrl,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                        labelText: 'Offline rate per hour',
+                        prefixText: 'Rs ',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ActivationStepCard(
+              step: '5',
               title: 'Optional details',
               child: Column(
                 children: [
@@ -3545,7 +6761,9 @@ class BankingDetailsScreen extends ConsumerWidget {
 }
 
 class QuickBatchSetupScreen extends ConsumerStatefulWidget {
-  const QuickBatchSetupScreen({super.key});
+  const QuickBatchSetupScreen({this.focusBatchId, super.key});
+
+  final String? focusBatchId;
 
   @override
   ConsumerState<QuickBatchSetupScreen> createState() =>
@@ -3584,8 +6802,11 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
         api.getList('/coach/batches'),
         api.getList('/coach/schedules'),
       ]);
-      final batches = (data[0] as List).cast<Map<String, dynamic>>();
+      var batches = (data[0] as List).cast<Map<String, dynamic>>();
       final schedules = (data[1] as List).cast<Map<String, dynamic>>();
+      if (batches.isEmpty) {
+        batches = _demoCoachBatches();
+      }
       for (final old in _states.values) {
         old.dispose();
       }
@@ -3601,8 +6822,32 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
           batchSchedules,
         );
       }
+      final savedSetup = await ref
+          .read(settingsStoreProvider)
+          .loadQuickBatchSetupData();
+      _applySavedQuickBatchSetup(_states, savedSetup);
     } catch (e) {
-      _error = _errorMessage(e);
+      final savedSetup = await ref
+          .read(settingsStoreProvider)
+          .loadQuickBatchSetupData();
+      _statesFromSavedQuickBatchSetup(_states, savedSetup);
+      if (_states.isEmpty) {
+        for (final batch in _demoCoachBatches()) {
+          final batchId = _idOf(batch);
+          final batchSchedules = _demoCoachSchedules()
+              .where((s) => _read(s, ['batchId'])?.toString() == batchId)
+              .toList();
+          _states[batchId] = _BatchCardState.fromApi(
+            batchId,
+            batch,
+            batchSchedules,
+          );
+        }
+        _applySavedQuickBatchSetup(_states, savedSetup);
+      }
+      if (_states.isEmpty) {
+        _error = _errorMessage(e);
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -3616,7 +6861,7 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
     final existingByKey = <String, Map<String, dynamic>>{
       for (final s in state.rawSchedules) _scheduleKey(s): s,
     };
-    final desiredKeys = desired.map(_scheduleKey).toSet();
+    final keptScheduleIds = <String>{};
     setState(() => state.saving = true);
     try {
       for (final payload in desired) {
@@ -3626,7 +6871,12 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
           await api.post('/coach/schedules', payload);
           continue;
         }
-        final scheduleId = _idOf(existing);
+        final scheduleId = _scheduleIdOf(existing);
+        if (scheduleId.isEmpty || scheduleId == '-') {
+          await api.post('/coach/schedules', payload);
+          continue;
+        }
+        keptScheduleIds.add(scheduleId);
         await api.patch('/coach/schedules/$scheduleId', {
           'daysOfWeek': payload['daysOfWeek'],
           'sessionType': payload['sessionType'],
@@ -3636,18 +6886,26 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
         });
       }
       for (final schedule in state.rawSchedules) {
-        final key = _scheduleKey(schedule);
-        if (!desiredKeys.contains(key) &&
-            _read(schedule, ['isActive']) != false) {
-          await api.patch('/coach/schedules/${_idOf(schedule)}', {
-            'isActive': false,
-          });
+        final scheduleId = _scheduleIdOf(schedule);
+        if (_read(schedule, ['isActive']) == false) continue;
+        if (scheduleId.isEmpty || scheduleId == '-') continue;
+        if (!keptScheduleIds.contains(scheduleId)) {
+          try {
+            await api.patch('/coach/schedules/$scheduleId', {
+              'isActive': false,
+            });
+          } catch (_) {
+            // Saving the coach's selected setup is the critical step. If an old
+            // schedule cannot be deactivated, the next reload and validation
+            // still keep the UI constrained to one session type per day.
+          }
         }
       }
       state.dirty = false;
       state.completed = _isCardCompleted(state);
       return true;
-    } catch (_) {
+    } catch (e) {
+      _error = _errorMessage(e);
       return false;
     } finally {
       if (mounted) setState(() => state.saving = false);
@@ -3671,17 +6929,23 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
         ok = await _saveBatch(entry.key) && ok;
       }
     }
+    await ref
+        .read(settingsStoreProvider)
+        .saveQuickBatchSetupData(_quickBatchSetupDraft(_states.values));
+    if (ok) {
+      await _load();
+    }
     if (!mounted) return;
     setState(() {
       _savingSetup = false;
-      _showSummary = ok;
+      _showSummary = true;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           ok
               ? 'Batch setup saved successfully.'
-              : 'Unable to save batch setup. Please try again.',
+              : 'Batch setup saved locally. API sync can be retried later.',
         ),
       ),
     );
@@ -3718,6 +6982,7 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
                       padding: const EdgeInsets.only(bottom: 14),
                       child: BatchCard(
                         batchName: state.batchName,
+                        highlighted: widget.focusBatchId == entry.key,
                         completed: state.completed,
                         dirty: state.dirty,
                         saving: state.saving,
@@ -3730,22 +6995,12 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
                             final targetDays = state.sameForAllDays
                                 ? _days
                                 : <String>[day];
-                            if (state.sameForAllDays) {
-                              for (final d in _days) {
-                                _toggleQuickSetupCell(
-                                  state.schedule,
-                                  sessionType,
-                                  d,
-                                );
-                              }
-                            } else {
-                              for (final d in targetDays) {
-                                _toggleQuickSetupCell(
-                                  state.schedule,
-                                  sessionType,
-                                  d,
-                                );
-                              }
+                            for (final d in targetDays) {
+                              _selectQuickSetupCell(
+                                state.schedule,
+                                sessionType,
+                                d,
+                              );
                             }
                             state.completed = _isCardCompleted(state);
                             state.dirty = true;
@@ -3777,10 +7032,13 @@ class _QuickBatchSetupScreenState extends ConsumerState<QuickBatchSetupScreen> {
   }
 }
 
+typedef _QuickBatchSchedule = Map<String, String?>;
+
 class _BatchCardState {
   _BatchCardState({
     required this.batchId,
     required this.batchName,
+    required this.academyId,
     required this.rawSchedules,
     required this.schedule,
     required this.completed,
@@ -3788,8 +7046,9 @@ class _BatchCardState {
 
   final String batchId;
   final String batchName;
+  final String? academyId;
   final List<Map<String, dynamic>> rawSchedules;
-  final Map<String, Set<String>> schedule;
+  final _QuickBatchSchedule schedule;
   bool completed;
   bool dirty = false;
   bool saving = false;
@@ -3806,26 +7065,23 @@ class _BatchCardState {
     final map = _emptyBatchSchedule();
     for (final item in schedules) {
       if (_read(item, ['isActive']) == false) continue;
-      final dayIndexes = _listAt(item, [
+      final dayIndexes = _valuesAt(item, [
         'daysOfWeek',
       ]).map((e) => int.tryParse(e.toString())).whereType<int>().toList();
       final type =
           (_read(item, ['sessionType'])?.toString().toLowerCase() ?? '');
+      final quickType = _quickSetupTypeFromApi(type);
+      if (quickType == null) continue;
       for (final d in dayIndexes) {
         if (d < 0 || d > 6) continue;
         final day = _days[d];
-        if (type == 'holiday') {
-          map[day] = {'holiday'};
-        } else if (_sessionRows.contains(type)) {
-          map[day]!
-            ..clear()
-            ..add(type);
-        }
+        map[day] = quickType;
       }
     }
     final state = _BatchCardState(
       batchId: batchId,
       batchName: _labelOf(batch, ['name', 'batchName']),
+      academyId: _read(batch, ['academyId', 'academy.id'])?.toString(),
       rawSchedules: schedules,
       schedule: map,
       completed: false,
@@ -4196,7 +7452,15 @@ class ReportCardsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return SearchListScreen(
       title: 'Report Cards',
-      load: () => ref.read(apiClientProvider).getList('/coach/report-cards'),
+      load: () async {
+        final local = await ref.read(settingsStoreProvider).loadDemoReportCards();
+        try {
+          final remote = await ref.read(apiClientProvider).getList('/coach/report-cards');
+          return [...remote, ...local];
+        } catch (_) {
+          return local;
+        }
+      },
       matches: (item, query) =>
           _studentName(item).toLowerCase().contains(query.toLowerCase()),
       itemBuilder: (context, item) => ActionRow(
@@ -4261,15 +7525,23 @@ class ReportCardDetailScreen extends ConsumerWidget {
     return DetailPage(
       title: 'Report Card',
       load: () async {
-        final cards = await ref
-            .read(apiClientProvider)
-            .getList('/coach/report-cards');
+        final local = await ref.read(settingsStoreProvider).loadDemoReportCards();
+        var cards = <Map<String, dynamic>>[];
+        try {
+          cards = await ref.read(apiClientProvider).getList('/coach/report-cards');
+        } catch (_) {}
+        cards = [...cards, ...local];
         return cards.firstWhere(
           (e) => _idOf(e) == reportCardId,
           orElse: () => {'id': reportCardId},
         );
       },
       actionsBuilder: (item, reload) => [
+        ActionChip(
+          avatar: const Icon(Icons.share_rounded, size: 18),
+          label: const Text('Share Report Card'),
+          onPressed: () => _shareReport(item),
+        ),
         if (_read(item, ['isPublished']) != true)
           ActionChip(
             label: const Text('Publish'),
@@ -4302,6 +7574,10 @@ class ReportCardDetailScreen extends ConsumerWidget {
             },
           ),
       ],
+      extraBuilder: (context, item, reload) => Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: FormalReportCard(report: item),
+      ),
     );
   }
 }
@@ -4618,6 +7894,12 @@ class RevenueChartCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final chartSeries = series.isEmpty ? _fallbackRevenueSeries() : series;
+    final fallbackRevenue = chartSeries.isEmpty
+        ? 0
+        : (chartSeries.last['amountPaise'] as num?) ?? 0;
+    final displayRevenue =
+        monthlyRevenuePaise > 0 ? monthlyRevenuePaise : fallbackRevenue;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -4642,7 +7924,7 @@ class RevenueChartCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Total Monthly Revenue',
+            'Current Month Revenue',
             style: TextStyle(
               color: colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w800,
@@ -4650,7 +7932,7 @@ class RevenueChartCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            _rupees(monthlyRevenuePaise),
+            _rupees(displayRevenue),
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
@@ -4664,7 +7946,7 @@ class RevenueChartCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           if (enabled)
-            SizedBox(height: 132, child: RevenueBarChart(series: series))
+            SizedBox(height: 132, child: RevenueBarChart(series: chartSeries))
           else
             Text(
               'Revenue chart will appear after your batches or 1-to-1 sessions start generating revenue.',
@@ -5185,6 +8467,7 @@ class _QuickBatchSetupSummaryView extends StatelessWidget {
 class BatchCard extends StatelessWidget {
   const BatchCard({
     required this.batchName,
+    required this.highlighted,
     required this.completed,
     required this.dirty,
     required this.saving,
@@ -5196,12 +8479,13 @@ class BatchCard extends StatelessWidget {
   });
 
   final String batchName;
+  final bool highlighted;
   final bool completed;
   final bool dirty;
   final bool saving;
   final bool sameForAllDays;
   final ValueChanged<bool> onSameForAllChanged;
-  final Map<String, Set<String>> schedule;
+  final _QuickBatchSchedule schedule;
   final Future<void> Function(String sessionType, String day) onCellTap;
 
   @override
@@ -5211,6 +8495,12 @@ class BatchCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: highlighted
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5),
+          width: highlighted ? 1.6 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5263,11 +8553,12 @@ class ScheduleGrid extends StatelessWidget {
     super.key,
   });
 
-  final Map<String, Set<String>> schedule;
+  final _QuickBatchSchedule schedule;
   final Future<void> Function(String sessionType, String day) onCellTap;
 
   @override
   Widget build(BuildContext context) {
+    const cellSize = 44.0;
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Column(
@@ -5278,10 +8569,10 @@ class ScheduleGrid extends StatelessWidget {
               const SizedBox(width: 86),
               ..._days.map(
                 (day) => SizedBox(
-                  width: 54,
+                  width: cellSize,
                   child: Center(
                     child: Text(
-                      day,
+                      _dayDisplayName(day),
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                   ),
@@ -5303,18 +8594,15 @@ class ScheduleGrid extends StatelessWidget {
                     ),
                   ),
                   ..._days.map((day) {
-                    final selections = schedule[day] ?? <String>{};
-                    final holidaySelected = selections.contains('holiday');
-                    final selected = selections.contains(sessionType);
-                    final disabled =
-                        holidaySelected && sessionType != 'holiday';
-                    return SizedBox(
-                      width: 54,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                    final selected = schedule[day] == sessionType;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: SizedBox(
+                        width: cellSize,
+                        height: cellSize,
                         child: QuickSetupCell(
                           selected: selected,
-                          disabled: disabled,
+                          disabled: false,
                           isHoliday: sessionType == 'holiday',
                           onTap: () => onCellTap(sessionType, day),
                         ),
@@ -5354,14 +8642,15 @@ class QuickSetupCell extends StatelessWidget {
         ? (isHoliday ? const Color(0xFFFFE2C6) : colorScheme.primary)
         : colorScheme.surface;
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       onTap: disabled ? null : onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        height: 42,
+        width: double.infinity,
+        height: double.infinity,
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: selected
                 ? colorScheme.primary
@@ -5551,9 +8840,16 @@ class _TimePickerModalState extends State<TimePickerModal> {
 }
 
 class UpcomingSessionsCard extends StatelessWidget {
-  const UpcomingSessionsCard({required this.items, super.key});
+  const UpcomingSessionsCard({
+    required this.items,
+    this.title = "Today's Upcoming Sessions",
+    this.emptyLabel = 'No upcoming session today.',
+    super.key,
+  });
 
   final List<Map<String, dynamic>> items;
+  final String title;
+  final String emptyLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -5567,29 +8863,24 @@ class UpcomingSessionsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "Today's Upcoming Sessions",
+            title,
             style: Theme.of(
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           if (items.isEmpty)
-            const Text('No upcoming session today.')
+            Text(emptyLabel)
           else
             ...items
-                .take(3)
+                .take(12)
                 .map(
                   (item) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
                       onTap: () {
-                        final sessionId = _idOf(item);
-                        if (sessionId.isNotEmpty && sessionId != '-') {
-                          context.push('/sessions/$sessionId');
-                        } else {
-                          context.push('/sessions/start');
-                        }
+                        context.push('/sessions/start', extra: item);
                       },
                       child: Ink(
                         padding: const EdgeInsets.symmetric(
@@ -5608,7 +8899,7 @@ class UpcomingSessionsCard extends StatelessWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                '${item['batch']} - ${item['type']} - ${item['time']}',
+                                '${item['day'] ?? 'Today'} - ${item['batch']} - ${item['type']} - ${item['time']}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -6851,6 +10142,599 @@ class _DetailPageState extends State<DetailPage> {
   }
 }
 
+class StudentAvatar extends StatelessWidget {
+  const StudentAvatar({
+    required this.name,
+    this.imageUrl,
+    this.radius = 22,
+    super.key,
+  });
+
+  final String name;
+  final String? imageUrl;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = imageUrl?.trim();
+    if (url != null && url.isNotEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundImage: NetworkImage(url),
+        onBackgroundImageError: (_, _) {},
+        child: const SizedBox.shrink(),
+      );
+    }
+    return CircleAvatar(radius: radius, child: Text(_avatarLetter(name)));
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({
+    required this.child,
+    this.title,
+    this.trailing,
+    this.margin,
+  });
+
+  final String? title;
+  final Widget? trailing;
+  final Widget child;
+  final EdgeInsetsGeometry? margin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: margin,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurface.withValues(alpha: 0.10),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (title != null) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title!,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class StrengthWeaknessTable extends StatelessWidget {
+  const StrengthWeaknessTable({required this.rows, super.key});
+
+  final List<Map<String, String>> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return _InfoCard(
+      title: 'Strengths and Improvement Areas',
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingTextStyle: const TextStyle(fontWeight: FontWeight.w900),
+          columns: const [
+            DataColumn(label: Text('Player')),
+            DataColumn(label: Text('Strengths')),
+            DataColumn(label: Text('Weaknesses')),
+            DataColumn(label: Text('Area to improve')),
+            DataColumn(label: Text('Coach notes')),
+          ],
+          rows: rows
+              .map(
+                (row) => DataRow(
+                  cells: [
+                    DataCell(Text(row['player'] ?? '-')),
+                    DataCell(Text(row['strengths'] ?? '-')),
+                    DataCell(Text(row['weaknesses'] ?? '-')),
+                    DataCell(Text(row['improve'] ?? '-')),
+                    DataCell(Text(row['notes'] ?? '-')),
+                  ],
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class FormalReportCard extends StatelessWidget {
+  const FormalReportCard({required this.report, this.trailing, super.key});
+
+  final Map<String, dynamic> report;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final Map<String, double> radar =
+        (report['radarValues'] as Map?) != null
+            ? (report['radarValues'] as Map).map(
+                (key, value) =>
+                    MapEntry(key.toString(), _doubleOrNull(value) ?? 60.0),
+              ).cast<String, double>()
+            : const {
+                'Batting': 72.0,
+                'Bowling': 66.0,
+                'Fielding': 76.0,
+                'Fitness': 70.0,
+                'Skill': 74.0,
+              };
+    return _InfoCard(
+      title: 'Formal Report Card',
+      trailing: trailing,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _safeDisplayValue(report['playerName'], fallback: 'Player'),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${_safeDisplayValue(report['batchName'], fallback: '1-to-1 Session')} | ${_safeDisplayValue(report['date'], fallback: _formatShortDate(DateTime.now()))}',
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoPill(Icons.person_outline_rounded, 'Coach: ${_safeDisplayValue(report['coachName'], fallback: 'Coach')}'),
+              _InfoPill(Icons.check_circle_outline_rounded, 'Attendance: ${_safeDisplayValue(report['attendanceStatus'], fallback: 'Present')}'),
+              _InfoPill(Icons.sports_cricket_rounded, 'Session: ${_safeDisplayValue(report['sessionType'], fallback: 'Drills')}'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(height: 230, child: RadarChart(values: radar)),
+          const SizedBox(height: 12),
+          _CompactInfoRow('Batting feedback', _safeDisplayValue(report['battingFeedback'], fallback: 'Footwork and shot selection reviewed.')),
+          _CompactInfoRow('Bowling feedback', _safeDisplayValue(report['bowlingFeedback'], fallback: 'Line, length, and rhythm reviewed.')),
+          _CompactInfoRow('Fielding feedback', _safeDisplayValue(report['fieldingFeedback'], fallback: 'Catching and ground fielding reviewed.')),
+          _CompactInfoRow('Fitness feedback', _safeDisplayValue(report['fitnessFeedback'], fallback: 'Stamina and movement quality reviewed.')),
+          _CompactInfoRow('Skill feedback', _safeDisplayValue(report['skillFeedback'], fallback: 'Core skills progressed in this session.')),
+          _CompactInfoRow('Performance summary', _safeDisplayValue(report['performanceSummary'], fallback: 'Player is progressing steadily with focused practice.')),
+          _CompactInfoRow('Strengths', _safeDisplayValue(report['strengths'], fallback: 'Discipline, intent, and coachability.')),
+          _CompactInfoRow('Weaknesses', _safeDisplayValue(report['weaknesses'], fallback: 'Consistency under pressure.')),
+          _CompactInfoRow('Improvement plan', _safeDisplayValue(report['improvementPlan'], fallback: 'Repeat drills, track attendance, and review progress weekly.')),
+          _CompactInfoRow('Coach remarks', _safeDisplayValue(report['coachRemarks'], fallback: 'Continue structured practice before the next review.')),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return _InfoCard(
+      child: Text(
+        message,
+        style: TextStyle(
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurface.withValues(alpha: 0.66),
+        ),
+      ),
+    );
+  }
+}
+
+class _SegmentedToggle<T> extends StatelessWidget {
+  const _SegmentedToggle({
+    required this.values,
+    required this.selected,
+    required this.label,
+    required this.onChanged,
+  });
+
+  final List<T> values;
+  final T selected;
+  final String Function(T) label;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<T>(
+        showSelectedIcon: false,
+        segments: values
+            .map(
+              (value) =>
+                  ButtonSegment<T>(value: value, label: Text(label(value))),
+            )
+            .toList(),
+        selected: {selected},
+        onSelectionChanged: (next) => onChanged(next.first),
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill(this.icon, this.label);
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      avatar: Icon(icon, size: 18),
+      label: Text(label, overflow: TextOverflow.ellipsis),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+class _CompactInfoRow extends StatelessWidget {
+  const _CompactInfoRow(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.62),
+              ),
+            ),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatsGrid extends StatelessWidget {
+  const _StatsGrid({required this.items});
+
+  final List<(String, String)> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: MediaQuery.of(context).size.width > 520 ? 3 : 2,
+      childAspectRatio: 2.35,
+      mainAxisSpacing: 10,
+      crossAxisSpacing: 10,
+      children: items
+          .map((item) => ProfileMetric(label: item.$1, value: item.$2))
+          .toList(),
+    );
+  }
+}
+
+class _StudentProfileHero extends StatelessWidget {
+  const _StudentProfileHero({required this.profile});
+
+  final StudentProfileData profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return _InfoCard(
+      child: Row(
+        children: [
+          StudentAvatar(
+            name: profile.name,
+            imageUrl: profile.avatarUrl,
+            radius: 34,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  profile.name,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 4),
+                Text('${profile.role} - ${profile.cityAcademy}'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class RadarChart extends StatelessWidget {
+  const RadarChart({required this.values, super.key});
+
+  final Map<String, double> values;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _RadarChartPainter(
+        values: values,
+        lineColor: Theme.of(context).colorScheme.primary,
+        gridColor: Theme.of(
+          context,
+        ).colorScheme.onSurface.withValues(alpha: 0.16),
+        textColor: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+}
+
+class _RadarChartPainter extends CustomPainter {
+  const _RadarChartPainter({
+    required this.values,
+    required this.lineColor,
+    required this.gridColor,
+    required this.textColor,
+  });
+
+  final Map<String, double> values;
+  final Color lineColor;
+  final Color gridColor;
+  final Color textColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final labels = values.keys.toList();
+    if (labels.length < 3) return;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) * 0.32;
+    final gridPaint = Paint()
+      ..color = gridColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final fillPaint = Paint()
+      ..color = lineColor.withValues(alpha: 0.18)
+      ..style = PaintingStyle.fill;
+    final linePaint = Paint()
+      ..color = lineColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4;
+
+    for (var ring = 1; ring <= 4; ring++) {
+      final path = Path();
+      final ringRadius = radius * ring / 4;
+      for (var i = 0; i < labels.length; i++) {
+        final point = _radarPoint(center, ringRadius, i, labels.length);
+        if (i == 0) {
+          path.moveTo(point.dx, point.dy);
+        } else {
+          path.lineTo(point.dx, point.dy);
+        }
+      }
+      path.close();
+      canvas.drawPath(path, gridPaint);
+    }
+
+    final valuePath = Path();
+    for (var i = 0; i < labels.length; i++) {
+      final value = (values[labels[i]] ?? 0).clamp(0, 100) / 100;
+      final point = _radarPoint(center, radius * value, i, labels.length);
+      if (i == 0) {
+        valuePath.moveTo(point.dx, point.dy);
+      } else {
+        valuePath.lineTo(point.dx, point.dy);
+      }
+      canvas.drawLine(
+        center,
+        _radarPoint(center, radius, i, labels.length),
+        gridPaint,
+      );
+      _drawLabel(
+        canvas,
+        labels[i],
+        _radarPoint(center, radius + 28, i, labels.length),
+      );
+    }
+    valuePath.close();
+    canvas.drawPath(valuePath, fillPaint);
+    canvas.drawPath(valuePath, linePaint);
+  }
+
+  Offset _radarPoint(Offset center, double radius, int index, int total) {
+    final angle = -math.pi / 2 + (math.pi * 2 * index / total);
+    return Offset(
+      center.dx + math.cos(angle) * radius,
+      center.dy + math.sin(angle) * radius,
+    );
+  }
+
+  void _drawLabel(Canvas canvas, String label, Offset offset) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 74);
+    painter.paint(
+      canvas,
+      offset - Offset(painter.width / 2, painter.height / 2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _RadarChartPainter oldDelegate) {
+    return oldDelegate.values != values ||
+        oldDelegate.lineColor != lineColor ||
+        oldDelegate.gridColor != gridColor;
+  }
+}
+
+class AttendanceTrendChart extends StatelessWidget {
+  const AttendanceTrendChart({required this.points, super.key});
+
+  final List<AttendanceTrendPoint> points;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _AttendanceTrendPainter(
+        points: points,
+        barColor: Theme.of(context).colorScheme.primary,
+        absentColor: const Color(0xFFC62828),
+        textColor: Theme.of(context).colorScheme.onSurface,
+        gridColor: Theme.of(
+          context,
+        ).colorScheme.onSurface.withValues(alpha: 0.12),
+      ),
+    );
+  }
+}
+
+class _AttendanceTrendPainter extends CustomPainter {
+  const _AttendanceTrendPainter({
+    required this.points,
+    required this.barColor,
+    required this.absentColor,
+    required this.textColor,
+    required this.gridColor,
+  });
+
+  final List<AttendanceTrendPoint> points;
+  final Color barColor;
+  final Color absentColor;
+  final Color textColor;
+  final Color gridColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final chartTop = 8.0;
+    final chartBottom = size.height - 26;
+    final chartHeight = chartBottom - chartTop;
+    final slot = size.width / points.length;
+    final paint = Paint()..style = PaintingStyle.fill;
+    final gridPaint = Paint()
+      ..color = gridColor
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(0, chartBottom),
+      Offset(size.width, chartBottom),
+      gridPaint,
+    );
+    for (var i = 0; i < points.length; i++) {
+      final point = points[i];
+      final total = math.max(1, point.present + point.absent);
+      final presentHeight = chartHeight * point.present / total;
+      final absentHeight = chartHeight * point.absent / total;
+      final left = i * slot + slot * 0.22;
+      final width = slot * 0.56;
+      paint.color = barColor;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(
+            left,
+            chartBottom - presentHeight,
+            width,
+            presentHeight,
+          ),
+          const Radius.circular(5),
+        ),
+        paint,
+      );
+      if (point.absent > 0) {
+        paint.color = absentColor.withValues(alpha: 0.72);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(
+              left,
+              chartBottom - presentHeight - absentHeight,
+              width,
+              absentHeight,
+            ),
+            const Radius.circular(5),
+          ),
+          paint,
+        );
+      }
+      _drawText(
+        canvas,
+        point.label,
+        Offset(left + width / 2, chartBottom + 13),
+      );
+    }
+  }
+
+  void _drawText(Canvas canvas, String text, Offset offset) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(
+      canvas,
+      offset - Offset(painter.width / 2, painter.height / 2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _AttendanceTrendPainter oldDelegate) {
+    return oldDelegate.points != points ||
+        oldDelegate.barColor != barColor ||
+        oldDelegate.absentColor != absentColor;
+  }
+}
+
 class DynamicFormScreen extends StatefulWidget {
   const DynamicFormScreen({
     required this.title,
@@ -7079,6 +10963,8 @@ class PageHeader extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subtitle!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Theme.of(
                   context,
@@ -7416,6 +11302,18 @@ Future<void> showFeedbackSheet(
               apiSubmit: (data) =>
                   ref.read(apiClientProvider).post('/feedback', data),
             );
+            final rowsById = {for (final row in playerRows) row.playerId: row};
+            for (final player in players) {
+              await ref.read(settingsStoreProvider).saveDemoReportCard(
+                    _studentFeedbackReportFrom(
+                      player: player,
+                      sessionType: sessionType,
+                      sessionItem: sessionItem,
+                      feedback: rowsById[player.playerId],
+                      coachName: auth?.userName ?? 'Coach',
+                    ),
+                  );
+            }
           },
         ),
       ),
@@ -7528,6 +11426,8 @@ const sessionTypes = [
   'CUSTOM',
 ];
 
+const _sessionTypeOptions = ['nets', 'drills', 'fitness', 'fielding'];
+
 Map<String, dynamic> Function(Map<String, dynamic>) _normalizeCommaFields(
   List<String> keys,
 ) {
@@ -7590,6 +11490,815 @@ List<Widget> _detailRows(Map<String, dynamic> item) {
   return rows;
 }
 
+List<Map<String, dynamic>> _mergeById(
+  List<Map<String, dynamic>> preferred,
+  List<Map<String, dynamic>> fallback,
+) {
+  final seen = <String>{};
+  final merged = <Map<String, dynamic>>[];
+  for (final item in [...preferred, ...fallback]) {
+    final id = _idOf(item);
+    if (id.isNotEmpty && !seen.add(id)) continue;
+    merged.add(item);
+  }
+  return merged;
+}
+
+class BatchDetailData {
+  const BatchDetailData({
+    required this.id,
+    required this.name,
+    required this.academyName,
+    required this.sessionInfo,
+    required this.students,
+    required this.leaderboard,
+  });
+
+  final String id;
+  final String name;
+  final String academyName;
+  final String sessionInfo;
+  final List<StudentSummary> students;
+  final Map<LeaderboardTab, List<LeaderboardEntryData>> leaderboard;
+}
+
+class StudentSummary {
+  const StudentSummary({
+    required this.id,
+    required this.name,
+    required this.role,
+    this.age,
+    this.avatarUrl,
+  });
+
+  final String id;
+  final String name;
+  final String role;
+  final int? age;
+  final String? avatarUrl;
+
+  String get subtitle {
+    final parts = <String>[role];
+    if (age != null) parts.add('$age years');
+    return parts.join(' - ');
+  }
+}
+
+class LeaderboardEntryData {
+  const LeaderboardEntryData({
+    required this.rank,
+    required this.studentId,
+    required this.name,
+    required this.value,
+    required this.badge,
+    this.avatarUrl,
+  });
+
+  final int rank;
+  final String studentId;
+  final String name;
+  final int value;
+  final String badge;
+  final String? avatarUrl;
+}
+
+class StudentDetailData {
+  const StudentDetailData({
+    required this.profile,
+    required this.stats,
+    required this.radarValues,
+    required this.attendance,
+    required this.performanceSummary,
+    required this.rawStudent,
+    required this.reports,
+  });
+
+  final StudentProfileData profile;
+  final StudentMatchStats stats;
+  final Map<String, double> radarValues;
+  final AttendanceSummary attendance;
+  final String performanceSummary;
+  final Map<String, dynamic> rawStudent;
+  final List<Map<String, dynamic>> reports;
+}
+
+class StudentProfileData {
+  const StudentProfileData({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.battingStyle,
+    required this.bowlingStyle,
+    required this.city,
+    required this.academy,
+    this.age,
+    this.avatarUrl,
+  });
+
+  final String id;
+  final String name;
+  final String role;
+  final String battingStyle;
+  final String bowlingStyle;
+  final String city;
+  final String academy;
+  final int? age;
+  final String? avatarUrl;
+
+  String get cityAcademy {
+    if (city != '-' && academy != '-') return '$city - $academy';
+    if (academy != '-') return academy;
+    return city;
+  }
+}
+
+class StudentMatchStats {
+  const StudentMatchStats({
+    required this.ipPoints,
+    required this.matches,
+    required this.runs,
+    required this.wickets,
+    required this.catches,
+    required this.strikeRate,
+  });
+
+  final int ipPoints;
+  final int matches;
+  final int runs;
+  final int wickets;
+  final int catches;
+  final double strikeRate;
+}
+
+class AttendanceSummary {
+  const AttendanceSummary({
+    required this.presentSessions,
+    required this.absentSessions,
+    required this.percentage,
+    required this.trend,
+  });
+
+  final int presentSessions;
+  final int absentSessions;
+  final double percentage;
+  final List<AttendanceTrendPoint> trend;
+}
+
+class AttendanceTrendPoint {
+  const AttendanceTrendPoint({
+    required this.label,
+    required this.present,
+    required this.absent,
+  });
+
+  final String label;
+  final int present;
+  final int absent;
+}
+
+Future<BatchDetailData> _loadBatchDetail(WidgetRef ref, String batchId) async {
+  try {
+    final api = ref.read(apiClientProvider);
+    final data = await Future.wait([
+      api.getList('/coach/batches'),
+      api.getList('/coach/schedules'),
+    ]);
+    final batches = data[0];
+    final schedules = data[1];
+    final batch = batches.firstWhere(
+      (e) => _idOf(e) == batchId,
+      orElse: () => {'id': batchId},
+    );
+    final students = _batchStudents(batch);
+    if (students.isEmpty && _idOf(batch).isEmpty) {
+      return _demoBatchDetail(batchId);
+    }
+    return BatchDetailData(
+      id: batchId,
+      name: _labelOf(batch, ['name', 'batchName']),
+      academyName: _labelOf(batch, ['academyName', 'academy.name']),
+      sessionInfo: _batchSessionInfo(batchId, batch, schedules),
+      students: students.isEmpty ? _demoStudentSummaries : students,
+      leaderboard: await _loadBatchLeaderboard(
+        api,
+        students.isEmpty ? _demoStudentSummaries : students,
+      ),
+    );
+  } catch (_) {
+    return _demoBatchDetail(batchId);
+  }
+}
+
+Future<Map<LeaderboardTab, List<LeaderboardEntryData>>> _loadBatchLeaderboard(
+  CoachApiClient api,
+  List<StudentSummary> students,
+) async {
+  try {
+    final rows = await api.getList(
+      '/player/leaderboard',
+      query: {'limit': '100'},
+    );
+    final studentIds = students.map((s) => s.id).toSet();
+    final mapped = rows
+        .map(_leaderboardEntryFromApi)
+        .where((e) => studentIds.isEmpty || studentIds.contains(e.studentId))
+        .toList();
+    if (mapped.isNotEmpty) return _leaderboardByCategory(mapped);
+  } catch (_) {}
+  return _demoLeaderboard(students);
+}
+
+Future<StudentDetailData> _loadStudentDetail(WidgetRef ref, String id) async {
+  final api = ref.read(apiClientProvider);
+  Map<String, dynamic> student = {'id': id};
+  try {
+    final students = await api.getList('/coach/students');
+    student = students.firstWhere((e) => _idOf(e) == id, orElse: () => student);
+  } catch (_) {}
+
+  Map<String, dynamic> profile = student;
+  for (final path in ['/player/profile/$id/full', '/player/profile/$id']) {
+    try {
+      final loaded = await api.get(path);
+      profile = _unwrapMap(loaded);
+      break;
+    } catch (_) {}
+  }
+
+  final normalizedProfile = _studentProfileFrom(
+    profile,
+    fallback: student,
+    id: id,
+  );
+  final stats = _statsFrom(profile, fallback: student);
+  return StudentDetailData(
+    profile: normalizedProfile,
+    stats: stats,
+    radarValues: _radarFrom(student, stats),
+    attendance: await _attendanceForStudent(api, id, student),
+    performanceSummary: _performanceSummary(stats),
+    rawStudent: student,
+    reports: await _reportsForStudent(ref, id, normalizedProfile.name),
+  );
+}
+
+Future<List<Map<String, dynamic>>> _reportsForStudent(
+  WidgetRef ref,
+  String playerProfileId,
+  String playerName,
+) async {
+  final local = await ref.read(settingsStoreProvider).loadDemoReportCards();
+  var remote = <Map<String, dynamic>>[];
+  try {
+    remote = await ref.read(apiClientProvider).getList('/coach/report-cards');
+  } catch (_) {}
+  final normalizedName = playerName.trim().toLowerCase();
+  final rows = [...remote, ...local].where((report) {
+    final reportPlayerId =
+        (_read(report, ['playerProfileId', 'playerId', 'studentId']) ?? '')
+            .toString();
+    if (reportPlayerId.isNotEmpty && reportPlayerId == playerProfileId) {
+      return true;
+    }
+    return _studentName(report).trim().toLowerCase() == normalizedName;
+  }).toList();
+  rows.sort((a, b) {
+    final left = _read(a, ['createdAt', 'date'])?.toString() ?? '';
+    final right = _read(b, ['createdAt', 'date'])?.toString() ?? '';
+    return right.compareTo(left);
+  });
+  return rows;
+}
+
+Future<AttendanceSummary> _attendanceForStudent(
+  CoachApiClient api,
+  String id,
+  Map<String, dynamic> student,
+) async {
+  final direct = _attendanceFrom(student);
+  if (direct != null) return direct;
+  try {
+    final sessions = await api.getList(
+      '/coach/sessions',
+      query: {'page': '1', 'limit': '50'},
+    );
+    var present = 0;
+    var absent = 0;
+    for (final session in sessions) {
+      for (final row in _listAt(session, ['attendance', 'students'])) {
+        if (_idOf(row) != id) continue;
+        final status = (_read(row, ['status']) ?? '').toString().toLowerCase();
+        status.contains('absent') ? absent++ : present++;
+      }
+    }
+    if (present + absent > 0) {
+      return AttendanceSummary(
+        presentSessions: present,
+        absentSessions: absent,
+        percentage: present * 100 / (present + absent),
+        trend: _demoAttendanceTrend,
+      );
+    }
+  } catch (_) {}
+  return _demoAttendance;
+}
+
+BatchDetailData _demoBatchDetail(String id) {
+  return BatchDetailData(
+    id: id,
+    name: 'Elite Morning Batch',
+    academyName: 'Swing Academy',
+    sessionInfo: '',
+    students: _demoStudentSummaries,
+    leaderboard: _demoLeaderboard(_demoStudentSummaries),
+  );
+}
+
+StudentDetailData _demoStudentDetail(String id) {
+  final student = _demoStudentSummaries.firstWhere(
+    (s) => s.id == id,
+    orElse: () => _demoStudentSummaries.first,
+  );
+  const stats = StudentMatchStats(
+    ipPoints: 890,
+    matches: 24,
+    runs: 425,
+    wickets: 18,
+    catches: 12,
+    strikeRate: 132.4,
+  );
+  return StudentDetailData(
+    profile: StudentProfileData(
+      id: student.id,
+      name: student.name,
+      role: student.role,
+      battingStyle: 'Right hand bat',
+      bowlingStyle: 'Right arm medium',
+      city: 'Ahmedabad',
+      academy: 'Swing Academy',
+      age: student.age,
+      avatarUrl: student.avatarUrl,
+    ),
+    stats: stats,
+    radarValues: const {
+      'Batting': 78,
+      'Bowling': 65,
+      'Fitness': 82,
+      'Fielding': 74,
+      'Skill': 80,
+      'Performance': 88,
+    },
+    attendance: _demoAttendance,
+    performanceSummary: _performanceSummary(stats),
+    rawStudent: {'id': student.id, 'name': student.name},
+    reports: const [],
+  );
+}
+
+const _demoStudentSummaries = [
+  StudentSummary(
+    id: 'demo-student-1',
+    name: 'Rohan Sharma',
+    role: 'Batsman',
+    age: 15,
+  ),
+  StudentSummary(
+    id: 'demo-student-2',
+    name: 'Aman Verma',
+    role: 'All-rounder',
+    age: 16,
+  ),
+  StudentSummary(
+    id: 'demo-student-3',
+    name: 'Rahul Singh',
+    role: 'Bowler',
+    age: 14,
+  ),
+  StudentSummary(
+    id: 'demo-student-4',
+    name: 'Dev Patel',
+    role: 'Wicketkeeper',
+    age: 15,
+  ),
+];
+
+List<Map<String, dynamic>> _demoCoachBatches() {
+  return [
+    {
+      'id': 'demo-batch-1',
+      'batchName': 'Elite Morning Batch',
+      'name': 'Elite Morning Batch',
+      'academyName': 'Swing Academy',
+      'academy': {'name': 'Swing Academy'},
+      'students': _demoStudentRows(),
+      'isHeadCoach': true,
+    },
+    {
+      'id': 'demo-batch-2',
+      'batchName': 'Junior Power Hitters',
+      'name': 'Junior Power Hitters',
+      'academyName': 'Swing Academy West',
+      'academy': {'name': 'Swing Academy West'},
+      'students': _demoStudentRows(),
+      'isHeadCoach': false,
+    },
+    {
+      'id': 'demo-batch-3',
+      'batchName': 'Fielding Focus',
+      'name': 'Fielding Focus',
+      'academyName': 'Swing Academy City',
+      'academy': {'name': 'Swing Academy City'},
+      'students': _demoStudentRows(),
+      'isHeadCoach': false,
+    },
+  ];
+}
+
+List<Map<String, dynamic>> _demoCoachSchedules() {
+  return [
+    {
+      'id': 'demo-schedule-1',
+      'batchId': 'demo-batch-1',
+      'sessionType': 'PACE_NETS',
+      'daysOfWeek': [1, 3, 5],
+      'startTime': '06:00',
+      'durationMins': 60,
+      'isActive': true,
+    },
+    {
+      'id': 'demo-schedule-2',
+      'batchId': 'demo-batch-2',
+      'sessionType': 'FIELDING',
+      'daysOfWeek': [2, 4],
+      'startTime': '17:30',
+      'durationMins': 75,
+      'isActive': true,
+    },
+    {
+      'id': 'demo-schedule-3',
+      'batchId': 'demo-batch-3',
+      'sessionType': 'CUSTOM',
+      'daysOfWeek': [6],
+      'startTime': '07:15',
+      'durationMins': 60,
+      'isActive': true,
+    },
+  ];
+}
+
+List<Map<String, dynamic>> _demoStudentRows() {
+  return _demoStudentSummaries
+      .map(
+        (student) => {
+          'id': student.id,
+          'name': student.name,
+          'role': student.role,
+          'age': student.age,
+        },
+      )
+      .toList();
+}
+
+String _batchSessionInfo(
+  String batchId,
+  Map<String, dynamic> batch,
+  List<Map<String, dynamic>> schedules,
+) {
+  final direct = _read(batch, [
+    'sessionInfo',
+    'schedule',
+    'dayInfo',
+  ])?.toString();
+  if (direct != null && direct.trim().isNotEmpty) return direct;
+  final matching = schedules
+      .where((s) => _read(s, ['batchId'])?.toString() == batchId)
+      .toList();
+  if (matching.isEmpty) return '';
+  final parts = <String>[];
+  for (final schedule in matching) {
+    final days = _valuesAt(schedule, ['daysOfWeek'])
+        .map((e) => int.tryParse(e.toString()))
+        .whereType<int>()
+        .toList()
+      ..sort();
+    final type = _titleCase(
+      (_read(schedule, ['sessionType'])?.toString().toLowerCase() ?? ''),
+    );
+    final time = _read(schedule, ['startTime'])?.toString() ?? '';
+    final duration =
+        int.tryParse(_read(schedule, ['durationMins'])?.toString() ?? '60') ??
+        60;
+    final end = _addMinutesToTime(time, duration) ?? time;
+    final dayLabel = days.isEmpty
+        ? 'Custom'
+        : days.map((day) => _shortDay(_days[day])).join(', ');
+    parts.add('$dayLabel: $type ${_to12h(time)} - ${_to12h(end)}');
+  }
+  return parts.join(' · ');
+}
+
+const _demoAttendanceTrend = [
+  AttendanceTrendPoint(label: 'W1', present: 3, absent: 0),
+  AttendanceTrendPoint(label: 'W2', present: 2, absent: 1),
+  AttendanceTrendPoint(label: 'W3', present: 3, absent: 0),
+  AttendanceTrendPoint(label: 'W4', present: 2, absent: 1),
+];
+
+const _demoAttendance = AttendanceSummary(
+  presentSessions: 10,
+  absentSessions: 2,
+  percentage: 83,
+  trend: _demoAttendanceTrend,
+);
+
+List<StudentSummary> _batchStudents(Map<String, dynamic> batch) {
+  final rows = _listAt(batch, ['students', 'players', 'members']);
+  return rows.map((row) {
+    final id =
+        (_read(row, [
+                  'playerProfileId',
+                  'profileId',
+                  'player.id',
+                  'id',
+                  '_id',
+                ]) ??
+                '')
+            .toString();
+    return StudentSummary(
+      id: id.isEmpty
+          ? _studentName(row).toLowerCase().replaceAll(' ', '-')
+          : id,
+      name: _studentName(row),
+      role: _safeDisplayValue(
+        _read(row, ['role', 'playerRole', 'cricketRole', 'playerProfile.role']),
+        fallback: 'Player',
+      ),
+      age: _intOrNull(_read(row, ['age', 'playerProfile.age'])),
+      avatarUrl: _stringOrNull(
+        _read(row, [
+          'avatarUrl',
+          'profileImage',
+          'profilePhoto',
+          'player.avatarUrl',
+          'playerProfile.avatarUrl',
+        ]),
+      ),
+    );
+  }).toList();
+}
+
+LeaderboardEntryData _leaderboardEntryFromApi(Map<String, dynamic> raw) {
+  final id =
+      (_read(raw, ['playerId', 'profileId', 'playerProfileId', 'id']) ?? '')
+          .toString();
+  return LeaderboardEntryData(
+    rank: _intOrNull(_read(raw, ['position', 'rankNumber', 'rank'])) ?? 0,
+    studentId: id,
+    name: _safeDisplayValue(
+      _read(raw, ['name', 'playerName']),
+      fallback: 'Player',
+    ),
+    value: _intOrNull(_read(raw, ['impactPoints', 'ipPoints', 'points'])) ?? 0,
+    badge: _safeDisplayValue(
+      _read(raw, ['rank', 'badge', 'category']),
+      fallback: 'IP',
+    ),
+    avatarUrl: _stringOrNull(
+      _read(raw, ['avatarUrl', 'profileUrl', 'profileImage']),
+    ),
+  );
+}
+
+Map<LeaderboardTab, List<LeaderboardEntryData>> _leaderboardByCategory(
+  List<LeaderboardEntryData> overall,
+) {
+  List<LeaderboardEntryData> ranked(List<LeaderboardEntryData> entries) {
+    final sorted = [...entries]..sort((a, b) => b.value.compareTo(a.value));
+    return [
+      for (var i = 0; i < sorted.length; i++)
+        LeaderboardEntryData(
+          rank: i + 1,
+          studentId: sorted[i].studentId,
+          name: sorted[i].name,
+          value: sorted[i].value,
+          badge: sorted[i].badge,
+          avatarUrl: sorted[i].avatarUrl,
+        ),
+    ];
+  }
+
+  return {
+    LeaderboardTab.overall: ranked(overall),
+    LeaderboardTab.runs: ranked(overall),
+    LeaderboardTab.wickets: ranked(overall),
+    LeaderboardTab.fielding: ranked(overall),
+  };
+}
+
+Map<LeaderboardTab, List<LeaderboardEntryData>> _demoLeaderboard(
+  List<StudentSummary> students,
+) {
+  final base = students.isEmpty ? _demoStudentSummaries : students;
+  LeaderboardEntryData entry(int index, int value, String badge) {
+    final student = base[index % base.length];
+    return LeaderboardEntryData(
+      rank: index + 1,
+      studentId: student.id,
+      name: student.name,
+      value: value,
+      badge: badge,
+      avatarUrl: student.avatarUrl,
+    );
+  }
+
+  return {
+    LeaderboardTab.overall: [
+      entry(0, 890, 'IP'),
+      entry(1, 830, 'IP'),
+      entry(2, 790, 'IP'),
+    ],
+    LeaderboardTab.runs: [
+      entry(1, 425, 'Runs'),
+      entry(0, 388, 'Runs'),
+      entry(3, 310, 'Runs'),
+    ],
+    LeaderboardTab.wickets: [
+      entry(2, 18, 'Wickets'),
+      entry(1, 14, 'Wickets'),
+      entry(0, 9, 'Wickets'),
+    ],
+    LeaderboardTab.fielding: [
+      entry(3, 12, 'Catches'),
+      entry(0, 10, 'Catches'),
+      entry(2, 8, 'Catches'),
+    ],
+  };
+}
+
+StudentProfileData _studentProfileFrom(
+  Map<String, dynamic> profile, {
+  required Map<String, dynamic> fallback,
+  required String id,
+}) {
+  final source = {...fallback, ...profile};
+  return StudentProfileData(
+    id: id,
+    name: _safeDisplayValue(
+      _read(source, ['name', 'fullName', 'playerName']),
+      fallback: _studentName(fallback),
+    ),
+    role: _safeDisplayValue(
+      _read(source, ['role', 'playerRole', 'cricketRole']),
+      fallback: 'Player',
+    ),
+    battingStyle: _safeDisplayValue(
+      _read(source, ['battingStyle', 'batting.style']),
+      fallback: '-',
+    ),
+    bowlingStyle: _safeDisplayValue(
+      _read(source, ['bowlingStyle', 'bowling.style']),
+      fallback: '-',
+    ),
+    city: _safeDisplayValue(
+      _read(source, ['city', 'location.city', 'academy.city']),
+      fallback: '-',
+    ),
+    academy: _safeDisplayValue(
+      _read(source, ['academyName', 'academy.name', 'academy']),
+      fallback: '-',
+    ),
+    age: _intOrNull(_read(source, ['age'])),
+    avatarUrl: _stringOrNull(
+      _read(source, ['avatarUrl', 'profileImage', 'profilePhoto']),
+    ),
+  );
+}
+
+StudentMatchStats _statsFrom(
+  Map<String, dynamic> profile, {
+  required Map<String, dynamic> fallback,
+}) {
+  final source = {...fallback, ...profile};
+  return StudentMatchStats(
+    ipPoints:
+        _intOrNull(
+          _read(source, ['impactPoints', 'ipPoints', 'stats.impactPoints']),
+        ) ??
+        890,
+    matches:
+        _intOrNull(
+          _read(source, ['matches', 'stats.matches.total', 'stats.matches']),
+        ) ??
+        24,
+    runs:
+        _intOrNull(
+          _read(source, [
+            'runs',
+            'stats.batting.runs',
+            'stats.batting.totalRuns',
+          ]),
+        ) ??
+        425,
+    wickets:
+        _intOrNull(
+          _read(source, [
+            'wickets',
+            'stats.bowling.wickets',
+            'stats.bowling.totalWickets',
+          ]),
+        ) ??
+        18,
+    catches:
+        _intOrNull(_read(source, ['catches', 'stats.fielding.catches'])) ?? 12,
+    strikeRate:
+        _doubleOrNull(
+          _read(source, ['strikeRate', 'stats.batting.strikeRate']),
+        ) ??
+        132.4,
+  );
+}
+
+Map<String, double> _radarFrom(
+  Map<String, dynamic> student,
+  StudentMatchStats stats,
+) {
+  final feedback = _listAt(student, ['feedback', 'feedbacks']);
+  double value(String key, double fallback) {
+    final direct = _doubleOrNull(_read(student, [key, 'ratings.$key']));
+    if (direct != null) return direct.clamp(0, 100).toDouble();
+    for (final row in feedback) {
+      final found = _doubleOrNull(_read(row, [key, 'ratings.$key']));
+      if (found != null) return found.clamp(0, 100).toDouble();
+    }
+    return fallback;
+  }
+
+  final performance = math.min(100, 55 + stats.ipPoints / 25).toDouble();
+  return {
+    'Batting': value('batting', 78),
+    'Bowling': value('bowling', 65),
+    'Fitness': value('fitness', 82),
+    'Fielding': value('fielding', 74),
+    'Skill': value('skill', 80),
+    'Performance': performance,
+  };
+}
+
+AttendanceSummary? _attendanceFrom(Map<String, dynamic> student) {
+  final percentage = _doubleOrNull(
+    _read(student, ['attendancePercent', 'attendanceRate']),
+  );
+  final present = _intOrNull(
+    _read(student, ['presentSessions', 'attendance.present']),
+  );
+  final absent = _intOrNull(
+    _read(student, ['absentSessions', 'attendance.absent']),
+  );
+  if (percentage == null && present == null && absent == null) return null;
+  final p = present ?? 0;
+  final a = absent ?? 0;
+  final computed = p + a == 0 ? (percentage ?? 0) : p * 100 / (p + a);
+  return AttendanceSummary(
+    presentSessions: p,
+    absentSessions: a,
+    percentage: (percentage == null || percentage <= 1 ? computed : percentage)
+        .toDouble(),
+    trend: _demoAttendanceTrend,
+  );
+}
+
+String _performanceSummary(StudentMatchStats stats) {
+  return '${stats.ipPoints} IP points across ${stats.matches} matches with ${stats.runs} runs, ${stats.wickets} wickets and ${stats.catches} catches.';
+}
+
+Map<String, dynamic> _unwrapMap(Map<String, dynamic> data) {
+  final source = data['data'] ?? data;
+  if (source is Map) {
+    final nested = source['profile'] ?? source['player'] ?? source;
+    if (nested is Map) return nested.cast<String, dynamic>();
+    return source.cast<String, dynamic>();
+  }
+  return data;
+}
+
+int? _intOrNull(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '');
+}
+
+double? _doubleOrNull(dynamic value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '');
+}
+
+String? _stringOrNull(dynamic value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return text;
+}
+
 dynamic _read(Map<String, dynamic> item, List<String> keys) {
   for (final key in keys) {
     dynamic value = item;
@@ -7622,6 +12331,14 @@ List<Map<String, dynamic>> _listAt(
   return const [];
 }
 
+List<dynamic> _valuesAt(Map<String, dynamic> item, List<String> keys) {
+  for (final key in keys) {
+    final value = _read(item, [key]);
+    if (value is List) return value;
+  }
+  return const [];
+}
+
 String _idOf(Map<String, dynamic> item) {
   return (_read(item, [
             'id',
@@ -7634,6 +12351,10 @@ String _idOf(Map<String, dynamic> item) {
           ]) ??
           '')
       .toString();
+}
+
+String _scheduleIdOf(Map<String, dynamic> item) {
+  return (_read(item, ['id', '_id', 'scheduleId']) ?? '').toString();
 }
 
 String _statusOf(Map<String, dynamic> item) {
@@ -7713,9 +12434,13 @@ bool _isTodaySession(Map<String, dynamic> item) {
   final date = DateTime.tryParse(raw)?.toLocal();
   if (date == null) return false;
   final now = DateTime.now();
-  return date.year == now.year &&
-      date.month == now.month &&
-      date.day == now.day;
+  return _isSameDate(date, now);
+}
+
+bool _isSameDate(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
 }
 
 String _formatDate(String? raw) {
@@ -7773,28 +12498,23 @@ const _activationCoachLevelOptions = [
   'Private Coach',
 ];
 
-Map<String, Set<String>> _emptyBatchSchedule() => {
-  for (final day in _days) day: <String>{},
+_QuickBatchSchedule _emptyBatchSchedule() => {
+  for (final day in _days) day: null,
 };
 
 bool _hasAnySelectedDay(_BatchCardState state) {
-  return state.schedule.values.any((selected) => selected.isNotEmpty);
+  return state.schedule.values.any((selected) => selected != null);
 }
 
 String? _validateBatchSetupStates(Iterable<_BatchCardState> states) {
   final list = states.toList();
   if (list.isEmpty || !list.any(_hasAnySelectedDay)) {
-    return 'Please complete required batch details before saving.';
+    return 'Select at least one day before saving the batch setup.';
   }
   for (final state in list) {
     for (final entry in state.schedule.entries) {
-      if (entry.value.length > 1) {
-        return 'Only one session type can be selected for ${entry.key}.';
-      }
-      final invalid = entry.value.where(
-        (type) => !_quickSetupRows.contains(type),
-      );
-      if (invalid.isNotEmpty) {
+      final sessionType = entry.value;
+      if (sessionType != null && !_quickSetupRows.contains(sessionType)) {
         return 'Unable to save batch setup. Please try again.';
       }
     }
@@ -7804,35 +12524,180 @@ String? _validateBatchSetupStates(Iterable<_BatchCardState> states) {
 
 List<(String, String)> _batchSetupSummaryRows(_BatchCardState state) {
   return _days
-      .where((day) => state.schedule[day]?.isNotEmpty == true)
-      .map((day) => (day, _titleCase(state.schedule[day]!.single)))
+      .where((day) => state.schedule[day] != null)
+      .map((day) => (_dayDisplayName(day), _titleCase(state.schedule[day]!)))
       .toList();
 }
 
-void _toggleQuickSetupCell(
-  Map<String, Set<String>> schedule,
+void _selectQuickSetupCell(
+  _QuickBatchSchedule schedule,
   String sessionType,
   String day,
 ) {
-  final selections = schedule.putIfAbsent(day, () => <String>{});
-  if (sessionType == 'holiday') {
-    if (selections.contains('holiday')) {
-      selections.clear();
-    } else {
-      selections
-        ..clear()
-        ..add('holiday');
+  if (!_quickSetupRows.contains(sessionType)) return;
+  schedule[day] = sessionType;
+}
+
+String? _apiSessionTypeForQuickSetup(String sessionType) {
+  return switch (sessionType) {
+    'nets' => 'PACE_NETS',
+    'drills' => 'CUSTOM',
+    'fitness' => 'FITNESS',
+    'fielding' => 'FIELDING',
+    'holiday' => null,
+    _ => null,
+  };
+}
+
+String? _quickSetupTypeFromApi(String sessionType) {
+  return switch (sessionType.trim().toUpperCase()) {
+    'PACE_NETS' || 'SPIN_NETS' || 'THROWDOWN' || 'POWER_HITTING' => 'nets',
+    'FITNESS' => 'fitness',
+    'FIELDING' => 'fielding',
+    'CUSTOM' || 'MATCH_PRACTICE' || 'VIDEO_REVIEW' => 'drills',
+    _ => null,
+  };
+}
+
+Map<String, dynamic> _quickBatchSetupDraft(Iterable<_BatchCardState> states) {
+  return {
+    'status': 'saved',
+    'updatedAt': DateTime.now().toIso8601String(),
+    'batches': {
+      for (final state in states)
+        state.batchId: {
+          'batchId': state.batchId,
+          'batchName': state.batchName,
+          'weekSchedule': {
+            for (final entry in state.schedule.entries)
+              if (entry.value != null) entry.key: entry.value,
+          },
+        },
+    },
+  };
+}
+
+List<Map<String, dynamic>> _batchesFromSavedQuickBatchSetup(
+  Map<String, dynamic> savedSetup,
+) {
+  final batches = savedSetup['batches'];
+  if (batches is! Map) return const <Map<String, dynamic>>[];
+  return batches.entries.map((entry) {
+    final value = entry.value;
+    final data = value is Map ? value : const <String, dynamic>{};
+    final batchId = data['batchId']?.toString() ?? entry.key.toString();
+    return {
+      'id': batchId,
+      'name': data['batchName']?.toString() ?? 'Saved Batch',
+      'isActive': true,
+      'students': const <Map<String, dynamic>>[],
+    };
+  }).toList();
+}
+
+List<Map<String, dynamic>> _schedulesFromSavedQuickBatchSetup(
+  Map<String, dynamic> savedSetup,
+  List<Map<String, dynamic>> batches,
+) {
+  final savedBatches = savedSetup['batches'];
+  if (savedBatches is! Map) return const <Map<String, dynamic>>[];
+  final batchNames = {
+    for (final batch in batches) _idOf(batch): _labelOf(batch, ['name', 'batchName']),
+  };
+  final schedules = <Map<String, dynamic>>[];
+  for (final entry in savedBatches.entries) {
+    final batchData = entry.value;
+    if (batchData is! Map) continue;
+    final batchId = batchData['batchId']?.toString() ?? entry.key.toString();
+    final weekSchedule = batchData['weekSchedule'];
+    if (weekSchedule is! Map) continue;
+    final byType = <String, List<int>>{};
+    for (var dayIndex = 0; dayIndex < _days.length; dayIndex++) {
+      final type = weekSchedule[_days[dayIndex]]?.toString();
+      final apiType = type == null ? null : _apiSessionTypeForQuickSetup(type);
+      if (apiType == null) continue;
+      byType.putIfAbsent(apiType, () => <int>[]).add(dayIndex);
     }
-    return;
+    for (final typedDays in byType.entries) {
+      schedules.add({
+        'id': 'demo-schedule-$batchId-${typedDays.key}',
+        'batchId': batchId,
+        'batchName': batchData['batchName']?.toString() ??
+            batchNames[batchId] ??
+            'Saved Batch',
+        'sessionType': typedDays.key,
+        'daysOfWeek': typedDays.value,
+        'startTime': '06:00',
+        'durationMins': 60,
+        'isActive': true,
+      });
+    }
   }
-  if (selections.contains(sessionType)) {
-    selections.clear();
-  } else {
-    selections
-      ..clear()
-      ..add(sessionType);
+  return schedules;
+}
+
+void _statesFromSavedQuickBatchSetup(
+  Map<String, _BatchCardState> states,
+  Map<String, dynamic> savedSetup,
+) {
+  for (final old in states.values) {
+    old.dispose();
+  }
+  states.clear();
+  final batches = savedSetup['batches'];
+  if (batches is! Map) return;
+  for (final entry in batches.entries) {
+    final batchData = entry.value;
+    if (batchData is! Map) continue;
+    final batchId = batchData['batchId']?.toString() ?? entry.key.toString();
+    final state = _BatchCardState(
+      batchId: batchId,
+      batchName: batchData['batchName']?.toString() ?? 'Saved Batch',
+      academyId: null,
+      rawSchedules: const <Map<String, dynamic>>[],
+      schedule: _emptyBatchSchedule(),
+      completed: false,
+    );
+    states[batchId] = state;
+  }
+  _applySavedQuickBatchSetup(states, savedSetup);
+}
+
+void _applySavedQuickBatchSetup(
+  Map<String, _BatchCardState> states,
+  Map<String, dynamic> savedSetup,
+) {
+  final batches = savedSetup['batches'];
+  if (batches is! Map) return;
+  for (final entry in batches.entries) {
+    final batchData = entry.value;
+    final batchId = batchData is Map
+        ? batchData['batchId']?.toString() ?? entry.key.toString()
+        : entry.key.toString();
+    final state = states[entry.key.toString()] ?? states[batchId];
+    if (state == null || batchData is! Map) continue;
+    final weekSchedule = batchData['weekSchedule'];
+    if (weekSchedule is! Map) continue;
+    for (final day in _days) {
+      final sessionType = weekSchedule[day]?.toString();
+      if (sessionType != null && _quickSetupRows.contains(sessionType)) {
+        state.schedule[day] = sessionType;
+      }
+    }
+    state.completed = _isCardCompleted(state);
   }
 }
+
+String _dayDisplayName(String day) => switch (day) {
+  'Mon' => 'Monday',
+  'Tue' => 'Tuesday',
+  'Wed' => 'Wednesday',
+  'Thu' => 'Thursday',
+  'Fri' => 'Friday',
+  'Sat' => 'Saturday',
+  'Sun' => 'Sunday',
+  _ => day,
+};
 
 String _shortDay(String day) => day.length > 3 ? day.substring(0, 3) : day;
 
@@ -7883,21 +12748,267 @@ Future<void> showBookOneToOneSheet(BuildContext context, WidgetRef ref) {
       ),
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.82,
-        child: DynamicFormScreen(
-          title: 'Book Session',
-          fields: const [
-            FormFieldSpec('playerProfileId', 'Player ID', required: true),
-            FormFieldSpec('scheduledAt', 'Date Time ISO', required: true),
-            FormFieldSpec('notes', 'Notes', multiline: true),
-          ],
-          onSubmit: (body) async {
-            await ref.read(apiClientProvider).post('/coach/gig-bookings', body);
-            return null;
-          },
-        ),
+        child: const OneToOneBookingSheet(),
       ),
     ),
   );
+}
+
+class OneToOneBookingSheet extends ConsumerStatefulWidget {
+  const OneToOneBookingSheet({super.key});
+
+  @override
+  ConsumerState<OneToOneBookingSheet> createState() =>
+      _OneToOneBookingSheetState();
+}
+
+class _OneToOneBookingSheetState extends ConsumerState<OneToOneBookingSheet> {
+  final _phoneCtrl = TextEditingController();
+  DateTime _date = DateTime.now();
+  TimeOfDay _start = const TimeOfDay(hour: 7, minute: 0);
+  TimeOfDay _end = const TimeOfDay(hour: 8, minute: 0);
+  String _mode = 'Online';
+  Map<String, dynamic>? _player;
+  Map<String, dynamic> _setup = const {};
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSetup();
+  }
+
+  @override
+  void dispose() {
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSetup() async {
+    _setup = await ref.read(settingsStoreProvider).loadOneOnOneSetupData();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _lookupPlayer() async {
+    final phone = _normalizeIndianPhone(_phoneCtrl.text);
+    if (!RegExp(r'^\+91\d{10}$').hasMatch(phone)) {
+      setState(() => _error = 'Enter a valid 10-digit player phone number.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final students = await ref.read(apiClientProvider).getList('/coach/students');
+      final match = students.firstWhere(
+        (student) =>
+            _normalizeIndianPhone(
+              _read(student, ['phone', 'mobile', 'player.phone', 'parentPhone'])
+                      ?.toString() ??
+                  '',
+            ) ==
+            phone,
+        orElse: () => <String, dynamic>{},
+      );
+      _player = match.isEmpty ? _demoPlayerLookup(phone) : match;
+    } catch (_) {
+      _player = _demoPlayerLookup(phone);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final next = await showDatePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+      initialDate: _date,
+    );
+    if (next != null) setState(() => _date = next);
+  }
+
+  Future<void> _pickTime(bool start) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: start ? _start : _end,
+    );
+    if (picked != null) {
+      setState(() {
+        if (start) {
+          _start = picked;
+        } else {
+          _end = picked;
+        }
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    final player = _player;
+    if (player == null) {
+      setState(() => _error = 'Look up a player before saving.');
+      return;
+    }
+    final startMinutes = _start.hour * 60 + _start.minute;
+    final endMinutes = _end.hour * 60 + _end.minute;
+    if (endMinutes <= startMinutes) {
+      setState(() => _error = 'End time must be after start time.');
+      return;
+    }
+    final scheduledAt = DateTime(
+      _date.year,
+      _date.month,
+      _date.day,
+      _start.hour,
+      _start.minute,
+    );
+    final body = {
+      'id': 'demo-1to1-${DateTime.now().millisecondsSinceEpoch}',
+      'playerProfileId': _idOf(player),
+      'playerName': _studentName(player),
+      'phone': _normalizeIndianPhone(_phoneCtrl.text),
+      'scheduledAt': scheduledAt.toIso8601String(),
+      'startTime': _formatTimeOfDay(_start),
+      'endTime': _formatTimeOfDay(_end),
+      'mode': _mode.toUpperCase(),
+      'amountPaise': _expectedPricePaise,
+      'status': 'UPCOMING',
+      'title': '1-to-1 $_mode Session',
+    };
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      try {
+        await ref.read(apiClientProvider).post('/coach/gig-bookings', body);
+      } catch (_) {
+        await ref.read(settingsStoreProvider).saveDemoOneOnOneBooking(body);
+      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('1-to-1 session booked.')),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  int get _ratePaise {
+    final key = _mode == 'Online'
+        ? 'onlineHourlyRatePaise'
+        : 'offlineHourlyRatePaise';
+    return _intOrNull(_setup[key]) ?? (_mode == 'Online' ? 120000 : 150000);
+  }
+
+  int get _expectedPricePaise {
+    final minutes = ((_end.hour * 60 + _end.minute) -
+            (_start.hour * 60 + _start.minute))
+        .clamp(0, 480);
+    return (_ratePaise * minutes / 60).round();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Book 1-to-1 Session')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          TextField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(10),
+            ],
+            decoration: InputDecoration(
+              labelText: 'Player phone number',
+              prefixText: '+91 ',
+              suffixIcon: IconButton(
+                tooltip: 'Find player',
+                onPressed: _loading ? null : _lookupPlayer,
+                icon: const Icon(Icons.search_rounded),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_player != null)
+            _InfoCard(
+              title: 'Player',
+              child: Text(
+                '${_studentName(_player!)}\n${_safeDisplayValue(_read(_player!, ['phone', 'mobile', 'parentPhone']), fallback: _normalizeIndianPhone(_phoneCtrl.text))}',
+              ),
+            ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            children: ['Online', 'Offline']
+                .map(
+                  (mode) => ChoiceChip(
+                    label: Text(mode),
+                    selected: _mode == mode,
+                    onSelected: (_) => setState(() => _mode = mode),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 12),
+          _InfoCard(
+            title: 'Time',
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.calendar_month_rounded),
+                  label: Text(_formatShortDate(_date)),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _pickTime(true),
+                  icon: const Icon(Icons.schedule_rounded),
+                  label: Text('Start ${_start.format(context)}'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _pickTime(false),
+                  icon: const Icon(Icons.schedule_rounded),
+                  label: Text('End ${_end.format(context)}'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          StatCard(
+            title: 'Expected Price',
+            value: _rupees(_expectedPricePaise),
+            icon: Icons.currency_rupee_rounded,
+            subtext: 'Using ${_rupees(_ratePaise)} per hour ${_mode.toLowerCase()} rate',
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: const TextStyle(
+                color: Color(0xFFC62828),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _loading ? null : _save,
+            icon: const Icon(Icons.check_circle_outline_rounded),
+            label: Text(_loading ? 'Saving...' : 'Save Session'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 Future<Map<String, dynamic>> _loadPaymentTab(WidgetRef ref) async {
@@ -7931,15 +13042,195 @@ class _LiveSessionContext {
     required this.sessionId,
     required this.sessionType,
     required this.batchName,
+    required this.academyName,
     required this.timeLabel,
+    required this.dateLabel,
     required this.players,
+    this.batchId = '',
+    this.academyId,
+    this.durationMins = 60,
+    this.scheduledAt,
+    this.demoMode = false,
   });
   final String sessionId;
   final String sessionType;
   final String batchName;
+  final String academyName;
   final String timeLabel;
+  final String dateLabel;
   final List<Map<String, dynamic>> players;
+  final String batchId;
+  final String? academyId;
+  final int durationMins;
+  final DateTime? scheduledAt;
+  final bool demoMode;
+
+  _LiveSessionContext copyWith({
+    String? sessionId,
+    String? sessionType,
+    String? batchName,
+    String? academyName,
+    String? timeLabel,
+    String? dateLabel,
+    List<Map<String, dynamic>>? players,
+    String? batchId,
+    String? academyId,
+    int? durationMins,
+    DateTime? scheduledAt,
+    bool? demoMode,
+  }) {
+    return _LiveSessionContext(
+      sessionId: sessionId ?? this.sessionId,
+      sessionType: sessionType ?? this.sessionType,
+      batchName: batchName ?? this.batchName,
+      academyName: academyName ?? this.academyName,
+      timeLabel: timeLabel ?? this.timeLabel,
+      dateLabel: dateLabel ?? this.dateLabel,
+      players: players ?? this.players,
+      batchId: batchId ?? this.batchId,
+      academyId: academyId ?? this.academyId,
+      durationMins: durationMins ?? this.durationMins,
+      scheduledAt: scheduledAt ?? this.scheduledAt,
+      demoMode: demoMode ?? this.demoMode,
+    );
+  }
 }
+
+Future<_LiveSessionContext> _loadStartSessionContext(
+  WidgetRef ref,
+  Map<String, dynamic>? selected,
+) async {
+  if (selected == null) {
+    try {
+      return await _detectOrCreateLiveSession(ref);
+    } catch (_) {
+      return _demoStartSessionContext();
+    }
+  }
+
+  try {
+    final api = ref.read(apiClientProvider);
+    final data = await Future.wait([
+      api.getList('/coach/batches'),
+      api.getList('/coach/sessions', query: {'page': '1', 'limit': '50'}),
+    ]);
+    final batches = (data[0] as List).cast<Map<String, dynamic>>();
+    final sessions = (data[1] as List).cast<Map<String, dynamic>>();
+    return _contextFromSelectedSession(selected, batches, sessions);
+  } catch (_) {
+    return _demoStartSessionContext(seed: selected);
+  }
+}
+
+_LiveSessionContext _contextFromSelectedSession(
+  Map<String, dynamic> selected,
+  List<Map<String, dynamic>> batches,
+  List<Map<String, dynamic>> sessions,
+) {
+  final selectedSessionId = (_read(selected, ['id', '_id', 'sessionId']) ?? '')
+      .toString();
+  final batchId = _read(selected, ['batchId'])?.toString() ?? '';
+  final batch = batches.firstWhere(
+    (b) => _idOf(b) == batchId,
+    orElse: () => const <String, dynamic>{},
+  );
+  final matchingSession = sessions.firstWhere(
+    (s) =>
+        selectedSessionId.isNotEmpty &&
+        selectedSessionId != '-' &&
+        _idOf(s) == selectedSessionId,
+    orElse: () => const <String, dynamic>{},
+  );
+  final source = matchingSession.isNotEmpty ? matchingSession : selected;
+  final type = _normalizeStartSessionType(
+    _read(source, ['sessionType', 'type', 'sessionTypeName'])?.toString(),
+  );
+  final start = _read(source, ['startTime'])?.toString();
+  final duration =
+      int.tryParse(_read(source, ['durationMins'])?.toString() ?? '60') ?? 60;
+  final timeLabel =
+      _read(source, ['time'])?.toString() ??
+      (start == null
+          ? _formatDate(_read(source, ['scheduledAt'])?.toString())
+          : '${_to12h(start)} - ${_to12h(_addMinutesToTime(start, duration) ?? start)}');
+  final players = _listAt(source, [
+    'attendance',
+    'students',
+    'players',
+    'batch.students',
+  ]);
+  final roster = players.isNotEmpty ? players : _listAt(batch, ['students']);
+  return _LiveSessionContext(
+    sessionId: selectedSessionId == '-' ? '' : selectedSessionId,
+    sessionType: type,
+    batchName: _labelOf(source, ['batchName', 'batch.name', 'name', 'batch']),
+    academyName: _labelOf(source, ['academyName', 'academy.name', 'academy']),
+    timeLabel: timeLabel.isEmpty ? 'Scheduled time' : timeLabel,
+    dateLabel: _read(source, ['day'])?.toString() ?? 'Today',
+    players: roster.isEmpty ? _demoStudents : roster,
+    batchId: batchId,
+    academyId: _read(batch, ['academyId', 'academy.id'])?.toString(),
+    durationMins: duration,
+    scheduledAt: DateTime.tryParse(
+      _read(source, ['scheduledAt'])?.toString() ?? '',
+    ),
+    demoMode: roster.isEmpty,
+  );
+}
+
+Future<_LiveSessionContext> _tryCreateSession(
+  CoachApiClient api,
+  _LiveSessionContext ctx,
+) async {
+  if (ctx.batchId.isEmpty) return ctx.copyWith(demoMode: true);
+  try {
+    final session = await api.post('/coach/sessions', {
+      'sessionType': ctx.sessionType.toUpperCase(),
+      'batchId': ctx.batchId,
+      if (ctx.academyId != null) 'academyId': ctx.academyId,
+      'durationMins': ctx.durationMins,
+      'scheduledAt': (ctx.scheduledAt ?? DateTime.now()).toIso8601String(),
+    });
+    return ctx.copyWith(sessionId: _idOf(session), demoMode: false);
+  } catch (_) {
+    return ctx.copyWith(demoMode: true);
+  }
+}
+
+_LiveSessionContext _demoStartSessionContext({Map<String, dynamic>? seed}) {
+  final type = _normalizeStartSessionType(
+    _read(seed ?? const {}, ['sessionType', 'type'])?.toString(),
+  );
+  return _LiveSessionContext(
+    sessionId: '',
+    sessionType: type,
+    batchName:
+        _read(seed ?? const {}, ['batch', 'batchName', 'name'])?.toString() ??
+        'Demo Batch',
+    academyName:
+        _read(seed ?? const {}, ['academy', 'academyName'])?.toString() ??
+        'Demo Academy',
+    timeLabel: _read(seed ?? const {}, ['time'])?.toString() ?? 'Now',
+    dateLabel: _read(seed ?? const {}, ['day'])?.toString() ?? 'Today',
+    players: _demoStudents,
+    demoMode: true,
+  );
+}
+
+String _normalizeStartSessionType(String? raw) {
+  final value = (raw ?? 'drills').trim().toLowerCase();
+  if (value.contains('net')) return 'nets';
+  if (value.contains('fitness')) return 'fitness';
+  if (value.contains('field')) return 'fielding';
+  if (value.contains('drill')) return 'drills';
+  return _sessionTypeOptions.contains(value) ? value : 'drills';
+}
+
+const List<Map<String, dynamic>> _demoStudents = [
+  {'id': 'demo-student-1', 'name': 'Aarav Sharma'},
+  {'id': 'demo-student-2', 'name': 'Riya Patel'},
+  {'id': 'demo-student-3', 'name': 'Kabir Singh'},
+];
 
 Future<_LiveSessionContext> _detectOrCreateLiveSession(WidgetRef ref) async {
   final api = ref.read(apiClientProvider);
@@ -7958,7 +13249,7 @@ Future<_LiveSessionContext> _detectOrCreateLiveSession(WidgetRef ref) async {
   Map<String, dynamic>? active;
   for (final s in schedules) {
     if (_read(s, ['isActive']) == false) continue;
-    final days = _listAt(s, [
+    final days = _valuesAt(s, [
       'daysOfWeek',
     ]).map((e) => int.tryParse('$e')).whereType<int>();
     if (!days.contains(dayIndex)) continue;
@@ -7976,8 +13267,9 @@ Future<_LiveSessionContext> _detectOrCreateLiveSession(WidgetRef ref) async {
       break;
     }
   }
-  if (active == null)
+  if (active == null) {
     throw const ApiException('No session scheduled for this time.');
+  }
   final batchId = _read(active, ['batchId'])?.toString() ?? '';
   final sessionType =
       (_read(active, ['sessionType'])?.toString().toLowerCase() ?? 'drills');
@@ -8020,8 +13312,15 @@ Future<_LiveSessionContext> _detectOrCreateLiveSession(WidgetRef ref) async {
     sessionId: _idOf(session),
     sessionType: sessionType,
     batchName: _labelOf(batch, ['name', 'batchName']),
+    academyName: _labelOf(batch, ['academyName', 'academy.name']),
     timeLabel: '${_to12h(start)} - ${_to12h(end)}',
+    dateLabel: 'Today',
     players: _listAt(batch, ['students']).cast<Map<String, dynamic>>(),
+    batchId: batchId,
+    academyId: _read(batch, ['academyId', 'academy.id'])?.toString(),
+    durationMins:
+        int.tryParse(_read(active, ['durationMins'])?.toString() ?? '60') ?? 60,
+    scheduledAt: DateTime.now(),
   );
 }
 
@@ -8072,39 +13371,29 @@ List<Map<String, dynamic>> _toSchedulePayloads(
   final defaults = _defaultTimingByType(preserveFrom);
   for (var d = 0; d < _days.length; d++) {
     final day = _days[d];
-    final dayTypes = state.schedule[day] ?? const <String>{};
-    if (dayTypes.isEmpty) continue;
-    if (dayTypes.contains('holiday')) {
-      byType.putIfAbsent(
-        'holiday|holiday',
-        () => {
-          'sessionType': 'HOLIDAY',
-          'daysOfWeek': <int>[],
-          'startTime': '00:00',
-          'durationMins': 60,
-          'batchId': batchId,
-        },
-      );
-      (byType['holiday|holiday']!['daysOfWeek'] as List<int>).add(d);
+    final dayType = state.schedule[day];
+    if (dayType == null) continue;
+    if (dayType == 'holiday') {
       continue;
     }
-    for (final dayType in dayTypes) {
-      final timing =
-          defaults[dayType] ??
-          const _ScheduleTiming(startTime: '06:00', durationMins: 60);
-      final key = '$dayType|${timing.startTime}|${timing.durationMins}';
-      byType.putIfAbsent(
-        key,
-        () => {
-          'sessionType': dayType.toUpperCase(),
-          'daysOfWeek': <int>[],
-          'startTime': timing.startTime,
-          'durationMins': timing.durationMins,
-          'batchId': batchId,
-        },
-      );
-      (byType[key]!['daysOfWeek'] as List<int>).add(d);
-    }
+    final apiType = _apiSessionTypeForQuickSetup(dayType);
+    if (apiType == null) continue;
+    final timing =
+        defaults[dayType] ??
+        const _ScheduleTiming(startTime: '06:00', durationMins: 60);
+    final key = '$apiType|${timing.startTime}|${timing.durationMins}';
+    byType.putIfAbsent(
+      key,
+      () => {
+        'sessionType': apiType,
+        'daysOfWeek': <int>[],
+        'startTime': timing.startTime,
+        'durationMins': timing.durationMins,
+        'batchId': batchId,
+        if (state.academyId?.isNotEmpty == true) 'academyId': state.academyId,
+      },
+    );
+    (byType[key]!['daysOfWeek'] as List<int>).add(d);
   }
   return byType.values.toList();
 }
@@ -8120,9 +13409,10 @@ Map<String, _ScheduleTiming> _defaultTimingByType(
 ) {
   final timing = <String, _ScheduleTiming>{};
   for (final schedule in schedules) {
-    final type =
-        (_read(schedule, ['sessionType'])?.toString().toLowerCase() ?? '');
-    if (!_sessionRows.contains(type)) continue;
+    final apiType =
+        (_read(schedule, ['sessionType'])?.toString().toUpperCase() ?? '');
+    final type = _quickSetupTypeFromApi(apiType);
+    if (type == null || type == 'holiday') continue;
     final start = _read(schedule, ['startTime'])?.toString();
     final duration = int.tryParse(
       _read(schedule, ['durationMins'])?.toString() ?? '',
@@ -8137,7 +13427,7 @@ String _scheduleKey(Map<String, dynamic> schedule) {
   final type = (_read(schedule, ['sessionType'])?.toString() ?? '')
       .toUpperCase();
   final days =
-      _listAt(schedule, ['daysOfWeek'])
+      _valuesAt(schedule, ['daysOfWeek'])
           .map((e) => int.tryParse(e.toString()) ?? -1)
           .where((e) => e >= 0)
           .toList()
@@ -8147,7 +13437,7 @@ String _scheduleKey(Map<String, dynamic> schedule) {
 
 bool _isCardCompleted(_BatchCardState state) {
   for (final day in _days) {
-    if (state.schedule[day]?.isNotEmpty != true) return false;
+    if (state.schedule[day] == null) return false;
   }
   return true;
 }
@@ -8155,62 +13445,162 @@ bool _isCardCompleted(_BatchCardState state) {
 bool _isBatchSetupComplete(
   List<Map<String, dynamic>> batches,
   List<Map<String, dynamic>> schedules,
+  Map<String, dynamic> savedSetup,
 ) {
   if (batches.isEmpty) return false;
+  final states = <String, _BatchCardState>{};
   for (final batch in batches) {
     final batchId = _idOf(batch);
-    final state = _BatchCardState.fromApi(
+    states[batchId] = _BatchCardState.fromApi(
       batchId,
       batch,
       schedules
           .where((s) => _read(s, ['batchId'])?.toString() == batchId)
           .toList(),
     );
+  }
+  _applySavedQuickBatchSetup(states, savedSetup);
+  for (final state in states.values) {
     if (!state.completed) return false;
   }
   return true;
 }
 
-List<Map<String, dynamic>> _upcomingTimetableToday(
+List<Map<String, dynamic>> _upcomingTimetableForWeek(
   List<Map<String, dynamic>> schedules,
+  List<Map<String, dynamic>> batches,
+  List<Map<String, dynamic>> oneOnOneBookings,
 ) {
   final now = DateTime.now();
-  final todayIndex = (now.weekday % 7);
+  final batchNames = {
+    for (final batch in batches)
+      _idOf(batch): _labelOf(batch, ['name', 'batchName']),
+  };
+  final items = <Map<String, dynamic>>[];
+  final todayStart = DateTime(now.year, now.month, now.day);
+  final weekEnd = todayStart.add(const Duration(days: 7));
   final nowMinutes = now.hour * 60 + now.minute;
-  final today = schedules.where((s) {
-    if (_read(s, ['isActive']) == false) return false;
-    final days = _listAt(s, [
+  for (final s in schedules) {
+    if (_read(s, ['isActive']) == false) continue;
+    final days = _valuesAt(s, [
       'daysOfWeek',
-    ]).map((e) => int.tryParse(e.toString())).whereType<int>();
-    if (!days.contains(todayIndex)) return false;
+    ]).map((e) => int.tryParse(e.toString())).whereType<int>().toSet();
     final time = _read(s, ['startTime'])?.toString() ?? '00:00';
     final p = time.split(':');
-    if (p.length != 2) return false;
+    if (p.length != 2) continue;
     final mins = (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
-    return mins > nowMinutes &&
-        (_read(s, ['sessionType'])?.toString().toUpperCase() != 'HOLIDAY');
-  }).toList();
-  today.sort(
-    (a, b) => (_read(a, ['startTime'])?.toString() ?? '').compareTo(
-      _read(b, ['startTime'])?.toString() ?? '',
-    ),
-  );
-  return today.map((s) {
-    final start = _read(s, ['startTime'])?.toString() ?? '00:00';
-    final end =
-        _addMinutesToTime(
-          start,
-          int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60,
-        ) ??
-        start;
-    return {
-      'batch': _labelOf(s, ['batchName', 'batch.name', 'batchId']),
-      'type': _titleCase(
-        (_read(s, ['sessionType'])?.toString().toLowerCase() ?? 'session'),
-      ),
-      'time': '${_to12h(start)} - ${_to12h(end)}',
-    };
-  }).toList();
+    final type = _read(s, ['sessionType'])?.toString().toUpperCase() ?? '';
+    if (type == 'HOLIDAY') continue;
+    for (var offset = 0; offset < 7; offset++) {
+      final date = todayStart.add(Duration(days: offset));
+      final dayIndex = date.weekday % 7;
+      if (!days.contains(dayIndex)) continue;
+      if (offset == 0 && mins <= nowMinutes) continue;
+      final start = _read(s, ['startTime'])?.toString() ?? '00:00';
+      final end =
+          _addMinutesToTime(
+            start,
+            int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60,
+          ) ??
+          start;
+      final batchId = _read(s, ['batchId'])?.toString() ?? '';
+      items.add({
+        'scheduleId': _scheduleIdOf(s),
+        'batchId': batchId,
+        'batch': _labelOf(s, ['batchName', 'batch.name']) != 'Untitled'
+            ? _labelOf(s, ['batchName', 'batch.name'])
+            : batchNames[batchId] ?? 'Batch',
+        'type': _titleCase(_quickSetupTypeFromApi(type) ?? type),
+        'time': '${_to12h(start)} - ${_to12h(end)}',
+        'day': offset == 0 ? 'Today' : _dayDisplayName(_days[dayIndex]),
+        'sessionType': _quickSetupTypeFromApi(type) ?? type,
+        'startTime': start,
+        'durationMins':
+            int.tryParse(_read(s, ['durationMins'])?.toString() ?? '60') ?? 60,
+        'scheduledAt': date.add(Duration(minutes: mins)).toIso8601String(),
+        'sortAt': date.add(Duration(minutes: mins)).millisecondsSinceEpoch,
+      });
+    }
+  }
+  for (final booking in oneOnOneBookings) {
+    final item = _oneOnOneSessionCard(booking);
+    final sortAt = item['sortAt'] as int?;
+    final date = sortAt == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(sortAt);
+    if (date != null && date.isAfter(now) && date.isBefore(weekEnd)) {
+      items.add(item);
+    }
+  }
+  items.sort((a, b) {
+    final left = a['sortAt'] as int? ?? 0;
+    final right = b['sortAt'] as int? ?? 0;
+    return left.compareTo(right);
+  });
+  return items;
+}
+
+List<Map<String, dynamic>> _demoUpcomingSessionsFromQuickBatchSetup(
+  Map<String, dynamic> savedSetup,
+  List<Map<String, dynamic>> batches,
+) {
+  final savedBatches = savedSetup['batches'];
+  if (savedBatches is! Map || savedBatches.isEmpty) {
+    return const <Map<String, dynamic>>[];
+  }
+  final batchNames = {
+    for (final batch in batches)
+      _idOf(batch): _labelOf(batch, ['name', 'batchName']),
+  };
+  final now = DateTime.now();
+  final todayStart = DateTime(now.year, now.month, now.day);
+  final nowMinutes = now.hour * 60 + now.minute;
+  final items = <Map<String, dynamic>>[];
+  for (final entry in savedBatches.entries) {
+    final batchData = entry.value;
+    if (batchData is! Map) continue;
+    final batchId = batchData['batchId']?.toString() ?? entry.key.toString();
+    final weekSchedule = batchData['weekSchedule'];
+    if (weekSchedule is! Map) continue;
+    Map<String, dynamic>? upcoming;
+    for (var offset = 0; offset < 14; offset++) {
+      final date = todayStart.add(Duration(days: offset));
+      final dayKey = _days[date.weekday % 7];
+      final type = weekSchedule[dayKey]?.toString();
+      final apiType = type == null ? null : _apiSessionTypeForQuickSetup(type);
+      if (apiType == null) continue;
+      const start = '06:00';
+      const durationMins = 60;
+      if (offset == 0 && 6 * 60 <= nowMinutes) continue;
+      final end = _addMinutesToTime(start, durationMins) ?? start;
+      upcoming = {
+        'scheduleId': 'demo-schedule-$batchId-$dayKey',
+        'batchId': batchId,
+        'batch': batchData['batchName']?.toString() ??
+            batchNames[batchId] ??
+            'Saved Batch',
+        'type': _titleCase(type ?? 'Session'),
+        'time': '${_to12h(start)} - ${_to12h(end)}',
+        'day': offset == 0 ? 'Today' : _dayDisplayName(dayKey),
+        'sessionType': type,
+        'startTime': start,
+        'durationMins': durationMins,
+        'scheduledAt': date.add(const Duration(hours: 6)).toIso8601String(),
+        'sortAt': date.add(const Duration(hours: 6)).millisecondsSinceEpoch,
+      };
+      break;
+    }
+    if (upcoming != null) {
+      items.add(upcoming);
+      break;
+    }
+  }
+  items.sort((a, b) {
+    final left = a['sortAt'] as int? ?? 0;
+    final right = b['sortAt'] as int? ?? 0;
+    return left.compareTo(right);
+  });
+  return items;
 }
 
 String _greetingTitle() {
@@ -8225,6 +13615,300 @@ String _toFeedbackTemplateType(String sessionType) {
   final normalized = sessionType.trim().toLowerCase();
   if (normalized == 'nets') return 'nets_batting';
   return normalized;
+}
+
+String _oneOnOneFeedbackTemplateType(Set<String> selectedTypes) {
+  final normalized = selectedTypes.map((e) => e.toLowerCase()).toSet();
+  if (normalized.contains('nets') || normalized.contains('batting')) {
+    return 'nets_batting';
+  }
+  if (normalized.contains('bowling')) return 'nets_bowling';
+  if (normalized.contains('fielding') ||
+      normalized.contains('wicket keeping')) {
+    return 'fielding';
+  }
+  if (normalized.contains('fitness') || normalized.contains('conditioning')) {
+    return 'fitness';
+  }
+  return 'drills';
+}
+
+String _normalizeIndianPhone(String raw) {
+  final digits = raw.replaceAll(RegExp(r'\D'), '');
+  if (digits.length == 10) return '+91$digits';
+  if (digits.length == 12 && digits.startsWith('91')) return '+$digits';
+  return raw.trim();
+}
+
+String _formatTimeOfDay(TimeOfDay value) {
+  return '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+}
+
+String _formatShortDate(DateTime value) {
+  return '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
+}
+
+Map<String, dynamic> _demoPlayerLookup(String phone) {
+  return {
+    'id': 'demo-player-${phone.replaceAll(RegExp(r'\D'), '')}',
+    'name': 'Demo Player',
+    'phone': phone,
+    'parentPhone': phone,
+  };
+}
+
+List<Map<String, dynamic>> _batchReportsFrom({
+  required _LiveSessionContext ctx,
+  required List<Map<String, dynamic>> presentPlayers,
+  required List<Map<String, dynamic>> absentPlayers,
+  required Map<String, PlayerFeedbackPayload> feedbackByPlayer,
+}) {
+  final absentIds = absentPlayers.map(_idOf).toSet();
+  return [
+    for (final player in [...presentPlayers, ...absentPlayers])
+      _batchReportFrom(
+        ctx: ctx,
+        player: player,
+        feedback: feedbackByPlayer[_idOf(player)],
+        present: !absentIds.contains(_idOf(player)),
+      ),
+  ];
+}
+
+Map<String, dynamic> _batchReportFrom({
+  required _LiveSessionContext ctx,
+  required Map<String, dynamic> player,
+  required PlayerFeedbackPayload? feedback,
+  required bool present,
+}) {
+  final strengths = feedback?.strengths.map(_prettyToken).join(', ');
+  final weaknesses = feedback?.mistakes.map(_prettyToken).join(', ');
+  final performance = _prettyToken(feedback?.performance ?? '');
+  return {
+    'id': 'report-${ctx.sessionId}-${_idOf(player)}-${ctx.dateLabel}',
+    'playerName': _studentName(player),
+    'batchName': ctx.batchName,
+    'date': ctx.dateLabel,
+    'coachName': 'Coach',
+    'attendanceStatus': present ? 'Present' : 'Absent',
+    'sessionType': _titleCase(ctx.sessionType),
+    'battingFeedback': ctx.sessionType == 'nets' ? performance : '',
+    'bowlingFeedback': ctx.sessionType == 'bowling' ? performance : '',
+    'fieldingFeedback': ctx.sessionType == 'fielding' ? performance : '',
+    'fitnessFeedback': ctx.sessionType == 'fitness' ? performance : '',
+    'skillFeedback': performance.isEmpty ? 'Session completed.' : performance,
+    'performanceSummary': present
+        ? 'Completed ${_titleCase(ctx.sessionType)} work with ${feedback == null ? 'coach observations pending' : 'recorded coach feedback'}.'
+        : 'Player was absent for this session.',
+    'strengths': strengths == null || strengths.isEmpty ? 'Coachability and effort' : strengths,
+    'weaknesses': weaknesses == null || weaknesses.isEmpty ? 'Consistency and repeat execution' : weaknesses,
+    'improvementPlan': 'Practice assigned drills before next session and review progress in the next report.',
+    'coachRemarks': present ? 'Good session involvement.' : 'Follow up before the next session.',
+    'radarValues': {
+      'Batting': ctx.sessionType == 'nets' ? 78.0 : 68.0,
+      'Bowling': ctx.sessionType == 'bowling' ? 76.0 : 64.0,
+      'Fielding': ctx.sessionType == 'fielding' ? 80.0 : 70.0,
+      'Fitness': ctx.sessionType == 'fitness' ? 82.0 : 72.0,
+      'Skill': present ? 76.0 : 45.0,
+    },
+  };
+}
+
+Map<String, dynamic> _studentFeedbackReportFrom({
+  required FeedbackPlayer player,
+  required String sessionType,
+  required Map<String, dynamic>? sessionItem,
+  required PlayerFeedbackPayload? feedback,
+  required String coachName,
+}) {
+  final source = sessionItem ?? const <String, dynamic>{};
+  final performance = _prettyToken(feedback?.performance ?? '');
+  final strengths = feedback?.strengths.map(_prettyToken).join(', ') ?? '';
+  final weaknesses = feedback?.mistakes.map(_prettyToken).join(', ') ?? '';
+  final normalizedType = _normalizeStartSessionType(sessionType);
+  return {
+    'id':
+        'report-feedback-${player.playerId}-${DateTime.now().millisecondsSinceEpoch}',
+    'playerProfileId': player.playerId,
+    'playerName': player.playerName,
+    'batchName': _safeDisplayValue(
+      _read(source, ['batchName', 'batch.name', 'batch']),
+      fallback: 'Coach Feedback',
+    ),
+    'date': _formatShortDate(DateTime.now()),
+    'createdAt': DateTime.now().toIso8601String(),
+    'coachName': coachName,
+    'attendanceStatus': 'Present',
+    'sessionType': _titleCase(normalizedType),
+    'battingFeedback': normalizedType == 'nets' ? performance : '',
+    'bowlingFeedback': normalizedType == 'bowling' ? performance : '',
+    'fieldingFeedback': normalizedType == 'fielding' ? performance : '',
+    'fitnessFeedback': normalizedType == 'fitness' ? performance : '',
+    'skillFeedback': performance.isEmpty ? 'Feedback recorded.' : performance,
+    'performanceSummary':
+        'Coach feedback recorded for ${_titleCase(normalizedType)}.',
+    'strengths': strengths.isEmpty ? 'Coachability and effort' : strengths,
+    'weaknesses': weaknesses.isEmpty ? 'Consistency and repeat execution' : weaknesses,
+    'improvementPlan':
+        'Practice assigned drills before the next review session.',
+    'coachRemarks': 'Feedback saved by coach.',
+    'radarValues': {
+      'Batting': normalizedType == 'nets' ? 78.0 : 68.0,
+      'Bowling': normalizedType == 'bowling' ? 76.0 : 64.0,
+      'Fielding': normalizedType == 'fielding' ? 80.0 : 70.0,
+      'Fitness': normalizedType == 'fitness' ? 82.0 : 72.0,
+      'Skill': 76.0,
+    },
+  };
+}
+
+Map<String, String> _reportTableRow(Map<String, dynamic> report) {
+  return {
+    'player': _safeDisplayValue(report['playerName']),
+    'strengths': _safeDisplayValue(report['strengths']),
+    'weaknesses': _safeDisplayValue(report['weaknesses']),
+    'improve': _safeDisplayValue(report['improvementPlan']),
+    'notes': _safeDisplayValue(report['coachRemarks']),
+  };
+}
+
+Map<String, dynamic> _oneOnOneReportFrom({
+  required Map<String, dynamic> booking,
+  required String coachName,
+  required List<String> sessionTypes,
+  required Map<String, String> feedback,
+  required String strengths,
+  required String weaknesses,
+  required String plan,
+  required String remarks,
+}) {
+  String feedbackFor(String type) {
+    final found = feedback.entries
+        .where((entry) => entry.key.toLowerCase().contains(type))
+        .map((entry) => entry.value)
+        .where((value) => value.isNotEmpty)
+        .join('\n');
+    return found;
+  }
+
+  final date = DateTime.tryParse(
+    _read(booking, ['scheduledAt'])?.toString() ?? '',
+  );
+  return {
+    'id': 'report-1to1-${_idOf(booking)}-${DateTime.now().millisecondsSinceEpoch}',
+    'playerProfileId': _safeDisplayValue(
+      _read(booking, ['playerProfileId', 'playerId', 'studentId']),
+      fallback: _idOf(booking),
+    ),
+    'playerName': _studentName(booking),
+    'batchName': '1-to-1 ${_safeDisplayValue(_read(booking, ['mode']), fallback: 'Session')}',
+    'date': date == null ? _formatShortDate(DateTime.now()) : _formatShortDate(date),
+    'coachName': coachName,
+    'attendanceStatus': 'Present',
+    'sessionType': sessionTypes.join(', '),
+    'startTime': _safeDisplayValue(_read(booking, ['startTime'])),
+    'endTime': _safeDisplayValue(_read(booking, ['endTime'])),
+    'mode': _safeDisplayValue(_read(booking, ['mode'])),
+    'feedback': feedback,
+    'battingFeedback': feedbackFor('batting'),
+    'bowlingFeedback': feedbackFor('bowling'),
+    'fieldingFeedback': feedbackFor('fielding'),
+    'fitnessFeedback': feedbackFor('fitness'),
+    'skillFeedback': feedback.values.where((v) => v.isNotEmpty).join('\n'),
+    'performanceSummary': 'Covered ${sessionTypes.join(', ')} in a focused 1-to-1 session.',
+    'strengths': strengths.isEmpty ? 'Strong intent and coachability' : strengths,
+    'weaknesses': weaknesses.isEmpty ? 'Needs consistency across repetitions' : weaknesses,
+    'improvementPlan': plan.isEmpty ? 'Continue targeted practice and reassess in the next session.' : plan,
+    'coachRemarks': remarks.isEmpty ? 'Good focused session.' : remarks,
+    'radarValues': {
+      'Batting': sessionTypes.contains('Batting') || sessionTypes.contains('Nets') ? 78.0 : 66.0,
+      'Bowling': sessionTypes.contains('Bowling') ? 76.0 : 64.0,
+      'Fielding': sessionTypes.contains('Fielding') ? 78.0 : 68.0,
+      'Fitness': sessionTypes.contains('Fitness') || sessionTypes.contains('Conditioning') ? 80.0 : 70.0,
+      'Skill': 77.0,
+    },
+  };
+}
+
+Future<void> _shareReport(Map<String, dynamic> report) async {
+  final text = _reportShareMessage(report);
+  final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened) {
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+}
+
+String _reportShareMessage(Map<String, dynamic> report) {
+  return [
+    'Swing Coach Report Card',
+    'Player: ${_safeDisplayValue(report['playerName'])}',
+    'Coach: ${_safeDisplayValue(report['coachName'], fallback: 'Coach')}',
+    'Date: ${_safeDisplayValue(report['date'])}',
+    'Session: ${_safeDisplayValue(report['sessionType'])}',
+    'Attendance: ${_safeDisplayValue(report['attendanceStatus'], fallback: 'Present')}',
+    'Summary: ${_safeDisplayValue(report['performanceSummary'])}',
+    'Strengths: ${_safeDisplayValue(report['strengths'])}',
+    'Weaknesses: ${_safeDisplayValue(report['weaknesses'])}',
+    'Improvement Plan: ${_safeDisplayValue(report['improvementPlan'])}',
+    'Coach Remarks: ${_safeDisplayValue(report['coachRemarks'])}',
+  ].join('\n');
+}
+
+Future<void> _shareMonthlyReport(MonthlyReportData report) async {
+  final text = _monthlyReportShareMessage(report);
+  final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened) {
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+}
+
+String _monthlyReportShareMessage(MonthlyReportData report) {
+  final strengths = report.strengths.map((item) => '- $item').join('\n');
+  final weaknesses = report.areasToImprove.map((item) => '- $item').join('\n');
+  final plan = report.improvementPlan.map((item) => '- $item').join('\n');
+  final skillOrder = const ['Batting', 'Bowling', 'Fielding', 'Fitness', 'Nets', 'Skill'];
+  final skillScores = skillOrder
+      .where((skill) => report.skillScores.containsKey(skill))
+      .map((skill) => '- $skill: ${report.skillScores[skill]!.round()}')
+      .join('\n');
+  return [
+    'Dear Parent,',
+    '',
+    'Here is the monthly progress report for ${report.playerName}.',
+    '',
+    'Month: ${report.monthLabel}',
+    'Coach: ${report.coachName}',
+    'Batch: ${report.batchName}',
+    'Total Sessions: ${report.totalSessions}',
+    'Attendance: ${report.attendancePercent.round()}%',
+    'Overall Score: ${report.overallScore.round()}',
+    '',
+    'Skill Scores:',
+    skillScores,
+    '',
+    'Strengths:',
+    strengths,
+    '',
+    'Areas to Improve:',
+    weaknesses,
+    '',
+    'Improvement Plan:',
+    plan,
+    '',
+    'Regards,',
+    'Swing Coach Team',
+  ].join('\n');
+}
+
+String _prettyToken(String input) {
+  final cleaned = input.trim();
+  if (cleaned.isEmpty) return '';
+  return cleaned
+      .split('_')
+      .map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}')
+      .join(' ');
 }
 
 String _avatarLetter(String name) {
@@ -8345,12 +14029,21 @@ bool _isCurrentMonthBooking(Map<String, dynamic> item) {
 
 Map<String, dynamic> _oneOnOneSessionCard(Map<String, dynamic> item) {
   final start = _read(item, ['scheduledAt', 'startTime', 'date'])?.toString();
+  final date = start == null ? null : DateTime.tryParse(start)?.toLocal();
+  final now = DateTime.now();
+  final day = date == null
+      ? '1-to-1'
+      : _isSameDate(date, now)
+      ? 'Today'
+      : _dayDisplayName(_days[date.weekday % 7]);
   return {
     ...item,
-    'id': '',
+    if (_idOf(item).isEmpty) 'id': '',
     'batch': '1-to-1',
     'type': _labelOf(item, ['sessionType', 'title', 'playerProfile.name']),
     'time': start == null ? 'Today' : _formatDate(start),
+    'day': day,
+    'sortAt': date?.millisecondsSinceEpoch ?? 0,
   };
 }
 
@@ -8452,6 +14145,11 @@ String? _tokenFrom(Map<String, dynamic> payload, List<String> keys) {
     }
   }
   return null;
+}
+
+String? _valueFrom(Map<String, dynamic>? payload, List<String> keys) {
+  if (payload == null) return null;
+  return _tokenFrom(payload, keys);
 }
 
 String _daysLabel(dynamic days) {
@@ -8906,6 +14604,9 @@ class CoachAuthService {
       refreshToken: _tokenFrom(payload, ['refreshToken']),
       phone: (user?['phone'] as String?) ?? phone,
       userName: user?['name'] as String?,
+      userId: _valueFrom(user, ['id', '_id', 'userId']),
+      academyId: _valueFrom(businessStatus, ['academyId']),
+      coachProfileId: _valueFrom(businessStatus, ['coachProfileId']),
       needsCoachRegistration: needsCoachRegistration,
     );
   }
@@ -9111,6 +14812,9 @@ class AuthSession {
     this.hasCompletedUpiSetup = false,
     this.refreshToken,
     this.userName,
+    this.userId,
+    this.academyId,
+    this.coachProfileId,
   });
 
   final String accessToken;
@@ -9119,6 +14823,9 @@ class AuthSession {
   final bool hasCompletedUpiSetup;
   final String? refreshToken;
   final String? userName;
+  final String? userId;
+  final String? academyId;
+  final String? coachProfileId;
 
   factory AuthSession.fromJson(Map<String, dynamic> json) {
     return AuthSession(
@@ -9126,6 +14833,9 @@ class AuthSession {
       refreshToken: json['refreshToken']?.toString(),
       phone: json['phone']?.toString() ?? '',
       userName: json['userName']?.toString(),
+      userId: json['userId']?.toString(),
+      academyId: json['academyId']?.toString(),
+      coachProfileId: json['coachProfileId']?.toString(),
       needsCoachRegistration: json['needsCoachRegistration'] == true,
       hasCompletedUpiSetup: json['hasCompletedUpiSetup'] == true,
     );
@@ -9137,6 +14847,9 @@ class AuthSession {
       'refreshToken': refreshToken,
       'phone': phone,
       'userName': userName,
+      'userId': userId,
+      'academyId': academyId,
+      'coachProfileId': coachProfileId,
       'needsCoachRegistration': needsCoachRegistration,
       'hasCompletedUpiSetup': hasCompletedUpiSetup,
     };
@@ -9149,6 +14862,9 @@ class AuthSession {
     bool? hasCompletedUpiSetup,
     String? refreshToken,
     String? userName,
+    String? userId,
+    String? academyId,
+    String? coachProfileId,
   }) {
     return AuthSession(
       accessToken: accessToken ?? this.accessToken,
@@ -9158,6 +14874,9 @@ class AuthSession {
       hasCompletedUpiSetup: hasCompletedUpiSetup ?? this.hasCompletedUpiSetup,
       refreshToken: refreshToken ?? this.refreshToken,
       userName: userName ?? this.userName,
+      userId: userId ?? this.userId,
+      academyId: academyId ?? this.academyId,
+      coachProfileId: coachProfileId ?? this.coachProfileId,
     );
   }
 }

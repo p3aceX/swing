@@ -13,7 +13,8 @@ class FeedbackPlayer {
   final String playerName;
 }
 
-typedef FeedbackSubmit = Future<void> Function(List<PlayerFeedbackPayload> players);
+typedef FeedbackSubmit =
+    Future<void> Function(List<PlayerFeedbackPayload> players);
 typedef FeedbackSkip = Future<void> Function();
 
 class FeedbackForm extends StatefulWidget {
@@ -23,6 +24,8 @@ class FeedbackForm extends StatefulWidget {
     required this.onSubmit,
     this.onSkip,
     this.draftKey,
+    this.closeOnSubmit = true,
+    this.closeOnSkip = true,
     super.key,
   });
 
@@ -31,6 +34,8 @@ class FeedbackForm extends StatefulWidget {
   final FeedbackSubmit onSubmit;
   final FeedbackSkip? onSkip;
   final String? draftKey;
+  final bool closeOnSubmit;
+  final bool closeOnSkip;
 
   @override
   State<FeedbackForm> createState() => _FeedbackFormState();
@@ -47,7 +52,8 @@ class _FeedbackFormState extends State<FeedbackForm> {
   String? _expandedPlayerId;
   bool _submitting = false;
 
-  SessionFeedbackTemplate get _template => resolveSessionFeedbackTemplate(widget.sessionType);
+  SessionFeedbackTemplate get _template =>
+      resolveSessionFeedbackTemplate(widget.sessionType);
 
   @override
   void initState() {
@@ -67,7 +73,8 @@ class _FeedbackFormState extends State<FeedbackForm> {
     final draft = widget.draftKey == null ? null : _drafts[widget.draftKey!];
     final draftById = {for (final row in (draft ?? [])) row.playerId: row};
     for (final player in widget.players) {
-      _state[player.playerId] = draftById[player.playerId] ??
+      _state[player.playerId] =
+          draftById[player.playerId] ??
           PlayerFeedbackPayload(
             playerId: player.playerId,
             mistakes: <String>[],
@@ -150,7 +157,9 @@ class _FeedbackFormState extends State<FeedbackForm> {
   }
 
   void _addCustomOption(String playerId, String kind) {
-    final controller = kind == 'mistakes' ? _customMistakeCtrl : _customStrengthCtrl;
+    final controller = kind == 'mistakes'
+        ? _customMistakeCtrl
+        : _customStrengthCtrl;
     final value = controller.text.trim().toLowerCase().replaceAll(' ', '_');
     if (value.isEmpty) return;
     controller.clear();
@@ -169,7 +178,7 @@ class _FeedbackFormState extends State<FeedbackForm> {
     try {
       await widget.onSubmit(_state.values.toList(growable: false));
       if (widget.draftKey != null) _drafts.remove(widget.draftKey!);
-      if (mounted) Navigator.of(context).pop();
+      if (mounted && widget.closeOnSubmit) Navigator.of(context).pop();
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -177,7 +186,7 @@ class _FeedbackFormState extends State<FeedbackForm> {
 
   Future<void> _skip() async {
     await widget.onSkip?.call();
-    if (mounted) Navigator.of(context).pop();
+    if (mounted && widget.closeOnSkip) Navigator.of(context).pop();
   }
 
   @override
@@ -192,7 +201,10 @@ class _FeedbackFormState extends State<FeedbackForm> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
             children: [
-              Text('Session: ${widget.sessionType}', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'Session: ${widget.sessionType}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 10),
               ...widget.players.map((player) {
                 final model = _state[player.playerId]!;
@@ -204,43 +216,67 @@ class _FeedbackFormState extends State<FeedbackForm> {
                     color: Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: expanded ? Theme.of(context).colorScheme.primary : Theme.of(context).dividerColor,
+                      color: expanded
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).dividerColor,
                     ),
                   ),
                   child: ExpansionTile(
                     key: ValueKey(player.playerId),
                     initiallyExpanded: expanded,
                     onExpansionChanged: (value) {
-                      setState(() => _expandedPlayerId = value ? player.playerId : null);
+                      setState(
+                        () =>
+                            _expandedPlayerId = value ? player.playerId : null,
+                      );
                     },
                     title: Text(player.playerName),
-                    subtitle: Text(model.performance.isEmpty ? 'Tap to add feedback' : 'Performance: ${_pretty(model.performance)}'),
+                    subtitle: Text(
+                      model.performance.isEmpty
+                          ? 'Tap to add feedback'
+                          : 'Performance: ${_pretty(model.performance)}',
+                    ),
                     childrenPadding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
                     children: [
                       _sectionLabel('Mistakes'),
-                      _chips(mistakes, model.mistakes, (value) => _toggleMulti(player.playerId, 'mistakes', value)),
+                      _chips(
+                        mistakes,
+                        model.mistakes,
+                        (value) =>
+                            _toggleMulti(player.playerId, 'mistakes', value),
+                      ),
                       _customInput(
                         controller: _customMistakeCtrl,
-                        onAdd: () => _addCustomOption(player.playerId, 'mistakes'),
+                        onAdd: () =>
+                            _addCustomOption(player.playerId, 'mistakes'),
                       ),
                       _sectionLabel('Strengths'),
-                      _chips(strengths, model.strengths, (value) => _toggleMulti(player.playerId, 'strengths', value)),
+                      _chips(
+                        strengths,
+                        model.strengths,
+                        (value) =>
+                            _toggleMulti(player.playerId, 'strengths', value),
+                      ),
                       _customInput(
                         controller: _customStrengthCtrl,
-                        onAdd: () => _addCustomOption(player.playerId, 'strengths'),
+                        onAdd: () =>
+                            _addCustomOption(player.playerId, 'strengths'),
                       ),
                       _sectionLabel('Performance'),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
-                        children: performance.map((option) {
-                          final selected = model.performance == option;
-                          return ChoiceChip(
-                            label: Text(_pretty(option)),
-                            selected: selected,
-                            onSelected: (_) => _setPerformance(player.playerId, option),
-                          );
-                        }).toList(growable: false),
+                        children: performance
+                            .map((option) {
+                              final selected = model.performance == option;
+                              return ChoiceChip(
+                                label: Text(_pretty(option)),
+                                selected: selected,
+                                onSelected: (_) =>
+                                    _setPerformance(player.playerId, option),
+                              );
+                            })
+                            .toList(growable: false),
                       ),
                     ],
                   ),
@@ -265,7 +301,9 @@ class _FeedbackFormState extends State<FeedbackForm> {
                 Expanded(
                   child: FilledButton(
                     onPressed: _submitting ? null : _submit,
-                    child: Text(_submitting ? 'Submitting...' : 'Submit Feedback'),
+                    child: Text(
+                      _submitting ? 'Submitting...' : 'Submit Feedback',
+                    ),
                   ),
                 ),
               ],
@@ -283,21 +321,30 @@ class _FeedbackFormState extends State<FeedbackForm> {
     );
   }
 
-  Widget _chips(List<String> options, List<String> selected, ValueChanged<String> onTap) {
+  Widget _chips(
+    List<String> options,
+    List<String> selected,
+    ValueChanged<String> onTap,
+  ) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: options.map((option) {
-        return FilterChip(
-          label: Text(_pretty(option)),
-          selected: selected.contains(option),
-          onSelected: (_) => onTap(option),
-        );
-      }).toList(growable: false),
+      children: options
+          .map((option) {
+            return FilterChip(
+              label: Text(_pretty(option)),
+              selected: selected.contains(option),
+              onSelected: (_) => onTap(option),
+            );
+          })
+          .toList(growable: false),
     );
   }
 
-  Widget _customInput({required TextEditingController controller, required VoidCallback onAdd}) {
+  Widget _customInput({
+    required TextEditingController controller,
+    required VoidCallback onAdd,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 4),
       child: Row(
@@ -322,7 +369,11 @@ class _FeedbackFormState extends State<FeedbackForm> {
   String _pretty(String input) {
     return input
         .split('_')
-        .map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}')
+        .map(
+          (part) => part.isEmpty
+              ? part
+              : '${part[0].toUpperCase()}${part.substring(1)}',
+        )
         .join(' ');
   }
 }
