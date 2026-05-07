@@ -209,15 +209,16 @@ class MatchmakingRepository {
   Future<MmDiscoverResponse> discoverLobbies({
     required String teamId,
     required String date,
-    required String format, // T10|T20|ODI|Test|Custom|ANY
+    required String format,
     String? ballType,
-    List<String> timeWindows = const [], // 'MORNING'|'AFTERNOON'|'EVENING'
-    String? preferredArenaId,
+    List<String> timeWindows = const [], // 5-bucket enum strings
+    String? preferredArenaId, // legacy single-ground (deprecated)
+    List<String> preferredArenaIds = const [], // up to 3 grounds
     double? lat,
     double? lng,
   }) async {
     _mmLog(
-        'discoverLobbies → teamId=$teamId date=$date format=$format windows=$timeWindows arena=$preferredArenaId');
+        'discoverLobbies → teamId=$teamId date=$date format=$format windows=$timeWindows arenas=$preferredArenaIds');
     final body = <String, dynamic>{
       'teamId': teamId,
       'filters': {
@@ -226,6 +227,7 @@ class MatchmakingRepository {
         if (ballType != null) 'ballType': ballType,
         'timeWindows': timeWindows,
         if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
+        if (preferredArenaIds.isNotEmpty) 'preferredArenaIds': preferredArenaIds,
       },
       if (lat != null && lng != null) 'context': {'lat': lat, 'lng': lng},
     };

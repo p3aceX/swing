@@ -194,6 +194,7 @@ export class MatchmakingService {
     // same date+format+window+arena (or any arena if both are null).
     timeWindow?: TimeWindow | null
     preferredArenaId?: string | null
+    preferredArenaIds?: string[] // up to 3 grounds; empty = any
   }) {
     const isPreferenceMode = input.picks.length === 0
     if (isPreferenceMode) {
@@ -240,6 +241,7 @@ export class MatchmakingService {
           expiresAt,
           timeWindow: input.timeWindow ?? null,
           preferredArenaId: input.preferredArenaId ?? null,
+          preferredArenaIds: input.preferredArenaIds ?? [],
           picks: {
             create: input.picks.map((p, i) => ({
               groundId: p.groundId,
@@ -477,6 +479,7 @@ export class MatchmakingService {
         ballType?: string | null
         timeWindows: Array<TimeWindow>
         preferredArenaId?: string | null
+        preferredArenaIds?: string[] // up to 3 preferred grounds, empty = any
       }
       context?: { lat?: number; lng?: number }
     },
@@ -609,6 +612,7 @@ export class MatchmakingService {
             expiresAt,
             timeWindow: lobbyTimeWindow,
             preferredArenaId: input.filters.preferredArenaId ?? null,
+            preferredArenaIds: input.filters.preferredArenaIds ?? [],
           } as any,
         })
       }
@@ -623,6 +627,7 @@ export class MatchmakingService {
           expiresAt,
           timeWindow: lobbyTimeWindow,
           preferredArenaId: input.filters.preferredArenaId ?? null,
+          preferredArenaIds: input.filters.preferredArenaIds ?? [],
         } as any,
       })
     })

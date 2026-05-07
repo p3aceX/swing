@@ -46,6 +46,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       })).max(3).optional(),
       timeWindow: timeWindowSchema,
       preferredArenaId: z.string().optional(),
+      preferredArenaIds: z.array(z.string()).max(3).optional(),
     }).parse(request.body)
     const data = await svc.createLobby(user.userId, {
       teamId: body.teamId,
@@ -55,6 +56,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       picks: body.picks ?? [],
       timeWindow: body.timeWindow ?? null,
       preferredArenaId: body.preferredArenaId ?? null,
+      preferredArenaIds: body.preferredArenaIds ?? [],
     })
     return reply.code(201).send({ success: true, data })
   })
@@ -88,6 +90,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
         ballType: ballTypeSchema,
         timeWindows: z.array(timeWindowVal).default([]),
         preferredArenaId: z.string().optional(),
+        preferredArenaIds: z.array(z.string()).max(3).optional(),
       }),
       context: z
         .object({
@@ -104,6 +107,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
         ballType: body.filters.ballType ?? null,
         timeWindows: body.filters.timeWindows,
         preferredArenaId: body.filters.preferredArenaId ?? null,
+        preferredArenaIds: body.filters.preferredArenaIds ?? [],
       },
       context: body.context,
     })

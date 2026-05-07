@@ -2692,10 +2692,13 @@ model MatchmakingLobby {
   // timeWindow values: 'MORNING' (06:00–12:00), 'AFTERNOON' (12:00–18:00),
   // 'EVENING' (18:00–next-04:00).
   //
-  // preferredArenaId: when set, the user wants to match only at this arena;
-  // when NULL, the user is open to any arena.
-  timeWindow         String?
-  preferredArenaId   String?
+  // preferredArenaId: legacy single-arena pref. Kept for backward
+  // compatibility with old lobby rows. New lobbies should use preferredArenaIds.
+  // preferredArenaIds: up to 3 grounds the team is happy to play at. Empty
+  // array means "any nearby ground".
+  timeWindow          String?
+  preferredArenaId    String?
+  preferredArenaIds   String[] @default([])
 
   // First-to-pay lock (Plan B / V2). When an interested team taps "Pay" on
   // this lobby, we acquire a 120s lock so only their Razorpay order is alive
