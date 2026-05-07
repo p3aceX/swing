@@ -2157,6 +2157,63 @@ export class MatchmakingService {
     return player
   }
 
+  // Slot resolution for player-vs-player Discover lobbies that have no
+  // explicit picks. Returns a (groundId, slotTime) chosen from the lobby's
+  // preferredArenaIds (or any active arena if none preferred). The slot
+  // starts at the lobby's timeWindow's bucket-start (e.g. 06:30 for MORNING)
+  // — concrete enough that lockAndPay / verifyInterestPayment can finalise
+  // a SlotBooking without crashing with NO_PICKS.
+  //
+  // Returns null when no active arena unit can be found. Caller throws
+  // NO_AVAILABLE_SLOT in that case.
+  private async resolveSlotForPicklessLobby(
+    lobby: {
+      preferredArenaIds: string[]
+      timeWindow: string | null
+    },
+    tx?: any,
+  ): Promise<{ groundId: string; slotTime: string } | null> {
+    const client = tx ?? prisma
+    const preferred = lobby.preferredArenaIds ?? []
+
+    // 1. Pick the candidate arenas: preferred first, then a small fallback
+    //    pool of active arenas if the team didn't pin any.
+    let candidateArenaIds = preferred
+    if (candidateArenaIds.length === 0) {
+      const fallback = await client.arena.findMany({
+        where: { isActive: true },
+        select: { id: true },
+        take: 10,
+      })
+      candidateArenaIds = fallback.map((a: { id: string }) => a.id)
+    }
+    if (candidateArenaIds.length === 0) return null
+
+    // 2. Pick the first available unit. We sort by price ascending so a
+    //    deterministic tiebreaker exists (cheapest wins).
+    const unit = await client.arenaUnit.findFirst({
+      where: {
+        arenaId: { in: candidateArenaIds },
+        // Filter to active units. Schema doesn't have an explicit isActive
+        // on ArenaUnit (yet), so any unit at an active arena is eligible.
+      },
+      orderBy: { pricePerHourPaise: 'asc' },
+      select: { id: true },
+    })
+    if (!unit) return null
+
+    // 3. Slot start time: bucket-start of the lobby's window. Multi-window
+    //    lobbies (timeWindow = null) default to MORNING.
+    const w = (lobby.timeWindow as TimeWindow | null) ?? 'MORNING'
+    const startMin =
+      WINDOW_RANGES[w]?.startMin ?? WINDOW_RANGES.MORNING.startMin
+    const hh = Math.floor(startMin / 60)
+    const mm = startMin % 60
+    const slotTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+
+    return { groundId: unit.id, slotTime }
+  }
+
   // Smart-window scanner. For each of the 5 time buckets, count how many
   // active arenas have operating hours that overlap the bucket on the given
   // date. Player-side abstraction — arenas don't tag slots with buckets, we
@@ -3688,11 +3745,35 @@ export class MatchmakingService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     )
 
-    if (!result.pick) {
-      throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+    // Player-vs-player Discover lobbies have no explicit picks. Resolve one
+    // from the lobby's preferredArenaIds + timeWindow so finalize can write
+    // a real SlotBooking. Persist as a pick row so subsequent reads (and
+    // the bypass / verify paths below) find it normally.
+    let resolvedPick = result.pick as { groundId: string; slotTime: string } | null
+    if (!resolvedPick) {
+      const r = await this.resolveSlotForPicklessLobby({
+        preferredArenaIds: (result.lobby as any).preferredArenaIds ?? [],
+        timeWindow: (result.lobby as any).timeWindow ?? null,
+      })
+      if (!r) {
+        throw new AppError(
+          'NO_AVAILABLE_SLOT',
+          'Could not find an available slot at the preferred grounds. Pick different grounds or relax the window.',
+          400,
+        )
+      }
+      await prisma.matchmakingLobbyPick.create({
+        data: {
+          lobbyId: result.lobby.id,
+          groundId: r.groundId,
+          slotTime: r.slotTime,
+          preferenceOrder: 1,
+        },
+      })
+      resolvedPick = r
     }
 
-    const unit = await prisma.arenaUnit.findUnique({ where: { id: result.pick.groundId } })
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: resolvedPick.groundId } })
     if (!unit) throw Errors.notFound('Arena unit')
 
     // Half the slot's ground fee is the per-team confirmation amount,
