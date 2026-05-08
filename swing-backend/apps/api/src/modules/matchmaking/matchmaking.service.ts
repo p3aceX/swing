@@ -2369,8 +2369,17 @@ export class MatchmakingService {
   //
   // Returns null when no active arena unit can be found. Caller throws
   // NO_AVAILABLE_SLOT in that case.
+  //
+  // Allocation precedence (the user-pref-wins rule):
+  //   1. groundsRanked / preferredArenaIds set on the lobby (player chose) →
+  //      use that ranked list as-is. System never overrides.
+  //   2. Empty groundsRanked ("any nearby") → smart allocation by
+  //      utilizationGap + recency + proximity (see smartAnyGroundAllocation).
+  //      The flywheel: quieter and closer arenas get first shot at no-pref
+  //      matches, building load balance from day one.
   private async resolveSlotForPicklessLobby(
     lobby: {
+      teamId?: string | null
       preferredArenaIds: string[]
       windowsRanked?: string[] | null
       windowsMatched?: string[] | null
@@ -2383,16 +2392,14 @@ export class MatchmakingService {
       ? lobby.groundsRanked
       : (lobby.preferredArenaIds ?? [])
 
-    // 1. Pick the candidate arenas: groundsRanked first, then a small
-    //    fallback pool of active arenas if the team didn't pin any.
+    // 1. Pick the candidate arenas: groundsRanked (player pref) wins if set,
+    //    otherwise fall through to smart allocation.
     let candidateArenaIds: string[] = [...groundsRanked]
     if (candidateArenaIds.length === 0) {
-      const fallback = await client.arena.findMany({
-        where: { isActive: true },
-        select: { id: true },
-        take: 10,
-      })
-      candidateArenaIds = fallback.map((a: { id: string }) => a.id)
+      candidateArenaIds = await this.smartAnyGroundAllocation(
+        lobby.teamId ?? null,
+        client,
+      )
     }
     if (candidateArenaIds.length === 0) return null
 
@@ -2426,6 +2433,104 @@ export class MatchmakingService {
     const slotTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 
     return { groundId: unit.id, slotTime, window: w }
+  }
+
+  // L1b — smart "any-ground" allocation. Fires only when the player did NOT
+  // pin specific grounds. Returns a ranked list of candidate arenaIds, top
+  // first. Caller picks rank-1, falls through to next on no-unit failure.
+  //
+  // Score = 0.5 * utilizationGap + 0.2 * recency + 0.3 * proximity
+  //   utilizationGap : 1 - (matches_28d / max_matches_28d). Quiet arenas win.
+  //   recency        : days_since_last_match / 30, capped. Stale arenas win.
+  //   proximity      : 1/(km+1) from team's home arena. Neutral 0.5 when
+  //                    location unknown. Nearby arenas win.
+  //
+  // Rating is intentionally NOT in this score yet — it's added in L3 once
+  // the ArenaReview model has data to draw on.
+  private async smartAnyGroundAllocation(
+    teamId: string | null,
+    client: any,
+  ): Promise<string[]> {
+    const arenas = await client.arena.findMany({
+      where: { isActive: true, units: { some: { isActive: true } } },
+      select: { id: true, latitude: true, longitude: true },
+    })
+    if (arenas.length === 0) return []
+
+    const since = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000)
+    const arenaIds = arenas.map((a: { id: string }) => a.id)
+    const counts: Array<{
+      venueId: string | null
+      _count: { _all: number }
+      _max: { scheduledAt: Date | null }
+    }> = await client.match.groupBy({
+      by: ['venueId'],
+      where: { venueId: { in: arenaIds }, scheduledAt: { gte: since } },
+      _count: { _all: true },
+      _max: { scheduledAt: true },
+    })
+    const stats = new Map<string, { count: number; lastAt: Date | null }>()
+    for (const c of counts) {
+      if (c.venueId) {
+        stats.set(c.venueId, {
+          count: c._count._all,
+          lastAt: c._max.scheduledAt,
+        })
+      }
+    }
+    const maxCount = Math.max(
+      1,
+      ...Array.from(stats.values()).map((s) => s.count),
+    )
+
+    let homeLat: number | null = null
+    let homeLng: number | null = null
+    if (teamId) {
+      const team = await client.team.findUnique({
+        where: { id: teamId },
+        select: { arenaId: true },
+      })
+      if (team?.arenaId) {
+        const homeArena = await client.arena.findUnique({
+          where: { id: team.arenaId },
+          select: { latitude: true, longitude: true },
+        })
+        if (homeArena) {
+          homeLat = homeArena.latitude
+          homeLng = homeArena.longitude
+        }
+      }
+    }
+
+    const now = Date.now()
+    const scored = arenas.map(
+      (a: { id: string; latitude: number; longitude: number }) => {
+        const stat = stats.get(a.id) ?? { count: 0, lastAt: null }
+        const utilizationGap = 1 - stat.count / maxCount
+        const lastDays = stat.lastAt
+          ? (now - stat.lastAt.getTime()) / (24 * 60 * 60 * 1000)
+          : 30
+        const recency = Math.min(1.0, lastDays / 30)
+        let proximity = 0.5
+        if (
+          homeLat !== null &&
+          homeLng !== null &&
+          a.latitude != null &&
+          a.longitude != null
+        ) {
+          const km = this.haversineKm(homeLat, homeLng, a.latitude, a.longitude)
+          proximity = 1.0 / (km + 1.0)
+        }
+        const score = 0.5 * utilizationGap + 0.2 * recency + 0.3 * proximity
+        return { id: a.id, score }
+      },
+    )
+    scored.sort(
+      (a: { score: number }, b: { score: number }) => b.score - a.score,
+    )
+    // Return top 5 — the resolver tries rank-1 first and falls back through
+    // the rest if no unit is available at the top pick.
+    return scored.slice(0, 5).map((s: { id: string }) => s.id)
   }
 
   // V2 lobby consumption: when a match is created, append the matched window
@@ -4185,6 +4290,7 @@ export class MatchmakingService {
     let resolvedPick = result.pick as { groundId: string; slotTime: string; window?: TimeWindow } | null
     if (!resolvedPick) {
       const r = await this.resolveSlotForPicklessLobby({
+        teamId: (result.lobby as any).teamId ?? null,
         preferredArenaIds: (result.lobby as any).preferredArenaIds ?? [],
         windowsRanked: (result.lobby as any).windowsRanked ?? [],
         windowsMatched: (result.lobby as any).windowsMatched ?? [],
