@@ -910,33 +910,48 @@ export class MatchmakingService {
         ?? (isTentative ? tentativeArena!.matchRatingAvg : null)
       const matchRatingCount = (concreteArena as any)?.matchRatingCount
         ?? (isTentative ? tentativeArena!.matchRatingCount : null)
-      // Display label combining bucket + clock window. Arena/picks-based
-      // candidates render as "MORNING · 10:00 AM – 1:00 PM" (concrete time).
-      // Pure-preference candidates (no picks) render as "MORNING window".
+      // Display label combining bucket + clock window. Renders the same
+      // shape ("MORNING · 10:00 AM – 1:00 PM") whether the candidate has
+      // a concrete pick or just a window preference — pure-preference
+      // candidates use the bucket's start time as the tentative slot,
+      // matching what resolveSlotForPicklessLobby will actually pick at
+      // lock-time. Without this Discover Results would alternate between
+      // "AFTERNOON window" and "AFTERNOON · 11:30 AM – 3:30 PM" cards.
       const slotLabel = (() => {
+        const fmtClock = (mins: number) => {
+          const hh = Math.floor(mins / 60) % 24
+          const mm = mins % 60
+          const ampm = hh < 12 ? 'AM' : 'PM'
+          const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+          return `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`
+        }
+        const dur = this.formatDurationMins(c.format as MatchmakingFormat)
+        // Concrete pick → use its actual slotTime.
         if (pick?.slotTime) {
           const parts = pick.slotTime.split(':')
           const h = parseInt(parts[0], 10)
           const m = parseInt(parts[1], 10)
           if (Number.isFinite(h) && Number.isFinite(m)) {
             const startMin = h * 60 + m
-            const dur = this.formatDurationMins(c.format as MatchmakingFormat)
-            const endMin = startMin + dur
-            const fmtClock = (mins: number) => {
-              const hh = Math.floor(mins / 60) % 24
-              const mm = mins % 60
-              const ampm = hh < 12 ? 'AM' : 'PM'
-              const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
-              return `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`
-            }
             const bucket = bucketForSlotTime(pick.slotTime)
             return bucket
-              ? `${bucket} · ${fmtClock(startMin)} – ${fmtClock(endMin)}`
-              : `${fmtClock(startMin)} – ${fmtClock(endMin)}`
+              ? `${bucket} · ${fmtClock(startMin)} – ${fmtClock(startMin + dur)}`
+              : `${fmtClock(startMin)} – ${fmtClock(startMin + dur)}`
           }
         }
+        // Pure-preference candidate → tentative slot at bucket-start of
+        // the rank-1 still-active window.
         const w0 = cWindowsRanked.find((w) => !cWindowsMatched.includes(w))
-        return w0 ? `${w0} window` : null
+        if (w0) {
+          const range = (WINDOW_RANGES as any)[w0] as
+              | { startMin: number; endMin: number }
+              | undefined
+          if (range) {
+            return `${w0} · ${fmtClock(range.startMin)} – ${fmtClock(range.startMin + dur)}`
+          }
+          return `${w0} window`
+        }
+        return null
       })()
 
       return {
