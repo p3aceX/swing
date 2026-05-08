@@ -12,6 +12,21 @@ final matchmakingRepositoryProvider = Provider<MatchmakingRepository>(
   (_) => MatchmakingRepository(),
 );
 
+/// Tick that bumps whenever a match-up is cancelled or confirmed. Surfaces
+/// outside Riverpod's normal data flow because the Discover view holds its
+/// own bootstrap state and needs an external nudge to re-fetch active
+/// lobbies after another tab mutates them.
+final mmRefreshTickProvider = StateProvider<int>((_) => 0);
+
+/// Bumps every matchmaking-state-changed signal at once: invalidates the
+/// teams + open-lobbies providers and ticks [mmRefreshTickProvider] so
+/// Discover re-bootstraps. Call after any cancel / confirm / pay flow.
+void bumpMatchmakingState(WidgetRef ref) {
+  ref.invalidate(mmTeamsProvider);
+  ref.invalidate(mmOpenLobbiesProvider);
+  ref.read(mmRefreshTickProvider.notifier).state++;
+}
+
 /// User's teams, mapped to MmTeam. Cached for the session.
 final mmTeamsProvider = FutureProvider<List<MmTeam>>((ref) async {
   _mmLog('mmTeamsProvider → loading');

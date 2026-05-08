@@ -163,10 +163,6 @@ class MatchmakingRepository {
     // preference-lobby that matches via ranked window overlap.
     List<String> windowsRanked = const [],
     List<String> groundsRanked = const [],
-    // Legacy single-window / single-arena. Kept for back-compat with older
-    // call sites; new code should pass the ranked arrays above instead.
-    String? timeWindow,
-    String? preferredArenaId,
   }) async {
     final resp = await _dio.post(
       ApiEndpoints.matchmakingLobbies,
@@ -181,8 +177,6 @@ class MatchmakingRepository {
               .toList(),
         if (windowsRanked.isNotEmpty) 'windowsRanked': windowsRanked,
         if (groundsRanked.isNotEmpty) 'groundsRanked': groundsRanked,
-        if (timeWindow != null) 'timeWindow': timeWindow,
-        if (preferredArenaId != null) 'preferredArenaId': preferredArenaId,
       },
     );
     return MmCreateLobbyResult.fromJson(_unwrap(resp.data));

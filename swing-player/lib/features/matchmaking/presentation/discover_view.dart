@@ -244,12 +244,38 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       final active = chosen != null ? _teamLobbies[chosen.id] : null;
       if (active != null) {
         _hydratePrefsFromLobby(active);
-        // Don't fire /discover if hydration produced no windows — backend
-        // rejects empty windowsRanked with 400. User has to pick a window
-        // first via the wizard.
-        if (_prefs.windowsRanked.isNotEmpty) {
-          await _runDiscover(skipCelebrate: true);
+        if (_prefs.windowsRanked.isEmpty) return;
+        // Fully-matched lobby: render last-known results without re-hitting
+        // /discover. A re-fire would 409 SLOT_CONFLICT and surface as the
+        // "you're already booked" dialog every time the tab opens.
+        final fullyMatched = active.status == 'matched' ||
+            (active.windowsRanked.isNotEmpty &&
+                active.windowsMatched.length >= active.windowsRanked.length);
+        if (fullyMatched) {
+          if (!mounted) return;
+          setState(() {
+            _activeLobbyId = active.lobbyId;
+            _stage = _Stage.results;
+          });
+          return;
         }
+        // Partial match: narrow windowsRanked to the still-unmatched subset
+        // so the next /discover doesn't conflict with already-consumed slots.
+        if (active.windowsMatched.isNotEmpty) {
+          final remaining = _prefs.windowsRanked
+              .where((w) => !active.windowsMatched.contains(w.apiValue))
+              .toList();
+          if (remaining.isEmpty) {
+            if (!mounted) return;
+            setState(() {
+              _activeLobbyId = active.lobbyId;
+              _stage = _Stage.results;
+            });
+            return;
+          }
+          setState(() => _prefs.windowsRanked = remaining);
+        }
+        await _runDiscover(skipCelebrate: true, silent: true);
       }
     } catch (e) {
       _log('bootstrap error: $e');
@@ -343,6 +369,8 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       _submittedLobbies = const [];
       _stage = _Stage.intro;
     });
+    // Tell the rest of the app (My Match-Up tab, lobby lists) to refresh.
+    bumpMatchmakingState(ref);
   }
 
   // True if every selected window has ended on the lobby's date. Empty set
@@ -469,10 +497,6 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
             date: dateApi,
             format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
             ballType: _prefs.ballType,
-            timeWindow: _prefs.windowsRanked.length == 1
-                ? _prefs.windowsRanked.first.apiValue
-                : null,
-            preferredArenaId: _prefs.preferredArenaId,
             windowsRanked: _prefs.windowsApi,
             groundsRanked: _prefs.preferredArenaIdList,
           );
@@ -496,7 +520,14 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   // Calls /matchmaking/discover for the currently-selected single date. Used
   // by Results-screen pull-to-refresh and by team-switcher hydration. Multi-
   // date submission goes through [_runDiscoverForAllDates] instead.
-  Future<void> _runDiscover({bool skipCelebrate = false}) async {
+  //
+  // [silent] swallows mapped error dialogs (SLOT_CONFLICT / TEAM_BANNED /
+  // NO_AVAILABLE_SLOT) — used by auto-bootstrap so opening the tab on an
+  // already-matched lobby doesn't surface alerts the user didn't ask for.
+  Future<void> _runDiscover({
+    bool skipCelebrate = false,
+    bool silent = false,
+  }) async {
     if (_currentTeam == null) return;
     final repo = ref.read(matchmakingRepositoryProvider);
     try {
@@ -523,10 +554,6 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           date: _prefs.dateApi,
           format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
           ballType: _prefs.ballType,
-          timeWindow: _prefs.windowsRanked.length == 1
-              ? _prefs.windowsRanked.first.apiValue
-              : null,
-          preferredArenaId: _prefs.preferredArenaId,
           windowsRanked: _prefs.windowsApi,
           groundsRanked: _prefs.preferredArenaIdList,
         );
@@ -537,6 +564,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     } catch (e) {
       _log('runDiscover error: $e');
       if (!mounted) return;
+      if (silent) return;
       _handleDiscoverError(e);
     }
   }
@@ -693,7 +721,35 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     final active = _teamLobbies[team.id];
     if (active != null) {
       _hydratePrefsFromLobby(active);
-      await _runDiscover(skipCelebrate: true);
+      if (_prefs.windowsRanked.isEmpty) {
+        setState(() => _stage = _Stage.results);
+        return;
+      }
+      // Skip /discover for already-matched lobbies — same reason as bootstrap.
+      final fullyMatched = active.status == 'matched' ||
+          (active.windowsRanked.isNotEmpty &&
+              active.windowsMatched.length >= active.windowsRanked.length);
+      if (fullyMatched) {
+        setState(() {
+          _activeLobbyId = active.lobbyId;
+          _stage = _Stage.results;
+        });
+        return;
+      }
+      if (active.windowsMatched.isNotEmpty) {
+        final remaining = _prefs.windowsRanked
+            .where((w) => !active.windowsMatched.contains(w.apiValue))
+            .toList();
+        if (remaining.isEmpty) {
+          setState(() {
+            _activeLobbyId = active.lobbyId;
+            _stage = _Stage.results;
+          });
+          return;
+        }
+        setState(() => _prefs.windowsRanked = remaining);
+      }
+      await _runDiscover(skipCelebrate: true, silent: true);
       if (!mounted) return;
       setState(() => _stage = _Stage.results);
     } else {
@@ -705,6 +761,13 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
 
   @override
   Widget build(BuildContext context) {
+    // External signal that some matchmaking-state-changed event happened
+    // outside this view (cancel from My Match-Up tab, payment confirmation,
+    // etc.). Re-run bootstrap so we pick up the now-canonical lobby state.
+    ref.listen<int>(mmRefreshTickProvider, (prev, next) {
+      if (prev == next) return;
+      _bootstrap();
+    });
     final teamsAsync = ref.watch(mmTeamsProvider);
     final allTeams = teamsAsync.valueOrNull ?? const <MmTeam>[];
     return switch (_stage) {
@@ -2426,15 +2489,6 @@ class _StatusBannerState extends State<_StatusBanner>
       ),
     );
   }
-}
-
-String _emptyClosestText(String? reason, bool hasAlts) {
-  if (reason == 'no_exact_matches') {
-    return hasAlts
-        ? 'No exact matches yet. Here are the closest alternatives:'
-        : 'No teams want these prefs yet. Your match-up is posted — we\'ll notify you when one shows up.';
-  }
-  return 'No exact matches yet. Your match-up is posted — we\'ll notify you when one shows up.';
 }
 
 String _dateLabel(DateTime d) {

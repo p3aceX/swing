@@ -7366,7 +7366,13 @@ class _MatchCard extends ConsumerWidget {
           opponentPaid: match.opponentPaid,
           status: match.status,
           bookingId: match.bookingId,
-          onRefresh: () => ref.invalidate(_myMatchesProvider),
+          onRefresh: () {
+            // Full cascade: my-matches list, teams, open lobbies, and the
+            // Discover bootstrap tick — so cancelling here resets every
+            // matchmaking surface, not just this tab.
+            ref.invalidate(_myMatchesProvider);
+            bumpMatchmakingState(ref);
+          },
         ),
       ),
       child: _MatchCardBody(match: match),
