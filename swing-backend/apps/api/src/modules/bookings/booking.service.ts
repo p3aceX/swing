@@ -762,6 +762,8 @@ export class BookingService {
         guestPlayerProfile: { select: { id: true, username: true } },
         unit: { select: { name: true } },
         bookedBy: { include: { user: { select: { name: true, phone: true } } } },
+        _count: { select: { bookingPayments: true } },
+        bookingPayments: { select: { amountPaise: true } },
       },
       orderBy: { date: 'desc' },
     })
@@ -777,12 +779,14 @@ export class BookingService {
       playerProfileId: string | null
       isLinkedUser: boolean
       lastDate: Date | null
-      bookings: typeof bookings
+      bookings: any[]
     }>()
 
     for (const b of bookings) {
       const phone = b.guestUser?.phone ?? b.guestPhone!
       const key = b.guestUserId ?? phone
+      const paidPaise = b.bookingPayments?.reduce((s: number, p: any) => s + p.amountPaise, 0) ?? b.advancePaise
+      const balPaise = Math.max(0, b.totalAmountPaise - paidPaise)
       if (!map.has(key)) {
         map.set(key, {
           phone,
@@ -799,11 +803,14 @@ export class BookingService {
       }
       const entry = map.get(key)!
       entry.totalBookings++
-      // collected = checked-in bookings; balance = confirmed but not yet checked in
-      entry.totalSpentPaise += b.checkedInAt != null ? b.totalAmountPaise : 0
-      entry.balanceDuePaise += b.checkedInAt == null ? b.totalAmountPaise : 0
+      entry.totalSpentPaise += balPaise === 0 ? b.totalAmountPaise : paidPaise
+      entry.balanceDuePaise += balPaise
       if (!entry.lastDate || (b.date && b.date > entry.lastDate)) entry.lastDate = b.date
-      entry.bookings.push(b)
+      entry.bookings.push({
+        ...b,
+        paymentsCount: b._count?.bookingPayments ?? 0,
+        paidAmountPaise: paidPaise,
+      })
     }
 
     let guests = Array.from(map.values())
