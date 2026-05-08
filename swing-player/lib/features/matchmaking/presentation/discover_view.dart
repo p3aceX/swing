@@ -2123,156 +2123,529 @@ class _DiscoverResults extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: _StatusBanner(expired: expired),
         ),
-        // Other-dates strip — visible only when the wizard submitted >1 date.
-        // v1 simplification: tapping a chip just shows which date is being
-        // viewed. The user re-enters Setup to switch into a different date's
-        // results. (See SUMMARY for the simplification rationale.)
-        if (submittedLobbies.length > 1)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: _OtherDatesStrip(
-              submitted: submittedLobbies,
-              activeDateApi: prefs.dateApi,
-              onSelect: onSwitchDate,
-            ),
+        // Date strip — only dates the user submitted (multi-date) or the
+        // active date if there was no multi-date submission. Active is
+        // highlighted; tap = re-run discover for that date.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: _MatchDateStrip(
+            submitted: submittedLobbies,
+            activeDateApi: prefs.dateApi,
+            onSelect: onSwitchDate,
           ),
+        ),
+        const SizedBox(height: 12),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => onRefresh(skipCelebrate: true),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${prefs.formatLabel} · ${_ballLabelFor(prefs)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.fg,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${_dateLabel(prefs.date)} · ${prefs.windowsLabel} · ${prefs.preferredArenaName ?? 'Any ground'}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.fgSub,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  height: 1,
-                  color: context.stroke.withValues(alpha: 0.18),
-                ),
-                const SizedBox(height: 18),
-
-                if (primary.isNotEmpty) ...[
-                  _ResultsHeader(
-                    label: 'PRIMARY MATCHES',
-                    count: primary.length,
-                    accent: true,
-                  ),
-                  const SizedBox(height: 8),
-                  for (final r in primary)
-                    _LobbyTile(
-                      lobby: r.lobby,
-                      prominent: true,
-                      score: r.score,
-                      matchedOn: r.matchedOn,
-                      differs: r.differs,
-                      callerWindowsRanked: prefs.windowsApi,
-                      callerGroundsRanked: prefs.preferredArenaIdList,
-                      onTap: () => onChallenge(r.lobby),
-                    ),
-                  const SizedBox(height: 22),
-                ] else ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Color.alphaBlend(
-                          context.warn.withValues(alpha: 0.10),
-                          context.bg,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.info_rounded,
-                                  color: context.warn, size: 18),
-                              const SizedBox(width: 8),
-                              Text(
-                                'No primary matches yet',
-                                style: TextStyle(
-                                  color: context.fg,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.2,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            alternatives.isNotEmpty
-                                ? 'Showing alternatives below — teams whose preferences overlap yours but don\'t share your top window+ground.'
-                                : 'Your match-up is posted. We\'ll notify you when a team matches.',
-                            style: TextStyle(
-                              color: context.fgSub,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                if (alternatives.isNotEmpty) ...[
-                  _ResultsHeader(
-                    label: 'ALTERNATIVES',
-                    count: alternatives.length,
-                    accent: primary.isEmpty,
-                  ),
-                  const SizedBox(height: 8),
-                  for (final r in alternatives)
-                    _LobbyTile(
-                      lobby: r.lobby,
-                      prominent: primary.isEmpty,
-                      score: r.score,
-                      matchedOn: r.matchedOn,
-                      differs: r.differs,
-                      callerWindowsRanked: prefs.windowsApi,
-                      callerGroundsRanked: prefs.preferredArenaIdList,
-                      onTap: () => onChallenge(r.lobby),
-                    ),
-                ],
-              ],
+            child: _MatchTimeline(
+              prefs: prefs,
+              primary: primary,
+              alternatives: alternatives,
+              alternativeReason: alternativeReason,
+              onChallenge: onChallenge,
             ),
           ),
         ),
       ],
     );
   }
+}
+
+// ── Calendar-timeline (Discover Results) ──────────────────────────────────
+
+// Horizontal date chips. Only dates the player submitted appear; empty
+// days are skipped so the strip never feels sparse. Active chip uses the
+// app's gold accent (matches the design reference).
+class _MatchDateStrip extends StatelessWidget {
+  const _MatchDateStrip({
+    required this.submitted,
+    required this.activeDateApi,
+    required this.onSelect,
+  });
+
+  final List<({String date, String lobbyId})> submitted;
+  final String activeDateApi;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    // Always include the active date even if it isn't in the submitted list
+    // (single-date discover fires without writing to submittedLobbies).
+    final dates = <String>{
+      activeDateApi,
+      for (final s in submitted) s.date,
+    }.toList()..sort();
+    if (dates.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 64,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: dates.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final api = dates[i];
+          final isActive = api == activeDateApi;
+          DateTime? d;
+          try { d = DateTime.parse(api); } catch (_) {}
+          if (d == null) return const SizedBox.shrink();
+          const monthNames = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+              'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+          const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          return GestureDetector(
+            onTap: isActive ? null : () => onSelect(api),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 56,
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                color: isActive ? context.gold : context.bg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isActive
+                      ? Colors.transparent
+                      : context.fg.withValues(alpha: 0.10),
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    monthNames[d.month],
+                    style: TextStyle(
+                      color: isActive ? Colors.black87 : context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${d.day}',
+                    style: TextStyle(
+                      color: isActive ? Colors.black : context.fg,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    dowNames[d.weekday],
+                    style: TextStyle(
+                      color: isActive ? Colors.black54 : context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// Vertical timeline. Hour gutter on the left; each match renders inline at
+// its slot hour. Empty hours are collapsed (we don't render rows of
+// nothingness — the date strip already tells the user which date they're
+// looking at).
+class _MatchTimeline extends StatelessWidget {
+  const _MatchTimeline({
+    required this.prefs,
+    required this.primary,
+    required this.alternatives,
+    required this.alternativeReason,
+    required this.onChallenge,
+  });
+
+  final _Prefs prefs;
+  final List<MmRankedLobby> primary;
+  final List<MmRankedLobby> alternatives;
+  final String? alternativeReason;
+  final ValueChanged<MmOpenLobby> onChallenge;
+
+  // Pulls a starting hour for the timeline placement. Uses the lobby's
+  // concrete slotTime when present (arena listings + locked picks); falls
+  // back to the bucket-start of windowsRanked[0] for pure-preference lobbies.
+  static int _hourOf(MmOpenLobby lobby) {
+    if (lobby.slotTime.isNotEmpty) {
+      final h = int.tryParse(lobby.slotTime.split(':').first);
+      if (h != null) return h;
+    }
+    if (lobby.windowsRanked.isNotEmpty) {
+      return switch (lobby.windowsRanked.first) {
+        'MORNING' => 7,
+        'AFTERNOON' => 12,
+        'EVENING' => 17,
+        'NIGHT' => 21,
+        'LATE_NIGHT' => 0,
+        _ => 9,
+      };
+    }
+    return 9;
+  }
+
+  static String _hourLabel(int h) {
+    final ampm = h < 12 ? 'AM' : 'PM';
+    final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
+    return '$h12 $ampm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <({MmRankedLobby ranked, bool isPrimary, int hour})>[
+      for (final r in primary)
+        (ranked: r, isPrimary: true, hour: _hourOf(r.lobby)),
+      for (final r in alternatives)
+        (ranked: r, isPrimary: false, hour: _hourOf(r.lobby)),
+    ]..sort((a, b) => a.hour.compareTo(b.hour));
+
+    if (entries.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Color.alphaBlend(
+                context.warn.withValues(alpha: 0.10),
+                context.bg,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Icon(Icons.info_rounded, color: context.warn, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'No matches on this date yet',
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 6),
+                Text(
+                  alternativeReason == 'no_exact_matches'
+                      ? "Your match-up is posted. We'll notify you when a team matches."
+                      : "Your match-up is searching. Switch dates above or modify preferences.",
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
+      itemCount: entries.length,
+      itemBuilder: (_, i) {
+        final e = entries[i];
+        return _TimelineRow(
+          hourLabel: _hourLabel(e.hour),
+          isPrimary: e.isPrimary,
+          ranked: e.ranked,
+          callerWindowsRanked: prefs.windowsApi,
+          callerGroundsRanked: prefs.preferredArenaIdList,
+          onTap: () => onChallenge(e.ranked.lobby),
+        );
+      },
+    );
+  }
+}
+
+class _TimelineRow extends StatelessWidget {
+  const _TimelineRow({
+    required this.hourLabel,
+    required this.isPrimary,
+    required this.ranked,
+    required this.callerWindowsRanked,
+    required this.callerGroundsRanked,
+    required this.onTap,
+  });
+
+  final String hourLabel;
+  final bool isPrimary;
+  final MmRankedLobby ranked;
+  final List<String> callerWindowsRanked;
+  final List<String> callerGroundsRanked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Hour gutter: tiny right-aligned label + a dash beneath it.
+          SizedBox(
+            width: 56,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    hourLabel,
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 1,
+                    width: 14,
+                    color: context.fgSub.withValues(alpha: 0.4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _TimelineCard(
+              isPrimary: isPrimary,
+              ranked: ranked,
+              callerWindowsRanked: callerWindowsRanked,
+              callerGroundsRanked: callerGroundsRanked,
+              onTap: onTap,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineCard extends StatelessWidget {
+  const _TimelineCard({
+    required this.isPrimary,
+    required this.ranked,
+    required this.callerWindowsRanked,
+    required this.callerGroundsRanked,
+    required this.onTap,
+  });
+
+  final bool isPrimary;
+  final MmRankedLobby ranked;
+  final List<String> callerWindowsRanked;
+  final List<String> callerGroundsRanked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final lobby = ranked.lobby;
+    // Primary cards: solid filled (the "team meeting" look from the
+    // reference). Alternative cards: striped surface.
+    final cardBg = isPrimary
+        ? context.ctaBg
+        : Color.alphaBlend(context.fg.withValues(alpha: 0.05), context.bg);
+    final fg = isPrimary ? context.ctaFg : context.fg;
+    final fgSub = isPrimary ? context.ctaFg.withValues(alpha: 0.75) : context.fgSub;
+    final caveat = _differsLabel(ranked.differs);
+    final groundLine = lobby.arenaName.isNotEmpty
+        ? lobby.arenaName
+        : (lobby.preferredArenaName ?? 'Any ground');
+    final priceLine =
+        '${lobby.isTentativePricing ? "≈ " : ""}₹${(lobby.pricePerTeamPaise / 100).round()}';
+
+    final inner = Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  lobby.teamName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+              ),
+              if (lobby.matchRatingCount != null)
+                _RatingPill(
+                  isPrimary: isPrimary,
+                  average: lobby.matchRatingAvg,
+                  count: lobby.matchRatingCount,
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            lobby.slotLabel ?? lobby.displaySlot,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: fg,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${lobby.format} · $groundLine · $priceLine',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: fgSub,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (caveat != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              caveat,
+              style: TextStyle(
+                color: isPrimary ? context.ctaFg.withValues(alpha: 0.85) : context.warn,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    final card = ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(14),
+          border: isPrimary
+              ? null
+              : Border.all(
+                  color: context.fg.withValues(alpha: 0.10),
+                  width: 1,
+                ),
+        ),
+        child: isPrimary
+            ? inner
+            : CustomPaint(
+                painter: _DiagonalStripePainter(
+                  color: context.fg.withValues(alpha: 0.04),
+                ),
+                child: inner,
+              ),
+      ),
+    );
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: card,
+    );
+  }
+}
+
+class _RatingPill extends StatelessWidget {
+  const _RatingPill({
+    required this.isPrimary,
+    required this.average,
+    required this.count,
+  });
+  final bool isPrimary;
+  final double? average;
+  final int? count;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count == null || count! < 3) {
+      // Mirrors HostArenaRatingBadge's "NEW GROUND" treatment but tightened
+      // for the timeline card header.
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: (isPrimary ? context.ctaFg : context.sky).withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'NEW',
+          style: TextStyle(
+            color: isPrimary ? context.ctaFg : context.sky,
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.6,
+          ),
+        ),
+      );
+    }
+    final avg = (average ?? 0).clamp(0, 5);
+    final fg = isPrimary ? context.ctaFg : context.fg;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.star_rounded, size: 13, color: isPrimary ? context.gold : context.gold),
+        const SizedBox(width: 2),
+        Text(
+          avg.toStringAsFixed(1),
+          style: TextStyle(
+            color: fg,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DiagonalStripePainter extends CustomPainter {
+  _DiagonalStripePainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5;
+    const spacing = 10.0;
+    // Diagonal lines from bottom-left toward top-right.
+    final start = -size.height;
+    for (var x = start; x < size.width + size.height; x += spacing) {
+      canvas.drawLine(
+        Offset(x, size.height),
+        Offset(x + size.height, 0),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DiagonalStripePainter old) => old.color != color;
 }
 
 String _ballLabelFor(_Prefs p) =>
