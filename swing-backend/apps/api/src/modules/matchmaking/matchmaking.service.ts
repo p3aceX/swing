@@ -444,10 +444,32 @@ export class MatchmakingService {
     const units = groundIds.length
       ? await prisma.arenaUnit.findMany({
           where: { id: { in: groundIds } },
-          select: { id: true, name: true, arena: { select: { name: true } } },
+          select: { id: true, name: true, arenaId: true, arena: { select: { name: true } } },
         })
       : []
     const unitById = new Map(units.map((u) => [u.id, u]))
+
+    // Re-validate each stored pick against the live availability grid for
+    // its arena. Picks that are off-grid under the unit's current config
+    // (e.g. unit hours/turnaround changed since lobby was created) are
+    // surfaced as `available: false` so the UI can hide or de-emphasize
+    // them. The lobby itself stays alive — players keep their windowsRanked.
+    const dateApi = this.toDateOnly(lobby.date)
+    const lobbyDurationMins = this.formatDurationMins(lobby.format as MatchmakingFormat)
+    const liveSlotsByUnit = new Map<string, Set<string>>()
+    const arenaIds = Array.from(new Set(units.map((u) => u.arenaId).filter(Boolean) as string[]))
+    for (const aid of arenaIds) {
+      try {
+        const live = await new ArenaService().getPlayerSlots(aid, dateApi, lobbyDurationMins)
+        for (const g of (live.unitGroups as any[])) {
+          const uid = g.unitId
+          if (!uid) continue
+          liveSlotsByUnit.set(uid, new Set((g.availableSlots ?? []).map((s: any) => s.startTime)))
+        }
+      } catch {
+        // Arena unreachable — picks for this arena fall through to available=false
+      }
+    }
 
     // Unified contract: preferredArenaIds is the canonical "groundsRanked"
     // storage. Surface the rank-1 ground's display name so clients can
@@ -473,6 +495,7 @@ export class MatchmakingService {
         groundId: p.groundId,
         groundName: unitById.get(p.groundId)?.arena?.name ?? unitById.get(p.groundId)?.name ?? null,
         slotTime: p.slotTime,
+        available: liveSlotsByUnit.get(p.groundId)?.has(p.slotTime) ?? false,
       })),
       windowsRanked,
       windowsMatched: ((lobby as any).windowsMatched ?? []) as string[],
@@ -773,6 +796,31 @@ export class MatchmakingService {
       : []
     const unitsById = new Map(units.map((u) => [u.id, u]))
 
+    // Live re-validation for concrete-pick opponents: stored picks may be
+    // off-grid under the unit's current config (turnaround/hours changed
+    // since lobby creation). Build a per-unit set of currently-bookable
+    // start times so concrete-pick candidates whose slotTime no longer
+    // aligns fall through to the tentative-slot path like a pure-preference
+    // lobby would.
+    const candidateDateApi = this.toDateOnly(date)
+    const candidateDur = this.formatDurationMins(input.filters.format)
+    const candidatePickArenaIds = Array.from(new Set(
+      units.map((u) => (u as any).arenaId).filter(Boolean) as string[],
+    ))
+    const liveSlotsByPickUnit = new Map<string, Set<string>>()
+    for (const aid of candidatePickArenaIds) {
+      try {
+        const live = await new ArenaService().getPlayerSlots(aid, candidateDateApi, candidateDur)
+        for (const g of (live.unitGroups as any[])) {
+          const uid = g.unitId
+          if (!uid) continue
+          liveSlotsByPickUnit.set(uid, new Set((g.availableSlots ?? []).map((s: any) => s.startTime)))
+        }
+      } catch {
+        // Arena unreachable — picks for this arena fall through to tentative
+      }
+    }
+
     const arenaIds = [
       ...new Set(
         candidates.flatMap((c) => [
@@ -932,7 +980,15 @@ export class MatchmakingService {
       differs: string[]
     }) => {
       const c = s.lobby
-      const pick = c.picks[0]
+      const rawPick = c.picks[0]
+      // Re-validate the candidate's concrete pick against the live grid.
+      // If the unit's current config has shifted the pick off-grid, treat
+      // the candidate as pure-preference so the tentative-slot path picks
+      // a real bookable time instead of advertising a dead slot.
+      const pickIsLive = rawPick
+        ? (liveSlotsByPickUnit.get(rawPick.groundId)?.has(rawPick.slotTime) ?? false)
+        : false
+      const pick = pickIsLive ? rawPick : null
       const unit = pick ? unitsById.get(pick.groundId) : null
       const arena = c.arenaId ? arenasById.get(c.arenaId) : null
       const cGroundsRanked = (c.preferredArenaIds ?? []) as string[]
@@ -1661,7 +1717,7 @@ export class MatchmakingService {
     }
   }
 
-  async acceptLobbyAsOwner(userId: string, lobbyId: string, arenaId: string, slotTime?: string) {
+  async acceptLobbyAsOwner(userId: string, lobbyId: string, arenaId: string, slotTime?: string, unitId?: string) {
     const owner = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
     if (!owner) throw Errors.forbidden()
     const arena = await prisma.arena.findUnique({ where: { id: arenaId } })
@@ -1674,22 +1730,42 @@ export class MatchmakingService {
     if (!lobby) throw Errors.notFound('Lobby')
     if (lobby.status !== 'searching') throw new AppError('INVALID_STATE', 'Lobby is no longer searching', 400)
 
-    // Use the owner-chosen slot or fall back to first preference
-    const pick = slotTime
-      ? (lobby.picks.find((p: any) => p.slotTime === slotTime) ?? lobby.picks[0])
-      : lobby.picks[0]
-    if (!pick) throw new AppError('NO_PICKS', 'Lobby has no ground picks', 400)
+    // Resolve target unit + slot. Prefer explicit client-supplied values
+    // (live-availability UI); fall back to stored picks for back-compat.
+    let targetUnitId = unitId
+    let targetSlotTime = slotTime
+    if (!targetUnitId || !targetSlotTime) {
+      const fallbackPick = targetSlotTime
+        ? lobby.picks.find((p: any) => p.slotTime === targetSlotTime) ?? lobby.picks[0]
+        : lobby.picks[0]
+      if (!fallbackPick) throw new AppError('NO_PICKS', 'Specify unitId and slotTime', 400)
+      targetUnitId = targetUnitId ?? fallbackPick.groundId
+      targetSlotTime = targetSlotTime ?? fallbackPick.slotTime
+    }
 
-    // Verify the pick's ground belongs to this arena
-    const unit = await prisma.arenaUnit.findUnique({ where: { id: pick.groundId } })
-    if (!unit || unit.arenaId !== arenaId) throw new AppError('GROUND_MISMATCH', 'Pick does not belong to this arena', 400)
-
-    // Soft-block the slot
-    const date = lobby.date
-    const endMins = this.timeToMinutes(pick.slotTime) + 120
-    const endTime = this.minutesToTime(endMins)
+    const unit = await prisma.arenaUnit.findUnique({ where: { id: targetUnitId! } })
+    if (!unit || unit.arenaId !== arenaId) throw new AppError('GROUND_MISMATCH', 'Unit does not belong to this arena', 400)
 
     const durationMins = this.formatDurationMins(lobby.format as MatchmakingFormat)
+
+    // Validate the chosen slot against the live availability grid — picks
+    // captured under an older unit config (different turnaround/hours) may
+    // be off-grid now; trust the live grid, not stored slotTime.
+    const dateApi = this.toDateOnly(lobby.date)
+    const liveSlots = await new ArenaService().getPlayerSlots(arenaId, dateApi, durationMins)
+    const unitGroup = (liveSlots.unitGroups as any[]).find((g) => g.unitId === unit.id)
+    const isOnGrid = (unitGroup?.availableSlots ?? []).some((s: any) => s.startTime === targetSlotTime)
+    if (!isOnGrid) {
+      throw new AppError(
+        'SLOT_UNAVAILABLE',
+        'This slot is no longer available under the unit\'s current configuration. Pick another time.',
+        409,
+      )
+    }
+
+    const date = lobby.date
+    const endMins = this.timeToMinutes(targetSlotTime!) + durationMins
+    const endTime = this.minutesToTime(endMins)
     const totalAmountPaise = Math.round(unit.pricePerHourPaise * durationMins / 60)
 
     const booking = await prisma.slotBooking.create({
@@ -1698,7 +1774,7 @@ export class MatchmakingService {
         unitId: unit.id,
         bookedById: lobby.playerId,
         date,
-        startTime: pick.slotTime,
+        startTime: targetSlotTime!,
         endTime,
         durationMins,
         format: lobby.format as any,

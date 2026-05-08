@@ -462,9 +462,10 @@ class _ScheduleTabState extends State<_ScheduleTab> {
     final opDays = widget.unit.operatingDays.isNotEmpty
         ? widget.unit.operatingDays
         : widget.arena.operatingDays;
-    // Grounds are single-capacity: step by maxSlotMins so slots are non-overlapping
+    // Grounds are single-capacity: step by maxSlotMins + turnaround so slots
+    // are non-overlapping and respect the cleanup gap between sessions.
     final slotStep = widget.unit.isGround
-        ? widget.unit.maxSlotMins
+        ? widget.unit.maxSlotMins + widget.unit.turnaroundMins
         : widget.unit.minSlotMins;
     debugPrint('🔵 [slots] unitType=${widget.unit.unitType} isGround=${widget.unit.isGround} minSlotMins=${widget.unit.minSlotMins} maxSlotMins=${widget.unit.maxSlotMins} slotStep=$slotStep openTime=$openTime closeTime=$closeTime');
     final slots = _computeSlots(openTime, closeTime, slotStep);

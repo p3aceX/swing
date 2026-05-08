@@ -593,6 +593,27 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
   bool _loading = false;
   String? _error;
   late String _selectedSlot;
+  String? _selectedUnitId;
+
+  // Live availability for the lobby's date+arena+format. Picks are
+  // cross-checked against this map so off-grid stored slots are surfaced
+  // as unavailable instead of letting the host commit a stale time that
+  // the backend will then reject.
+  bool _loadingLive = true;
+  Map<String, Set<String>> _liveSlotsByUnit = const {};
+
+  static int _formatDurationMins(String format) {
+    switch (format) {
+      case 'ODI':
+      case 'Test':
+        return 480;
+      case 'T10':
+      case 'T20':
+      case 'Custom':
+      default:
+        return 240;
+    }
+  }
 
   @override
   void initState() {
@@ -601,6 +622,55 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
     _selectedSlot = widget.lobby.picks.isNotEmpty
         ? widget.lobby.picks.first.slotTime
         : widget.lobby.slotTime;
+    _selectedUnitId = widget.lobby.picks.isNotEmpty
+        ? widget.lobby.picks.first.unitId
+        : null;
+    _loadLiveAvailability();
+  }
+
+  Future<void> _loadLiveAvailability() async {
+    try {
+      final dio = ref.read(hostDioProvider);
+      final dur = _formatDurationMins(widget.lobby.format);
+      final res = await dio.get(
+        '/arenas/${widget.arenaId}/slots',
+        queryParameters: {
+          'date': widget.lobby.date,
+          'durationMins': dur,
+        },
+      );
+      final payload = (res.data is Map && res.data['data'] is Map)
+          ? res.data['data'] as Map
+          : (res.data as Map);
+      final groups = (payload['unitGroups'] as List?) ?? const [];
+      final next = <String, Set<String>>{};
+      for (final g in groups) {
+        if (g is! Map) continue;
+        final uid = g['unitId'] as String?;
+        if (uid == null) continue;
+        final starts = ((g['availableSlots'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((s) => s['startTime'])
+            .whereType<String>()
+            .toSet();
+        next[uid] = starts;
+      }
+      if (!mounted) return;
+      setState(() {
+        _liveSlotsByUnit = next;
+        _loadingLive = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // Fall back to letting the host pick from stored picks; the backend
+      // still re-validates and will reject off-grid slots with a clear error.
+      setState(() => _loadingLive = false);
+    }
+  }
+
+  bool _isPickLive(ArenaLobbyPick p) {
+    if (p.unitId.isEmpty) return true;
+    return _liveSlotsByUnit[p.unitId]?.contains(p.slotTime) ?? false;
   }
 
   Future<void> _confirm() async {
@@ -609,7 +679,12 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
       final dio = ref.read(hostDioProvider);
       await dio.post(
         '/matchmaking/lobbies/${widget.lobby.lobbyId}/accept',
-        data: {'arenaId': widget.arenaId, 'slotTime': _selectedSlot},
+        data: {
+          'arenaId': widget.arenaId,
+          'slotTime': _selectedSlot,
+          if (_selectedUnitId != null && _selectedUnitId!.isNotEmpty)
+            'unitId': _selectedUnitId,
+        },
       );
       if (mounted) {
         Navigator.pop(context);
@@ -726,11 +801,35 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
             ),
           ),
           SizedBox(height: 10),
+          if (_loadingLive)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(children: [
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.5, color: _c.muted),
+                ),
+                SizedBox(width: 8),
+                Text('Checking current availability…',
+                    style: TextStyle(color: _c.muted, fontSize: 12)),
+              ]),
+            ),
           ...slots.map((p) {
-            final selected = _selectedSlot == p.slotTime;
+            final selected = _selectedSlot == p.slotTime &&
+                (_selectedUnitId ?? '') == p.unitId;
+            final isLive = _loadingLive ? true : _isPickLive(p);
+            final canSelect = !_loadingLive && isLive;
             return GestureDetector(
-              onTap: () => setState(() => _selectedSlot = p.slotTime),
-              child: Container(
+              onTap: canSelect
+                  ? () => setState(() {
+                        _selectedSlot = p.slotTime;
+                        _selectedUnitId = p.unitId.isEmpty ? null : p.unitId;
+                      })
+                  : null,
+              child: Opacity(
+                opacity: isLive ? 1.0 : 0.45,
+                child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                 decoration: BoxDecoration(
@@ -781,9 +880,17 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                             : _c.text,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        decoration: isLive ? null : TextDecoration.lineThrough,
                       ),
                     ),
-                    if (p.preferenceOrder == 1) ...[
+                    if (!isLive) ...[
+                      SizedBox(width: 8),
+                      Text('No longer available',
+                          style: TextStyle(
+                              color: Color(0xFFDC2626),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600)),
+                    ] else if (p.preferenceOrder == 1) ...[
                       Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -804,21 +911,41 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                   ],
                 ),
               ),
+              ),
             );
           }),
           if (_error != null) ...[
             SizedBox(height: 8),
             Text(_error!, style: TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
           ],
+          if (!_loadingLive &&
+              slots.isNotEmpty &&
+              !slots.any(_isPickLive)) ...[
+            SizedBox(height: 8),
+            Text(
+              'None of these slots are bookable under your unit\'s current setup. Ask the team to re-submit, or adjust your unit.',
+              style: TextStyle(color: _c.muted, fontSize: 12),
+            ),
+          ],
           SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            child: GestureDetector(
-              onTap: _loading ? null : _confirm,
-              child: Container(
+            child: Builder(builder: (_) {
+              final selectedPick = slots.firstWhere(
+                (p) => p.slotTime == _selectedSlot &&
+                    (_selectedUnitId ?? '') == p.unitId,
+                orElse: () => slots.isNotEmpty
+                    ? slots.first
+                    : ArenaLobbyPick(slotTime: '', unitId: ''),
+              );
+              final selectionLive = !_loadingLive && _isPickLive(selectedPick);
+              final disabled = _loading || _loadingLive || !selectionLive;
+              return GestureDetector(
+                onTap: disabled ? null : _confirm,
+                child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
-                  color: _loading
+                  color: disabled
                       ? Color(0xFFF43F5E).withValues(alpha: 0.6)
                       : Color(0xFFF43F5E),
                   borderRadius: BorderRadius.circular(10),
@@ -839,7 +966,8 @@ class _AcceptLobbySheetState extends ConsumerState<AcceptLobbySheet> {
                         ),
                       ),
               ),
-            ),
+            );
+            }),
           ),
         ],
       ),

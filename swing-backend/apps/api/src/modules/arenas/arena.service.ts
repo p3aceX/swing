@@ -739,9 +739,13 @@ export class ArenaService {
       const uOpen: string = (u as any).openTime || arena.openTime || '06:00'
       const uClose: string = (u as any).closeTime || arena.closeTime || '22:00'
       // Net units use slotIncrementMins (multiple nets can overlap); single-capacity units step
-      // by durationMins so held-slot keys align with the non-overlapping slots we generate below
+      // by durationMins + turnaround so held-slot keys align with the non-overlapping slots
+      // we generate below (see getPossibleStarts for non-nets at the bottom of this method).
       const isNet = netUnitTypesSet.has((u as any).unitType)
-      const uStep: number = isNet ? ((u as any).slotIncrementMins || 60) : durationMins
+      const uTurnaround: number = (u as any).turnaroundMins ?? 0
+      const uStep: number = isNet
+        ? ((u as any).slotIncrementMins || 60)
+        : durationMins + uTurnaround
       const uOpenMins = this.timeToMinutes(uOpen)
       const uCloseMins = this.timeToMinutes(uClose)
       for (let cur = uOpenMins; cur < uCloseMins; cur += uStep) {
@@ -964,8 +968,10 @@ export class ArenaService {
         durationMins % minSlot === 0 &&
         durationMins <= windowMins
 
-      // Single-capacity unit: step by durationMins so slots are sequential and non-overlapping
-      const possibleStarts = durationValid ? getPossibleStarts(unit, durationMins) : []
+      // Single-capacity unit: step by durationMins + turnaround so slots are sequential,
+      // non-overlapping, and respect the cleanup gap between sessions.
+      const stepMins = durationMins + (unit.turnaroundMins ?? 0)
+      const possibleStarts = durationValid ? getPossibleStarts(unit, stepMins) : []
       const availableSlots: any[] = []
 
       for (const startTime of possibleStarts) {

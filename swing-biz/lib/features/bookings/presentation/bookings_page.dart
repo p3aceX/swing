@@ -3405,9 +3405,10 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final openMins = _toMins(openStr);
     final closeMins = _toMins(closeStr);
     final durMins = _currentDurationMins;
-    // Grounds are single-capacity: step by durMins so slots are non-overlapping
+    // Grounds are single-capacity: step by durMins + turnaround so slots are
+    // non-overlapping and respect the cleanup gap between sessions.
     final increment = unit.isGround
-        ? durMins
+        ? durMins + (unit.turnaroundMins > 0 ? unit.turnaroundMins : 0)
         : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
     debugPrint('🔵 [_rebuildTimes] unit=${unit.name} unitType=${unit.unitType} isGround=${unit.isGround} '
         'pricePerHourPaise=${unit.pricePerHourPaise} price4Hr=${unit.price4HrPaise} price8Hr=${unit.price8HrPaise} priceFullDay=${unit.priceFullDayPaise} '

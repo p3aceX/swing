@@ -207,8 +207,12 @@ export async function matchmakingRoutes(app: FastifyInstance) {
   app.post('/lobbies/:lobbyId/accept', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }
-    const body = z.object({ arenaId: z.string(), slotTime: z.string().optional() }).parse(request.body)
-    const data = await svc.acceptLobbyAsOwner(user.userId, lobbyId, body.arenaId, body.slotTime)
+    const body = z.object({
+      arenaId: z.string(),
+      slotTime: z.string().optional(),
+      unitId: z.string().optional(),
+    }).parse(request.body)
+    const data = await svc.acceptLobbyAsOwner(user.userId, lobbyId, body.arenaId, body.slotTime, body.unitId)
     return reply.send({ success: true, data })
   })
 
