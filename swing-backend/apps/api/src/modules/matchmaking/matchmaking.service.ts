@@ -10,6 +10,7 @@ import {
   intervalsOverlap,
   formatRange,
   bucketForSlotTime,
+  bucketsForSlot,
   WINDOW_RANGES,
   TIME_WINDOWS,
   type TimeWindow,
@@ -804,7 +805,10 @@ export class MatchmakingService {
       startTime: string
       endTime: string
       pricePerTeamPaise: number
-      bucket: TimeWindow | null
+      // Every bucket the slot's [start, end) interval overlaps. A
+      // 10:00–14:00 T20 slot tags both MORNING and AFTERNOON, so an
+      // afternoon-window query can still bind to it.
+      buckets: TimeWindow[]
     }
     let tentativeArena: {
       id: string
@@ -864,7 +868,7 @@ export class MatchmakingService {
                 startTime: s.startTime,
                 endTime: s.endTime,
                 pricePerTeamPaise: Math.round(s.totalAmountPaise / 2),
-                bucket: bucketForSlotTime(s.startTime),
+                buckets: bucketsForSlot(s.startTime, dur),
               })
             }
           }
@@ -959,7 +963,7 @@ export class MatchmakingService {
       const w0 = cWindowsRanked.find((w) => !cWindowsMatched.includes(w))
       const tentativeSlot: TentativeSlot | null =
           (!pick?.slotTime && isTentative && tentativeArena && w0)
-              ? (tentativeArena.slots.find((s) => s.bucket === w0) ?? null)
+              ? (tentativeArena.slots.find((s) => s.buckets.includes(w0 as TimeWindow)) ?? null)
               : null
 
       const fmtClock = (slotTime: string) => {
@@ -1000,8 +1004,15 @@ export class MatchmakingService {
           }
         }
         if (tentativeSlot) {
-          return tentativeSlot.bucket
-            ? `${tentativeSlot.bucket} · ${fmtClock(tentativeSlot.startTime)} – ${fmtClock(tentativeSlot.endTime)}`
+          // Display the bucket the player asked for when the slot covers
+          // it (afternoon-search → "AFTERNOON · 10:00 AM – 2:00 PM" even
+          // though the slot started in the morning), otherwise fall to
+          // the slot's first bucket.
+          const labelBucket = (w0 && tentativeSlot.buckets.includes(w0 as TimeWindow))
+            ? w0
+            : tentativeSlot.buckets[0] ?? null
+          return labelBucket
+            ? `${labelBucket} · ${fmtClock(tentativeSlot.startTime)} – ${fmtClock(tentativeSlot.endTime)}`
             : `${fmtClock(tentativeSlot.startTime)} – ${fmtClock(tentativeSlot.endTime)}`
         }
         if (w0) return `${w0} window`

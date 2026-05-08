@@ -65,7 +65,10 @@ export function slotTimeToMin(slotTime: string): number | null {
 }
 
 // Which bucket does a slot start at? Slots ending past their bucket's end are
-// still tagged by their START — that's how players will search.
+// still tagged by their START — used for legacy code paths that want a
+// single canonical bucket (slot-conflict guard, lobby-key derivation).
+// For matchmaking display use [bucketsForSlot] which returns every bucket
+// the slot intersects.
 export function bucketForSlotTime(slotTime: string): TimeWindow | null {
   const min = slotTimeToMin(slotTime)
   if (min === null) return null
@@ -74,6 +77,26 @@ export function bucketForSlotTime(slotTime: string): TimeWindow | null {
     if (min >= r.startMin && min < r.endMin) return w
   }
   return null
+}
+
+// Returns every bucket whose range intersects the slot's [start, start+dur)
+// interval. A 10:00–14:00 T20 slot spans MORNING (04–12) and AFTERNOON
+// (12–16) under the new boundaries, so a player searching AFTERNOON can
+// still bind to that slot — the match runs into their requested time-of-day
+// even if it didn't START there. List preserves TIME_WINDOWS order.
+export function bucketsForSlot(
+  slotTime: string,
+  durationMins: number,
+): TimeWindow[] {
+  const start = slotTimeToMin(slotTime)
+  if (start === null) return []
+  const end = start + durationMins
+  const out: TimeWindow[] = []
+  for (const w of TIME_WINDOWS) {
+    const r = WINDOW_RANGES[w]
+    if (intervalsOverlap(start, end, r.startMin, r.endMin)) out.push(w)
+  }
+  return out
 }
 
 // Half-open interval overlap: [aStart, aEnd) ∩ [bStart, bEnd) ≠ ∅
