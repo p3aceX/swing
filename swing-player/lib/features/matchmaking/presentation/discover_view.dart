@@ -7,6 +7,7 @@
 // to Intro when the active preference-lobby's window has passed.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -189,6 +190,10 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   // matches") then refresh in the background. Same map drives the
   // match-count badge on each date chip.
   final Map<String, _DateResultCache> _resultsByDate = {};
+  // Cached snapshot of every active lobby across the user's teams.
+  // Populated in bootstrap; lets _switchTeam restore the correct
+  // multi-date strip when the user picks a different team.
+  List<MmTeamLobbySummary> _allActiveLobbies = const [];
   // Polls /discover for the active date every 30s while on the Results
   // stage, so users see new opponents without pulling to refresh.
   Timer? _autoRefreshTimer;
@@ -249,6 +254,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       for (final l in res.lobbies) {
         _teamLobbies[l.teamId] = l;
       }
+      _allActiveLobbies = res.allLobbies;
       MmTeam? chosen;
       // Prefer a team with an active lobby
       if (res.lobbies.isNotEmpty) {
@@ -800,10 +806,33 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     return e.toString();
   }
 
-  // Switch to a different team. If that team has an active lobby, hydrate
-  // prefs from it and jump to results. Else go to Intro for that team.
+  // Switch to a different team. Mirrors bootstrap's date selection:
+  // restores the multi-date strip from the cached _allActiveLobbies for
+  // the new team, then prefers today's lobby (or nearest upcoming, or
+  // most-recent) as the active hydration source.
   Future<void> _switchTeam(MmTeam team) async {
     if (team.id == _currentTeam?.id) return;
+    final teamLobbies = _allActiveLobbies
+        .where((l) => l.teamId == team.id)
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final restoredSubmitted = teamLobbies
+        .map((l) => (date: l.date, lobbyId: l.lobbyId))
+        .toList();
+    final todayApi = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    MmTeamLobbySummary? active;
+    for (final l in teamLobbies) {
+      if (l.date == todayApi) { active = l; break; }
+    }
+    if (active == null) {
+      for (final l in teamLobbies) {
+        if (l.date.compareTo(todayApi) > 0) { active = l; break; }
+      }
+    }
+    active ??= teamLobbies.isNotEmpty
+        ? teamLobbies.last
+        : _teamLobbies[team.id];
+
     setState(() {
       _currentTeam = team;
       _activeLobbyId = null;
@@ -811,33 +840,33 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       _alternatives = [];
       _alternativeReason = null;
       _isEditing = false;
-      _submittedLobbies = const [];
+      _submittedLobbies = restoredSubmitted;
     });
-    final active = _teamLobbies[team.id];
-    if (active != null) {
-      _hydratePrefsFromLobby(active);
+    final activeLobby = active;
+    if (activeLobby != null) {
+      _hydratePrefsFromLobby(activeLobby);
       if (_prefs.windowsRanked.isEmpty) {
         setState(() => _stage = _Stage.results);
         return;
       }
       // Skip /discover for already-matched lobbies — same reason as bootstrap.
-      final fullyMatched = active.status == 'matched' ||
-          (active.windowsRanked.isNotEmpty &&
-              active.windowsMatched.length >= active.windowsRanked.length);
+      final fullyMatched = activeLobby.status == 'matched' ||
+          (activeLobby.windowsRanked.isNotEmpty &&
+              activeLobby.windowsMatched.length >= activeLobby.windowsRanked.length);
       if (fullyMatched) {
         setState(() {
-          _activeLobbyId = active.lobbyId;
+          _activeLobbyId = activeLobby.lobbyId;
           _stage = _Stage.results;
         });
         return;
       }
-      if (active.windowsMatched.isNotEmpty) {
+      if (activeLobby.windowsMatched.isNotEmpty) {
         final remaining = _prefs.windowsRanked
-            .where((w) => !active.windowsMatched.contains(w.apiValue))
+            .where((w) => !activeLobby.windowsMatched.contains(w.apiValue))
             .toList();
         if (remaining.isEmpty) {
           setState(() {
-            _activeLobbyId = active.lobbyId;
+            _activeLobbyId = activeLobby.lobbyId;
             _stage = _Stage.results;
           });
           return;
@@ -972,64 +1001,124 @@ class _DiscoverIntro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: [
+        // Tactical background — diagonal gold streaks + corner taglines.
+        // Pure-painted so it adapts to dark/light theme automatically.
+        const Positioned.fill(child: _TacticalBackground()),
         SafeArea(
-          bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(
-              children: [
-                _TeamChip(
-                  team: team,
-                  allTeams: allTeams,
-                  teamLobbies: teamLobbies,
-                  onSwitch: onSwitchTeam,
-                ),
-              ],
-            ),
-          ),
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const Spacer(),
+                // Hero — two-beat. Big condensed type, the line the user
+                // reads on every app open.
                 Text(
-                  'Find your\nmatch-up.',
+                  'Game on.',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     color: context.fg,
-                    fontSize: 56,
+                    fontSize: 44,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: -2.4,
+                    letterSpacing: -1.6,
                     height: 0.95,
                   ),
                 ),
-                const SizedBox(height: 22),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 320),
-                  child: Text.rich(
-                    TextSpan(
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        height: 1.4,
+                const SizedBox(height: 4),
+                Text(
+                  'Find your match-up.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.6,
+                    height: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Sarcastic dig at the "looking for" boards on other apps.
+                // Italicised "looking for" makes the quote read as a sneer
+                // without needing literal quotation marks.
+                Text.rich(
+                  TextSpan(
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.1,
+                      height: 1.4,
+                    ),
+                    children: const [
+                      TextSpan(text: 'Stop '),
+                      TextSpan(
+                        text: '"looking for"',
+                        style: TextStyle(
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
+                      TextSpan(
+                        text:
+                            ' opponents. Lock a window — we\'ll find one before they\'re still scrolling.',
+                      ),
+                    ],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 36),
+                _TeamDropdown(
+                  team: team,
+                  onTap: allTeams.isEmpty
+                      ? null
+                      : () => _showTeamPicker(
+                            context,
+                            currentTeam: team,
+                            allTeams: allTeams,
+                            teamLobbies: teamLobbies,
+                            onSwitch: onSwitchTeam,
+                          ),
+                ),
+                const Spacer(),
+                // Get Started — full-width, themed; disabled until a team
+                // is chosen.
+                GestureDetector(
+                  onTap: team == null ? null : onStart,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    height: 54,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: team == null
+                          ? context.fg.withValues(alpha: 0.12)
+                          : context.ctaBg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        const TextSpan(text: 'Skip the group chat.\n'),
-                        TextSpan(
-                          text: 'Pick a window',
+                        Text(
+                          team == null
+                              ? 'Pick a team to start'
+                              : 'Get started',
                           style: TextStyle(
-                            color: context.fg,
-                            fontWeight: FontWeight.w800,
+                            color: team == null
+                                ? context.fgSub
+                                : context.ctaFg,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.2,
                           ),
                         ),
-                        const TextSpan(
-                            text:
-                                ' — we\'ll match you with a team that wants the same one.'),
+                        const SizedBox(width: 10),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          color:
+                              team == null ? context.fgSub : context.ctaFg,
+                          size: 18,
+                        ),
                       ],
                     ),
                   ),
@@ -1038,44 +1127,429 @@ class _DiscoverIntro extends StatelessWidget {
             ),
           ),
         ),
-        Container(
-          padding: EdgeInsets.fromLTRB(
-              20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
-          child: GestureDetector(
-            onTap: team == null ? null : onStart,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              height: 56,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: team == null
-                    ? context.stroke.withValues(alpha: 0.18)
-                    : context.ctaBg,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    team == null ? 'Pick a team to start' : 'Get started',
-                    style: TextStyle(
-                      color: team == null ? context.fgSub : context.ctaFg,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Icon(Icons.arrow_forward_rounded,
-                      color: team == null ? context.fgSub : context.ctaFg,
-                      size: 18),
-                ],
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
+}
+
+// Tactical-style decorative background. Painted in pure Flutter so it
+// adapts to dark/light theme:
+//   • Base    : context.bg
+//   • Streaks : context.sky (4 diagonal bands at -30°)
+//   • Icons   : context.sky @ low alpha — trophy, bat, shield, bolt,
+//                gavel, fire, crosshair scattered around the safe zone.
+// No text overlays — the icons carry the competitive/war vibe.
+class _TacticalBackground extends StatelessWidget {
+  const _TacticalBackground();
+
+  // (icon, top%, left%, size, rotationDeg, alpha) — anchored as fractions
+  // of the canvas so the layout stays sensible across phone sizes.
+  static const _icons = <_BgIcon>[
+    _BgIcon(Icons.emoji_events_rounded, 0.06, 0.10, 36, -12, 0.22),
+    _BgIcon(Icons.sports_cricket_rounded, 0.12, 0.78, 44, 25, 0.18),
+    _BgIcon(Icons.shield_rounded, 0.30, 0.05, 40, -8, 0.20),
+    _BgIcon(Icons.bolt_rounded, 0.32, 0.85, 38, 18, 0.22),
+    _BgIcon(Icons.gps_fixed_rounded, 0.55, 0.04, 32, 0, 0.18),
+    _BgIcon(Icons.local_fire_department_rounded, 0.58, 0.84, 42, -14, 0.20),
+    _BgIcon(Icons.gavel_rounded, 0.78, 0.10, 36, 22, 0.18),
+    _BgIcon(Icons.military_tech_rounded, 0.82, 0.78, 44, -18, 0.22),
+    _BgIcon(Icons.flag_rounded, 0.92, 0.42, 30, 6, 0.16),
+    _BgIcon(Icons.timer_rounded, 0.20, 0.46, 26, 12, 0.14),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        final w = constraints.maxWidth;
+        final h = constraints.maxHeight;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(color: context.bg),
+            CustomPaint(painter: _TacticalPainter(color: context.sky)),
+            for (final ic in _icons)
+              Positioned(
+                top: ic.top * h,
+                left: ic.left * w,
+                child: Transform.rotate(
+                  angle: ic.rotationDeg * math.pi / 180,
+                  child: Icon(
+                    ic.icon,
+                    size: ic.size,
+                    color: context.sky.withValues(alpha: ic.alpha),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _BgIcon {
+  const _BgIcon(
+    this.icon,
+    this.top,
+    this.left,
+    this.size,
+    this.rotationDeg,
+    this.alpha,
+  );
+  final IconData icon;
+  final double top;
+  final double left;
+  final double size;
+  final double rotationDeg;
+  final double alpha;
+}
+
+class _TacticalPainter extends CustomPainter {
+  _TacticalPainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    canvas.rotate(-30 * math.pi / 180);
+
+    final maxDim = math.max(size.width, size.height) * 2.5;
+    // Four diagonal bands of varying width and opacity. Heavier on the
+    // right side to mirror the reference's directional feel.
+    final bands = <({double offset, double width, double alpha})>[
+      (offset: -maxDim * 0.18, width: 70, alpha: 0.05),
+      (offset: -maxDim * 0.06, width: 130, alpha: 0.09),
+      (offset: maxDim * 0.05, width: 60, alpha: 0.04),
+      (offset: maxDim * 0.13, width: 110, alpha: 0.075),
+      (offset: maxDim * 0.22, width: 40, alpha: 0.05),
+    ];
+    for (final b in bands) {
+      final paint = Paint()..color = color.withValues(alpha: b.alpha);
+      canvas.drawRect(
+        Rect.fromLTWH(b.offset, -maxDim, b.width, maxDim * 2),
+        paint,
+      );
+    }
+    canvas.restore();
+
+    // Ruler ticks down the left edge — small subtle marks every 60px.
+    final tickPaint = Paint()
+      ..color = color.withValues(alpha: 0.35)
+      ..strokeWidth = 1.0;
+    for (var y = 80.0; y < size.height - 60; y += 60) {
+      canvas.drawLine(Offset(0, y), Offset(8, y), tickPaint);
+    }
+    // Bigger dash near top-mid + bottom-mid for the "tactical" feel.
+    final accentPaint = Paint()
+      ..color = color.withValues(alpha: 0.55)
+      ..strokeWidth = 1.5;
+    canvas.drawLine(
+      Offset(0, size.height * 0.35),
+      Offset(14, size.height * 0.35),
+      accentPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _TacticalPainter old) => old.color != color;
+}
+
+// Outlined dropdown-style team selector — mirrors the reference design.
+// Caption + value stacked left, chevron on right, accent border when a
+// team is picked.
+class _TeamDropdown extends StatelessWidget {
+  const _TeamDropdown({required this.team, required this.onTap});
+  final MmTeam? team;
+  final VoidCallback? onTap;
+
+  String _initials(String n) {
+    final parts =
+        n.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first.substring(0, 1) + parts[1].substring(0, 1))
+        .toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasTeam = team != null;
+    final hasLogo = hasTeam &&
+        team!.logoUrl != null &&
+        team!.logoUrl!.isNotEmpty;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: context.bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: hasTeam
+                ? context.ctaBg
+                : context.fg.withValues(alpha: 0.18),
+            width: hasTeam ? 1.6 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            // Avatar — image or initials.
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: context.ctaBg.withValues(alpha: hasTeam ? 0.16 : 0.08),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              clipBehavior: hasLogo ? Clip.antiAlias : Clip.none,
+              child: hasLogo
+                  ? Image.network(
+                      team!.logoUrl!,
+                      width: 36,
+                      height: 36,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _avatarFallback(context),
+                    )
+                  : _avatarFallback(context),
+            ),
+            const SizedBox(width: 12),
+            // Caption + value.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Playing for',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasTeam ? team!.name : 'Choose a team',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.3,
+                      height: 1.15,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: context.fgSub,
+              size: 24,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarFallback(BuildContext context) {
+    return Text(
+      team == null ? '?' : _initials(team!.name),
+      style: TextStyle(
+        color: context.ctaBg,
+        fontSize: 14,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.2,
+      ),
+    );
+  }
+}
+
+// Big centered team-selector card for the Intro screen. Shows the current
+// team's avatar + name + member count and a "Tap to change" affordance.
+// Defers to the shared _showTeamPicker helper for the actual picker.
+class _BigTeamCard extends StatelessWidget {
+  const _BigTeamCard({required this.team, required this.onTap});
+  final MmTeam? team;
+  final VoidCallback? onTap;
+
+  String _initials(String n) {
+    final parts =
+        n.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first.substring(0, 1) + parts[1].substring(0, 1))
+        .toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasTeam = team != null;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 22),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            context.fg.withValues(alpha: 0.04),
+            context.bg,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: context.fg.withValues(alpha: 0.10),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            // Avatar — logo or initials.
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: context.ctaBg.withValues(alpha: hasTeam ? 0.16 : 0.08),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: hasTeam && team!.logoUrl != null && team!.logoUrl!.isNotEmpty
+                  ? ClipOval(
+                      child: Image.network(
+                        team!.logoUrl!,
+                        width: 72,
+                        height: 72,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _avatarFallback(context),
+                      ),
+                    )
+                  : _avatarFallback(context),
+            ),
+            const SizedBox(height: 14),
+            // Eyebrow.
+            Text(
+              hasTeam ? 'PLAYING FOR' : 'NO TEAM SELECTED',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.4,
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Team name (or placeholder).
+            Text(
+              hasTeam ? team!.name : 'Pick a team',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Tap-to-change affordance.
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.swap_horiz_rounded,
+                  size: 14,
+                  color: context.fgSub,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  hasTeam ? 'Tap to switch team' : 'Tap to choose',
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarFallback(BuildContext context) {
+    return Text(
+      team == null ? '?' : _initials(team!.name),
+      style: TextStyle(
+        color: context.ctaBg,
+        fontSize: 26,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.4,
+      ),
+    );
+  }
+}
+
+// Shared team-picker bottom sheet. Used by both _TeamChip and _BigTeamCard
+// so the picker stays consistent across surfaces.
+void _showTeamPicker(
+  BuildContext context, {
+  required MmTeam? currentTeam,
+  required List<MmTeam> allTeams,
+  required Map<String, MmTeamLobbySummary> teamLobbies,
+  required ValueChanged<MmTeam> onSwitch,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: context.bg,
+    builder: (sheetCtx) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text(
+                'Switch team',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                ),
+              ),
+            ),
+            Container(
+              height: 1,
+              color: context.stroke.withValues(alpha: 0.18),
+            ),
+            for (final t in allTeams)
+              _PickerRow(
+                label: t.name,
+                subtitle: teamLobbies.containsKey(t.id)
+                    ? '● Searching now'
+                    : '${t.memberCount} member${t.memberCount == 1 ? '' : 's'}',
+                selected: currentTeam?.id == t.id,
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  onSwitch(t);
+                },
+              ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 // ─── TEAM CHIP ──────────────────────────────────────────────────────────────
@@ -2240,9 +2714,16 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
             ),
           ),
         ),
-        // Status banner — "Searching" while live, "Expired" once windows pass
+        // Active preferences — small pills summarising what we're
+        // searching for. Sits directly above the status banner so the
+        // user always has a quick read of the current criteria.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: _PrefsPillsRow(prefs: prefs),
+        ),
+        // Status banner — "Searching" while live, "Expired" once windows pass
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: _StatusBanner(expired: expired),
         ),
         // Date strip — only dates the user submitted (multi-date) or the
@@ -2646,15 +3127,15 @@ class _WindowFilterStrip extends StatelessWidget {
   static ({String label, IconData icon}) _shortLabel(String w) {
     switch (w) {
       case 'MORNING':
-        return (label: 'Morn', icon: Icons.wb_sunny_rounded);
+        return (label: 'Morning', icon: Icons.wb_sunny_rounded);
       case 'AFTERNOON':
-        return (label: 'Aft', icon: Icons.light_mode_rounded);
+        return (label: 'Afternoon', icon: Icons.light_mode_rounded);
       case 'EVENING':
-        return (label: 'Eve', icon: Icons.wb_twilight_rounded);
+        return (label: 'Evening', icon: Icons.wb_twilight_rounded);
       case 'NIGHT':
         return (label: 'Night', icon: Icons.nights_stay_rounded);
       default:
-        return (label: 'Late', icon: Icons.bedtime_rounded);
+        return (label: 'Late night', icon: Icons.bedtime_rounded);
     }
   }
 }
@@ -3102,6 +3583,77 @@ class _OtherDatesStrip extends StatelessWidget {
 
 // Live "we're searching for you" banner with a slow pulsing dot. Flips to
 // an "Expired" banner once all selected windows have passed.
+// Small pills summarising the current preference set (format, ball,
+// windows, grounds). Sits above the status banner so the user can see
+// at a glance what we're searching for.
+class _PrefsPillsRow extends StatelessWidget {
+  const _PrefsPillsRow({required this.prefs});
+  final _Prefs prefs;
+
+  @override
+  Widget build(BuildContext context) {
+    final pills = <_PillSpec>[];
+
+    // Format
+    pills.add(_PillSpec(
+      label: prefs.allFormats ? 'Any format' : prefs.format.label,
+    ));
+
+    // Ball type — only when explicitly chosen.
+    if (prefs.ballType != null) {
+      pills.add(_PillSpec(label: _ballLabel(prefs.ballType!)));
+    }
+
+    // Windows — one pill per window so the rank ordering reads cleanly.
+    for (final w in prefs.windowsRanked) {
+      pills.add(_PillSpec(label: w.label));
+    }
+
+    // Grounds — count summary; "Any ground" when empty.
+    if (prefs.preferredArenas.isEmpty) {
+      pills.add(const _PillSpec(label: 'Any ground'));
+    } else if (prefs.preferredArenas.length == 1) {
+      pills.add(_PillSpec(label: prefs.preferredArenas.first.name));
+    } else {
+      pills.add(_PillSpec(
+          label: '${prefs.preferredArenas.length} grounds'));
+    }
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final p in pills)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: context.bg,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: context.fg.withValues(alpha: 0.14),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              p.label,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _PillSpec {
+  const _PillSpec({required this.label});
+  final String label;
+}
+
 class _StatusBanner extends StatefulWidget {
   const _StatusBanner({required this.expired});
   final bool expired;
@@ -3113,6 +3665,10 @@ class _StatusBanner extends StatefulWidget {
 class _StatusBannerState extends State<_StatusBanner>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
+  // Cycles the trailing ellipsis 1 → 2 → 3 → 1 every ~480ms while
+  // searching, so the banner reads as actively working.
+  Timer? _ellipsisTimer;
+  int _dotCount = 1;
 
   @override
   void initState() {
@@ -3121,11 +3677,19 @@ class _StatusBannerState extends State<_StatusBanner>
       vsync: this,
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
+    _ellipsisTimer = Timer.periodic(
+      const Duration(milliseconds: 480),
+      (_) {
+        if (!mounted) return;
+        setState(() => _dotCount = (_dotCount % 3) + 1);
+      },
+    );
   }
 
   @override
   void dispose() {
     _pulse.dispose();
+    _ellipsisTimer?.cancel();
     super.dispose();
   }
 
@@ -3179,7 +3743,7 @@ class _StatusBannerState extends State<_StatusBanner>
             ),
             const SizedBox(width: 10),
             Text(
-              'Searching for matches',
+              'Searching for matches${'.' * _dotCount}',
               style: TextStyle(
                 color: context.fg,
                 fontSize: 12,

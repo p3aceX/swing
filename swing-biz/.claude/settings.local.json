@@ -31,7 +31,19 @@
       "Bash(git commit -m ' *)",
       "Bash(flutter pub *)",
       "Bash(npx tsc *)",
-      "Bash(echo \"Build triggered in background, PID: $!\")"
+      "Bash(echo \"Build triggered in background, PID: $!\")",
+      "Bash(awk -F: '$1 > 1255 && $1 < 1370 {print $1}')",
+      "Bash(awk -F: '$1 > 560 && $1 < 880 {print}')",
+      "Bash(python3)",
+      "Bash(npx --prefix /Users/sangwanhq/dhandha/swing/swing-backend tsc --noEmit --project /Users/sangwanhq/dhandha/swing/swing-backend/apps/api/tsconfig.json)",
+      "Bash(gh run *)",
+      "Bash(gh api *)",
+      "WebFetch(domain:swing-backend-1007730655118.asia-south1.run.app)",
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd\\) npx tsx scripts/backfill-booking-payments-from-legacy.ts)",
+      "Bash(gcloud beta builds log 604f06ab-1b96-43f2-bc8a-d2ed008aacb5 *)",
+      "Bash(gcloud beta *)",
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx scripts/fix_falsely_paid_bookings.ts --dry-run)",
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx scripts/fix_falsely_paid_bookings.ts)"
     ]
   }
 }

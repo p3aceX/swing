@@ -739,62 +739,6 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
       bottom: false,
       child: Column(
         children: [
-          // ── Header ──────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'MatchUp',
-                    style: TextStyle(
-                      color: context.fg,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                ),
-                if (_isActive)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: context.panel,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 8,
-                          height: 8,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 1.6, color: context.accent),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _lobbyState == _LobbyState.matched ||
-                                  _lobbyState == _LobbyState.confirming
-                              ? 'Found'
-                              : _lobbyState == _LobbyState.waitingOpponent
-                                  ? 'Waiting'
-                                  : 'Searching',
-                          style: TextStyle(
-                            color: context.accent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
           // ── Tab bar ──────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),

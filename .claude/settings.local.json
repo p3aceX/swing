@@ -99,7 +99,11 @@
       "Bash(curl *)",
       "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.pdlqotoyxpzrylxvrmdm.supabase.co:6543/postgres?sslmode=require&pgbouncer=true&connection_limit=10\" npx prisma *)",
       "Bash(DATABASE_URL=\"postgresql://postgres:Usangwan%23123@db.pdlqotoyxpzrylxvrmdm.supabase.co:6543/postgres?sslmode=require&pgbouncer=true&connection_limit=10\" node *)",
-      "Bash(grep \"\\\\.ts$\")"
+      "Bash(grep \"\\\\.ts$\")",
+      "Bash(grep -B1 -A8 \"^  device_info_plus:$\" swing-player/pubspec.lock)",
+      "Bash(./gradlew :device_info_plus:compileDebugKotlin --no-configuration-cache)",
+      "Bash(./gradlew :app:assembleDebug)",
+      "Bash(node --eval ' *)"
     ]
   }
 }
