@@ -4,10 +4,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:flutter_host_core/host_ui.dart';
 import '../controller/create_team_controller.dart';
+import '../../team_detail/controller/team_detail_controller.dart';
+import '../../team_detail/domain/team_models.dart';
+
+/// Whether the screen creates a new team or edits an existing one.
+///
+/// Edit mode requires both [HostCreateTeamScreen.teamId] and
+/// [HostCreateTeamScreen.initialTeam] so fields can prefill without a second
+/// fetch. Submitting issues a PATCH and calls [HostCreateTeamScreen.onSaved].
+enum HostCreateTeamMode { create, edit }
 
 class HostCreateTeamScreen extends ConsumerStatefulWidget {
   const HostCreateTeamScreen({
     super.key,
+    this.mode = HostCreateTeamMode.create,
+    this.teamId,
+    this.initialTeam,
+    this.currentUserId,
     this.academyId,
     this.coachId,
     this.arenaId,
@@ -15,7 +28,25 @@ class HostCreateTeamScreen extends ConsumerStatefulWidget {
     this.onUploadLogo,
     this.onSuccess,
     this.onCreated,
-  });
+    this.onSaved,
+  }) : assert(
+          mode == HostCreateTeamMode.create ||
+              (teamId != null && initialTeam != null),
+          'edit mode requires teamId + initialTeam',
+        );
+
+  final HostCreateTeamMode mode;
+
+  /// Required in edit mode. Identifies the team to PATCH.
+  final String? teamId;
+
+  /// Required in edit mode. Used to prefill form fields and to key the
+  /// teamDetailController family so the post-save reload shares cache with
+  /// the detail screen.
+  final PlayerTeam? initialTeam;
+
+  /// Forwarded into the teamDetailController family key on save.
+  final String? currentUserId;
 
   /// Stamp this team as owned by an academy. Pass from the club/coach app context.
   final String? academyId;
@@ -33,12 +64,18 @@ class HostCreateTeamScreen extends ConsumerStatefulWidget {
   /// Called at submit time with the picked bytes. Should upload and return URL.
   final Future<String?> Function(Uint8List bytes, String extension)? onUploadLogo;
 
-  /// Called after a squad is successfully created (e.g. to invalidate caches).
+  /// Called after a squad is successfully created or edited (e.g. to invalidate caches).
   final VoidCallback? onSuccess;
 
-  /// Called with the new team ID after creation — use this to navigate to detail.
-  /// If null, shows a success dialog that pops back instead.
+  /// Create-mode only. Called with the new team ID after creation — use this
+  /// to navigate to detail. If null, shows a success dialog that pops back.
   final void Function(String teamId)? onCreated;
+
+  /// Edit-mode only. Called after a successful PATCH. Default behaviour is
+  /// to pop back to the team detail screen.
+  final void Function(String teamId)? onSaved;
+
+  bool get _isEdit => mode == HostCreateTeamMode.edit;
 
   @override
   ConsumerState<HostCreateTeamScreen> createState() => _HostCreateTeamScreenState();
@@ -52,7 +89,10 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
   final _mottoCtrl = TextEditingController();
   final _homeGroundCtrl = TextEditingController();
 
-  String _teamType = 'FRIENDLY';
+  // Mandatory pickers — initial null forces the user to choose. Backend
+  // would otherwise silently apply MIXED / OPEN / FRIENDLY defaults.
+  String? _teamType;
+  String? _gender;
   String? _ageGroup;
   String? _format;
   String? _skillLevel;
@@ -61,18 +101,22 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
   int? _foundedYear;
   Uint8List? _logoBytes;
   String? _logoExtension;
+  String? _existingLogoUrl;
+  bool _saving = false;
+  bool _uploadingLogo = false;
 
   static const _teamTypes = [
-    ('CLUB', 'Club'),
-    ('CORPORATE', 'Corporate'),
-    ('ACADEMY', 'Academy'),
     ('SCHOOL', 'School'),
-    ('COLLEGE', 'College'),
-    ('DISTRICT', 'District'),
-    ('STATE', 'State'),
-    ('NATIONAL', 'National'),
-    ('FRIENDLY', 'Friendly'),
-    ('GULLY', 'Gully'),
+    ('CLUB_ACADEMY', 'Club / Academy'),
+    ('CORPORATE', 'Corporate'),
+    ('GULLY', 'Gully (tennis ball)'),
+    ('ASSOCIATION', 'Association'),
+  ];
+
+  static const _genders = [
+    ('MALE', 'Men'),
+    ('FEMALE', 'Women'),
+    ('MIXED', 'Mixed'),
   ];
 
   static const _ageGroups = [
@@ -98,6 +142,32 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    final t = widget.initialTeam;
+    if (t != null) {
+      _nameCtrl.text = t.name;
+      _shortNameCtrl.text = t.shortName ?? '';
+      _cityCtrl.text = t.city ?? '';
+      _mottoCtrl.text = t.motto ?? '';
+      _homeGroundCtrl.text = t.homeGroundName ?? '';
+      _teamType = _whitelisted(t.teamType, _teamTypes);
+      _gender = _whitelisted(t.gender, _genders);
+      _ageGroup = _whitelisted(t.ageGroup, _ageGroups);
+      _format = _whitelisted(t.format, _formats);
+      _skillLevel = _whitelisted(t.skillLevel, _skillLevels);
+      _foundedYear = t.foundedYear;
+      _isPublic = t.isPublic;
+      _existingLogoUrl = t.logoUrl;
+    }
+  }
+
+  String? _whitelisted(String? raw, List<(String, String)> options) {
+    if (raw == null || raw.isEmpty) return null;
+    return options.any((e) => e.$1 == raw) ? raw : null;
+  }
+
+  @override
   void dispose() {
     _nameCtrl.dispose();
     _shortNameCtrl.dispose();
@@ -110,29 +180,54 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    String? logoUrl;
-    if (_logoBytes != null && _logoExtension != null && widget.onUploadLogo != null) {
-      logoUrl = await widget.onUploadLogo!(_logoBytes!, _logoExtension!);
+    // Picker fields aren't FormField-aware, so check them here.
+    final missing = <String>[
+      if (_teamType == null) 'Squad type',
+      if (_gender == null) 'Gender',
+      if (_ageGroup == null) 'Age group',
+    ];
+    if (missing.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please choose: ${missing.join(', ')}')),
+      );
+      return;
     }
 
+    String? logoUrl;
+    if (_logoBytes != null && _logoExtension != null && widget.onUploadLogo != null) {
+      setState(() => _uploadingLogo = true);
+      logoUrl = await widget.onUploadLogo!(_logoBytes!, _logoExtension!);
+      if (!mounted) return;
+      setState(() => _uploadingLogo = false);
+    }
+
+    if (widget._isEdit) {
+      await _submitEdit(logoUrl);
+    } else {
+      await _submitCreate(logoUrl);
+    }
+  }
+
+  Future<void> _submitCreate(String? logoUrl) async {
     final id = await ref.read(hostCreateTeamControllerProvider.notifier).createTeam(
-      name: _nameCtrl.text.trim(),
-      shortName: _shortNameCtrl.text.trim(),
-      logoUrl: logoUrl,
-      city: _cityCtrl.text.trim(),
-      teamType: _teamType,
-      iAmCaptain: _iAmCaptain,
-      academyId: widget.academyId,
-      coachId: widget.coachId,
-      arenaId: widget.arenaId,
-      motto: _mottoCtrl.text.trim(),
-      homeGroundName: _homeGroundCtrl.text.trim(),
-      foundedYear: _foundedYear,
-      ageGroup: _ageGroup,
-      format: _format,
-      skillLevel: _skillLevel,
-      isPublic: _isPublic,
-    );
+          name: _nameCtrl.text.trim(),
+          shortName: _shortNameCtrl.text.trim(),
+          logoUrl: logoUrl,
+          city: _cityCtrl.text.trim(),
+          teamType: _teamType!,
+          gender: _gender!,
+          ageGroup: _ageGroup!,
+          iAmCaptain: _iAmCaptain,
+          academyId: widget.academyId,
+          coachId: widget.coachId,
+          arenaId: widget.arenaId,
+          motto: _mottoCtrl.text.trim(),
+          homeGroundName: _homeGroundCtrl.text.trim(),
+          foundedYear: _foundedYear,
+          format: _format,
+          skillLevel: _skillLevel,
+          isPublic: _isPublic,
+        );
 
     if (!mounted) return;
 
@@ -159,6 +254,50 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
     }
   }
 
+  Future<void> _submitEdit(String? logoUrl) async {
+    setState(() => _saving = true);
+    final ctrl = ref.read(teamDetailControllerProvider(
+      (teamId: widget.teamId!, currentUserId: widget.currentUserId),
+    ).notifier);
+    final ok = await ctrl.updateTeam(
+      name: _nameCtrl.text.trim(),
+      shortName: _shortNameCtrl.text.trim(),
+      city: _cityCtrl.text.trim(),
+      teamType: _teamType,
+      gender: _gender,
+      ageGroup: _ageGroup,
+      format: _format,
+      skillLevel: _skillLevel,
+      motto: _mottoCtrl.text.trim(),
+      homeGroundName: _homeGroundCtrl.text.trim(),
+      foundedYear: _foundedYear,
+      clearFoundedYear:
+          _foundedYear == null && widget.initialTeam?.foundedYear != null,
+      isPublic: _isPublic,
+      logoUrl: logoUrl,
+    );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (ok) {
+      widget.onSuccess?.call();
+      if (widget.onSaved != null) {
+        widget.onSaved!(widget.teamId!);
+      } else {
+        Navigator.of(context).maybePop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Team updated')),
+      );
+    } else {
+      final error = ref
+              .read(teamDetailControllerProvider(
+                  (teamId: widget.teamId!, currentUserId: widget.currentUserId)))
+              .error ??
+          'Could not update team';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
+
   Future<void> _pickLogo() async {
     if (widget.onPickLogo == null) return;
     final result = await widget.onPickLogo!();
@@ -172,6 +311,7 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
   void _removeLogo() => setState(() {
         _logoBytes = null;
         _logoExtension = null;
+        _existingLogoUrl = null;
       });
 
   void _showPicker<T>({
@@ -211,10 +351,24 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
     if (picked != null) setState(() => _foundedYear = picked);
   }
 
+  String _labelFor(String? value, List<(String, String)> options) {
+    if (value == null) return '';
+    return options.firstWhere(
+      (e) => e.$1 == value,
+      orElse: () => (value, value),
+    ).$2;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(hostCreateTeamControllerProvider);
-    final typeLabel = _teamTypes.firstWhere((e) => e.$1 == _teamType).$2;
+    final createState = ref.watch(hostCreateTeamControllerProvider);
+    final isSubmitting = widget._isEdit
+        ? (_saving || _uploadingLogo)
+        : (createState.isSubmitting || _uploadingLogo);
+    final hasNewLogo = _logoBytes != null;
+    final hasExistingLogo =
+        _existingLogoUrl != null && _existingLogoUrl!.isNotEmpty;
+    final hasAnyLogo = hasNewLogo || hasExistingLogo;
 
     return Scaffold(
       backgroundColor: context.bg,
@@ -227,7 +381,7 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
           icon: Icon(Icons.arrow_back_ios_new_rounded, color: context.fg, size: 20),
         ),
         title: Text(
-          'New Squad',
+          widget._isEdit ? 'Edit Squad' : 'New Squad',
           style: Theme.of(context)
               .textTheme
               .titleLarge
@@ -249,10 +403,14 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
                     child: CircleAvatar(
                       radius: 36,
                       backgroundColor: context.surf,
-                      backgroundImage: _logoBytes != null ? MemoryImage(_logoBytes!) : null,
-                      child: _logoBytes == null
-                          ? Icon(Icons.shield_rounded, color: context.fgSub, size: 28)
-                          : null,
+                      backgroundImage: hasNewLogo
+                          ? MemoryImage(_logoBytes!) as ImageProvider
+                          : (hasExistingLogo
+                              ? NetworkImage(_existingLogoUrl!)
+                              : null),
+                      child: hasAnyLogo
+                          ? null
+                          : Icon(Icons.shield_rounded, color: context.fgSub, size: 28),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -277,18 +435,18 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 ),
                                 icon: Icon(
-                                  _logoBytes == null
-                                      ? Icons.add_photo_alternate_rounded
-                                      : Icons.edit_rounded,
+                                  hasAnyLogo
+                                      ? Icons.edit_rounded
+                                      : Icons.add_photo_alternate_rounded,
                                   size: 16,
                                   color: context.accent,
                                 ),
                                 label: Text(
-                                  _logoBytes == null ? 'Add photo' : 'Change',
+                                  hasAnyLogo ? 'Change' : 'Add photo',
                                   style: TextStyle(color: context.accent, fontSize: 13),
                                 ),
                               ),
-                            if (_logoBytes != null) ...[
+                            if (hasAnyLogo) ...[
                               const SizedBox(width: 16),
                               TextButton.icon(
                                 onPressed: _removeLogo,
@@ -383,36 +541,50 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
             _SectionHeader(label: 'Squad Type'),
             _PickerTile(
               icon: Icons.category_rounded,
-              label: typeLabel,
-              isSet: true,
+              label: _teamType != null
+                  ? _labelFor(_teamType, _teamTypes)
+                  : 'Squad type  (required)',
+              isSet: _teamType != null,
               onTap: () => _showPicker(
                 title: 'Squad Type',
                 options: _teamTypes,
                 selected: _teamType,
-                onSelected: (v) => setState(() => _teamType = v ?? 'FRIENDLY'),
+                onSelected: (v) => setState(() => _teamType = v),
+              ),
+            ),
+            Divider(height: 1, indent: 20, color: context.stroke),
+            _PickerTile(
+              icon: Icons.wc_rounded,
+              label: _gender != null
+                  ? _labelFor(_gender, _genders)
+                  : 'Gender  (required)',
+              isSet: _gender != null,
+              onTap: () => _showPicker(
+                title: 'Gender',
+                options: _genders,
+                selected: _gender,
+                onSelected: (v) => setState(() => _gender = v),
               ),
             ),
             Divider(height: 1, indent: 20, color: context.stroke),
             _PickerTile(
               icon: Icons.people_alt_rounded,
               label: _ageGroup != null
-                  ? _ageGroups.firstWhere((e) => e.$1 == _ageGroup).$2
-                  : 'Age group  (optional)',
+                  ? _labelFor(_ageGroup, _ageGroups)
+                  : 'Age group  (required)',
               isSet: _ageGroup != null,
               onTap: () => _showPicker(
                 title: 'Age Group',
                 options: _ageGroups,
                 selected: _ageGroup,
-                allowClear: true,
                 onSelected: (v) => setState(() => _ageGroup = v),
               ),
-              onClear: _ageGroup != null ? () => setState(() => _ageGroup = null) : null,
             ),
             Divider(height: 1, indent: 20, color: context.stroke),
             _PickerTile(
               icon: Icons.sports_cricket_rounded,
               label: _format != null
-                  ? _formats.firstWhere((e) => e.$1 == _format).$2
+                  ? _labelFor(_format, _formats)
                   : 'Format  (optional)',
               isSet: _format != null,
               onTap: () => _showPicker(
@@ -428,7 +600,7 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
             _PickerTile(
               icon: Icons.bar_chart_rounded,
               label: _skillLevel != null
-                  ? _skillLevels.firstWhere((e) => e.$1 == _skillLevel).$2
+                  ? _labelFor(_skillLevel, _skillLevels)
                   : 'Skill level  (optional)',
               isSet: _skillLevel != null,
               onTap: () => _showPicker(
@@ -444,24 +616,28 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
 
             // ── Settings ──────────────────────────────────────────────────────
             _SectionHeader(label: 'Settings'),
-            SwitchListTile.adaptive(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              secondary: Icon(Icons.star_rounded,
-                  color: _iAmCaptain ? context.accent : context.fgSub, size: 22),
-              title: Text(
-                'I am the Captain',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: _iAmCaptain ? context.accent : context.fg,
-                    ),
+            // "I am the Captain" only makes sense at create time. After
+            // creation, captaincy is managed from the Squad tab.
+            if (!widget._isEdit) ...[
+              SwitchListTile.adaptive(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                secondary: Icon(Icons.star_rounded,
+                    color: _iAmCaptain ? context.accent : context.fgSub, size: 22),
+                title: Text(
+                  'I am the Captain',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: _iAmCaptain ? context.accent : context.fg,
+                      ),
+                ),
+                subtitle: Text('Assign roles like captain/keeper later',
+                    style: TextStyle(color: context.fgSub, fontSize: 12)),
+                value: _iAmCaptain,
+                activeTrackColor: context.accent,
+                onChanged: (v) => setState(() => _iAmCaptain = v),
               ),
-              subtitle: Text('Assign roles like captain/keeper later',
-                  style: TextStyle(color: context.fgSub, fontSize: 12)),
-              value: _iAmCaptain,
-              activeTrackColor: context.accent,
-              onChanged: (v) => setState(() => _iAmCaptain = v),
-            ),
-            Divider(height: 1, indent: 20, color: context.stroke),
+              Divider(height: 1, indent: 20, color: context.stroke),
+            ],
             SwitchListTile.adaptive(
               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
               secondary: Icon(Icons.public_rounded,
@@ -489,8 +665,8 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 32, 20, 40),
               child: SwingSubmitButton(
-                label: 'Create Squad',
-                isLoading: state.isSubmitting,
+                label: widget._isEdit ? 'Save Changes' : 'Create Squad',
+                isLoading: isSubmitting,
                 onTap: _submit,
               ),
             ),

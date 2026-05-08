@@ -2807,7 +2807,7 @@ export class AdminService {
       const newTeam = await prisma.team.create({
         data: {
           name: data.teamName,
-          teamType: "FRIENDLY",
+          teamType: "CLUB_ACADEMY",
           createdByUserId: adminId,
           playerIds: data.playerIds || [],
         },
@@ -3445,7 +3445,7 @@ export class AdminService {
         shortName: data.shortName || null,
         logoUrl: data.logoUrl || null,
         city: data.city || null,
-        teamType: data.teamType || "FRIENDLY",
+        teamType: data.teamType || "CLUB_ACADEMY",
         captainId,
         playerIds: finalPlayerIds,
         createdByUserId: adminId,

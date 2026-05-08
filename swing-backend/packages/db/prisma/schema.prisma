@@ -415,16 +415,17 @@ enum TournamentFormat {
 }
 
 enum TeamType {
-  CLUB
-  CORPORATE
-  ACADEMY
   SCHOOL
-  COLLEGE
-  DISTRICT
-  STATE
-  NATIONAL
-  FRIENDLY
+  CLUB_ACADEMY
+  CORPORATE
   GULLY
+  ASSOCIATION
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  MIXED
 }
 
 enum BodyTransformDirection {
@@ -2203,7 +2204,7 @@ model Team {
   shortName           String?
   logoUrl             String?
   city                String?
-  teamType            TeamType  @default(FRIENDLY)
+  teamType            TeamType  @default(CLUB_ACADEMY)
   captainId           String?
   viceCaptainId       String?
   wicketKeeperId      String?
@@ -2220,7 +2221,8 @@ model Team {
   homeGroundName      String?
   foundedYear         Int?
   // Format & structure
-  ageGroup            String?   // OPEN | U19 | U23 | U30 | VETERANS
+  gender              Gender    @default(MIXED)
+  ageGroup            String    @default("OPEN") // OPEN | U19 | U23 | U30 | VETERANS
   format              String?   // T20 | ODI | TEST | ALL
   skillLevel          String?   // BEGINNER | INTERMEDIATE | ADVANCED | PROFESSIONAL
   isPublic            Boolean   @default(true)

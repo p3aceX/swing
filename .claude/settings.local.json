@@ -104,7 +104,11 @@
       "Bash(./gradlew :device_info_plus:compileDebugKotlin --no-configuration-cache)",
       "Bash(./gradlew :app:assembleDebug)",
       "Bash(node --eval ' *)",
-      "Bash(echo \"EXIT=$?\")"
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(DATABASE_URL=__CMDSUB_OUTPUT__ npx tsx -e ' *)",
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx /tmp/mm-test/probe.ts)",
+      "Bash(ln -sf /Users/sangwanhq/dhandha/swing/swing-backend/node_modules /tmp/mm-test/node_modules)",
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx /tmp/mm-test/sim.ts)"
     ]
   }
 }

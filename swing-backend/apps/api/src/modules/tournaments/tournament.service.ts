@@ -151,7 +151,7 @@ export class TournamentService {
       const newTeam = await prisma.team.create({
         data: {
           name: data.teamName,
-          teamType: "FRIENDLY",
+          teamType: "CLUB_ACADEMY",
           createdByUserId: userId,
           playerIds: data.playerIds || [],
         },

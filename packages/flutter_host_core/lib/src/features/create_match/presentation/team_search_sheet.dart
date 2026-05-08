@@ -378,16 +378,11 @@ class _Chip extends StatelessWidget {
 }
 
 String _teamTypeLabel(String type) => switch (type.toUpperCase()) {
-  'CLUB' => 'Club',
-  'CORPORATE' => 'Corporate',
-  'ACADEMY' => 'Academy',
   'SCHOOL' => 'School',
-  'COLLEGE' => 'College',
-  'DISTRICT' => 'District',
-  'STATE' => 'State',
-  'NATIONAL' => 'National',
-  'FRIENDLY' => 'Friendly',
+  'CLUB_ACADEMY' => 'Club / Academy',
+  'CORPORATE' => 'Corporate',
   'GULLY' => 'Gully',
+  'ASSOCIATION' => 'Association',
   _ => type,
 };
 

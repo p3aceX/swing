@@ -2211,6 +2211,14 @@ export class PlayerService {
       shortName?: string;
       city?: string;
       teamType?: string;
+      gender?: string;
+      ageGroup?: string;
+      format?: string;
+      skillLevel?: string;
+      motto?: string;
+      homeGroundName?: string;
+      foundedYear?: number | null;
+      isPublic?: boolean;
       logoUrl?: string;
       captainId?: string;
       viceCaptainId?: string;
@@ -2248,6 +2256,14 @@ export class PlayerService {
         shortName: data.shortName?.trim(),
         city: data.city?.trim(),
         teamType: (data.teamType as any) || undefined,
+        gender: (data.gender as any) || undefined,
+        ageGroup: data.ageGroup || undefined,
+        format: data.format ?? undefined,
+        skillLevel: data.skillLevel ?? undefined,
+        motto: data.motto?.trim(),
+        homeGroundName: data.homeGroundName?.trim(),
+        foundedYear: data.foundedYear,
+        isPublic: data.isPublic,
         logoUrl: data.logoUrl,
         isActive: data.isActive,
         captainId,
@@ -2365,7 +2381,9 @@ export class PlayerService {
       name: string;
       shortName?: string;
       city?: string;
-      teamType?: string;
+      teamType: string;
+      gender: string;
+      ageGroup: string;
       iAmCaptain?: boolean;
       academyId?: string;
       coachId?: string;
@@ -2373,10 +2391,10 @@ export class PlayerService {
       motto?: string;
       homeGroundName?: string;
       foundedYear?: number;
-      ageGroup?: string;
       format?: string;
       skillLevel?: string;
       isPublic?: boolean;
+      logoUrl?: string;
     },
   ) {
     const profile = await this.getOrCreateProfile(userId);
@@ -2386,7 +2404,9 @@ export class PlayerService {
         name: data.name.trim(),
         shortName: data.shortName?.trim() || null,
         city: data.city?.trim() || null,
-        teamType: (data.teamType as any) || "FRIENDLY",
+        teamType: data.teamType as any,
+        gender: data.gender as any,
+        ageGroup: data.ageGroup,
         captainId,
         playerIds: [profile.id],
         createdByUserId: userId,
@@ -2396,10 +2416,10 @@ export class PlayerService {
         motto: data.motto?.trim() || null,
         homeGroundName: data.homeGroundName?.trim() || null,
         foundedYear: data.foundedYear ?? null,
-        ageGroup: data.ageGroup || null,
         format: data.format || null,
         skillLevel: data.skillLevel || null,
         isPublic: data.isPublic !== false,
+        logoUrl: data.logoUrl || null,
       },
     });
     await this.performanceService.eliteAnalytics.recalculateTeamPowerScore(
@@ -2677,16 +2697,11 @@ export class PlayerService {
     filters?: {
       city?: string;
       teamType?:
-        | "CLUB"
-        | "CORPORATE"
-        | "ACADEMY"
         | "SCHOOL"
-        | "COLLEGE"
-        | "DISTRICT"
-        | "STATE"
-        | "NATIONAL"
-        | "FRIENDLY"
-        | "GULLY";
+        | "CLUB_ACADEMY"
+        | "CORPORATE"
+        | "GULLY"
+        | "ASSOCIATION";
     },
   ) {
     const trimmedQuery = query.trim();

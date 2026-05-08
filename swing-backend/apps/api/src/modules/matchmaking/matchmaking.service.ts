@@ -597,6 +597,10 @@ export class MatchmakingService {
         createdByUserId: true,
         playerIds: true,
         matchupBanUntil: true,
+        // Compatibility-filter inputs — caller side
+        teamType: true,
+        ageGroup: true,
+        credibilityScore: true,
       },
     })
     if (!team) throw Errors.notFound('Team')
@@ -771,7 +775,7 @@ export class MatchmakingService {
 
     // Pull candidate universe — same calendar date as caller; the V2 model
     // is date-precise (lobbies with different dates are separate entities).
-    const candidates: any[] = await prisma.matchmakingLobby.findMany({
+    const candidatesRaw: any[] = await prisma.matchmakingLobby.findMany({
       where: {
         id: { not: yourLobby.id },
         teamId: { not: team.id },
@@ -784,6 +788,14 @@ export class MatchmakingService {
       },
       include: { team: true, picks: { orderBy: { preferenceOrder: 'asc' } } },
     })
+
+    // Hard-filter pair compatibility on teamType + ageGroup + credibility
+    // before scoring. Drops any candidate that could never be a viable
+    // opponent regardless of preference overlap (e.g. a CORPORATE team
+    // listed against a SCHOOL search; a U16 listing against an OPEN one).
+    const candidates: any[] = candidatesRaw.filter((c) =>
+      this.teamsAreCompatible(team, c.team ?? {}),
+    )
 
     const groundIds = candidates.flatMap((c) =>
       c.picks.map((p: any) => p.groundId),
@@ -844,21 +856,20 @@ export class MatchmakingService {
 
     // Tentative-ground resolution. When a candidate lobby has no concrete
     // arena (player↔player no-pref pairing), the response would otherwise
-    // ship the ₹900 default and a hollow ground name. Pre-compute one
-    // tentative arena per request (using L1b's smart allocation from the
-    // caller's home arena perspective) and surface its real price + name
-    // marked as tentative — the actual ground gets locked in at lock-time.
+    // ship the ₹900 default and a hollow ground name. We pre-compute the
+    // top-N candidate arenas (smart allocation from the caller's home
+    // perspective) and pull each one's bookable slot grid. The per-pair
+    // picker below selects the best venue for each candidate, balancing
+    // load × quality so demand spreads across the market instead of
+    // piling onto whichever arena ranked first.
     type TentativeSlot = {
       unitId: string
       startTime: string
       endTime: string
       pricePerTeamPaise: number
-      // Every bucket the slot's [start, end) interval overlaps. A
-      // 10:00–14:00 T20 slot tags both MORNING and AFTERNOON, so an
-      // afternoon-window query can still bind to it.
       buckets: TimeWindow[]
     }
-    let tentativeArena: {
+    type TentativeArena = {
       id: string
       name: string
       pricePerHourPaise: number
@@ -867,74 +878,99 @@ export class MatchmakingService {
       matchRatingAvg: number
       matchRatingCount: number
       slots: TentativeSlot[]
-    } | null = null
-    {
-      const ids = await this.smartAnyGroundAllocation(input.teamId, prisma)
-      const tentativeId = ids[0]
-      if (tentativeId) {
-        const a = await prisma.arena.findUnique({
-          where: { id: tentativeId },
-          select: {
-            id: true,
-            name: true,
-            latitude: true,
-            longitude: true,
-            matchRatingAvg: true,
-            matchRatingCount: true,
-            units: {
-              where: { isActive: true, sport: 'CRICKET' },
-              orderBy: { pricePerHourPaise: 'asc' },
-              take: 1,
-              select: { pricePerHourPaise: true },
-            },
-          },
-        })
-        if (a && a.units[0]) {
-          // Pull the actual bookable T20 slot grid for the date — same
-          // endpoint the player-app booking sheet uses. Each slot is
-          // tagged with its bucket so per-candidate display can pick
-          // the right concrete time without inventing one.
-          const dateApi = this.toDateOnly(date)
-          const dur = this.formatDurationMins(input.filters.format)
-          const slotData = await new ArenaService().getPlayerSlots(
-            a.id,
-            dateApi,
-            dur,
-            { onlyCricketUnits: true },
-          )
-          const slots: TentativeSlot[] = []
-          for (const group of slotData.unitGroups) {
-            const groupAny = group as any
-            const unitId = (groupAny.unitId as string | undefined) ?? ''
-            for (const s of (groupAny.availableSlots ?? []) as Array<{
-              startTime: string
-              endTime: string
-              totalAmountPaise: number
-            }>) {
-              slots.push({
-                unitId,
-                startTime: s.startTime,
-                endTime: s.endTime,
-                pricePerTeamPaise: Math.round(s.totalAmountPaise / 2),
-                buckets: bucketsForSlot(s.startTime, dur),
-              })
-            }
-          }
-          // Earliest first so per-bucket lookups return the nearest slot.
-          slots.sort((x, y) => x.startTime.localeCompare(y.startTime))
-          tentativeArena = {
-            id: a.id,
-            name: a.name,
-            pricePerHourPaise: a.units[0].pricePerHourPaise,
-            latitude: a.latitude,
-            longitude: a.longitude,
-            matchRatingAvg: (a as any).matchRatingAvg ?? 3.0,
-            matchRatingCount: (a as any).matchRatingCount ?? 0,
-            slots,
-          }
-        }
-      }
     }
+    const TENTATIVE_POOL_SIZE = 5
+    const tentativeArenasById = new Map<string, TentativeArena>()
+    let tentativeArena: TentativeArena | null = null  // first-of-pool — back-compat fallback
+    {
+      const allocIds = await this.smartAnyGroundAllocation(input.teamId, prisma)
+      // Add every arena referenced by candidate prefs/picks so per-pair
+      // allocation can pick from the union of (caller prefs ∪ candidate
+      // prefs ∪ smart-allocated regional pool).
+      const referencedArenaIds = new Set<string>([
+        ...allocIds.slice(0, TENTATIVE_POOL_SIZE),
+        ...(groundsRanked ?? []),
+        ...candidates.flatMap((c) => [
+          ...((c.preferredArenaIds ?? []) as string[]),
+          ...(typeof c.arenaId === 'string' ? [c.arenaId] : []),
+        ]),
+      ])
+      const poolIds = Array.from(referencedArenaIds)
+      const dur = this.formatDurationMins(input.filters.format)
+      const dateApi = this.toDateOnly(date)
+      // Fetch arenas + their cheapest cricket unit price; one arena per row.
+      const arenaRows = poolIds.length
+        ? await prisma.arena.findMany({
+            where: { id: { in: poolIds }, isActive: true, units: { some: { isActive: true } } },
+            select: {
+              id: true, name: true, latitude: true, longitude: true,
+              matchRatingAvg: true, matchRatingCount: true,
+              units: {
+                where: { isActive: true, sport: 'CRICKET' },
+                orderBy: { pricePerHourPaise: 'asc' },
+                take: 1,
+                select: { pricePerHourPaise: true },
+              },
+            },
+          })
+        : []
+      // Live slot fetch in parallel — N arenas × one getPlayerSlots call each.
+      // Bounded by TENTATIVE_POOL_SIZE plus referenced ids; in practice ≤ 8.
+      const slotResults = await Promise.all(
+        arenaRows.map(async (a) => {
+          if (!a.units[0]) return null
+          try {
+            const slotData = await new ArenaService().getPlayerSlots(
+              a.id, dateApi, dur, { onlyCricketUnits: true },
+            )
+            const slots: TentativeSlot[] = []
+            for (const group of slotData.unitGroups) {
+              const ga = group as any
+              const unitId = (ga.unitId as string | undefined) ?? ''
+              for (const s of (ga.availableSlots ?? []) as Array<{
+                startTime: string; endTime: string; totalAmountPaise: number
+              }>) {
+                slots.push({
+                  unitId,
+                  startTime: s.startTime,
+                  endTime: s.endTime,
+                  pricePerTeamPaise: Math.round(s.totalAmountPaise / 2),
+                  buckets: bucketsForSlot(s.startTime, dur),
+                })
+              }
+            }
+            slots.sort((x, y) => x.startTime.localeCompare(y.startTime))
+            return {
+              id: a.id,
+              name: a.name,
+              pricePerHourPaise: a.units[0].pricePerHourPaise,
+              latitude: a.latitude,
+              longitude: a.longitude,
+              matchRatingAvg: (a as any).matchRatingAvg ?? 3.0,
+              matchRatingCount: (a as any).matchRatingCount ?? 0,
+              slots,
+            } as TentativeArena
+          } catch {
+            return null
+          }
+        }),
+      )
+      for (const t of slotResults) {
+        if (t) tentativeArenasById.set(t.id, t)
+      }
+      // First-of-pool = the smart-allocator's top pick when present, else
+      // the first arena in the map. Used as a final fallback when a
+      // candidate's window has no live slot anywhere in the pool.
+      const firstId = allocIds.find((id) => tentativeArenasById.has(id))
+        ?? Array.from(tentativeArenasById.keys())[0]
+      tentativeArena = firstId ? (tentativeArenasById.get(firstId) ?? null) : null
+    }
+
+    // Demand signal — count of active searching lobbies per arena on this
+    // date. Drives the load-factor in venue allocation so an arena that's
+    // already attracting many lobbies de-prioritizes for new pairings,
+    // distributing business across the market instead of piling onto one.
+    const arenaLoadByDate = await this.computeArenaLoadByDate(date)
 
     // ageGroup is still resolved per candidate so the response payload
     // (used by the client for an age-group label on the tile) stays
@@ -962,16 +998,100 @@ export class MatchmakingService {
       // intersects: there exists at least one (window, ground) pair that
       // both lobbies share. No intersection = not even an alternative.
       .filter((s) => s.intersects)
+
+    // Two-class slate. Owner-posted candidates have a real arena + slot
+    // pre-booked, so the matcher only needs to find ONE compatible team —
+    // half the work is done. They always rank above player-posted in the
+    // primary slate, regardless of the preference-overlap score. Within
+    // each class, sort by score (highest first).
+    const ownerPostedScored = scored
+      .filter((s) => this.isOwnerPosted(s.lobby))
+      .sort((a, b) => b.value - a.value)
+    const playerPostedScored = scored
+      .filter((s) => !this.isOwnerPosted(s.lobby))
       .sort((a, b) => b.value - a.value)
 
-    // primary = caller rank-1 window AND candidate rank-1 window mutually
-    // present in the other's ranked list AND the same for ground rank-1.
-    // Anything else with at least one window+ground pair → alternative.
-    const primary = scored.filter((s) => s.isPrimary)
+    // primary slate:
+    //   1. every compatible owner-posted lobby (concrete venue+slot)
+    //   2. player-posted lobbies that align both teams' rank-1 window AND
+    //      rank-1 ground (the existing "isPrimary" criterion)
+    // alternatives slate: remaining player-posted candidates.
+    const primary = [
+      ...ownerPostedScored,
+      ...playerPostedScored.filter((s) => s.isPrimary),
+    ]
     const primaryIds = new Set(primary.map((s) => s.lobby.id))
-    const alternatives = scored
+    const alternatives = playerPostedScored
       .filter((s) => !primaryIds.has(s.lobby.id))
       .slice(0, 20)
+
+    // Per-pair venue allocator. For pure-preference candidates (no concrete
+    // pick after live re-validation), pick the proposed arena from the
+    // multi-arena pool by maximizing
+    //   quality(rating) × loadFactor(active-lobbies) × diversity(per-response cap)
+    // restricted to arenas that have a live bookable slot in the candidate's
+    // first active window. Falls back to the smart-allocator's top arena
+    // when no pool member has a slot in that window.
+    const DIVERSITY_CAP = 3
+    const tentativeAllocCounter = new Map<string, number>()
+    const ratingMultiplier = (avg: number | null | undefined): number => {
+      const v = typeof avg === 'number' ? avg : 3.0
+      // Linear map: 1.0 → 0.5, 3.0 → 1.0, 5.0 → 1.5
+      return 0.5 + (Math.max(1, Math.min(5, v)) - 1) * 0.25
+    }
+    const loadFactor = (arenaId: string): number => {
+      const load = arenaLoadByDate.get(arenaId) ?? 0
+      return 1 / (1 + load / 3)
+    }
+    const diversityFactor = (arenaId: string): number => {
+      const used = tentativeAllocCounter.get(arenaId) ?? 0
+      return used >= DIVERSITY_CAP ? 0.3 : 1.0
+    }
+    const pickProposedTentative = (
+      cGrounds: string[],
+      window: string | undefined,
+    ): { arena: TentativeArena; slot: TentativeSlot } | null => {
+      if (!window || tentativeArenasById.size === 0) return null
+      // Pool: caller prefs ∪ candidate prefs ∪ entire smart-allocated pool.
+      const poolIds = new Set<string>([
+        ...((groundsRanked ?? []) as string[]),
+        ...cGrounds,
+        ...tentativeArenasById.keys(),
+      ])
+      const eligible: Array<{ arena: TentativeArena; slot: TentativeSlot; score: number }> = []
+      for (const aid of poolIds) {
+        const a = tentativeArenasById.get(aid)
+        if (!a) continue
+        const slot = a.slots.find((sl) => sl.buckets.includes(window as TimeWindow))
+        if (!slot) continue
+        const score =
+          ratingMultiplier(a.matchRatingAvg) *
+          loadFactor(a.id) *
+          diversityFactor(a.id)
+        eligible.push({ arena: a, slot, score })
+      }
+      if (eligible.length === 0) {
+        // Last-resort fallback: any pool arena with any slot, ignoring window.
+        if (tentativeArena) {
+          const fallbackSlot = tentativeArena.slots[0]
+          if (fallbackSlot) {
+            tentativeAllocCounter.set(
+              tentativeArena.id,
+              (tentativeAllocCounter.get(tentativeArena.id) ?? 0) + 1,
+            )
+            return { arena: tentativeArena, slot: fallbackSlot }
+          }
+        }
+        return null
+      }
+      eligible.sort((a, b) => b.score - a.score)
+      const winner = eligible[0]
+      tentativeAllocCounter.set(
+        winner.arena.id,
+        (tentativeAllocCounter.get(winner.arena.id) ?? 0) + 1,
+      )
+      return { arena: winner.arena, slot: winner.slot }
+    }
 
     const formatRanked = (s: {
       lobby: any
@@ -1000,27 +1120,26 @@ export class MatchmakingService {
       // Concrete arena, in priority order: explicit arenaId → unit's arena
       // → caller's groundsRanked rank-1 → candidate's groundsRanked rank-1.
       const concreteArena = arena ?? (unit as any)?.arena ?? rank1Arena ?? null
-      // Tentative fallback for fully-unallocated player↔player no-pref
-      // pairings. Used only when no concrete arena exists anywhere.
-      const isTentative = !concreteArena && tentativeArena !== null
-      const arenaName = (concreteArena as any)?.name ?? (isTentative ? tentativeArena!.name : null)
-      // L3 — rating surfacing. Falls back to the tentative arena's rating
-      // when the pairing has no concrete ground yet, so the UI can still
-      // show a "★ 4.6 · 23" badge for the would-be venue.
-      const matchRatingAvg = (concreteArena as any)?.matchRatingAvg
-        ?? (isTentative ? tentativeArena!.matchRatingAvg : null)
-      const matchRatingCount = (concreteArena as any)?.matchRatingCount
-        ?? (isTentative ? tentativeArena!.matchRatingCount : null)
-      // Pure-preference candidates with no concrete pick borrow the first
-      // real bookable slot from the tentative arena that falls in their
-      // rank-1 still-active window. No more synthetic bucket-start times
-      // — gutter, label, and price all read off the same /arenas/:id/slots
-      // response that the booking sheet uses.
+      // Per-pair tentative allocation for pure-preference candidates.
+      // Spreads load across arenas via the load × quality × diversity score;
+      // a pile-up on one popular arena drops its score for subsequent
+      // candidates and rotates them to comparable underused venues.
       const w0 = cWindowsRanked.find((w) => !cWindowsMatched.includes(w))
-      const tentativeSlot: TentativeSlot | null =
-          (!pick?.slotTime && isTentative && tentativeArena && w0)
-              ? (tentativeArena.slots.find((s) => s.buckets.includes(w0 as TimeWindow)) ?? null)
-              : null
+      const proposedTentative = (!pick?.slotTime && !concreteArena)
+        ? pickProposedTentative(cGroundsRanked, w0)
+        : null
+      const isTentative = !concreteArena && proposedTentative !== null
+      const proposedArena = proposedTentative?.arena ?? null
+      const arenaName = (concreteArena as any)?.name
+        ?? (isTentative ? proposedArena!.name : null)
+      // L3 — rating surfacing. Falls back to the per-pair tentative's
+      // rating when the pairing has no concrete ground yet, so the UI
+      // can still show a "★ 4.6 · 23" badge for the would-be venue.
+      const matchRatingAvg = (concreteArena as any)?.matchRatingAvg
+        ?? (isTentative ? proposedArena!.matchRatingAvg : null)
+      const matchRatingCount = (concreteArena as any)?.matchRatingCount
+        ?? (isTentative ? proposedArena!.matchRatingCount : null)
+      const tentativeSlot: TentativeSlot | null = proposedTentative?.slot ?? null
 
       const fmtClock = (slotTime: string) => {
         const parts = slotTime.split(':')
@@ -1110,7 +1229,7 @@ export class MatchmakingService {
               ? tentativeSlot.pricePerTeamPaise
               : isTentative
                 ? Math.round(
-                    (tentativeArena!.pricePerHourPaise *
+                    (proposedArena!.pricePerHourPaise *
                       this.formatDurationMins(c.format as MatchmakingFormat)) /
                       60 /
                       2,
@@ -3128,6 +3247,68 @@ export class MatchmakingService {
     if (format === 'Test') return 480
     if (format === 'Custom') return (overs ?? 20) > 20 ? 480 : 240
     return 240
+  }
+
+  // Owner-posted lobbies have both `arenaId` and `splitBookingId` populated
+  // (the host pre-booked a real slot when listing the team). Player-posted
+  // lobbies have both null. The concrete-vs-abstract split drives Discover
+  // priority: owner-posted always ranks above player-posted.
+  private isOwnerPosted(lobby: { arenaId: string | null; splitBookingId: string | null }): boolean {
+    return !!lobby.arenaId && !!lobby.splitBookingId
+  }
+
+  // TeamType compatibility — strict same-category match against the
+  // 5-value Prisma enum (SCHOOL, CLUB_ACADEMY, CORPORATE, GULLY,
+  // ASSOCIATION). A nullish value on either side acts as a wildcard.
+  private teamTypesCompatible(a: string | null | undefined, b: string | null | undefined): boolean {
+    if (!a || !b) return true
+    return a === b
+  }
+
+  // Age group compatibility. OPEN (or null/empty) on either side acts as a
+  // wildcard; otherwise must match exactly. U13/U16/U19 sides only meet
+  // their own age tier — protects youth cricket from senior pairings.
+  private ageGroupsCompatible(a: string | null | undefined, b: string | null | undefined): boolean {
+    if (!a || !b) return true
+    if (a === 'OPEN' || b === 'OPEN') return true
+    return a === b
+  }
+
+  // Demand signal for venue allocation: count of active searching lobbies
+  // per arena on a given date. A `MatchmakingLobby.arenaId` set means it's
+  // either owner-posted (split booking on that arena) or in mid-flight
+  // (lock acquired). Both count as load — they reduce the room left for
+  // new pairings to be steered onto that arena.
+  private async computeArenaLoadByDate(date: Date): Promise<Map<string, number>> {
+    const rows = await prisma.matchmakingLobby.groupBy({
+      by: ['arenaId'],
+      where: {
+        date,
+        status: 'searching',
+        arenaId: { not: null },
+      },
+      _count: { _all: true },
+    })
+    const out = new Map<string, number>()
+    for (const r of rows) {
+      if (!r.arenaId) continue
+      out.set(r.arenaId, (r as any)._count._all as number)
+    }
+    return out
+  }
+
+  // Hard-filter pair compatibility used to prune the Discover candidate pool
+  // before scoring. Anything that fails this can never be a viable opponent
+  // regardless of preference overlap.
+  private teamsAreCompatible(
+    caller: { teamType?: string | null; ageGroup?: string | null; credibilityScore?: number | null },
+    candidate: { teamType?: string | null; ageGroup?: string | null; credibilityScore?: number | null },
+  ): boolean {
+    if (!this.teamTypesCompatible(caller.teamType, candidate.teamType)) return false
+    if (!this.ageGroupsCompatible(caller.ageGroup, candidate.ageGroup)) return false
+    if ((caller.credibilityScore ?? 100) < 60) return false
+    if ((candidate.credibilityScore ?? 100) < 60) return false
+    return true
   }
 
   private generateDaySlots(openTime: string, closeTime: string, stepMins: number) {
