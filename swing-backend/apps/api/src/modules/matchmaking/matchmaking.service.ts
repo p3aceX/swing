@@ -3088,6 +3088,7 @@ export class MatchmakingService {
       return {
         matchId: m.id,
         myLobbyId,
+        myTeamId: myLobby?.teamId ?? null,
         myTeamName: myLobby?.team?.name ?? 'Your Team',
         myTeamLogoUrl: (myLobby as any)?.team?.logoUrl ?? null,
         opponentTeamName: opponentLobby?.team?.name ?? 'Opponent',

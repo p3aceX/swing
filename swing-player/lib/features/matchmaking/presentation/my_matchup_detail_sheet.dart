@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_host_core/flutter_host_core.dart' show HostArenaReviewSheet;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
@@ -19,6 +20,7 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
     super.key,
     required this.matchId,
     required this.myLobbyId,
+    this.myTeamId,
     required this.myTeamName,
     required this.opponentTeamName,
     this.myTeamLogoUrl,
@@ -40,6 +42,7 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
 
   final String matchId;
   final String? myLobbyId;
+  final String? myTeamId;
   final String myTeamName;
   final String? myTeamLogoUrl;
   final String opponentTeamName;
@@ -132,6 +135,30 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
 
   bool get _canCancel => widget.status != 'started';
   bool get _isPostPayment => _bothPaid;
+
+  Future<void> _openReviewSheet() async {
+    final teamId = widget.myTeamId;
+    if (teamId == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.bg,
+      builder: (_) => HostArenaReviewSheet(
+        matchId: widget.matchId,
+        teamId: teamId,
+        arenaName: widget.arenaName.isNotEmpty
+            ? widget.arenaName
+            : (widget.groundName.isNotEmpty ? widget.groundName : 'this ground'),
+        onSubmitted: (_) {
+          if (!mounted) return;
+          Navigator.of(context).maybePop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Review submitted. Thanks!')),
+          );
+        },
+      ),
+    );
+  }
 
   Future<void> _onCancel() async {
     if (_busy) return;
@@ -368,6 +395,29 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
                         size: 16, color: context.fg),
                     label: Text(
                       'View booking details',
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              // L2 — captain rates the ground after match has started/completed.
+              // Only the captain can submit (backend gates), but we show the
+              // CTA to anyone post-start; the sheet's submit will 403 if the
+              // caller isn't the captain.
+              if (widget.myTeamId != null &&
+                  (widget.status == 'started' || widget.status == 'completed')) ...[
+                const SizedBox(height: 6),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: _busy ? null : _openReviewSheet,
+                    icon: Icon(Icons.star_rounded,
+                        size: 18, color: context.gold),
+                    label: Text(
+                      'Rate ground',
                       style: TextStyle(
                         color: context.fg,
                         fontSize: 13,

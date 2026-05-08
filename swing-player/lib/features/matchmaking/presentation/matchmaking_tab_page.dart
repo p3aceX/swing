@@ -7113,6 +7113,7 @@ class _MyConfirmedMatch {
   const _MyConfirmedMatch({
     required this.matchId,
     this.myLobbyId,
+    this.myTeamId,
     required this.myTeamName,
     this.myTeamLogoUrl,
     required this.opponentTeamName,
@@ -7134,6 +7135,7 @@ class _MyConfirmedMatch {
 
   final String matchId;
   final String? myLobbyId;
+  final String? myTeamId;
   final String myTeamName;
   final String? myTeamLogoUrl;
   final String opponentTeamName;
@@ -7187,6 +7189,7 @@ class _MyConfirmedMatch {
       _MyConfirmedMatch(
         matchId: (j['matchId'] as String?) ?? '',
         myLobbyId: j['myLobbyId'] as String?,
+        myTeamId: j['myTeamId'] as String?,
         myTeamName: (j['myTeamName'] as String?) ?? 'Your Team',
         myTeamLogoUrl: j['myTeamLogoUrl'] as String?,
         opponentTeamName: (j['opponentTeamName'] as String?) ?? 'Opponent',
@@ -7350,6 +7353,7 @@ class _MatchCard extends ConsumerWidget {
         builder: (_) => MyMatchupDetailSheet(
           matchId: match.matchId,
           myLobbyId: match.myLobbyId,
+          myTeamId: match.myTeamId,
           myTeamName: match.myTeamName,
           myTeamLogoUrl: match.myTeamLogoUrl,
           opponentTeamName: match.opponentTeamName,

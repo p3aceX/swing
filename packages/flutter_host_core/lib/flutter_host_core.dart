@@ -14,6 +14,9 @@ export 'src/biz/biz_models.dart';
 export 'src/biz/host_biz_repository.dart';
 
 export 'src/features/arena_booking/domain/arena_booking_models.dart';
+export 'src/features/arena_review/domain/host_arena_review_models.dart';
+export 'src/features/arena_review/data/host_arena_review_repository.dart';
+export 'src/features/arena_review/presentation/host_arena_review_sheet.dart';
 export 'src/features/arena_booking/domain/booking_pricing_engine.dart';
 export 'src/features/arena_booking/data/booking_availability_loader.dart';
 export 'src/features/create_event/presentation/create_event_screen.dart';
