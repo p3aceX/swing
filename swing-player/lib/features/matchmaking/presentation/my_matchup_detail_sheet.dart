@@ -1244,9 +1244,16 @@ class _ActionStatus extends StatelessWidget {
   }
 }
 
-// Pricing breakdown card. Shows the full ground fee, the user's split,
-// and the lock-now / pay-at-venue split. Plus an early-bird nudge when
-// the match is 2+ days out.
+// Pricing breakdown card.
+//
+// Type scale used throughout (kept narrow on purpose so nothing reads as
+// off-by-a-pixel):
+//   eyebrow   — 11/w900/uppercase/letterspaced     (PRICING, T20 · 4hr)
+//   helper    — 12/w600                            ("Full unit ₹600 · split 50/50")
+//   row label — 13/w700                            ("Lock now" / "Pay at venue")
+//   row amt   — 14/w800                            ("Free" / "₹300")
+//   hero label — 13/w800                           ("Your share")
+//   hero amt   — 30/w900/letterspacing -1.0        (the big ₹300)
 class _PricingCard extends StatelessWidget {
   const _PricingCard({
     required this.yourShareRupees,
@@ -1272,7 +1279,7 @@ class _PricingCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
           decoration: BoxDecoration(
             color: Color.alphaBlend(
               context.fg.withValues(alpha: 0.04),
@@ -1283,58 +1290,77 @@ class _PricingCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Eyebrow row — PRICING / format tag.
               Row(
                 children: [
                   Text(
                     'PRICING',
-                    style: TextStyle(
-                      color: context.fgSub,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.4,
-                    ),
+                    style: _eyebrow(context.fgSub),
                   ),
                   const Spacer(),
                   Text(
                     '$format · $formatDuration',
+                    style: _eyebrow(context.fgSub),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+
+              // Hero — your share. Big number anchors the card so the
+              // user sees their actual obligation immediately.
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    yourShareRupees == 0 ? 'Free' : '₹$yourShareRupees',
                     style: TextStyle(
-                      color: context.fgSub,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
+                      color: context.fg,
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -1.0,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'YOUR SHARE',
+                      style: _eyebrow(context.fg),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              _PriceRow(
-                label: 'Ground fee (full unit)',
-                amountRupees: _groundFeeRupees,
-                emphasis: false,
+              const SizedBox(height: 4),
+              Text(
+                'Full unit ₹$_groundFeeRupees · split 50/50 with opponent',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
               ),
-              const SizedBox(height: 6),
-              _PriceRow(
-                label: 'Your share (split 50/50)',
-                amountRupees: yourShareRupees,
-                emphasis: true,
-              ),
-              const SizedBox(height: 10),
+
+              const SizedBox(height: 14),
               Container(
                 height: 1,
                 color: context.fgSub.withValues(alpha: 0.12),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
+
               _PriceRow(
                 label: 'Lock now',
-                amountRupees: lockNowRupees,
-                emphasis: false,
-                muted: lockNowRupees == 0,
+                amountStr: lockNowRupees == 0 ? 'Free' : '₹$lockNowRupees',
+                amountIsPositive: lockNowRupees == 0,
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               _PriceRow(
                 label: 'Pay at venue',
-                amountRupees: payAtVenueRupees,
-                emphasis: false,
+                amountStr: payAtVenueRupees == 0
+                    ? 'Free'
+                    : '₹$payAtVenueRupees',
+                amountIsPositive: false,
               ),
             ],
           ),
@@ -1373,43 +1399,48 @@ class _PricingCard extends StatelessWidget {
       ],
     );
   }
+
+  TextStyle _eyebrow(Color color) => TextStyle(
+        color: color,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.4,
+        height: 1.0,
+      );
 }
 
 class _PriceRow extends StatelessWidget {
   const _PriceRow({
     required this.label,
-    required this.amountRupees,
-    this.emphasis = false,
-    this.muted = false,
+    required this.amountStr,
+    this.amountIsPositive = false,
   });
 
   final String label;
-  final int amountRupees;
-  final bool emphasis;
-  final bool muted;
+  final String amountStr;
+  final bool amountIsPositive;
 
   @override
   Widget build(BuildContext context) {
-    final fg = muted ? context.fgSub : context.fg;
-    final amountStr = amountRupees == 0 ? 'Free' : '₹$amountRupees';
     return Row(
       children: [
         Expanded(
           child: Text(
             label,
             style: TextStyle(
-              color: emphasis ? fg : context.fgSub,
-              fontSize: emphasis ? 13 : 12.5,
-              fontWeight: emphasis ? FontWeight.w800 : FontWeight.w600,
+              color: context.fgSub,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.1,
             ),
           ),
         ),
         Text(
           amountStr,
           style: TextStyle(
-            color: muted ? context.success : fg,
-            fontSize: emphasis ? 16 : 13,
-            fontWeight: emphasis ? FontWeight.w900 : FontWeight.w800,
+            color: amountIsPositive ? context.success : context.fg,
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
             letterSpacing: -0.2,
           ),
         ),
