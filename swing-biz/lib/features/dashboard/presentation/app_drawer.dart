@@ -46,6 +46,7 @@ class AppDrawer extends ConsumerWidget {
                     label: 'Payments',
                     onTap: () {
                       Navigator.pop(context);
+                      // index 3 = Payments tab in DashboardScreen
                       ref.read(dashboardTabIndexProvider.notifier).state = 3;
                     },
                   ),
@@ -210,9 +211,7 @@ class _DarkModeToggle extends ConsumerWidget {
         child: Row(
           children: [
             Icon(
-              isDark
-                  ? Icons.dark_mode_rounded
-                  : Icons.light_mode_rounded,
+              isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
               size: 22,
               color: scheme.onSurface,
             ),
@@ -304,11 +303,9 @@ class _WhatsNewSheet extends StatelessWidget {
         ),
         Row(
           children: [
-            Icon(Icons.auto_awesome_rounded,
-                size: 22, color: scheme.primary),
+            Icon(Icons.auto_awesome_rounded, size: 22, color: scheme.primary),
             const SizedBox(width: 10),
-            Text("What's New",
-                style: Theme.of(context).textTheme.titleLarge),
+            Text("What's New", style: Theme.of(context).textTheme.titleLarge),
           ],
         ),
         const SizedBox(height: 4),
@@ -328,8 +325,7 @@ class _WhatsNewSheet extends StatelessWidget {
                     color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(item.$1,
-                      size: 20, color: scheme.primary),
+                  child: Icon(item.$1, size: 20, color: scheme.primary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(

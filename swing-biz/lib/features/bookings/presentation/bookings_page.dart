@@ -16,6 +16,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import '../../../core/router/app_router.dart';
+import 'matchups_tab.dart';
 import 'split_booking_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
@@ -77,6 +78,8 @@ final _bookingsProvider =
   }
 });
 
+/// Inner tab on the Bookings page. 0=Match-Up Requests, 1=Bookings.
+/// Exposed so the home screen "See all" link can jump straight to Bookings.
 final bookingsInnerTabProvider = StateProvider<int>((ref) => 0);
 
 // ─── Main page ───────────────────────────────────────────────────────────────
@@ -140,18 +143,29 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     _c = _C.of(context);
     final today = DateTime.now();
     final allBookingsAsync = ref.watch(_bookingsProvider);
+    final tab = ref.watch(bookingsInnerTabProvider);
 
     return Scaffold(
       backgroundColor: _c.bg,
       body: Column(
         children: [
+          // Big segmented tab header (replaces arena name + small tabs)
           _BigTabHeader(
+            selected: tab,
+            onSelect: (i) =>
+                ref.read(bookingsInnerTabProvider.notifier).state = i,
             arena: widget.arena,
             arenas: widget.arenas,
           ),
 
+          // Tab content
           Expanded(
-            child: _buildBookingsTab(context, today, allBookingsAsync),
+            child: AnimatedSwitcher(
+              duration: Duration(milliseconds: 200),
+              child: tab == 0
+                  ? _buildMatchUpRequestsTab()
+                  : _buildBookingsTab(context, today, allBookingsAsync),
+            ),
           ),
         ],
       ),
@@ -164,17 +178,17 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   width: double.infinity,
                   height: 52,
                   child: FilledButton.icon(
-                    onPressed: () => _showBookingTypeModal(context, today),
+                    onPressed: () => _showAddBookingSheet(context, today),
                     style: FilledButton.styleFrom(
                       backgroundColor:
-                          Theme.of(context).colorScheme.primary,
+                          Theme.of(context).colorScheme.onSurface,
                       foregroundColor:
-                          Theme.of(context).colorScheme.onPrimary,
+                          Theme.of(context).colorScheme.surface,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                     ),
-                    icon: const Icon(Icons.add_rounded, size: 22),
-                    label: const Text(
+                    icon: Icon(Icons.add_rounded, size: 22),
+                    label: Text(
                       'Book',
                       style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w700),
@@ -321,62 +335,12 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     );
   }
 
-  void _showBookingTypeModal(BuildContext context, DateTime today) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _c.bg,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-              Text(
-                'New Booking',
-                style: TextStyle(
-                  color: _c.text,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              SizedBox(height: 16),
-              _BookingTypeOption(
-                icon: Icons.calendar_month_rounded,
-                title: 'Full Booking',
-                subtitle: 'Collect full payment from one team',
-                onTap: () {
-                  Navigator.pop(context);
-                  _showAddBookingSheet(context, today);
-                },
-              ),
-              SizedBox(height: 10),
-              _BookingTypeOption(
-                icon: Icons.call_split_rounded,
-                title: 'Match-Up Request',
-                subtitle: 'Half price · find rival team via matchmaking',
-                onTap: () {
-                  Navigator.pop(context);
-                  _showSplitBookingSheet(context, today);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+  Widget _buildMatchUpRequestsTab() {
+    final filtered =
+        widget.arena == null ? widget.arenas : [widget.arena!];
+    return MatchUpsTab(
+      key: ValueKey(widget.arena?.id ?? 'all'),
+      arenas: filtered,
     );
   }
 
@@ -388,26 +352,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           builder: (_) => AddBookingSheet(arena: arena, date: date),
         ))
         .then((_) => ref.invalidate(_bookingsProvider));
-  }
-
-  void _showSplitBookingSheet(BuildContext context, DateTime date) {
-    Navigator.of(context, rootNavigator: true)
-        .push(MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => SplitBookingSheet(initialDate: date),
-        ))
-        .then((created) {
-      if (created == true) {
-        ref.invalidate(_bookingsProvider);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content:
-                Text('Split booking created — lobby is now live for players'),
-            backgroundColor: _c.accent,
-          ),
-        );
-      }
-    });
   }
 
   void _showBookingDetail(BuildContext context, ArenaReservation booking,
@@ -479,83 +423,211 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   }
 }
 
-// ─── Header ───────────────────────────────────────────────────────────────────
+// ─── Tab bar ─────────────────────────────────────────────────────────────────
 
 class _BigTabHeader extends ConsumerWidget {
-  const _BigTabHeader({required this.arena, required this.arenas});
+  const _BigTabHeader({
+    required this.selected,
+    required this.onSelect,
+    required this.arena,
+    required this.arenas,
+  });
+  final int selected;
+  final ValueChanged<int> onSelect;
   final ArenaListing? arena;
   final List<ArenaListing> arenas;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+    _c = _C.of(context);
     final top = MediaQuery.of(context).padding.top;
-    final selectedId = arena?.id;
-    final items = <({String? id, String label})>[
-      (id: null, label: 'All'),
-      ...arenas.map((a) => (id: a.id, label: a.name)),
-    ];
-
-    return ColoredBox(
-      color: scheme.surface,
+    return Container(
+      color: _c.bg,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(height: top + 12),
-          if (arenas.length > 1)
-            SizedBox(
-              height: 38,
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
-                scrollDirection: Axis.horizontal,
-                itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 24),
-                itemBuilder: (_, i) {
-                  final item = items[i];
-                  final selected = item.id == selectedId;
+          SizedBox(height: top + 16),
+
+          // Arena filter chips — All + individual arenas
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: arenas.length + 1,
+              separatorBuilder: (_, __) => SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                if (i == 0) {
+                  final active = arena == null;
                   return GestureDetector(
-                    onTap: () => ref
-                        .read(_selectedArenaProvider.notifier)
-                        .state = item.id,
-                    behavior: HitTestBehavior.opaque,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          item.label,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: selected
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                            letterSpacing: -0.1,
-                            color: selected
-                                ? scheme.primary
-                                : scheme.onSurface.withValues(alpha: 0.45),
-                          ),
+                    onTap: () =>
+                        ref.read(_selectedArenaProvider.notifier).state = null,
+                    child: AnimatedContainer(
+                      duration: Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: active ? _c.accent : _c.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: active ? _c.accent : _c.border),
+                      ),
+                      child: Text(
+                        'All',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: active ? Colors.white : _c.muted,
                         ),
-                        const SizedBox(height: 5),
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeOut,
-                          height: 2.5,
-                          width: selected ? 22 : 0,
-                          decoration: BoxDecoration(
-                            color: scheme.primary,
-                            borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  );
+                }
+                final a = arenas[i - 1];
+                final active = a.id == arena?.id;
+                return GestureDetector(
+                  onTap: () =>
+                      ref.read(_selectedArenaProvider.notifier).state = a.id,
+                  child: AnimatedContainer(
+                    duration: Duration(milliseconds: 160),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active ? _c.accent : _c.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border:
+                          Border.all(color: active ? _c.accent : _c.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.stadium_rounded,
+                            size: 13,
+                            color: active ? Colors.white : _c.muted),
+                        SizedBox(width: 5),
+                        Text(
+                          a.name,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: active ? Colors.white : _c.muted,
                           ),
                         ),
                       ],
                     ),
-                  );
+                  ),
+                );
+              },
+            ),
+          ),
+          SizedBox(height: 12),
+
+          // Bookings / MatchUp Requests tab bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Container(
+              height: 44,
+              decoration: BoxDecoration(
+                color: _c.border,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(3),
+              child: Row(
+                children: [
+                  _BigTab(
+                    label: 'Match-Up',
+                    active: selected == 0,
+                    onTap: () => onSelect(0),
+                  ),
+                  _BigTab(
+                    label: 'Bookings',
+                    active: selected == 1,
+                    onTap: () => onSelect(1),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showArenaPicker(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _c.surface,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Switch Arena',
+              style: TextStyle(
+                  color: _c.text, fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            SizedBox(height: 16),
+            ...arenas.map(
+              (a) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.stadium_rounded, color: _c.accent),
+                title: Text(a.name,
+                    style: TextStyle(
+                        color: _c.text, fontWeight: FontWeight.w600)),
+                trailing: a.id == arena?.id
+                    ? Icon(Icons.check_rounded, color: _c.accent)
+                    : null,
+                onTap: () {
+                  ref
+                      .read(_selectedArenaProvider.notifier)
+                      .state = a.id;
+                  Navigator.pop(context);
                 },
               ),
-            )
-          else
-            const SizedBox(height: 4),
-          Container(height: 1, color: scheme.outline),
-        ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BigTab extends StatelessWidget {
+  const _BigTab(
+      {required this.label, required this.active, required this.onTap});
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: active ? _c.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          alignment: Alignment.center,
+          child: AnimatedDefaultTextStyle(
+            duration: Duration(milliseconds: 180),
+            style: TextStyle(
+              color: active ? Colors.white : _c.muted,
+              fontSize: 15,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+            child: Text(label),
+          ),
+        ),
       ),
     );
   }
@@ -1111,8 +1183,8 @@ class _BookingCardState extends State<BookingCard> {
                                   );
                                 }),
                                 _StatusBadge(
-                                    label: booking.balancePaise == 0 ? 'PAID' : 'UNPAID',
-                                    color: booking.balancePaise == 0
+                                    label: booking.isPaid ? 'PAID' : 'UNPAID',
+                                    color: booking.isPaid
                                         ? _c.accent
                                         : Color(0xFFD97706)),
                               ],
@@ -1277,15 +1349,24 @@ class _FilterBar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: sel ? _c.accent : _c.surface,
+                color: sel ? _c.text : _c.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: sel ? _c.accent : _c.border),
+                border: Border.all(color: sel ? _c.text : _c.border),
+                boxShadow: sel
+                    ? [
+                        BoxShadow(
+                          color: _c.text.withValues(alpha: 0.2),
+                          blurRadius: 8,
+                          offset: Offset(0, 4),
+                        )
+                      ]
+                    : null,
               ),
               child: Row(
                 children: [
                   Text(f,
                       style: TextStyle(
-                        color: sel ? _c.onAccent : _c.muted,
+                        color: sel ? Colors.white : _c.muted,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                       )),
@@ -1294,14 +1375,12 @@ class _FilterBar extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: sel
-                          ? _c.onAccent.withValues(alpha: 0.18)
-                          : _c.accentLight,
+                      color: sel ? Colors.white.withValues(alpha: 0.2) : _c.bg,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text('$count',
                         style: TextStyle(
-                          color: sel ? _c.onAccent : _c.accent,
+                          color: sel ? Colors.white : _c.accent,
                           fontSize: 10,
                           fontWeight: FontWeight.w900,
                         )),
@@ -1668,7 +1747,7 @@ _See you at the arena!_ 🏏
         ? _booking.id.substring(_booking.id.length - 7).toUpperCase()
         : _booking.id.toUpperCase();
 
-    final remainingPaise = _booking.balancePaise;
+    final remainingPaise = _booking.totalAmountPaise - _booking.advancePaise;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -1933,7 +2012,7 @@ _See you at the arena!_ 🏏
           if (_loading)
             CircularProgressIndicator(color: _c.accent)
           else ...[
-            if (_booking.balancePaise > 0 && _booking.status != 'CANCELLED')
+            if (!_booking.isPaid && _booking.status != 'CANCELLED')
               Column(
                 children: [
                   if (remainingPaise > 0)
@@ -1971,7 +2050,7 @@ _See you at the arena!_ 🏏
                   ),
                 ],
               )
-            else if (_booking.balancePaise == 0)
+            else if (_booking.isPaid)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2508,8 +2587,8 @@ class _DateGroupCard extends StatelessWidget {
     final active = bookings.where((b) => b.status != 'CANCELLED').toList();
     final total = active.length;
     final confirmed = active.where((b) => b.status == 'CONFIRMED' || b.status == 'CHECKED_IN').length;
-    final paidPaise = active.where((b) => b.balancePaise == 0).fold(0, (s, b) => s + b.totalAmountPaise);
-    final duePaise = active.where((b) => b.balancePaise > 0).fold(0, (s, b) => s + b.balancePaise);
+    final paidPaise = active.where((b) => b.isPaid).fold(0, (s, b) => s + b.totalAmountPaise);
+    final duePaise = active.where((b) => !b.isPaid).fold(0, (s, b) => s + b.totalAmountPaise);
     final fillRatio = total > 0 ? (confirmed / total).clamp(0.0, 1.0) : 0.0;
 
     // Time-of-day heat (morning < 12, afternoon 12–17, evening ≥ 17)
@@ -2773,7 +2852,7 @@ class _DateBookingsSheet extends StatelessWidget {
             : DateFormat('EEEE, d MMMM yyyy').format(date);
     final revenue = bookings.fold(0, (s, b) => s + b.totalAmountPaise);
     final collected = bookings.fold(
-        0, (s, b) => s + (b.balancePaise == 0 ? b.totalAmountPaise : b.balancePaise));
+        0, (s, b) => s + (b.isPaid ? b.totalAmountPaise : b.advancePaise));
 
     return DraggableScrollableSheet(
       expand: false,
@@ -3405,10 +3484,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final openMins = _toMins(openStr);
     final closeMins = _toMins(closeStr);
     final durMins = _currentDurationMins;
-    // Grounds are single-capacity: step by durMins + turnaround so slots are
-    // non-overlapping and respect the cleanup gap between sessions.
+    // Grounds are single-capacity: step by durMins so slots are non-overlapping
     final increment = unit.isGround
-        ? durMins + (unit.turnaroundMins > 0 ? unit.turnaroundMins : 0)
+        ? durMins
         : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
     debugPrint('🔵 [_rebuildTimes] unit=${unit.name} unitType=${unit.unitType} isGround=${unit.isGround} '
         'pricePerHourPaise=${unit.pricePerHourPaise} price4Hr=${unit.price4HrPaise} price8Hr=${unit.price8HrPaise} priceFullDay=${unit.priceFullDayPaise} '
@@ -5477,7 +5555,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         autofocus: true,
         inputFormatters: [
           FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
-          _IndianPhoneFormatter(),
+          LengthLimitingTextInputFormatter(13),
         ],
         style: TextStyle(
             color: _c.text, fontSize: 16, fontWeight: FontWeight.w700),
@@ -6348,17 +6426,5 @@ class _SegmentPicker extends StatelessWidget {
             ),
           );
         }).toList());
-  }
-}
-
-// Limits phone input: 10 bare digits, 12 for "91…" prefix, 13 for "+91…" prefix.
-class _IndianPhoneFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
-    final t = newValue.text;
-    final max = t.startsWith('+') ? 13 : (t.startsWith('91') && t.length > 2 ? 12 : 10);
-    if (t.length > max) return oldValue;
-    return newValue;
   }
 }
