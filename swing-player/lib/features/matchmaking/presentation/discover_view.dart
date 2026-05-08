@@ -2307,13 +2307,13 @@ class _MatchDateStrip extends StatelessWidget {
           try { d = DateTime.parse(api); } catch (_) {}
           if (d == null) return const SizedBox.shrink();
           final isActive = api == activeDateApi;
-          final bgColor = isActive ? context.sky : context.bg;
+          final bgColor = isActive ? context.accent : context.bg;
           final borderColor = isActive
               ? Colors.transparent
               : context.fg.withValues(alpha: 0.12);
           final fgColor = isActive ? Colors.white : context.fg;
           final fgSubColor = isActive
-              ? Colors.white.withValues(alpha: 0.75)
+              ? Colors.white.withValues(alpha: 0.78)
               : context.fgSub;
           const monthNames = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -2655,7 +2655,7 @@ class _WindowChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? context.sky : context.bg,
+          color: selected ? context.accent : context.bg,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: selected
