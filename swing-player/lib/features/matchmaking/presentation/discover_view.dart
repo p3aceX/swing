@@ -2050,7 +2050,7 @@ class _DiscoverCelebrateState extends State<_DiscoverCelebrate>
 
 // ─── RESULTS ────────────────────────────────────────────────────────────────
 
-class _DiscoverResults extends StatelessWidget {
+class _DiscoverResults extends StatefulWidget {
   const _DiscoverResults({
     required this.prefs,
     required this.team,
@@ -2075,24 +2075,42 @@ class _DiscoverResults extends StatelessWidget {
   final Map<String, MmTeamLobbySummary> teamLobbies;
   final bool expired;
   final ValueChanged<MmTeam> onSwitchTeam;
-  // V2 wire shape: lobbies whose rank-1 window+ground both intersect the
-  // caller's. Backend field name: `primary`.
   final List<MmRankedLobby> primary;
   final List<MmRankedLobby> alternatives;
   final String? alternativeReason;
-  // Lobby ids submitted via multi-date wizard, in date order. Drives the
-  // "Other dates" strip at the top of Results.
   final List<({String date, String lobbyId})> submittedLobbies;
   final VoidCallback onModify;
   final Future<void> Function({bool skipCelebrate}) onRefresh;
   final VoidCallback onCancel;
   final ValueChanged<MmOpenLobby> onChallenge;
-  // Tap a date in the submitted-dates strip → switch active results to
-  // that date. Caller flips _prefs.date and re-runs discover.
   final ValueChanged<String> onSwitchDate;
 
   @override
+  State<_DiscoverResults> createState() => _DiscoverResultsState();
+}
+
+class _DiscoverResultsState extends State<_DiscoverResults> {
+  // null = ALL windows visible. Otherwise restrict to one bucket.
+  String? _activeWindow;
+
+  @override
   Widget build(BuildContext context) {
+    // Local accessors so the existing build body stays readable.
+    final prefs = widget.prefs;
+    final team = widget.team;
+    final allTeams = widget.allTeams;
+    final teamLobbies = widget.teamLobbies;
+    final expired = widget.expired;
+    final onSwitchTeam = widget.onSwitchTeam;
+    final primary = widget.primary;
+    final alternatives = widget.alternatives;
+    final alternativeReason = widget.alternativeReason;
+    final submittedLobbies = widget.submittedLobbies;
+    final onModify = widget.onModify;
+    final onRefresh = widget.onRefresh;
+    final onCancel = widget.onCancel;
+    final onChallenge = widget.onChallenge;
+    final onSwitchDate = widget.onSwitchDate;
     return Column(
       children: [
         SafeArea(
@@ -2140,7 +2158,21 @@ class _DiscoverResults extends StatelessWidget {
             onSelect: onSwitchDate,
           ),
         ),
-        const SizedBox(height: 12),
+        // Time-of-day filter strip — chips for each bucket that has at
+        // least one match candidate. ALL chip on the left clears the
+        // filter. Hidden when no matches exist (the empty state below
+        // already covers the "nothing to filter" case).
+        if (primary.isNotEmpty || alternatives.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: _WindowFilterStrip(
+              primary: primary,
+              alternatives: alternatives,
+              activeWindow: _activeWindow,
+              onSelect: (w) => setState(() => _activeWindow = w),
+            ),
+          ),
+        const SizedBox(height: 8),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => onRefresh(skipCelebrate: true),
@@ -2149,6 +2181,7 @@ class _DiscoverResults extends StatelessWidget {
               primary: primary,
               alternatives: alternatives,
               alternativeReason: alternativeReason,
+              activeWindow: _activeWindow,
               onChallenge: onChallenge,
             ),
           ),
@@ -2280,6 +2313,7 @@ class _MatchTimeline extends StatelessWidget {
     required this.alternatives,
     required this.alternativeReason,
     required this.onChallenge,
+    this.activeWindow,
   });
 
   final _Prefs prefs;
@@ -2287,6 +2321,8 @@ class _MatchTimeline extends StatelessWidget {
   final List<MmRankedLobby> alternatives;
   final String? alternativeReason;
   final ValueChanged<MmOpenLobby> onChallenge;
+  /// When non-null, only show entries whose hour falls in this bucket.
+  final String? activeWindow;
 
   // Pulls a starting hour for the timeline placement. Uses the lobby's
   // concrete slotTime when present (arena listings + locked picks); falls
@@ -2347,40 +2383,50 @@ class _MatchTimeline extends StatelessWidget {
       );
     }
 
-    // Group hour-sorted entries by their bucket window so the timeline
-    // breaks visually into MORNING / AFTERNOON / EVENING / NIGHT /
-    // LATE_NIGHT sections — the user immediately sees which match falls
-    // in which time-of-day, even when buckets only have one card.
-    final grouped = <String, List<({MmRankedLobby ranked, bool isPrimary, int hour})>>{};
-    for (final e in entries) {
-      final w = _windowFromHour(e.hour);
-      (grouped[w] ??= []).add(e);
-    }
-    const orderedWindows = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'LATE_NIGHT'];
+    // Filter by the active bucket from the parent's filter strip. Null =
+    // no filter, show all entries chronologically.
+    final visible = activeWindow == null
+        ? entries
+        : entries.where((e) => _windowFromHour(e.hour) == activeWindow).toList();
 
-    final children = <Widget>[];
-    var first = true;
-    for (final w in orderedWindows) {
-      final list = grouped[w];
-      if (list == null || list.isEmpty) continue;
-      children.add(_WindowHeader(window: w, withTopGap: !first));
-      first = false;
-      for (final e in list) {
-        children.add(_TimelineRow(
+    if (visible.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(32, 80, 32, 24),
+        children: [
+          Center(
+            child: Text(
+              activeWindow != null
+                  ? "No matches in this time-of-day yet."
+                  : "We're searching — no match available right now.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
+      itemCount: visible.length,
+      itemBuilder: (_, i) {
+        final e = visible[i];
+        return _TimelineRow(
           hourLabel: _hourLabel(e.hour),
           isPrimary: e.isPrimary,
           ranked: e.ranked,
           callerWindowsRanked: prefs.windowsApi,
           callerGroundsRanked: prefs.preferredArenaIdList,
           onTap: () => onChallenge(e.ranked.lobby),
-        ));
-      }
-    }
-
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
-      children: children,
+        );
+      },
     );
   }
 
@@ -2396,88 +2442,130 @@ class _MatchTimeline extends StatelessWidget {
   }
 }
 
-// Section header introducing a time-of-day group on the timeline. Uses
-// theme colors only — no per-bucket tint — so the surface stays calm.
-class _WindowHeader extends StatelessWidget {
-  const _WindowHeader({required this.window, required this.withTopGap});
-  final String window;
-  final bool withTopGap;
+// Time-of-day filter strip — sits below the date strip on the Results
+// screen. Renders an "ALL" chip on the left followed by one chip per
+// bucket that has at least one match candidate. Active chip uses the
+// same fg/bg inversion as the date strip so the two filter rows read
+// as a coherent system.
+class _WindowFilterStrip extends StatelessWidget {
+  const _WindowFilterStrip({
+    required this.primary,
+    required this.alternatives,
+    required this.activeWindow,
+    required this.onSelect,
+  });
+
+  final List<MmRankedLobby> primary;
+  final List<MmRankedLobby> alternatives;
+  final String? activeWindow;
+  final ValueChanged<String?> onSelect;
+
+  static const _windowOrder = [
+    'MORNING',
+    'AFTERNOON',
+    'EVENING',
+    'NIGHT',
+    'LATE_NIGHT',
+  ];
+
+  static String _windowFromHour(int h) {
+    if (h >= 6 && h < 11) return 'MORNING';
+    if (h >= 11 && h < 16) return 'AFTERNOON';
+    if (h >= 16 && h < 20) return 'EVENING';
+    if (h >= 20 && h < 23) return 'NIGHT';
+    return 'LATE_NIGHT';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final view = _windowMeta(window, context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, withTopGap ? 18 : 8, 20, 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(view.icon, size: 16, color: context.fg),
-          const SizedBox(width: 8),
-          Text(
-            view.title,
-            style: TextStyle(
-              color: context.fg,
-              fontSize: 13,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Container(
-              height: 1,
-              color: context.fgSub.withValues(alpha: 0.18),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            view.range,
-            style: TextStyle(
-              color: context.fgSub,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-            ),
-          ),
-        ],
+    // Buckets that actually carry a match. Empty buckets stay hidden so
+    // the strip only ever shows actionable filters.
+    final present = <String>{};
+    for (final r in [...primary, ...alternatives]) {
+      present.add(_windowFromHour(_MatchTimeline._hourOf(r.lobby)));
+    }
+    final ordered = _windowOrder.where(present.contains).toList();
+    if (ordered.isEmpty) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: ordered.length + 1, // +1 for the leading ALL chip
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          if (i == 0) {
+            return _WindowChip(
+              label: 'All',
+              selected: activeWindow == null,
+              onTap: () => onSelect(null),
+            );
+          }
+          final w = ordered[i - 1];
+          return _WindowChip(
+            label: _shortLabel(w),
+            selected: activeWindow == w,
+            onTap: () => onSelect(activeWindow == w ? null : w),
+          );
+        },
       ),
     );
   }
 
-  ({String title, String range, IconData icon}) _windowMeta(
-      String w, BuildContext ctx) {
+  static String _shortLabel(String w) {
     switch (w) {
       case 'MORNING':
-        return (
-          title: 'MORNING',
-          range: '6:30 – 11:30 AM',
-          icon: Icons.wb_sunny_rounded,
-        );
+        return 'Morning';
       case 'AFTERNOON':
-        return (
-          title: 'AFTERNOON',
-          range: '11:30 AM – 4:30 PM',
-          icon: Icons.light_mode_rounded,
-        );
+        return 'Afternoon';
       case 'EVENING':
-        return (
-          title: 'EVENING',
-          range: '4:30 – 8:30 PM',
-          icon: Icons.wb_twilight_rounded,
-        );
+        return 'Evening';
       case 'NIGHT':
-        return (
-          title: 'NIGHT',
-          range: '8:30 – 11:30 PM',
-          icon: Icons.nights_stay_rounded,
-        );
+        return 'Night';
       default:
-        return (
-          title: 'LATE NIGHT',
-          range: '11:30 PM – 4 AM',
-          icon: Icons.bedtime_rounded,
-        );
+        return 'Late night';
     }
+  }
+}
+
+class _WindowChip extends StatelessWidget {
+  const _WindowChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? context.fg : context.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? Colors.transparent
+                : context.fg.withValues(alpha: 0.12),
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? context.bg : context.fg,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
+    );
   }
 }
 
