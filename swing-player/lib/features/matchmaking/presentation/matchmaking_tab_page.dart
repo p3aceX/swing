@@ -815,7 +815,33 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
                     if (team != null) {
                       setState(() => _team = team);
                     }
-                    _instantChallenge(lobby, withTeam: team ?? _team);
+                    final t = team ?? _team;
+                    if (t == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Select a team first')),
+                      );
+                      return;
+                    }
+                    // Open the candidate-preview sheet. Booking is delegated
+                    // to _instantChallenge via onBook so the sheet itself
+                    // doesn't carry the express-interest / Razorpay logic.
+                    showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => MyMatchupDetailSheet.forCandidate(
+                        candidate: lobby,
+                        myTeamId: t.id,
+                        myTeamName: t.name,
+                        myTeamLogoUrl: t.logoUrl,
+                        onRefresh: () {
+                          ref.invalidate(_myMatchesProvider);
+                          bumpMatchmakingState(ref);
+                        },
+                        onBook: () =>
+                            _instantChallenge(lobby, withTeam: t),
+                      ),
+                    );
                   },
                 ),
                 const _MatchesTab(),

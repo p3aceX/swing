@@ -8,6 +8,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/matchmaking_repository.dart';
+import '../domain/matchmaking_models.dart';
 import 'matchmaking_providers.dart';
 
 typedef RefreshFn = void Function();
@@ -38,7 +39,50 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
     required this.status,
     required this.onRefresh,
     this.bookingId,
+    this.isCandidate = false,
+    this.onBook,
   });
+
+  /// Pre-booking preview: same vertical-ticket layout, but the action area
+  /// surfaces a "Book this match-up" CTA instead of payment / cancel rows.
+  /// Booking is delegated to [onBook] — typically the parent's existing
+  /// expressInterest → lockAndPay flow.
+  factory MyMatchupDetailSheet.forCandidate({
+    Key? key,
+    required MmOpenLobby candidate,
+    required String myTeamId,
+    required String myTeamName,
+    String? myTeamLogoUrl,
+    required RefreshFn onRefresh,
+    required VoidCallback onBook,
+  }) {
+    final priceRupees = (candidate.pricePerTeamPaise / 100).round();
+    return MyMatchupDetailSheet(
+      key: key,
+      matchId: '',
+      myLobbyId: null,
+      myTeamId: myTeamId,
+      myTeamName: myTeamName,
+      myTeamLogoUrl: myTeamLogoUrl,
+      opponentTeamName: candidate.teamName,
+      opponentTeamLogoUrl: null,
+      groundName: candidate.groundName,
+      arenaName: candidate.arenaName,
+      groundArea: '',
+      dateLabel: candidate.dateLabel,
+      displaySlot: candidate.slotLabel ?? candidate.displaySlot,
+      format: candidate.format,
+      confirmationRupees: priceRupees,
+      remainingRupees: 0,
+      myTeamPaid: false,
+      opponentPaid: false,
+      status: 'preview',
+      onRefresh: onRefresh,
+      bookingId: null,
+      isCandidate: true,
+      onBook: onBook,
+    );
+  }
 
   final String matchId;
   final String? myLobbyId;
@@ -60,6 +104,13 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
   final String status;
   final String? bookingId;
   final RefreshFn onRefresh;
+  /// True when the sheet is rendering a Discover candidate (pre-booking).
+  /// In candidate mode the action area shows a Book CTA and the cancel /
+  /// payment rows are suppressed (no match exists yet).
+  final bool isCandidate;
+  /// Fires when the user taps the candidate-mode Book CTA. Parent runs the
+  /// expressInterest → lockAndPay flow and pops this sheet on success.
+  final VoidCallback? onBook;
 
   @override
   ConsumerState<MyMatchupDetailSheet> createState() =>
@@ -133,7 +184,7 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
     }
   }
 
-  bool get _canCancel => widget.status != 'started';
+  bool get _canCancel => widget.status != 'started' && !widget.isCandidate;
   bool get _isPostPayment => _bothPaid;
 
   Future<void> _openReviewSheet() async {
@@ -451,6 +502,38 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
   }
 
   Widget _buildActionArea(BuildContext context) {
+    // Candidate preview — single Book CTA. No match exists yet, so we
+    // suppress the cancel / payment-status branches that follow.
+    if (widget.isCandidate) {
+      return GestureDetector(
+        onTap: _busy
+            ? null
+            : () {
+                widget.onBook?.call();
+                Navigator.of(context).maybePop();
+              },
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          height: 50,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: context.ctaBg,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            widget.confirmationRupees > 0
+                ? 'Book — ₹${widget.confirmationRupees}'
+                : 'Book this match-up',
+            style: TextStyle(
+              color: context.ctaFg,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+      );
+    }
     if (_bothPaid && widget.status == 'started') {
       return _ActionStatus(
         title: 'Match is live',
