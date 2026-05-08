@@ -799,6 +799,13 @@ export class MatchmakingService {
     // tentative arena per request (using L1b's smart allocation from the
     // caller's home arena perspective) and surface its real price + name
     // marked as tentative — the actual ground gets locked in at lock-time.
+    type TentativeSlot = {
+      unitId: string
+      startTime: string
+      endTime: string
+      pricePerTeamPaise: number
+      bucket: TimeWindow | null
+    }
     let tentativeArena: {
       id: string
       name: string
@@ -807,6 +814,7 @@ export class MatchmakingService {
       longitude: number
       matchRatingAvg: number
       matchRatingCount: number
+      slots: TentativeSlot[]
     } | null = null
     {
       const ids = await this.smartAnyGroundAllocation(input.teamId, prisma)
@@ -830,6 +838,38 @@ export class MatchmakingService {
           },
         })
         if (a && a.units[0]) {
+          // Pull the actual bookable T20 slot grid for the date — same
+          // endpoint the player-app booking sheet uses. Each slot is
+          // tagged with its bucket so per-candidate display can pick
+          // the right concrete time without inventing one.
+          const dateApi = this.toDateOnly(date)
+          const dur = this.formatDurationMins(input.filters.format)
+          const slotData = await new ArenaService().getPlayerSlots(
+            a.id,
+            dateApi,
+            dur,
+            { onlyCricketUnits: true },
+          )
+          const slots: TentativeSlot[] = []
+          for (const group of slotData.unitGroups) {
+            const groupAny = group as any
+            const unitId = (groupAny.unitId as string | undefined) ?? ''
+            for (const s of (groupAny.availableSlots ?? []) as Array<{
+              startTime: string
+              endTime: string
+              totalAmountPaise: number
+            }>) {
+              slots.push({
+                unitId,
+                startTime: s.startTime,
+                endTime: s.endTime,
+                pricePerTeamPaise: Math.round(s.totalAmountPaise / 2),
+                bucket: bucketForSlotTime(s.startTime),
+              })
+            }
+          }
+          // Earliest first so per-bucket lookups return the nearest slot.
+          slots.sort((x, y) => x.startTime.localeCompare(y.startTime))
           tentativeArena = {
             id: a.id,
             name: a.name,
@@ -838,6 +878,7 @@ export class MatchmakingService {
             longitude: a.longitude,
             matchRatingAvg: (a as any).matchRatingAvg ?? 3.0,
             matchRatingCount: (a as any).matchRatingCount ?? 0,
+            slots,
           }
         }
       }
@@ -910,47 +951,60 @@ export class MatchmakingService {
         ?? (isTentative ? tentativeArena!.matchRatingAvg : null)
       const matchRatingCount = (concreteArena as any)?.matchRatingCount
         ?? (isTentative ? tentativeArena!.matchRatingCount : null)
-      // Display label combining bucket + clock window. Renders the same
-      // shape ("MORNING · 10:00 AM – 1:00 PM") whether the candidate has
-      // a concrete pick or just a window preference — pure-preference
-      // candidates use the bucket's start time as the tentative slot,
-      // matching what resolveSlotForPicklessLobby will actually pick at
-      // lock-time. Without this Discover Results would alternate between
-      // "AFTERNOON window" and "AFTERNOON · 11:30 AM – 3:30 PM" cards.
+      // Pure-preference candidates with no concrete pick borrow the first
+      // real bookable slot from the tentative arena that falls in their
+      // rank-1 still-active window. No more synthetic bucket-start times
+      // — gutter, label, and price all read off the same /arenas/:id/slots
+      // response that the booking sheet uses.
+      const w0 = cWindowsRanked.find((w) => !cWindowsMatched.includes(w))
+      const tentativeSlot: TentativeSlot | null =
+          (!pick?.slotTime && isTentative && tentativeArena && w0)
+              ? (tentativeArena.slots.find((s) => s.bucket === w0) ?? null)
+              : null
+
+      const fmtClock = (slotTime: string) => {
+        const parts = slotTime.split(':')
+        const h = parseInt(parts[0], 10)
+        const m = parseInt(parts[1], 10)
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return slotTime
+        const ampm = h < 12 ? 'AM' : 'PM'
+        const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
+        return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`
+      }
+
+      // Effective slot times for response. Prefer concrete pick → tentative
+      // slot from the API → bucket label as last fallback.
+      const effectiveSlotTime: string | null = pick?.slotTime ?? tentativeSlot?.startTime ?? null
+      const effectiveEndTime: string | null = tentativeSlot?.endTime ?? null
+
       const slotLabel = (() => {
-        const fmtClock = (mins: number) => {
-          const hh = Math.floor(mins / 60) % 24
-          const mm = mins % 60
-          const ampm = hh < 12 ? 'AM' : 'PM'
-          const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
-          return `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`
-        }
-        const dur = this.formatDurationMins(c.format as MatchmakingFormat)
-        // Concrete pick → use its actual slotTime.
         if (pick?.slotTime) {
+          const dur = this.formatDurationMins(c.format as MatchmakingFormat)
           const parts = pick.slotTime.split(':')
           const h = parseInt(parts[0], 10)
           const m = parseInt(parts[1], 10)
           if (Number.isFinite(h) && Number.isFinite(m)) {
             const startMin = h * 60 + m
+            const endMin = startMin + dur
+            const fmtMin = (mins: number) => {
+              const hh = Math.floor(mins / 60) % 24
+              const mm = mins % 60
+              const ampm = hh < 12 ? 'AM' : 'PM'
+              const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+              return `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`
+            }
             const bucket = bucketForSlotTime(pick.slotTime)
             return bucket
-              ? `${bucket} · ${fmtClock(startMin)} – ${fmtClock(startMin + dur)}`
-              : `${fmtClock(startMin)} – ${fmtClock(startMin + dur)}`
+              ? `${bucket} · ${fmtMin(startMin)} – ${fmtMin(endMin)}`
+              : `${fmtMin(startMin)} – ${fmtMin(endMin)}`
           }
         }
-        // Pure-preference candidate → tentative slot at bucket-start of
-        // the rank-1 still-active window.
-        const w0 = cWindowsRanked.find((w) => !cWindowsMatched.includes(w))
-        if (w0) {
-          const range = (WINDOW_RANGES as any)[w0] as
-              | { startMin: number; endMin: number }
-              | undefined
-          if (range) {
-            return `${w0} · ${fmtClock(range.startMin)} – ${fmtClock(range.startMin + dur)}`
-          }
-          return `${w0} window`
+        if (tentativeSlot) {
+          return tentativeSlot.bucket
+            ? `${tentativeSlot.bucket} · ${fmtClock(tentativeSlot.startTime)} – ${fmtClock(tentativeSlot.endTime)}`
+            : `${fmtClock(tentativeSlot.startTime)} – ${fmtClock(tentativeSlot.endTime)}`
         }
+        if (w0) return `${w0} window`
         return null
       })()
 
@@ -973,9 +1027,11 @@ export class MatchmakingService {
           ageGroup: c.teamId ? ages.get(c.teamId) ?? null : null,
           groundName: unit?.name ?? null,
           unitId: pick?.groundId ?? null,
-          // Pricing precedence: concrete unit → tentative arena's cheapest
-          // unit → 90000 fallback. The fallback should only fire when no
-          // arenas are usable at all, which would be a deeper problem.
+          // Pricing precedence:
+          //   1. concrete unit (player picked + arena listing) → from unit.pricePerHourPaise
+          //   2. tentative arena's actual slot (real /arenas/:id/slots data) → from slot.totalAmountPaise
+          //   3. tentative arena cheapest-unit fallback (no slot in active window)
+          //   4. 90000 fallback (no arenas usable)
           pricePerTeam: unit
             ? Math.round(
                 (unit.pricePerHourPaise *
@@ -983,17 +1039,29 @@ export class MatchmakingService {
                   60 /
                   2,
               )
-            : isTentative
-              ? Math.round(
-                  (tentativeArena!.pricePerHourPaise *
-                    this.formatDurationMins(c.format as MatchmakingFormat)) /
-                    60 /
-                    2,
-                )
-              : 90000,
-          // Tile UI prefixes the price with "≈" when this is 'tentative'.
-          pricingMode: unit ? 'concrete' : isTentative ? 'tentative' : 'unknown',
-          slotTime: pick?.slotTime ?? null,
+            : tentativeSlot
+              ? tentativeSlot.pricePerTeamPaise
+              : isTentative
+                ? Math.round(
+                    (tentativeArena!.pricePerHourPaise *
+                      this.formatDurationMins(c.format as MatchmakingFormat)) /
+                      60 /
+                      2,
+                  )
+                : 90000,
+          // Tile UI prefixes the price with "≈" only when there's no
+          // real slot anchoring it. A tentative-but-slotted candidate
+          // reads as 'concrete' to the player — they'll book that exact
+          // slot. Only window-only fallbacks remain 'tentative'.
+          pricingMode: unit
+              ? 'concrete'
+              : tentativeSlot
+                ? 'concrete'
+                : isTentative
+                  ? 'tentative'
+                  : 'unknown',
+          slotTime: effectiveSlotTime,
+          slotEndTime: effectiveEndTime,
           slotLabel,
           daysFromNow: this.daysFromNow(c.date),
           preferredArenaName: rank1Arena?.name ?? null,

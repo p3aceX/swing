@@ -23,15 +23,22 @@ export const TIME_WINDOWS: TimeWindow[] = [
   'LATE_NIGHT',
 ]
 
-// minutes-from-midnight ranges, half-open [start, end). LATE_NIGHT extends
-// past midnight into the next day; we still represent it as 23:30 → 28:00
-// so a single comparison works for matches that begin late on the same date.
+// minutes-from-midnight ranges, half-open [start, end). The boundaries
+// span the full 24-hour clock with no gaps so every real arena slot
+// start time gets a bucket — bucketForSlotTime never returns null on
+// well-formed input.
+//
+// Boundary placement matches how cricket grounds run their day:
+//   • LATE_NIGHT carries the post-midnight pre-dawn window
+//   • MORNING absorbs early-AM cricket starts (5–6 AM lighting / nets)
+//   • AFTERNOON / EVENING / NIGHT split on round clock hours that arena
+//     owners actually grid against (12, 16, 20, 24).
 export const WINDOW_RANGES: Record<TimeWindow, { startMin: number; endMin: number }> = {
-  MORNING:    { startMin:  6 * 60 + 30, endMin: 11 * 60 + 30 },
-  AFTERNOON:  { startMin: 11 * 60 + 30, endMin: 16 * 60 + 30 },
-  EVENING:    { startMin: 16 * 60 + 30, endMin: 20 * 60 + 30 },
-  NIGHT:      { startMin: 20 * 60 + 30, endMin: 23 * 60 + 30 },
-  LATE_NIGHT: { startMin: 23 * 60 + 30, endMin: 28 * 60 +  0 },
+  LATE_NIGHT: { startMin:  0 * 60,      endMin:  4 * 60       },
+  MORNING:    { startMin:  4 * 60,      endMin: 12 * 60       },
+  AFTERNOON:  { startMin: 12 * 60,      endMin: 16 * 60       },
+  EVENING:    { startMin: 16 * 60,      endMin: 20 * 60       },
+  NIGHT:      { startMin: 20 * 60,      endMin: 24 * 60       },
 }
 
 // Match formats → duration in minutes. Source of truth lives in
@@ -84,11 +91,11 @@ export function intervalsOverlap(
 // single merged interval that covers all of them. Used for slot-conflict
 // checks on a search request.
 //
-// "Any time" is a permissive whole-day band (06:30 → next-day 04:00) that
-// will overlap any real match interval on the requested date.
+// "Any time" is a permissive whole-day band (00:00 → 24:00) that will
+// overlap any real match interval on the requested date.
 export function unionWindowRange(windows: TimeWindow[]): { startMin: number; endMin: number } {
   if (windows.length === 0) {
-    return { startMin: WINDOW_RANGES.MORNING.startMin, endMin: WINDOW_RANGES.LATE_NIGHT.endMin }
+    return { startMin: 0, endMin: 24 * 60 }
   }
   let start = Number.POSITIVE_INFINITY
   let end = Number.NEGATIVE_INFINITY
