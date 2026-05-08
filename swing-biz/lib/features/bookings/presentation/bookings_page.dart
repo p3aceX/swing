@@ -1111,8 +1111,8 @@ class _BookingCardState extends State<BookingCard> {
                                   );
                                 }),
                                 _StatusBadge(
-                                    label: booking.isPaid ? 'PAID' : 'UNPAID',
-                                    color: booking.isPaid
+                                    label: booking.balancePaise == 0 ? 'PAID' : 'UNPAID',
+                                    color: booking.balancePaise == 0
                                         ? _c.accent
                                         : Color(0xFFD97706)),
                               ],
@@ -1668,7 +1668,7 @@ _See you at the arena!_ 🏏
         ? _booking.id.substring(_booking.id.length - 7).toUpperCase()
         : _booking.id.toUpperCase();
 
-    final remainingPaise = _booking.totalAmountPaise - _booking.advancePaise;
+    final remainingPaise = _booking.balancePaise;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -1933,7 +1933,7 @@ _See you at the arena!_ 🏏
           if (_loading)
             CircularProgressIndicator(color: _c.accent)
           else ...[
-            if (!_booking.isPaid && _booking.status != 'CANCELLED')
+            if (_booking.balancePaise > 0 && _booking.status != 'CANCELLED')
               Column(
                 children: [
                   if (remainingPaise > 0)
@@ -1971,7 +1971,7 @@ _See you at the arena!_ 🏏
                   ),
                 ],
               )
-            else if (_booking.isPaid)
+            else if (_booking.balancePaise == 0)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2508,8 +2508,8 @@ class _DateGroupCard extends StatelessWidget {
     final active = bookings.where((b) => b.status != 'CANCELLED').toList();
     final total = active.length;
     final confirmed = active.where((b) => b.status == 'CONFIRMED' || b.status == 'CHECKED_IN').length;
-    final paidPaise = active.where((b) => b.isPaid).fold(0, (s, b) => s + b.totalAmountPaise);
-    final duePaise = active.where((b) => !b.isPaid).fold(0, (s, b) => s + b.totalAmountPaise);
+    final paidPaise = active.where((b) => b.balancePaise == 0).fold(0, (s, b) => s + b.totalAmountPaise);
+    final duePaise = active.where((b) => b.balancePaise > 0).fold(0, (s, b) => s + b.balancePaise);
     final fillRatio = total > 0 ? (confirmed / total).clamp(0.0, 1.0) : 0.0;
 
     // Time-of-day heat (morning < 12, afternoon 12–17, evening ≥ 17)
@@ -2773,7 +2773,7 @@ class _DateBookingsSheet extends StatelessWidget {
             : DateFormat('EEEE, d MMMM yyyy').format(date);
     final revenue = bookings.fold(0, (s, b) => s + b.totalAmountPaise);
     final collected = bookings.fold(
-        0, (s, b) => s + (b.isPaid ? b.totalAmountPaise : b.advancePaise));
+        0, (s, b) => s + (b.balancePaise == 0 ? b.totalAmountPaise : b.balancePaise));
 
     return DraggableScrollableSheet(
       expand: false,
