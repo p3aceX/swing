@@ -420,7 +420,7 @@ class _CreateArenaScreenState extends ConsumerState<CreateArenaScreen> {
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(10), border: Border.all(color: scheme.error.withValues(alpha: 0.12))),
+                    decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(10), border: Border.all(color: scheme.outline.withValues(alpha: 0.2))),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('Location details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: scheme.primary)),
                       const SizedBox(height: 10),

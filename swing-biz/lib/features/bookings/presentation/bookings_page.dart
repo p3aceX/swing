@@ -5477,7 +5477,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         autofocus: true,
         inputFormatters: [
           FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
-          LengthLimitingTextInputFormatter(13),
+          _IndianPhoneFormatter(),
         ],
         style: TextStyle(
             color: _c.text, fontSize: 16, fontWeight: FontWeight.w700),
@@ -6348,5 +6348,17 @@ class _SegmentPicker extends StatelessWidget {
             ),
           );
         }).toList());
+  }
+}
+
+// Limits phone input: 10 bare digits, 12 for "91…" prefix, 13 for "+91…" prefix.
+class _IndianPhoneFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final t = newValue.text;
+    final max = t.startsWith('+') ? 13 : (t.startsWith('91') && t.length > 2 ? 12 : 10);
+    if (t.length > max) return oldValue;
+    return newValue;
   }
 }

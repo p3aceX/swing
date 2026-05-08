@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
@@ -3774,33 +3778,201 @@ class _DetailsTab extends StatelessWidget {
   }
 }
 
-class _LocationTab extends StatelessWidget {
-  const _LocationTab({required this.parent, required this.scrollCtrl});
+const _kGooglePlacesKey = 'AIzaSyDpJ1S4JYO-jVA6BgzxM1LYjdSvrSrTkTo';
 
+class _LocationTab extends StatefulWidget {
+  const _LocationTab({required this.parent, required this.scrollCtrl});
   final _ArenaDetailSheetState parent;
   final ScrollController scrollCtrl;
+  @override
+  State<_LocationTab> createState() => _LocationTabState();
+}
+
+class _LocationTabState extends State<_LocationTab> {
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+  bool _loading = false;
+  List<Map<String, dynamic>> _suggestions = [];
+  String _session = _newPlacesSession();
+
+  static String _newPlacesSession() =>
+      DateTime.now().millisecondsSinceEpoch.toString();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String v) {
+    _debounce?.cancel();
+    if (v.trim().length < 2) {
+      setState(() { _suggestions = []; _loading = false; });
+      return;
+    }
+    setState(() => _loading = true);
+    _debounce = Timer(const Duration(milliseconds: 450), () => _fetch(v.trim()));
+  }
+
+  Future<void> _fetch(String query) async {
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', {
+        'input': query,
+        'key': _kGooglePlacesKey,
+        'components': 'country:in',
+        'language': 'en',
+        'types': 'geocode|establishment',
+        'sessiontoken': _session,
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final preds = (body['predictions'] as List?)
+                ?.whereType<Map<String, dynamic>>().toList() ?? [];
+        setState(() { _suggestions = preds; _loading = false; });
+      } else {
+        setState(() { _suggestions = []; _loading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _suggestions = []; _loading = false; });
+    }
+  }
+
+  Future<void> _select(Map<String, dynamic> pred) async {
+    final placeId = pred['place_id'] as String? ?? '';
+    final desc = pred['description'] as String? ?? '';
+    setState(() { _searchCtrl.text = desc; _suggestions = []; _loading = true; });
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
+        'place_id': placeId,
+        'key': _kGooglePlacesKey,
+        'fields': 'geometry,address_components',
+        'language': 'en',
+        'sessiontoken': _session,
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final result = ((jsonDecode(res.body) as Map<String, dynamic>)['result'] as Map<String, dynamic>?) ?? {};
+        final location = (result['geometry'] as Map?)?['location'] as Map<String, dynamic>?;
+        final components = (result['address_components'] as List?)
+                ?.whereType<Map<String, dynamic>>().toList() ?? [];
+
+        String get(List<String> types) {
+          for (final c in components) {
+            final t = (c['types'] as List?)?.cast<String>() ?? [];
+            if (types.any(t.contains)) return c['long_name'] as String? ?? '';
+          }
+          return '';
+        }
+
+        final streetNum = get(['street_number']);
+        final route     = get(['route']);
+        final sub       = get(['sublocality_level_1', 'sublocality']);
+        final city      = get(['locality']);
+        final state     = get(['administrative_area_level_1']);
+        final pin       = get(['postal_code']);
+        final addressParts = [if (streetNum.isNotEmpty) streetNum, if (route.isNotEmpty) route, if (sub.isNotEmpty) sub];
+        final address = addressParts.isNotEmpty ? addressParts.join(', ') : desc.split(',').first;
+
+        final p = widget.parent;
+        p._addressCtrl.text = address;
+        p._cityCtrl.text    = city;
+        p._stateCtrl.text   = state;
+        p._pincodeCtrl.text = pin;
+        if (location?['lat'] != null) p._latitudeCtrl.text  = (location!['lat'] as double).toStringAsFixed(6);
+        if (location?['lng'] != null) p._longitudeCtrl.text = (location!['lng'] as double).toStringAsFixed(6);
+        setState(() { _session = _newPlacesSession(); _loading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
-    final p = parent;
+    final scheme = Theme.of(context).colorScheme;
+    final p = widget.parent;
     return ListView(
-      controller: scrollCtrl,
+      controller: widget.scrollCtrl,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
-        p._field('Address', p._addressCtrl, p._addressCtrl.text,
-            required: true, maxLines: 2),
+        // ── Places search ──────────────────────────────────────────────
+        TextFormField(
+          controller: _searchCtrl,
+          onChanged: _onSearchChanged,
+          style: TextStyle(color: _c.text, fontSize: 14),
+          decoration: InputDecoration(
+            labelText: 'Search address…',
+            labelStyle: TextStyle(color: _c.muted),
+            prefixIcon: _loading
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 1.5, color: _c.accent),
+                    ),
+                  )
+                : Icon(Icons.search_rounded, color: _c.muted, size: 20),
+            suffixIcon: _searchCtrl.text.isNotEmpty
+                ? GestureDetector(
+                    onTap: () => setState(() { _searchCtrl.clear(); _suggestions = []; }),
+                    child: Icon(Icons.close_rounded, color: _c.muted, size: 18),
+                  )
+                : null,
+            filled: true,
+            fillColor: scheme.surfaceContainerHighest,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _c.accent, width: 1.5)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
+        ),
+        if (_suggestions.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Container(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              children: _suggestions.map((pred) {
+                final main = (pred['structured_formatting'] as Map?)?['main_text'] as String? ?? pred['description'] as String? ?? '';
+                final secondary = (pred['structured_formatting'] as Map?)?['secondary_text'] as String? ?? '';
+                return InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _select(pred),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Row(children: [
+                      Icon(Icons.location_on_outlined, size: 16, color: _c.muted),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(main, style: TextStyle(color: _c.text, fontSize: 13, fontWeight: FontWeight.w600)),
+                        if (secondary.isNotEmpty)
+                          Text(secondary, style: TextStyle(color: _c.muted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ])),
+                    ]),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        // ── Manual fields (pre-filled, still editable) ─────────────────
+        p._field('Address', p._addressCtrl, p._addressCtrl.text, required: true, maxLines: 2),
         p._field('City', p._cityCtrl, p._cityCtrl.text, required: true),
         p._field('State', p._stateCtrl, p._stateCtrl.text, required: true),
-        p._field('Pincode', p._pincodeCtrl, p._pincodeCtrl.text,
-            keyboardType: TextInputType.number),
+        p._field('Pincode', p._pincodeCtrl, p._pincodeCtrl.text, keyboardType: TextInputType.number),
         const _TabSectionLabel('Coordinates (optional)'),
         p._field('Latitude', p._latitudeCtrl, p._latitudeCtrl.text,
-            keyboardType: const TextInputType.numberWithOptions(
-                decimal: true, signed: true)),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true)),
         p._field('Longitude', p._longitudeCtrl, p._longitudeCtrl.text,
-            keyboardType: const TextInputType.numberWithOptions(
-                decimal: true, signed: true)),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true)),
       ],
     );
   }
