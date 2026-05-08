@@ -664,6 +664,11 @@ class MmInterest {
 
 /// Returned by `lockAndPay`. The interest now holds the lobby's 120s payment
 /// lock; player must complete Razorpay flow before `lockExpiresAt`.
+///
+/// When [amountPaise] == 0 (test-mode / free-confirm), the backend skips
+/// Razorpay entirely and creates the match in-line. [freeMatchId] holds
+/// the new match's id; the frontend should skip Razorpay and go straight
+/// to the booked-state UI.
 class MmInterestLock {
   const MmInterestLock({
     required this.interestId,
@@ -674,6 +679,7 @@ class MmInterestLock {
     required this.groundFeePaise,
     required this.lockExpiresAt,
     required this.lockSeconds,
+    this.freeMatchId,
   });
   final String interestId;
   final String razorpayOrderId;
@@ -683,6 +689,9 @@ class MmInterestLock {
   final int groundFeePaise;
   final DateTime lockExpiresAt;
   final int lockSeconds;
+  final String? freeMatchId;
+
+  bool get isFree => amountPaise == 0 || freeMatchId != null;
 
   factory MmInterestLock.fromJson(Map<String, dynamic> j) => MmInterestLock(
         interestId: (j['interestId'] as String?) ?? '',
@@ -695,6 +704,7 @@ class MmInterestLock {
                 (j['lockExpiresAt'] as String?) ?? '') ??
             DateTime.now().add(const Duration(seconds: 120)),
         lockSeconds: (j['lockSeconds'] as num?)?.toInt() ?? 120,
+        freeMatchId: j['freeMatchId'] as String?,
       );
 }
 

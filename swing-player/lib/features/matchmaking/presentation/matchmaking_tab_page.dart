@@ -436,6 +436,26 @@ class _MatchmakingTabPageState extends ConsumerState<MatchmakingTabPage> {
           '_instantChallenge → lock acquired order=${lock.razorpayOrderId} '
           'amount=${lock.amountPaise} expires=${lock.lockExpiresAt}');
       if (!mounted) return;
+
+      // Free-mode bypass — backend already created the match in lockAndPay
+      // when amount=0 (test mode). Skip Razorpay entirely and route the
+      // user straight to My Match-Up so they can see the booked match.
+      if (lock.isFree) {
+        setState(() {
+          _lobbyState = _LobbyState.idle;
+          _activeInterestId = null;
+          _activeInterestLobbyId = null;
+          _activeInterestRazorpayOrderId = null;
+          _tab = 1; // jump to My Match-Up tab
+        });
+        ref.invalidate(_myMatchesProvider);
+        bumpMatchmakingState(ref);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Match booked.')),
+        );
+        return;
+      }
+
       _activeInterestId = interest.interestId;
       _activeInterestLobbyId = lobby.lobbyId;
       _activeInterestRazorpayOrderId = lock.razorpayOrderId;

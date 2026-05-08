@@ -4040,19 +4040,31 @@ export class MatchmakingService {
       }
     }
 
-    const wasPostPayment = match.status !== 'pending_payment'
+    // Pre-payment cancel = match is still 'pending_payment' (at least one
+    // team hasn't paid the advance). The team is window-shopping; we keep
+    // both lobbies discoverable so neither side loses the slot they were
+    // chasing, and we don't ding reputation.
+    //
+    // Post-payment cancel = both teams have confirmed (status 'confirmed',
+    // 'setup', etc). This is a real bail; lobbies stay cancelled and the
+    // canceller's reputation counters bump (drives the soft-ban formula).
+    const isPrePayment = match.status === 'pending_payment'
+    const wasPostPayment = !isPrePayment
 
     await prisma.$transaction(async (tx) => {
       await tx.matchmakingMatch.update({
         where: { id: matchId },
         data: { status: 'cancelled' },
       })
-      // Player-cancel: flip lobbies to 'cancelled' (NOT 'searching' like the
-      // arena-owner path), since the team has chosen to back out and we
-      // shouldn't keep their old prefs surfacing in Discover.
       await tx.matchmakingLobby.updateMany({
         where: { id: { in: [match.lobbyAId, match.lobbyBId] } },
-        data: { status: 'cancelled' },
+        data: isPrePayment
+          ? {
+              status: 'searching',
+              matchId: null,
+              windowsMatched: { set: [] as string[] },
+            }
+          : { status: 'cancelled' },
       })
       if ((match as any).bookingId) {
         await tx.slotBooking.update({
@@ -4066,20 +4078,25 @@ export class MatchmakingService {
           data: { status: 'CANCELLED' as any },
         })
       }
-      // Bump reputation counters on the cancelling team. Late cancels
-      // (after both teams confirmed) hit the score harder.
-      await tx.team.update({
-        where: { id: team.id },
-        data: {
-          cancellationCount: { increment: 1 },
-          lateCancelCount: wasPostPayment ? { increment: 1 } : undefined,
-        },
-      })
+      // Reputation bump only on post-payment cancel — the team committed
+      // money + blocked the slot. Pre-payment cancels are free.
+      if (!isPrePayment) {
+        await tx.team.update({
+          where: { id: team.id },
+          data: {
+            cancellationCount: { increment: 1 },
+            lateCancelCount: { increment: 1 },
+          },
+        })
+      }
     })
 
     // Recompute credibility outside the tx so we use the freshly-updated
-    // counters. Sets matchupBanUntil if score crosses threshold.
-    await this.recomputeTeamCredibility(team.id).catch(() => undefined)
+    // counters. Sets matchupBanUntil if score crosses threshold. Skipped
+    // on pre-payment cancel since counters didn't change.
+    if (!isPrePayment) {
+      await this.recomputeTeamCredibility(team.id).catch(() => undefined)
+    }
 
     this.notifyMatchCancelledByPlayer(matchId, team.id, team.name ?? 'a team')
       .catch(() => undefined)
