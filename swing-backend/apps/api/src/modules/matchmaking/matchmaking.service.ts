@@ -600,6 +600,7 @@ export class MatchmakingService {
         // Compatibility-filter inputs — caller side
         teamType: true,
         ageGroup: true,
+        gender: true,
         credibilityScore: true,
       },
     })
@@ -3274,6 +3275,16 @@ export class MatchmakingService {
     return a === b
   }
 
+  // Gender compatibility. MIXED on either side meets anything (catch-all);
+  // MALE only meets MALE, FEMALE only meets FEMALE. Mirrors the strict
+  // same-tier philosophy of teamType — a men's side and a women's side
+  // never get auto-paired.
+  private gendersCompatible(a: string | null | undefined, b: string | null | undefined): boolean {
+    if (!a || !b) return true
+    if (a === 'MIXED' || b === 'MIXED') return true
+    return a === b
+  }
+
   // Demand signal for venue allocation: count of active searching lobbies
   // per arena on a given date. A `MatchmakingLobby.arenaId` set means it's
   // either owner-posted (split booking on that arena) or in mid-flight
@@ -3301,11 +3312,12 @@ export class MatchmakingService {
   // before scoring. Anything that fails this can never be a viable opponent
   // regardless of preference overlap.
   private teamsAreCompatible(
-    caller: { teamType?: string | null; ageGroup?: string | null; credibilityScore?: number | null },
-    candidate: { teamType?: string | null; ageGroup?: string | null; credibilityScore?: number | null },
+    caller: { teamType?: string | null; ageGroup?: string | null; gender?: string | null; credibilityScore?: number | null },
+    candidate: { teamType?: string | null; ageGroup?: string | null; gender?: string | null; credibilityScore?: number | null },
   ): boolean {
     if (!this.teamTypesCompatible(caller.teamType, candidate.teamType)) return false
     if (!this.ageGroupsCompatible(caller.ageGroup, candidate.ageGroup)) return false
+    if (!this.gendersCompatible(caller.gender, candidate.gender)) return false
     if ((caller.credibilityScore ?? 100) < 60) return false
     if ((candidate.credibilityScore ?? 100) < 60) return false
     return true
