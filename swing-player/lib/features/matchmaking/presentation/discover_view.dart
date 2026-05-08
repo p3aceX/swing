@@ -2193,20 +2193,17 @@ class _MatchDateStrip extends StatelessWidget {
           try { d = DateTime.parse(api); } catch (_) {}
           if (d == null) return const SizedBox.shrink();
           final isActive = api == activeDateApi;
-          // Color rule:
-          //   active        → gold
-          //   user-picked   → light blue (sky tint) — date is searched
-          // Dates not in this list don't render at all.
-          final bgColor = isActive
-              ? context.gold
-              : context.sky.withValues(alpha: 0.18);
+          // Plain treatment — active chip filled with the app's foreground
+          // accent (inverted), inactive chips show as bare text on bg with
+          // a hairline border. No coloured fills that fight the theme.
+          final bgColor = isActive ? context.fg : context.bg;
           final borderColor = isActive
               ? Colors.transparent
-              : context.sky.withValues(alpha: 0.45);
-          final fgColor = isActive ? Colors.black : context.sky;
+              : context.fg.withValues(alpha: 0.12);
+          final fgColor = isActive ? context.bg : context.fg;
           final fgSubColor = isActive
-              ? Colors.black54
-              : context.sky.withValues(alpha: 0.75);
+              ? context.bg.withValues(alpha: 0.65)
+              : context.fgSub;
           const monthNames = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
           const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -2322,48 +2319,22 @@ class _MatchTimeline extends StatelessWidget {
     ]..sort((a, b) => a.hour.compareTo(b.hour));
 
     if (entries.isEmpty) {
+      // Single centered line — no background, no icon, no card. The date
+      // strip already tells the user which date they're on.
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+        padding: const EdgeInsets.fromLTRB(32, 80, 32, 24),
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Color.alphaBlend(
-                context.warn.withValues(alpha: 0.10),
-                context.bg,
+          Center(
+            child: Text(
+              "We're searching — no match available right now.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
               ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Icon(Icons.info_rounded, color: context.warn, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    'No matches on this date yet',
-                    style: TextStyle(
-                      color: context.fg,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 6),
-                Text(
-                  alternativeReason == 'no_exact_matches'
-                      ? "Your match-up is posted. We'll notify you when a team matches."
-                      : "Your match-up is searching. Switch dates above or modify preferences.",
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
-                ),
-              ],
             ),
           ),
         ],
