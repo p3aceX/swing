@@ -170,6 +170,8 @@ class MmOpenLobby {
     this.teamId,
     this.status,
     this.slotLabel,
+    this.matchRatingAvg,
+    this.matchRatingCount,
   });
 
   final String lobbyId;
@@ -203,6 +205,12 @@ class MmOpenLobby {
   // "MORNING · 10:00 AM – 1:00 PM" (arena/picks-based), "MORNING window"
   // (pure-preference). Null on legacy responses; clients fall back to slotTime.
   final String? slotLabel;
+  // L3 — match-context arena rating, Bayesian-smoothed (k=5, prior=3.0).
+  // Both null when the candidate has no concrete arena yet (player↔player
+  // pure-preference lobby). Tile UI hides badge when count < 3 and shows
+  // "NEW GROUND" instead.
+  final double? matchRatingAvg;
+  final int? matchRatingCount;
 
   String get displaySlot {
     try {
@@ -271,6 +279,8 @@ class MmOpenLobby {
       teamId: j['teamId'] as String?,
       status: j['status'] as String?,
       slotLabel: j['slotLabel'] as String?,
+      matchRatingAvg: (j['matchRatingAvg'] as num?)?.toDouble(),
+      matchRatingCount: (j['matchRatingCount'] as num?)?.toInt(),
     );
   }
 }

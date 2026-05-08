@@ -772,7 +772,12 @@ export class MatchmakingService {
     const arenas = arenaIds.length
       ? await prisma.arena.findMany({
           where: { id: { in: arenaIds } },
-          select: { id: true, name: true },
+          select: {
+            id: true,
+            name: true,
+            matchRatingAvg: true,
+            matchRatingCount: true,
+          },
         })
       : []
     const arenasById = new Map(arenas.map((a) => [a.id, a]))
@@ -831,6 +836,13 @@ export class MatchmakingService {
         : null
       const cWindowsRanked = (c.windowsRanked ?? []) as string[]
       const cWindowsMatched = (c.windowsMatched ?? []) as string[]
+      // L3 — rating surfacing. Pull from arena.matchRatingAvg/Count if the
+      // candidate row carries a concrete arena (either via arenaId or via
+      // pick → unit → arena). Tile UI hides the badge when count < 3
+      // ("New ground" state) using ratingCount.
+      const arenaForRating = arena ?? (unit as any)?.arena ?? null
+      const matchRatingAvg = (arenaForRating as any)?.matchRatingAvg ?? null
+      const matchRatingCount = (arenaForRating as any)?.matchRatingCount ?? null
       // Display label combining bucket + clock window. Arena/picks-based
       // candidates render as "MORNING · 10:00 AM – 1:00 PM" (concrete time).
       // Pure-preference candidates (no picks) render as "MORNING window".
@@ -891,6 +903,8 @@ export class MatchmakingService {
           slotLabel,
           daysFromNow: this.daysFromNow(c.date),
           preferredArenaName: rank1Arena?.name ?? null,
+          matchRatingAvg,
+          matchRatingCount,
         },
         score: s.value,
         matchedOn: s.matchedOn,
@@ -2435,25 +2449,35 @@ export class MatchmakingService {
     return { groundId: unit.id, slotTime, window: w }
   }
 
-  // L1b — smart "any-ground" allocation. Fires only when the player did NOT
-  // pin specific grounds. Returns a ranked list of candidate arenaIds, top
-  // first. Caller picks rank-1, falls through to next on no-unit failure.
+  // L1b/L3 — smart "any-ground" allocation. Fires only when the player did
+  // NOT pin specific grounds. Returns a ranked list of candidate arenaIds,
+  // top first. Caller picks rank-1, falls through to next on no-unit failure.
   //
-  // Score = 0.5 * utilizationGap + 0.2 * recency + 0.3 * proximity
-  //   utilizationGap : 1 - (matches_28d / max_matches_28d). Quiet arenas win.
-  //   recency        : days_since_last_match / 30, capped. Stale arenas win.
+  // L3 score = 0.3 * utilizationGap + 0.4 * ratingScore + 0.2 * proximity + 0.1 * recency
+  //   utilizationGap : 1 - (bookings_28d / max). Quiet arenas win.
+  //   ratingScore    : (matchRatingAvg - 1.0) / 4.0  →  1★=0.0, 5★=1.0.
+  //                    Neutral 0.5 when matchRatingCount < 5 (gather data
+  //                    on new arenas; the user's "5-match threshold").
   //   proximity      : 1/(km+1) from team's home arena. Neutral 0.5 when
-  //                    location unknown. Nearby arenas win.
+  //                    location unknown.
+  //   recency        : days_since_last_booking / 30, capped. Stale arenas win.
   //
-  // Rating is intentionally NOT in this score yet — it's added in L3 once
-  // the ArenaReview model has data to draw on.
+  // Soft-ban: arenas with matchRatingCount >= 5 AND matchRatingAvg < 2.5
+  // are excluded entirely from the any-ground pool. They still appear when
+  // a player explicitly picks them (player pref always wins).
   private async smartAnyGroundAllocation(
     teamId: string | null,
     client: any,
   ): Promise<string[]> {
     const arenas = await client.arena.findMany({
       where: { isActive: true, units: { some: { isActive: true } } },
-      select: { id: true, latitude: true, longitude: true },
+      select: {
+        id: true,
+        latitude: true,
+        longitude: true,
+        matchRatingAvg: true,
+        matchRatingCount: true,
+      },
     })
     if (arenas.length === 0) return []
 
@@ -2509,8 +2533,20 @@ export class MatchmakingService {
     }
 
     const now = Date.now()
-    const scored = arenas.map(
-      (a: { id: string; latitude: number; longitude: number }) => {
+    type AnyArena = {
+      id: string
+      latitude: number
+      longitude: number
+      matchRatingAvg: number
+      matchRatingCount: number
+    }
+    const scored = arenas
+      .filter((a: AnyArena) => {
+        // Soft-ban — exclude consistently low-rated arenas from the
+        // no-pref pool. Player explicit picks bypass this entirely.
+        return !(a.matchRatingCount >= 5 && a.matchRatingAvg < 2.5)
+      })
+      .map((a: AnyArena) => {
         const stat = stats.get(a.id) ?? { count: 0, lastAt: null }
         const utilizationGap = 1 - stat.count / maxCount
         const lastDays = stat.lastAt
@@ -2527,10 +2563,19 @@ export class MatchmakingService {
           const km = this.haversineKm(homeLat, homeLng, a.latitude, a.longitude)
           proximity = 1.0 / (km + 1.0)
         }
-        const score = 0.5 * utilizationGap + 0.2 * recency + 0.3 * proximity
+        // Rating component is neutral until the 5-match threshold is hit
+        // (gives new arenas a fair shot to gather data).
+        const ratingScore =
+          a.matchRatingCount >= 5
+            ? Math.max(0, Math.min(1, (a.matchRatingAvg - 1.0) / 4.0))
+            : 0.5
+        const score =
+          0.3 * utilizationGap +
+          0.4 * ratingScore +
+          0.2 * proximity +
+          0.1 * recency
         return { id: a.id, score }
-      },
-    )
+      })
     scored.sort(
       (a: { score: number }, b: { score: number }) => b.score - a.score,
     )
