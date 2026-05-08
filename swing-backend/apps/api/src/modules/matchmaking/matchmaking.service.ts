@@ -1257,15 +1257,18 @@ export class MatchmakingService {
     // UI can render "different ground" / "different time horizon" precisely.
     const callerW0 = p.callerWindowsRanked[0]
     const candW0 = candWindowsActive[0]
-    const windowsPrimary =
-      !!callerW0 && !!candW0 &&
-      candWindowsActive.includes(callerW0) &&
-      p.callerWindowsRanked.includes(candW0)
-    if (intersects && !windowsPrimary && bestWindow) {
-      const myRank = (bestWindow as { myRank: number }).myRank
-      if (myRank === 1) differs.push('window_rank_2')
-      else if (myRank === 2) differs.push('window_rank_3')
-      else differs.push('window_other')
+    // Any window overlap = primary. Rank distinctions still drive the
+    // score (rank-0 + rank-0 outscores rank-1 + rank-0 → ordering is
+    // preserved) but they don't downgrade a candidate into the
+    // "alternative" stripe lane or fire a caveat. The player explicitly
+    // opted into MORNING and AFTERNOON; matching on either is honest.
+    const windowsPrimary = bestWindow !== null
+    // Caveat fires only on truly out-of-list windows — and the upstream
+    // intersects-filter already drops those, so this is mostly belt &
+    // braces.
+    if (!intersects && bestWindow === null) {
+      // unreachable in current code path (filtered earlier), kept for
+      // future callers that surface non-intersecting candidates.
     }
 
     const callerG0 = p.callerGroundsRanked[0]
