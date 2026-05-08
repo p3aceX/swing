@@ -262,6 +262,14 @@ class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
                   ],
                 ),
                 actions: [
+                  IconButton(
+                    tooltip: 'Match reviews',
+                    onPressed: () => context.push(
+                      '${AppRoutes.arenaMatchReviews}/${arena.id}',
+                    ),
+                    icon: Icon(Icons.star_outline_rounded,
+                        size: 22, color: _c.text),
+                  ),
                   Padding(
                     padding: const EdgeInsets.only(right: 12),
                     child: FilledButton.icon(

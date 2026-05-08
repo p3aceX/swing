@@ -1476,4 +1476,92 @@ export class ArenaService {
     if (!arena || arena.ownerId !== owner.id) throw Errors.forbidden()
     return arena
   }
+
+  // L4 — match-context review analytics for the biz arena dashboard.
+  // Owner-only. Returns the aggregates plus enough detail (top tags, recent
+  // review samples) to populate the dashboard screen in a single request.
+  //
+  // Eligibility states (mirror the matchmaking allocation rules):
+  //   • NEW         — matchRatingCount < 5; rating component neutral, can't
+  //                   be soft-banned. Owners see "Gathering reviews".
+  //   • SOFT_BANNED — matchRatingCount >= 5 AND matchRatingAvg < 2.5.
+  //                   Excluded from any-ground allocation; player explicit
+  //                   picks still allowed. Owners see warning + delta to
+  //                   recovery (2.5 - current).
+  //   • ACTIVE      — everyone else.
+  async getMatchReviewAnalytics(userId: string, arenaId: string) {
+    const arena = await this.verifyOwner(arenaId, userId)
+    const reviews = await prisma.review.findMany({
+      where: { arenaId, matchId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        team: { select: { id: true, name: true, logoUrl: true } },
+      },
+    })
+
+    const matchRatingAvg = (arena as any).matchRatingAvg ?? 3.0
+    const matchRatingCount = (arena as any).matchRatingCount ?? 0
+    const eligibilityStatus =
+      matchRatingCount >= 5 && matchRatingAvg < 2.5
+        ? 'SOFT_BANNED'
+        : matchRatingCount < 5
+          ? 'NEW'
+          : 'ACTIVE'
+
+    // Stars histogram across all match-context reviews.
+    const starsBreakdown: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+    for (const r of reviews) {
+      const v = Math.max(1, Math.min(5, r.rating))
+      starsBreakdown[v] = (starsBreakdown[v] ?? 0) + 1
+    }
+
+    // Tag frequency. Slugs prefixed with positive/negative semantics in the
+    // host_core sheet — split here so the dashboard can show two columns.
+    const tagFreq = new Map<string, number>()
+    for (const r of reviews) {
+      for (const t of r.tags as string[]) {
+        tagFreq.set(t, (tagFreq.get(t) ?? 0) + 1)
+      }
+    }
+    const positiveSlugs = new Set([
+      'surface_good',
+      'parking_easy',
+      'lights_bright',
+      'washroom_clean',
+      'well_run',
+      'good_pricing',
+    ])
+    const allTags = Array.from(tagFreq.entries()).map(([tag, count]) => ({
+      tag,
+      count,
+      positive: positiveSlugs.has(tag),
+    }))
+    allTags.sort((a, b) => b.count - a.count)
+    const topPositive = allTags.filter((t) => t.positive).slice(0, 4)
+    const topNegative = allTags.filter((t) => !t.positive).slice(0, 4)
+
+    // Last 8 reviews surfaced verbatim — owners want to read what was said
+    // alongside the stars. Comments truncated client-side.
+    const recentReviews = reviews.slice(0, 8).map((r) => ({
+      id: r.id,
+      stars: r.rating,
+      tags: r.tags as string[],
+      comment: r.comment,
+      createdAt: r.createdAt.toISOString(),
+      teamName: (r as any).team?.name ?? 'A team',
+      teamLogoUrl: (r as any).team?.logoUrl ?? null,
+    }))
+
+    return {
+      arenaId: arena.id,
+      arenaName: arena.name,
+      matchRatingAvg,
+      matchRatingCount,
+      eligibilityStatus,
+      starsBreakdown,
+      topPositive,
+      topNegative,
+      recentReviews,
+    }
+  }
 }

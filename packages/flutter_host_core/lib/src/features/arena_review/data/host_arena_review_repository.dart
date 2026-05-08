@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../providers/host_dio_provider.dart';
+import '../domain/host_arena_review_analytics.dart';
 import '../domain/host_arena_review_models.dart';
 
 /// Submits a captain's arena review against the matchmaking endpoint.
@@ -13,6 +14,19 @@ class HostArenaReviewRepository {
   HostArenaReviewRepository(this._dio);
 
   final Dio _dio;
+
+  /// Loads the biz arena dashboard analytics for an arena. Owner-only.
+  /// Path is hardcoded under `/arenas` because that's where the existing
+  /// arena routes live; if the host adopts namespaced paths, lift to
+  /// HostPathConfig.
+  Future<HostArenaReviewAnalytics> loadAnalytics(String arenaId) async {
+    final resp = await _dio.get('/arenas/$arenaId/match-review-analytics');
+    final raw = resp.data;
+    final data = raw is Map<String, dynamic> && raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : (raw is Map<String, dynamic> ? raw : const <String, dynamic>{});
+    return HostArenaReviewAnalytics.fromJson(data);
+  }
 
   Future<HostArenaReviewResult> submitReview({
     required String matchId,

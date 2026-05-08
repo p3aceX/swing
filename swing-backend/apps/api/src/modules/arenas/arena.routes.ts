@@ -295,6 +295,16 @@ export async function arenaRoutes(app: FastifyInstance) {
     return reply.send({ success: true })
   })
 
+  // L4 — match-context review analytics for the biz arena dashboard.
+  // Owner-only. Returns rating + count + eligibility + tag freq + recent
+  // reviews in a single payload to feed the dashboard screen.
+  app.get('/:id/match-review-analytics', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const data = await svc.getMatchReviewAnalytics(user.userId, id)
+    return reply.send({ success: true, data })
+  })
+
   app.get('/:id/slots', async (request, reply) => {
     const { id } = request.params as { id: string }
     const q = request.query as { date: string; durationMins?: string }

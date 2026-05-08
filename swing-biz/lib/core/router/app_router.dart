@@ -57,6 +57,7 @@ class AppRoutes {
   static const arenaUnitDetail = '/arena/units';
   static const arenaAccount = '/arena/account';
   static const arenaNotifications = '/arena/notifications';
+  static const arenaMatchReviews = '/arena/match-reviews';
   static const students = '/dashboard/students';
   static const editStudent = '/dashboard/students/edit';
   static const deleteStudent = '/dashboard/students/delete';
@@ -345,6 +346,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.arenaNotifications,
         builder: (_, __) => const BizNotificationsScreen(),
+      ),
+      // L4 — match-context review dashboard for arena owners. Path takes
+      // the arenaId from `extra` because the existing arena flow already
+      // threads it that way.
+      GoRoute(
+        path: '${AppRoutes.arenaMatchReviews}/:arenaId',
+        builder: (_, state) => HostArenaReviewDashboard(
+          arenaId: state.pathParameters['arenaId']!,
+        ),
       ),
       GoRoute(
         path: AppRoutes.students,
