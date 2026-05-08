@@ -1,7 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { MatchmakingService, MatchmakingFormat } from './matchmaking.service'
-import { AppError } from '../../lib/errors'
 
 export async function matchmakingRoutes(app: FastifyInstance) {
   const svc = new MatchmakingService()
@@ -39,31 +38,17 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       format: formatSchema,
       ballType: ballTypeSchema,
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      // Picks are optional now — when omitted, the lobby is a preference-lobby
-      // (windowsRanked/timeWindow becomes required in that case; validated in service).
+      // Picks are optional. When omitted, windowsRanked is required so the
+      // lobby has a discoverable time-window — service auto-derives
+      // groundsRanked from picks when both arrays are unset.
       picks: z.array(z.object({
         groundId: z.string(),
         slotTime: z.string().regex(/^\d{2}:\d{2}$/),
       })).max(3).optional(),
-      // V2 ranked preferences (preferred). Order = preference; first is strongest.
+      // Unified ranked preferences. Order = preference; first is strongest.
       windowsRanked: z.array(timeWindowVal).min(1).optional(),
       groundsRanked: z.array(z.string()).max(3).optional(),
-      // Back-compat: old clients submit `timeWindow` (single) or `timeWindows`
-      // (multi, unranked). When `windowsRanked` is absent, normalise from
-      // these into a ranked array.
-      timeWindow: timeWindowVal.optional(),
-      timeWindows: z.array(timeWindowVal).optional(),
-      preferredArenaId: z.string().optional(),
-      preferredArenaIds: z.array(z.string()).max(3).optional(),
     }).parse(request.body)
-
-    const windowsRanked = body.windowsRanked
-      ?? (body.timeWindows && body.timeWindows.length > 0
-        ? body.timeWindows
-        : (body.timeWindow ? [body.timeWindow] : []))
-    const groundsRanked = body.groundsRanked
-      ?? body.preferredArenaIds
-      ?? (body.preferredArenaId ? [body.preferredArenaId] : [])
 
     const data = await svc.createLobby(user.userId, {
       teamId: body.teamId,
@@ -71,11 +56,8 @@ export async function matchmakingRoutes(app: FastifyInstance) {
       ballType: body.ballType ?? null,
       date: body.date,
       picks: body.picks ?? [],
-      timeWindow: body.timeWindow ?? null,
-      windowsRanked,
-      preferredArenaId: body.preferredArenaId ?? null,
-      preferredArenaIds: body.preferredArenaIds ?? [],
-      groundsRanked,
+      windowsRanked: body.windowsRanked,
+      groundsRanked: body.groundsRanked,
     })
     return reply.code(201).send({ success: true, data })
   })
@@ -127,16 +109,10 @@ export async function matchmakingRoutes(app: FastifyInstance) {
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         format: formatSchema,
         ballType: ballTypeSchema,
-        // V2 ranked arrays (preferred). At least one window required when
-        // windowsRanked is supplied; groundsRanked is up to 3 (empty = any).
-        windowsRanked: z.array(timeWindowVal).min(1).optional(),
-        groundsRanked: z.array(z.string()).max(3).optional(),
-        // Legacy unranked / single-pref fallbacks. Normalised into
-        // windowsRanked / groundsRanked below.
-        timeWindow: timeWindowVal.optional(),
-        timeWindows: z.array(timeWindowVal).optional(),
-        preferredArenaId: z.string().optional(),
-        preferredArenaIds: z.array(z.string()).max(3).optional(),
+        // Unified ranked arrays. windowsRanked is required (>=1); groundsRanked
+        // defaults to [] (any nearby) when omitted.
+        windowsRanked: z.array(timeWindowVal).min(1),
+        groundsRanked: z.array(z.string()).max(3).default([]),
       }),
       context: z
         .object({
@@ -147,33 +123,14 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     }).parse(request.body)
 
     const f = body.filters
-    const windowsRanked = f.windowsRanked
-      ?? (f.timeWindows && f.timeWindows.length > 0
-        ? f.timeWindows
-        : (f.timeWindow ? [f.timeWindow] : []))
-    if (windowsRanked.length === 0) {
-      throw new AppError(
-        'INVALID_INPUT',
-        'At least one time window is required',
-        400,
-      )
-    }
-    const groundsRanked = f.groundsRanked
-      ?? f.preferredArenaIds
-      ?? (f.preferredArenaId ? [f.preferredArenaId] : [])
-
     const data = await svc.discoverLobbies(user.userId, {
       teamId: body.teamId,
       filters: {
         date: f.date,
         format: f.format as MatchmakingFormat,
         ballType: f.ballType ?? null,
-        windowsRanked,
-        groundsRanked,
-        // Pass-through legacy fields for any service-side back-compat reads.
-        timeWindows: windowsRanked,
-        preferredArenaId: f.preferredArenaId ?? (groundsRanked[0] ?? null),
-        preferredArenaIds: groundsRanked,
+        windowsRanked: f.windowsRanked,
+        groundsRanked: f.groundsRanked,
       },
       context: body.context,
     })

@@ -2377,7 +2377,6 @@ model Arena {
   managers           ArenaManager[]
   monthlyPasses      MonthlyPass[]
   matchmakingLobbies MatchmakingLobby[]
-  preferredByLobbies MatchmakingLobby[] @relation("MatchmakingLobbyPreferredArena")
   teams              Team[]
 
   citySlug     String?
@@ -2701,25 +2700,15 @@ model MatchmakingLobby {
   createdAt      DateTime @default(now())
   expiresAt      DateTime
 
-  // ── Preference-based discovery (additive, nullable) ─────────────────────────
-  // Set when the lobby is posted via the Discover flow (preferences instead of
-  // exact slot picks). NULL on legacy slot-precise lobbies — match logic falls
-  // back to picks-based matching when these are NULL.
+  // ── Unified lobby model — preferences are ALWAYS persisted as ranked arrays.
   //
-  // timeWindow values: 'MORNING' (06:00–12:00), 'AFTERNOON' (12:00–18:00),
-  // 'EVENING' (18:00–next-04:00).
-  //
-  // preferredArenaId: legacy single-arena pref. Kept for backward
-  // compatibility with old lobby rows. New lobbies should use preferredArenaIds.
   // preferredArenaIds: up to 3 grounds the team is happy to play at. Empty
   // array means "any nearby ground".
-  timeWindow          String?
-  preferredArenaId    String?
   preferredArenaIds   String[] @default([])
   // Lobby-as-persistent-supply-spec: ranked time windows the team is happy
-  // to play in (order = preference; first element = strongest). When at
-  // least one element is set, this is the source of truth for matching;
-  // legacy `timeWindow` is read only as fallback.
+  // to play in (order = preference; first element = strongest). At least
+  // one entry is required at write time — auto-derived from picks/legacy
+  // singular fields when callers don't supply it explicitly.
   windowsRanked       String[] @default([])
   // Subset of windowsRanked that have already been consumed by a confirmed
   // match. Lobby stays `searching` until windowsMatched.length ==
@@ -2735,7 +2724,6 @@ model MatchmakingLobby {
   team           Team?                  @relation(fields: [teamId], references: [id])
   player         PlayerProfile?         @relation(fields: [playerId], references: [id])
   arena          Arena?                 @relation(fields: [arenaId], references: [id])
-  preferredArena Arena?                 @relation("MatchmakingLobbyPreferredArena", fields: [preferredArenaId], references: [id])
   picks          MatchmakingLobbyPick[]
   interests      MatchmakingInterest[]
 
@@ -2744,8 +2732,6 @@ model MatchmakingLobby {
   @@index([matchId])
   @@index([arenaId, status])
   @@index([lockExpiresAt])
-  @@index([status, date, format, timeWindow])
-  @@index([preferredArenaId, status])
 }
 
 /// Express-of-interest in an open MatchmakingLobby.

@@ -1646,6 +1646,20 @@ export class BookingService {
         } as any,
       }) : null
 
+      // Auto-derive unified ranked arrays so the lobby satisfies the
+      // universal contract (windowsRanked + preferredArenaIds non-empty
+      // when picks are present).
+      const slotMin =
+        Number(data.slotTime.split(':')[0]) * 60 +
+        Number(data.slotTime.split(':')[1])
+      const bucket = (() => {
+        if (slotMin >= 390 && slotMin < 690) return 'MORNING'
+        if (slotMin >= 690 && slotMin < 990) return 'AFTERNOON'
+        if (slotMin >= 990 && slotMin < 1230) return 'EVENING'
+        if (slotMin >= 1230 && slotMin < 1410) return 'NIGHT'
+        return 'LATE_NIGHT'
+      })()
+
       // Create matchmaking lobby visible to players
       const lobby = await tx.matchmakingLobby.create({
         data: {
@@ -1658,6 +1672,9 @@ export class BookingService {
           status: 'searching',
           ...(booking ? { splitBookingId: booking.id } : {}),
           expiresAt,
+          windowsRanked: [bucket],
+          windowsMatched: [],
+          preferredArenaIds: [arenaId],
         } as any,
       })
 
