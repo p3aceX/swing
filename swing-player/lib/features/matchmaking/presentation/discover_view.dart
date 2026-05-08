@@ -292,8 +292,29 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         _currentTeam = chosen;
         _submittedLobbies = restoredSubmitted;
       });
-      // If the chosen team has an active lobby, hydrate prefs + jump to results.
-      final active = chosen != null ? _teamLobbies[chosen.id] : null;
+      // Pick the active lobby to seed the Results screen from. Prefer
+      // today's lobby for the chosen team; if today has none, fall back
+      // to the earliest upcoming date; if all are in the past, take the
+      // most-recent. Without this the screen lands on whatever the
+      // backend listed first — usually a future date — and the user
+      // sees a stale-feeling timeline on every app open.
+      final todayApi = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final teamLobbies = chosenId == null
+          ? const <MmTeamLobbySummary>[]
+          : (res.allLobbies.where((l) => l.teamId == chosenId).toList()
+            ..sort((a, b) => a.date.compareTo(b.date)));
+      MmTeamLobbySummary? active;
+      for (final l in teamLobbies) {
+        if (l.date == todayApi) { active = l; break; }
+      }
+      if (active == null) {
+        for (final l in teamLobbies) {
+          if (l.date.compareTo(todayApi) > 0) { active = l; break; }
+        }
+      }
+      active ??= teamLobbies.isNotEmpty
+          ? teamLobbies.last
+          : (chosen != null ? _teamLobbies[chosen.id] : null);
       if (active != null) {
         _hydratePrefsFromLobby(active);
         if (_prefs.windowsRanked.isEmpty) return;
