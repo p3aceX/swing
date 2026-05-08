@@ -1306,34 +1306,38 @@ class _PricingCard extends StatelessWidget {
               ),
               const SizedBox(height: 14),
 
-              // Hero — your share. Big number anchors the card so the
-              // user sees their actual obligation immediately.
+              // Hero — Full unit + Your share as side-by-side stat blocks.
+              // Both render equally bold so the user reads the venue's
+              // quoted price next to their actual obligation.
               Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    yourShareRupees == 0 ? 'Free' : '₹$yourShareRupees',
-                    style: TextStyle(
-                      color: context.fg,
-                      fontSize: 30,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -1.0,
-                      height: 1.0,
+                  Expanded(
+                    child: _HeroStat(
+                      label: 'FULL UNIT',
+                      amountStr: '₹$_groundFeeRupees',
+                      muted: true,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      'YOUR SHARE',
-                      style: _eyebrow(context.fg),
+                  Container(
+                    width: 1,
+                    height: 44,
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                    color: context.fgSub.withValues(alpha: 0.15),
+                  ),
+                  Expanded(
+                    child: _HeroStat(
+                      label: 'YOUR SHARE',
+                      amountStr:
+                          yourShareRupees == 0 ? 'Free' : '₹$yourShareRupees',
+                      muted: false,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
-                'Full unit ₹$_groundFeeRupees · split 50/50 with opponent',
+                'Split 50/50 with opponent',
                 style: TextStyle(
                   color: context.fgSub,
                   fontSize: 12,
@@ -1407,6 +1411,53 @@ class _PricingCard extends StatelessWidget {
         letterSpacing: 1.4,
         height: 1.0,
       );
+}
+
+// Stat-block hero for the pricing card. Big bold amount on top, eyebrow
+// label below. Two of these sit side-by-side: Full unit and Your share.
+// `muted` dims the amount one notch (used for the venue's full quote so
+// the player's share gets visual primacy).
+class _HeroStat extends StatelessWidget {
+  const _HeroStat({
+    required this.label,
+    required this.amountStr,
+    required this.muted,
+  });
+
+  final String label;
+  final String amountStr;
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          amountStr,
+          style: TextStyle(
+            color: muted ? context.fgSub : context.fg,
+            fontSize: 28,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.9,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.4,
+            height: 1.0,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _PriceRow extends StatelessWidget {
