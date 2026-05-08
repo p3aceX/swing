@@ -44,9 +44,11 @@ class BookingPricingEngine {
   /// For grounds: prefers explicit bundle prices (4hr, 8hr, full-day) over
   /// hourly math. For nets: steps from minSlot up to maxSlot.
   /// Pass [variantPricePaise] to override with a net variant's per-hour rate.
+  /// Pass [date] so weekend multiplier is applied when the date is Sat/Sun.
   static List<BookingDurationOption> durationOptions(
     ArenaUnitOption unit, {
     int? variantPricePaise,
+    DateTime? date,
   }) {
     final pricePerHour =
         (variantPricePaise != null && variantPricePaise > 0)
@@ -83,7 +85,8 @@ class BookingPricingEngine {
       // Only return bundles-only when no hourly rate — if pricePerHourPaise > 0
       // fall through so the loop generates all hourly slots (bundle prices are
       // substituted at their specific durations inside the loop below).
-      if (bundles.isNotEmpty && unit.pricePerHourPaise == 0) return bundles;
+      if (bundles.isNotEmpty && unit.pricePerHourPaise == 0)
+        return _applyWeekend(bundles, unit, date);
     }
 
     final configuredMax = unit.maxSlotMins > minMins ? unit.maxSlotMins : 0;
@@ -136,10 +139,10 @@ class BookingPricingEngine {
         )
       ];
       debugPrint('🟡 [durationOptions] → fallback: ${fallback.map((o) => '${o.durationMins}m').toList()}');
-      return fallback;
+      return _applyWeekend(fallback, unit, date);
     }
     debugPrint('🟡 [durationOptions] → opts: ${opts.map((o) => '${o.durationMins}m').toList()}');
-    return opts;
+    return _applyWeekend(opts, unit, date);
   }
 
   // ── Slot busy check ─────────────────────────────────────────────────────────
@@ -191,15 +194,19 @@ class BookingPricingEngine {
     required int durationMins,
     int variantPricePaise = 0,
     int addonPaise = 0,
+    DateTime? date,
   }) {
     if (unit.isNet) {
       final rate = variantPricePaise > 0
           ? variantPricePaise
           : unit.pricePerHourPaise;
-      return ((rate * durationMins) / 60).round() + addonPaise;
+      final base = ((rate * durationMins) / 60).round();
+      final isWeekend = date != null && (date.weekday == 6 || date.weekday == 7);
+      final mult = (isWeekend && unit.weekendMultiplier > 1.0) ? unit.weekendMultiplier : 1.0;
+      return (base * mult).round() + addonPaise;
     }
     // Ground: use bundle price if available
-    final opts = durationOptions(unit, variantPricePaise: variantPricePaise);
+    final opts = durationOptions(unit, variantPricePaise: variantPricePaise, date: date);
     final match = opts.where((o) => o.durationMins == durationMins).firstOrNull;
     return (match?.pricePaise ?? 0) + addonPaise;
   }
@@ -291,6 +298,24 @@ class BookingPricingEngine {
 
   static bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+
+  static List<BookingDurationOption> _applyWeekend(
+    List<BookingDurationOption> opts,
+    ArenaUnitOption unit,
+    DateTime? date,
+  ) {
+    if (date == null) return opts;
+    final isWeekend = date.weekday == 6 || date.weekday == 7;
+    if (!isWeekend || unit.weekendMultiplier <= 1.0) return opts;
+    final m = unit.weekendMultiplier;
+    return opts
+        .map((o) => BookingDurationOption(
+              durationMins: o.durationMins,
+              label: o.label,
+              pricePaise: (o.pricePaise * m).round(),
+            ))
+        .toList();
+  }
 }
 
 // ── Supporting types ──────────────────────────────────────────────────────────

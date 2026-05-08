@@ -598,9 +598,9 @@ class _TodaySection extends StatelessWidget {
               accent: const Color(0xFF2563EB),
             ),
             _KpiCard(
-              label: 'Check-ins',
+              label: 'Paid this month',
               value: '$checkedIn',
-              helper: 'Checked in this month',
+              helper: 'Fully paid bookings in $monthKey',
               accent: const Color(0xFF059669),
             ),
             _KpiCard(
@@ -741,9 +741,6 @@ class _BookingsSummaryCard extends ConsumerWidget {
                 ),
                 GestureDetector(
                   onTap: () {
-                    ref
-                        .read(bookings.bookingsInnerTabProvider.notifier)
-                        .state = 1; // Bookings sub-tab
                     ref.read(dashboardTabIndexProvider.notifier).state = 2;
                   },
                   behavior: HitTestBehavior.opaque,
@@ -828,33 +825,34 @@ class _RecentBookingCard extends StatelessWidget {
     final status = booking.status.toUpperCase();
     // Tapping opens the booking detail page
     final ({Color fg, Color bg, String label}) badge;
-    switch (status) {
-      case 'CHECKED_IN':
-      case 'COMPLETED':
-        badge = (
-          fg: const Color(0xFF059669),
-          bg: const Color(0xFF059669).withValues(alpha: 0.14),
-          label: 'Paid',
-        );
-      case 'CANCELLED':
-      case 'CANCELLED_BY_OWNER':
-        badge = (
-          fg: scheme.error,
-          bg: scheme.error.withValues(alpha: 0.14),
-          label: 'Cancelled',
-        );
-      case 'HELD':
-        badge = (
-          fg: scheme.onSurface.withValues(alpha: 0.65),
-          bg: scheme.onSurface.withValues(alpha: 0.10),
-          label: 'Held',
-        );
-      default:
-        badge = (
-          fg: scheme.primary,
-          bg: scheme.primary.withValues(alpha: 0.14),
-          label: 'Confirmed',
-        );
+    if (booking.balancePaise == 0) {
+      badge = (
+        fg: const Color(0xFF059669),
+        bg: const Color(0xFF059669).withValues(alpha: 0.14),
+        label: 'Paid',
+      );
+    } else {
+      switch (status) {
+        case 'CANCELLED':
+        case 'CANCELLED_BY_OWNER':
+          badge = (
+            fg: scheme.error,
+            bg: scheme.error.withValues(alpha: 0.14),
+            label: 'Cancelled',
+          );
+        case 'HELD':
+          badge = (
+            fg: scheme.onSurface.withValues(alpha: 0.65),
+            bg: scheme.onSurface.withValues(alpha: 0.10),
+            label: 'Held',
+          );
+        default:
+          badge = (
+            fg: scheme.primary,
+            bg: scheme.primary.withValues(alpha: 0.14),
+            label: 'Confirmed',
+          );
+      }
     }
 
     final dateLabel = DateFormat('d MMM').format(booking.bookingDate!);
@@ -2115,7 +2113,7 @@ class _PaymentsButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(
-          Icons.account_balance_wallet_outlined,
+          Icons.currency_rupee_rounded,
           size: 22,
           color: scheme.onSurface.withValues(alpha: 0.85),
         ),

@@ -420,6 +420,7 @@ export class BookingService {
     guestPhone: string
     paymentMode: PaymentMode
     amountPaise: number
+    discountPaise?: number
     advancePaise?: number   // 0 = collect later, ==amountPaise = fully paid
     notes?: string
     endDate?: string
@@ -506,8 +507,9 @@ export class BookingService {
         endTime: data.endTime,
         durationMins,
         baseAmountPaise: data.amountPaise,
-        totalAmountPaise: data.amountPaise,
-        totalPricePaise: data.amountPaise,
+        discountPaise: data.discountPaise ?? 0,
+        totalAmountPaise: data.amountPaise - (data.discountPaise ?? 0),
+        totalPricePaise: data.amountPaise - (data.discountPaise ?? 0),
         advancePaise: advance,
         status: 'CONFIRMED',
         isOfflineBooking: true,
@@ -1004,14 +1006,14 @@ export class BookingService {
       bookingPayments: { orderBy: { recordedAt: 'desc' as const }, select: { recordedAt: true, amountPaise: true } },
     }
 
-    // Checked-in = collection realized — filter by paidAt so a future booking
-    // checked-in today shows up in today's/this month's collected total.
+    // Collected = paidAt is set (fully paid), regardless of whether the player
+    // physically checked in. Covers manual/offline bookings paid at creation,
+    // partial-to-full payments recorded via addBookingPayment, and QR check-ins.
     const checkedInBookings = await prisma.slotBooking.findMany({
       where: {
         arenaId,
-        checkedInAt: { not: null },
+        paidAt: { not: null, ...(dateFrom ? { gte: dateFrom, lt: dateTo } : {}) },
         status: { notIn: ['CANCELLED'] },
-        ...(dateFrom ? { paidAt: { gte: dateFrom, lt: dateTo } } : {}),
       },
       select: bookingSelect,
       orderBy: { paidAt: 'desc' },

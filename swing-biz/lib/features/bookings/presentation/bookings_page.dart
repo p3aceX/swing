@@ -16,8 +16,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import '../../../core/router/app_router.dart';
-import 'matchups_tab.dart';
-import 'split_booking_sheet.dart';
+import 'record_payment_sheet.dart';
 
 // ─── Theme Overrides ─────────────────────────────────────────────────────────
 class _C {
@@ -80,7 +79,6 @@ final _bookingsProvider =
 
 /// Inner tab on the Bookings page. 0=Match-Up Requests, 1=Bookings.
 /// Exposed so the home screen "See all" link can jump straight to Bookings.
-final bookingsInnerTabProvider = StateProvider<int>((ref) => 0);
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
@@ -143,29 +141,18 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     _c = _C.of(context);
     final today = DateTime.now();
     final allBookingsAsync = ref.watch(_bookingsProvider);
-    final tab = ref.watch(bookingsInnerTabProvider);
 
     return Scaffold(
       backgroundColor: _c.bg,
       body: Column(
         children: [
-          // Big segmented tab header (replaces arena name + small tabs)
           _BigTabHeader(
-            selected: tab,
-            onSelect: (i) =>
-                ref.read(bookingsInnerTabProvider.notifier).state = i,
             arena: widget.arena,
             arenas: widget.arenas,
           ),
 
-          // Tab content
           Expanded(
-            child: AnimatedSwitcher(
-              duration: Duration(milliseconds: 200),
-              child: tab == 0
-                  ? _buildMatchUpRequestsTab()
-                  : _buildBookingsTab(context, today, allBookingsAsync),
-            ),
+            child: _buildBookingsTab(context, today, allBookingsAsync),
           ),
         ],
       ),
@@ -180,16 +167,14 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   child: FilledButton.icon(
                     onPressed: () => _showAddBookingSheet(context, today),
                     style: FilledButton.styleFrom(
-                      backgroundColor:
-                          Theme.of(context).colorScheme.onSurface,
-                      foregroundColor:
-                          Theme.of(context).colorScheme.surface,
+                      backgroundColor: _c.accent,
+                      foregroundColor: _c.onAccent,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                     ),
-                    icon: Icon(Icons.add_rounded, size: 22),
-                    label: Text(
-                      'Book',
+                    icon: const Icon(Icons.add_rounded, size: 22),
+                    label: const Text(
+                      'Add Booking',
                       style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w700),
                     ),
@@ -216,7 +201,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               'Confirmed':
                   rawBookings.where((b) => b.status == 'CONFIRMED').length,
               'Paid':
-                  rawBookings.where((b) => b.status == 'CHECKED_IN').length,
+                  rawBookings.where((b) => b.balancePaise == 0).length,
               'Cancelled':
                   rawBookings.where((b) => b.status == 'CANCELLED').length,
             },
@@ -224,9 +209,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
           ),
         ),
 
-        SizedBox(height: 12),
+        const SizedBox(height: 8),
 
-        // Unit filter
         _UnitFilterBar(
           units: widget.arena?.units ??
               widget.arenas.expand((a) => a.units).toList(),
@@ -244,7 +228,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               final filtered = rawBookings.where((b) {
                 if (_selectedFilter == 'Confirmed' && b.status != 'CONFIRMED')
                   return false;
-                if (_selectedFilter == 'Paid' && b.status != 'CHECKED_IN')
+                if (_selectedFilter == 'Paid' && b.balancePaise != 0)
                   return false;
                 if (_selectedFilter == 'Cancelled' && b.status != 'CANCELLED')
                   return false;
@@ -335,15 +319,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     );
   }
 
-  Widget _buildMatchUpRequestsTab() {
-    final filtered =
-        widget.arena == null ? widget.arenas : [widget.arena!];
-    return MatchUpsTab(
-      key: ValueKey(widget.arena?.id ?? 'all'),
-      arenas: filtered,
-    );
-  }
-
   void _showAddBookingSheet(BuildContext context, DateTime date) {
     final arena = widget.arena ?? widget.arenas.first;
     Navigator.of(context, rootNavigator: true)
@@ -359,40 +334,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     context.push(AppRoutes.bookingDetailPath(booking.id)).then((_) {
       ref.invalidate(_bookingsProvider);
     });
-  }
-
-  Future<void> _handleCheckinCheckout(
-      BuildContext context, ArenaReservation booking) async {
-    final result = await showModalBottomSheet<_PaymentResult>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _c.bg,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-      builder: (_) => _CheckoutSheet(booking: booking),
-    );
-    if (result == null) return;
-    final repo = ref.read(hostArenaBookingRepositoryProvider);
-    try {
-      await repo.markBookingPaid(booking.id,
-          paymentMode: result.mode, amountPaise: result.amountPaise);
-      if (booking.status == 'CONFIRMED') {
-        await repo.checkinByOwner(booking.id);
-      }
-      ref.invalidate(_bookingsProvider);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'Guest checked in · ${result.mode} ₹${(result.amountPaise / 100).toStringAsFixed(0)} recorded'),
-          backgroundColor: _c.accent,
-        ));
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
   }
 
   void _showDateBookings(
@@ -417,7 +358,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               .name,
           b.arenaId,
         ),
-        onCheckin: (b) => _handleCheckinCheckout(context, b),
       ),
     );
   }
@@ -427,13 +367,9 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
 
 class _BigTabHeader extends ConsumerWidget {
   const _BigTabHeader({
-    required this.selected,
-    required this.onSelect,
     required this.arena,
     required this.arenas,
   });
-  final int selected;
-  final ValueChanged<int> onSelect;
   final ArenaListing? arena;
   final List<ArenaListing> arenas;
 
@@ -522,33 +458,6 @@ class _BigTabHeader extends ConsumerWidget {
             ),
           ),
           SizedBox(height: 12),
-
-          // Bookings / MatchUp Requests tab bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Container(
-              height: 44,
-              decoration: BoxDecoration(
-                color: _c.border,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.all(3),
-              child: Row(
-                children: [
-                  _BigTab(
-                    label: 'Match-Up',
-                    active: selected == 0,
-                    onTap: () => onSelect(0),
-                  ),
-                  _BigTab(
-                    label: 'Bookings',
-                    active: selected == 1,
-                    onTap: () => onSelect(1),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -591,42 +500,6 @@ class _BigTabHeader extends ConsumerWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BigTab extends StatelessWidget {
-  const _BigTab(
-      {required this.label, required this.active, required this.onTap});
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    _c = _C.of(context);
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: active ? _c.accent : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: AnimatedDefaultTextStyle(
-            duration: Duration(milliseconds: 180),
-            style: TextStyle(
-              color: active ? Colors.white : _c.muted,
-              fontSize: 15,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-            ),
-            child: Text(label),
-          ),
         ),
       ),
     );
@@ -1027,13 +900,11 @@ class BookingCard extends StatefulWidget {
     required this.onTap,
     required this.arenas,
     this.isNextUp = false,
-    this.onCheckin,
   });
   final ArenaReservation booking;
   final VoidCallback onTap;
   final List<ArenaListing> arenas;
   final bool isNextUp;
-  final VoidCallback? onCheckin;
 
   @override
   State<BookingCard> createState() => _BookingCardState();
@@ -1045,9 +916,13 @@ class _BookingCardState extends State<BookingCard> {
     _c = _C.of(context);
     final booking = widget.booking;
     final amount = booking.totalAmountPaise / 100;
-    final needsCheckin =
-        booking.status == 'CONFIRMED' && widget.onCheckin != null;
     final isCancelled = booking.status == 'CANCELLED';
+    final isPaid = booking.balancePaise == 0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final paidCardColor =
+        isDark ? const Color(0xFF2D0F0F) : const Color(0xFFFEE2E2);
+    final paidBorderColor =
+        isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFCA5A5);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1055,25 +930,19 @@ class _BookingCardState extends State<BookingCard> {
         onTap: widget.onTap,
         child: Container(
           decoration: BoxDecoration(
-            color: _c.surface,
+            color: isPaid ? paidCardColor : _c.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: needsCheckin
-                  ? _c.accent.withValues(alpha: 0.4)
+              color: isPaid
+                  ? paidBorderColor
                   : widget.isNextUp
                       ? _c.accent
                       : _c.border,
             ),
             boxShadow: [
               BoxShadow(
-                color:
-                    (needsCheckin || widget.isNextUp ? _c.accent : Colors.black)
-                        .withValues(
-                            alpha: needsCheckin
-                                ? 0.06
-                                : widget.isNextUp
-                                    ? 0.08
-                                    : 0.03),
+                color: (widget.isNextUp ? _c.accent : Colors.black)
+                    .withValues(alpha: widget.isNextUp ? 0.08 : 0.03),
                 blurRadius: 12,
                 offset: Offset(0, 4),
               ),
@@ -1226,43 +1095,6 @@ class _BookingCardState extends State<BookingCard> {
                 ),
               ),
 
-              // ── Check In CTA — only for CONFIRMED bookings
-              if (needsCheckin) ...[
-                Container(height: 1, color: _c.accent.withValues(alpha: 0.15)),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: const BorderRadius.vertical(
-                        bottom: Radius.circular(20)),
-                    onTap: widget.onCheckin,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Color(0xFFF0FDF6),
-                        borderRadius:
-                            BorderRadius.vertical(bottom: Radius.circular(19)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.payments_rounded,
-                              size: 16, color: _c.accent),
-                          SizedBox(width: 6),
-                          Text(
-                            'Record Payment',
-                            style: TextStyle(
-                                color: _c.accent,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.2),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -1332,12 +1164,12 @@ class _FilterBar extends StatelessWidget {
     _c = _C.of(context);
     final filters = ['All', 'Confirmed', 'Paid', 'Cancelled'];
     return SizedBox(
-      height: 40,
+      height: 36,
       child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
         itemCount: filters.length,
-        separatorBuilder: (_, __) => SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           final f = filters[i];
           final count = counts[f] ?? 0;
@@ -1345,46 +1177,38 @@ class _FilterBar extends StatelessWidget {
           return GestureDetector(
             onTap: () => onSelect(f),
             child: AnimatedContainer(
-              duration: Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: sel ? _c.text : _c.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: sel ? _c.text : _c.border),
-                boxShadow: sel
-                    ? [
-                        BoxShadow(
-                          color: _c.text.withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          offset: Offset(0, 4),
-                        )
-                      ]
-                    : null,
+                color: sel ? _c.accent : _c.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: sel ? _c.accent : _c.border),
               ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(f,
-                      style: TextStyle(
-                        color: sel ? Colors.white : _c.muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      )),
-                  SizedBox(width: 6),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: sel ? Colors.white.withValues(alpha: 0.2) : _c.bg,
-                      borderRadius: BorderRadius.circular(6),
+                  Text(
+                    f,
+                    style: TextStyle(
+                      color: sel ? _c.onAccent : _c.muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
                     ),
-                    child: Text('$count',
-                        style: TextStyle(
-                          color: sel ? Colors.white : _c.accent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                        )),
                   ),
+                  if (count > 0) ...[
+                    const SizedBox(width: 5),
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        color: sel
+                            ? _c.onAccent.withValues(alpha: 0.7)
+                            : _c.muted,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1408,16 +1232,16 @@ class _UnitFilterBar extends StatelessWidget {
     return SizedBox(
       height: 36,
       child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
         itemCount: units.length + 1,
-        separatorBuilder: (_, __) => SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           final String id;
           final String label;
           if (i == 0) {
             id = 'All';
-            label = 'All Units';
+            label = 'All Nets';
           } else {
             final u = units[i - 1];
             id = u.id;
@@ -1427,7 +1251,7 @@ class _UnitFilterBar extends StatelessWidget {
           return GestureDetector(
             onTap: () => onSelect(id),
             child: AnimatedContainer(
-              duration: Duration(milliseconds: 160),
+              duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
               decoration: BoxDecoration(
@@ -1440,7 +1264,7 @@ class _UnitFilterBar extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
-                  color: sel ? Colors.white : _c.muted,
+                  color: sel ? _c.onAccent : _c.muted,
                 ),
               ),
             ),
@@ -1690,49 +1514,21 @@ _See you at the arena!_ 🏏
   }
 
   Future<void> _recordPayment() async {
-    final result = await showModalBottomSheet<_PaymentResult>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _c.bg,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-      builder: (_) => _CheckoutSheet(booking: _booking),
+    await showRecordPaymentSheet(
+      context,
+      booking: _booking,
+      onRecorded: () async {
+        final repo = ref.read(hostArenaBookingRepositoryProvider);
+        final updated = await repo.listArenaBookings(_booking.arenaId,
+            date: _fmtDate(_booking.bookingDate!));
+        if (mounted) {
+          setState(() {
+            _booking = updated.firstWhere((b) => b.id == _booking.id,
+                orElse: () => _booking);
+          });
+        }
+      },
     );
-
-    if (result == null) return;
-
-    final repo = ref.read(hostArenaBookingRepositoryProvider);
-
-    setState(() => _loading = true);
-    try {
-      // 1. Record payment with specific amount and mode
-      await repo.markBookingPaid(
-        _booking.id,
-        paymentMode: result.mode,
-        amountPaise: result.amountPaise,
-      );
-
-      // 2. Auto-checkin to finalize the occupancy state in one go
-      if (_booking.status == 'CONFIRMED') {
-        await repo.checkinByOwner(_booking.id);
-      }
-
-      // 3. Refresh and update local UI
-      final updated = await repo.listArenaBookings(_booking.arenaId,
-          date: _fmtDate(_booking.bookingDate!));
-      if (mounted) {
-        setState(() {
-          _booking = updated.firstWhere((b) => b.id == _booking.id);
-          _loading = false;
-        });
-        _snack('Booking settled via ${result.mode}');
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        _snack('Error: $e', err: true);
-      }
-    }
   }
 
   @override
@@ -2830,14 +2626,12 @@ class _DateBookingsSheet extends StatelessWidget {
     required this.bookings,
     required this.arenas,
     required this.onBookingTap,
-    required this.onCheckin,
   });
 
   final DateTime date;
   final List<ArenaReservation> bookings;
   final List<ArenaListing> arenas;
   final ValueChanged<ArenaReservation> onBookingTap;
-  final ValueChanged<ArenaReservation> onCheckin;
 
   @override
   Widget build(BuildContext context) {
@@ -2946,12 +2740,6 @@ class _DateBookingsSheet extends StatelessWidget {
                       Navigator.pop(ctx);
                       onBookingTap(b);
                     },
-                    onCheckin: b.status == 'CONFIRMED'
-                        ? () {
-                            Navigator.pop(ctx);
-                            onCheckin(b);
-                          }
-                        : null,
                   ),
                 );
               },
@@ -2986,10 +2774,11 @@ class _SlotOption {
 }
 
 List<_SlotOption> _buildSlotOptions(ArenaUnitOption unit,
-    {int? pricePerHourOverride}) {
+    {int? pricePerHourOverride, DateTime? date}) {
   final opts = BookingPricingEngine.durationOptions(
     unit,
     variantPricePaise: pricePerHourOverride,
+    date: date,
   ).map((o) => _SlotOption(durationMins: o.durationMins, label: o.label, paise: o.pricePaise)).toList();
   debugPrint('🔵 [_buildSlotOptions] unit=${unit.name} unitType=${unit.unitType} '
       'opts=${opts.map((o) => '${o.durationMins}m(${o.label})').toList()}');
@@ -3022,6 +2811,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   final _notesCtrl = TextEditingController();
   final _totalCtrl = TextEditingController();
   final _advanceCtrl = TextEditingController();
+  final _discountCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final _dateStripCtrl = ScrollController();
 
@@ -3114,7 +2904,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     if (_isNetsFlow) return _durationMins > 0 ? _durationMins : _netsDurMin;
     final unit = _unit;
     if (unit == null) return 60;
-    final opts = _buildSlotOptions(unit);
+    final opts = _buildSlotOptions(unit, date: _selectedDate);
     final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
     return opts[idx].durationMins;
   }
@@ -3210,10 +3000,12 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       final pricePerHour = _variantPricePerHour > 0
           ? _variantPricePerHour
           : unit.pricePerHourPaise;
-      return ((pricePerHour * _currentDurationMins) / 60).round() + _addonPaise;
+      final isWeekend = _selectedDate.weekday == 6 || _selectedDate.weekday == 7;
+      final wMult = (isWeekend && unit.weekendMultiplier > 1.0) ? unit.weekendMultiplier : 1.0;
+      return (((pricePerHour * _currentDurationMins) / 60) * wMult).round() + _addonPaise;
     }
     final opts =
-        _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour);
+        _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour, date: _selectedDate);
     final idx = _selectedDurationIdx.clamp(0, opts.length - 1);
     if (_isMultiDay) {
       final days = _isCustomDates ? _customDates.length : _bulkDays;
@@ -3227,9 +3019,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     return 0;
   }
 
-  int get _advancePaise => ((double.tryParse(_advanceCtrl.text) ?? 0) * 100)
+  int get _discountPaise => ((double.tryParse(_discountCtrl.text) ?? 0) * 100)
       .round()
       .clamp(0, _totalPaise);
+  int get _finalPaise => (_totalPaise - _discountPaise).clamp(0, _totalPaise);
+  int get _advancePaise => ((double.tryParse(_advanceCtrl.text) ?? 0) * 100)
+      .round()
+      .clamp(0, _finalPaise);
   int get _minAdvancePaise => _unit?.minAdvancePaise ?? 0;
   // Owner booking — no minimum advance enforcement
   bool get _advanceOk => true;
@@ -3276,7 +3072,8 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   bool get _hasSelectedGuest =>
       _customerLookup?.exists == true || _foundGuest != null;
 
-  bool get _showGuestNameInput => _lookupDone || _hasSelectedGuest;
+  bool get _showGuestNameInput =>
+      _phoneCtrl.text.trim().isNotEmpty || _lookupDone || _hasSelectedGuest;
 
   void _selectFetchedGuest() {
     final name = _customerLookup?.name ?? _foundGuest?.name ?? '';
@@ -3351,7 +3148,8 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       _phoneCtrl,
       _notesCtrl,
       _totalCtrl,
-      _advanceCtrl
+      _advanceCtrl,
+      _discountCtrl,
     ]) {
       ctrl.dispose();
     }
@@ -3657,10 +3455,14 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   }
 
   Future<void> _save() async {
+    if (_phoneCtrl.text.trim().isEmpty) {
+      _snack('Enter guest mobile number', err: true);
+      return;
+    }
     final guestName =
         _customerLookup?.name ?? _foundGuest?.name ?? _nameCtrl.text.trim();
-    if (guestName.isEmpty || _phoneCtrl.text.trim().isEmpty) {
-      _snack('Required fields missing', err: true);
+    if (guestName.isEmpty) {
+      _snack('Enter guest name', err: true);
       return;
     }
 
@@ -3749,6 +3551,9 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         final perDayPaise = _customDates.isNotEmpty
             ? (_totalPaise / _customDates.length).round()
             : _totalPaise;
+        final perDayDiscount = _customDates.isNotEmpty
+            ? (_discountPaise / _customDates.length).round()
+            : _discountPaise;
         final perDayAdvance = _customDates.isNotEmpty
             ? (_advancePaise / _customDates.length).round()
             : _advancePaise;
@@ -3765,6 +3570,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               guestPhone: guestPhone,
               paymentMode: _paymentMode,
               amountPaise: perDayPaise,
+              discountPaise: perDayDiscount,
               advancePaise: perDayAdvance,
               notes: notes,
               bookingSource: 'BIZ',
@@ -3799,6 +3605,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           guestPhone: guestPhone,
           paymentMode: _paymentMode,
           amountPaise: _totalPaise,
+          discountPaise: _discountPaise,
           advancePaise: _advancePaise,
           notes: notes,
           endDate: _isMultiDay ? _fmtDate(_endDate) : null,
@@ -3901,13 +3708,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
             (unit.bulkDayRatePaise! * days / 100).toStringAsFixed(0);
       } else {
         final opts =
-            _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour);
+            _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour, date: _selectedDate);
         final opt = opts[_selectedDurationIdx.clamp(0, opts.length - 1)];
         _totalCtrl.text = (opt.paise * days / 100).toStringAsFixed(0);
       }
     } else if (_isFullDay) {
       final opts =
-          _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour);
+          _buildSlotOptions(unit, pricePerHourOverride: _variantPricePerHour, date: _selectedDate);
       final opt = opts[_selectedDurationIdx.clamp(0, opts.length - 1)];
       _totalCtrl.text = (opt.paise / 100).toStringAsFixed(0);
     }
@@ -3918,63 +3725,50 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     _c = _C.of(context);
     final isLastStep = _step == _stepLabels.length - 1;
 
-    // Progressive visibility gates
-    final showBookingType = _unitId != null;
-    final showDates = _unitId != null;
-    final showDuration = _unitId != null && !_isMultiDay;
-    final showSlotGrid = _unitId != null && !_isMultiDay;
-    final showGuestPayment = _isMultiDay
-        ? _endDatePicked
-        : (_isFullDay || _selectedSlots.isNotEmpty);
-
     return Scaffold(
-      backgroundColor: _c.surface,
-      appBar: AppBar(
-        backgroundColor: _c.surface,
-        elevation: 0,
-        leading: GestureDetector(
-          onTap: _prevStep,
-          child: Icon(
-            _step == 0 ? Icons.close_rounded : Icons.arrow_back_rounded,
-            color: _c.text,
+      backgroundColor: _c.bg,
+      body: Column(children: [
+        // ── Ticket header ──────────────────────────────────
+        _TicketHeader(
+          arenaName: widget.arena.name,
+          step: _step,
+          stepLabels: _stepLabels,
+          selectedDate: _selectedDate,
+          onBack: _prevStep,
+          isFirstStep: _step == 0,
+        ),
+        // ── Perforated stub line ───────────────────────────
+        _PerforatedDivider(),
+        // ── Scrollable content ─────────────────────────────
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _scrollCtrl,
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
+            child: _buildStepContent(),
           ),
         ),
-        title: Text(
-          'Add Booking',
-          style: TextStyle(
-              color: _c.text, fontSize: 18, fontWeight: FontWeight.w900),
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
+      ]),
+      bottomNavigationBar: Container(
+        color: _c.bg,
+        child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
-            child: _BookingStepBar(step: _step, labels: _stepLabels),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            child: isLastStep
+                ? _BookingActionButton(
+                    label: _loading ? 'Saving…' : _confirmLabel,
+                    enabled: !_loading &&
+                        !(!_isMultiDay &&
+                            _isFullDay &&
+                            (_loadingAvail || _fullDayBusy)),
+                    onTap: _save,
+                  )
+                : _BookingActionButton(
+                    label: 'Continue',
+                    enabled: _canAdvance,
+                    onTap: _nextStep,
+                    trailing: Icons.arrow_forward_rounded,
+                  ),
           ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        controller: _scrollCtrl,
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 120),
-        child: _buildStepContent(),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-          child: isLastStep
-              ? _BookingActionButton(
-                  label: _loading ? 'Saving…' : _confirmLabel,
-                  enabled: !_loading &&
-                      !(!_isMultiDay &&
-                          _isFullDay &&
-                          (_loadingAvail || _fullDayBusy)),
-                  onTap: _save,
-                )
-              : _BookingActionButton(
-                  label: 'Next',
-                  enabled: _canAdvance,
-                  onTap: _nextStep,
-                  trailing: Icons.arrow_forward_rounded,
-                ),
         ),
       ),
     );
@@ -4691,245 +4485,142 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   // ── Step 0: Court + Duration ───────────────────────────────────────────────
   Widget _buildCourtStep() {
     final units = widget.arena.units;
-    final hasGrounds = units
-        .any((u) => u.unitType == 'FULL_GROUND' || u.unitType == 'HALF_GROUND');
-    final hasNets = units
-        .any((u) => u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET');
-    final selectedIsGround =
-        _unit?.unitType == 'FULL_GROUND' || _unit?.unitType == 'HALF_GROUND';
-    final selectedIsNet =
-        _unit?.unitType == 'CRICKET_NET' || _unit?.unitType == 'INDOOR_NET';
-    final netUnits = units
-        .where((u) => u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET')
-        .toList();
-    final netTypes = <String>{
-      for (final u in netUnits)
-        if (u.netType != null && u.netType!.isNotEmpty) u.netType!
-    }.toList();
     final unit = _unit;
     final bulkAvailable = unit != null &&
         (unit.minBulkDays ?? 0) > 0 &&
         unit.bulkDayRatePaise != null;
+    final isWeekend =
+        _selectedDate.weekday == 6 || _selectedDate.weekday == 7;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(
-        'Select Court',
-        style: TextStyle(
-            color: _c.text,
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.5),
-      ),
-      SizedBox(height: 20),
-
-      // No units configured
-      if (units.isEmpty) ...[
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-              color: _c.border.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(12)),
+      Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        Expanded(
           child: Text(
-            'No courts configured. Please add units in Arena Settings.',
+            'Select Court',
             style: TextStyle(
-                color: _c.muted, fontSize: 14, fontWeight: FontWeight.w600),
+                color: _c.text,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5),
           ),
         ),
-      ],
-
-      // Court type
-      if (hasGrounds && hasNets) ...[
-        Row(children: [
-          Expanded(
-              child: _BizTypeTile(
-            icon: Icons.grass_rounded,
-            label: 'Full Ground',
-            sublabel: _groundPriceLabel(units),
-            selected: selectedIsGround,
-            onTap: () {
-              final g = units.firstWhere((u) =>
-                  u.unitType == 'FULL_GROUND' || u.unitType == 'HALF_GROUND');
-              setState(() {
-                _unitId = g.id;
-                _selectedAddons.clear();
-                _selectedSlots.clear();
-                _initDuration();
-                _rebuildTimes();
-              });
-              _loadAvailability();
-            },
-          )),
-          SizedBox(width: 12),
-          Expanded(
-              child: _BizTypeTile(
-            icon: Icons.sports_cricket_rounded,
-            label: 'Nets',
-            sublabel: _netPriceLabel(units),
-            selected: selectedIsNet,
-            onTap: () {
-              final n = units.firstWhere((u) =>
-                  u.unitType == 'CRICKET_NET' || u.unitType == 'INDOOR_NET');
-              setState(() {
-                _unitId = n.id;
-                _selectedAddons.clear();
-                _selectedSlots.clear();
-                _initDuration();
-                _rebuildTimes();
-              });
-              _loadAvailability();
-            },
-          )),
-        ]),
-        if (selectedIsNet && netTypes.length > 1) ...[
-          SizedBox(height: 12),
-          SizedBox(
-              height: 40,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: netTypes.length,
-                separatorBuilder: (_, __) => SizedBox(width: 8),
-                itemBuilder: (ctx, i) {
-                  final type = netTypes[i];
-                  final isSel = _unit?.netType == type;
-                  final count = netUnits.where((u) => u.netType == type).length;
-                  return GestureDetector(
-                    onTap: () {
-                      final m = netUnits.firstWhere((u) => u.netType == type);
-                      setState(() {
-                        _unitId = m.id;
-                        _selectedAddons.clear();
-                        _initDuration();
-                        _rebuildTimes();
-                      });
-                      _loadAvailability();
-                    },
-                    child: AnimatedContainer(
-                      duration: Duration(milliseconds: 180),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: isSel ? _c.accent : _c.bg,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: isSel ? _c.accent : _c.border)),
-                      child: Text(
-                          '${type[0].toUpperCase()}${type.substring(1).toLowerCase()} ($count)',
-                          style: TextStyle(
-                              color: isSel ? Colors.white : _c.text,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13)),
-                    ),
-                  );
-                },
-              )),
-        ],
-        if (selectedIsNet && netTypes.length <= 1 && netUnits.length > 1) ...[
-          SizedBox(height: 12),
-          _SegmentPicker(
-              options: netUnits.map((u) => (u.id, u.name)).toList(),
-              selected: _unitId ?? '',
-              onSelect: (id) {
-                setState(() {
-                  _unitId = id;
-                  _netVariantType = null;
-                  _selectedAddons.clear();
-                  _initDuration();
-                  _rebuildTimes();
-                });
-                _loadAvailability();
-              }),
-        ],
-      ] else if (units.length > 1) ...[
-        _SegmentPicker(
-            options: units.map((u) => (u.id, u.name)).toList(),
-            selected: _unitId ?? '',
-            onSelect: (id) {
-              setState(() {
-                _unitId = id;
-                _netVariantType = null;
-                _selectedAddons.clear();
-                _initDuration();
-                _rebuildTimes();
-              });
-              _loadAvailability();
-            }),
-      ] else if (units.length == 1) ...[
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-              color: _c.accent.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _c.accent)),
-          child: Row(children: [
-            Icon(Icons.sports_outlined, color: _c.accent, size: 20),
-            SizedBox(width: 10),
-            Text(units.first.name,
-                style: TextStyle(
-                    color: _c.text, fontSize: 15, fontWeight: FontWeight.w700)),
-            Spacer(),
-            Icon(Icons.check_circle_rounded, color: _c.accent, size: 18),
-          ]),
+        Text(
+          DateFormat('EEE, MMM d').format(_selectedDate),
+          style: TextStyle(
+              color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600),
         ),
+      ]),
+
+      const SizedBox(height: 20),
+
+      // No units configured
+      if (units.isEmpty)
+        Text(
+          'No courts configured. Please add units in Arena Settings.',
+          style: TextStyle(color: _c.muted, fontSize: 14),
+        ),
+
+      // Court cards
+      if (units.isNotEmpty) ...[
+        for (final u in units) ...[
+          _CourtCard(
+            unit: u,
+            selected: u.id == _unitId,
+            isWeekend: isWeekend,
+            onTap: () {
+              setState(() {
+                _unitId = u.id;
+                _netVariantType = null;
+                _variantInstanceIdx = 0;
+                _selectedAddons.clear();
+                _selectedSlots.clear();
+                _initDuration();
+                _rebuildTimes();
+              });
+              _loadAvailability();
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
       ],
 
-      // Net variant picker — shown when selected unit has netVariants
+      // Net variant picker
       if (unit != null && unit.hasVariants) ...[
-        SizedBox(height: 16),
-        Text('SURFACE TYPE',
+        const SizedBox(height: 20),
+        Text('SURFACE',
             style: TextStyle(
                 color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final v in unit.netVariants)
-              GestureDetector(
-                onTap: () => setState(() => _netVariantType = v.type),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 36,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: unit.netVariants.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final v = unit.netVariants[i];
+              final isSel = _netVariantType == v.type;
+              final rate = v.pricePaise != null
+                  ? '₹${(v.pricePaise! / 100).toStringAsFixed(0)}/hr'
+                  : '';
+              return GestureDetector(
+                onTap: () => setState(() {
+                  _netVariantType = v.type;
+                  _variantInstanceIdx = 0;
+                  _selectedSlots.clear();
+                  _totalEdited = false;
+                  _totalCtrl.clear();
+                }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: _netVariantType == v.type ? _c.accent : _c.surface,
-                    borderRadius: BorderRadius.circular(20),
+                    color: isSel ? _c.accent : _c.surface,
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                        color: _netVariantType == v.type ? _c.accent : _c.border),
+                        color: isSel ? _c.accent : _c.border),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(v.label,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(v.label,
+                        style: TextStyle(
+                            color: isSel ? _c.onAccent : _c.text,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800)),
+                    if (rate.isNotEmpty) ...[
+                      const SizedBox(width: 5),
+                      Text(rate,
                           style: TextStyle(
-                              color: _netVariantType == v.type
-                                  ? Colors.white
-                                  : _c.text,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13)),
-                      if (v.pricePaise != null)
-                        Text('₹${(v.pricePaise! / 100).toStringAsFixed(0)}/hr',
-                            style: TextStyle(
-                                color: _netVariantType == v.type
-                                    ? Colors.white70
-                                    : _c.muted,
-                                fontSize: 11)),
+                              color: isSel
+                                  ? _c.onAccent.withValues(alpha: 0.7)
+                                  : _c.muted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600)),
                     ],
-                  ),
+                  ]),
                 ),
-              ),
-          ],
+              );
+            },
+          ),
         ),
       ],
 
-      // Duration — revealed after court selected, hidden when multi-day active
+      // Duration cards
       AnimatedSize(
-        duration: Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 260),
         curve: Curves.easeInOut,
         child: (unit == null || _isMultiDay)
-            ? SizedBox(width: double.infinity)
+            ? const SizedBox(width: double.infinity)
             : Padding(
                 padding: const EdgeInsets.only(top: 24),
-                child: Column(
+                child: Builder(builder: (_) {
+                  final opts = _buildSlotOptions(unit,
+                      pricePerHourOverride: _variantPricePerHour,
+                      date: _selectedDate);
+                  return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('DURATION',
@@ -4938,92 +4629,85 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.5)),
-                      SizedBox(height: 12),
-                      Builder(builder: (ctx) {
-                        final opts = _buildSlotOptions(unit,
-                            pricePerHourOverride: _variantPricePerHour);
-                        return SingleChildScrollView(
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 80,
+                        child: ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: List.generate(opts.length, (i) {
-                              final sel = i == _selectedDurationIdx;
-                              final opt = opts[i];
-                              return GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedDurationIdx = i;
-                                    _isMultiDay = false;
-                                    _endDatePicked = false;
-                                    _selectedSlots.clear();
-                                    _totalEdited = false;
-                                    _totalCtrl.clear();
-                                    _rebuildTimes();
-                                    if (opt.durationMins >= 720 &&
-                                        !_totalEdited)
-                                      _totalCtrl.text =
-                                          (opt.paise / 100).toStringAsFixed(0);
-                                  });
-                                  _loadAvailability();
-                                },
-                                child: AnimatedContainer(
-                                  duration: Duration(milliseconds: 160),
-                                  margin: EdgeInsets.only(
-                                      right: i < opts.length - 1 ? 10 : 0),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 22, vertical: 16),
-                                  decoration: BoxDecoration(
-                                    color: sel ? _c.accent : _c.bg,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                        color: sel ? _c.accent : _c.border,
-                                        width: sel ? 2 : 1),
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(opt.label,
-                                          style: TextStyle(
-                                              color: sel ? Colors.white : _c.text,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w900)),
-                                      SizedBox(height: 4),
-                                      Text(
-                                          '₹${(opt.paise / 100).toStringAsFixed(0)}',
-                                          style: TextStyle(
-                                              color:
-                                                  sel ? Colors.white70 : _c.muted,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600)),
-                                    ],
+                          itemCount: opts.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 10),
+                          itemBuilder: (_, i) {
+                            final sel = i == _selectedDurationIdx;
+                            final opt = opts[i];
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedDurationIdx = i;
+                                  _isMultiDay = false;
+                                  _endDatePicked = false;
+                                  _selectedSlots.clear();
+                                  _totalEdited = false;
+                                  _totalCtrl.clear();
+                                  _rebuildTimes();
+                                  if (opt.durationMins >= 720 && !_totalEdited)
+                                    _totalCtrl.text =
+                                        (opt.paise / 100).toStringAsFixed(0);
+                                });
+                                _loadAvailability();
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                width: 96,
+                                decoration: BoxDecoration(
+                                  color: sel ? _c.accent : _c.surface,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: sel ? _c.accent : _c.border,
+                                    width: sel ? 0 : 1,
                                   ),
                                 ),
-                              );
-                            }),
-                          ),
-                        );
-                      }),
-                    ]),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      opt.label,
+                                      style: TextStyle(
+                                        color: sel ? _c.onAccent : _c.text,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.3,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '₹${(opt.paise / 100).toStringAsFixed(0)}',
+                                      style: TextStyle(
+                                        color: sel
+                                            ? _c.onAccent.withValues(alpha: 0.75)
+                                            : _c.accent,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                }),
               ),
       ),
 
-      // Multi-Day toggle — lives outside the collapsed block so it stays visible
+      // Multi-day toggle
       if (unit != null && bulkAvailable) ...[
-        SizedBox(height: 20),
-        Row(children: [
-          Expanded(child: Divider(color: _c.border)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text('or book multiple days',
-                style: TextStyle(
-                    color: _c.muted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3)),
-          ),
-          Expanded(child: Divider(color: _c.border)),
-        ]),
-        SizedBox(height: 12),
-        GestureDetector(
+        const SizedBox(height: 20),
+        InkWell(
+          borderRadius: BorderRadius.circular(12),
           onTap: () => setState(() {
             _isMultiDay = !_isMultiDay;
             _totalEdited = false;
@@ -5035,36 +4719,33 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               _customDates.clear();
             }
           }),
-          child: AnimatedContainer(
-            duration: Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-                color: _isMultiDay ? _c.accent.withValues(alpha: .08) : _c.bg,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _isMultiDay ? _c.accent : _c.border)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(children: [
               Icon(Icons.date_range_rounded,
                   color: _isMultiDay ? _c.accent : _c.muted, size: 18),
-              SizedBox(width: 10),
+              const SizedBox(width: 10),
               Expanded(
                   child: Text(
                       'Multi-Day · ₹${unit.bulkDayRatePaise! ~/ 100}/day for ${unit.minBulkDays}+ days',
                       style: TextStyle(
                           color: _isMultiDay ? _c.accent : _c.text,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           fontSize: 13))),
-              Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                      color: _isMultiDay ? _c.accent : Colors.transparent,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: _isMultiDay ? _c.accent : _c.border, width: 2)),
-                  child: _isMultiDay
-                      ? Icon(Icons.check_rounded,
-                          color: _c.surface, size: 12)
-                      : null),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                    color: _isMultiDay ? _c.accent : Colors.transparent,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: _isMultiDay ? _c.accent : _c.border,
+                        width: 2)),
+                child: _isMultiDay
+                    ? Icon(Icons.check_rounded, color: _c.onAccent, size: 12)
+                    : null,
+              ),
             ]),
           ),
         ),
@@ -5072,52 +4753,69 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
 
       // Add-ons
       if (unit != null && _unitAddons.isNotEmpty) ...[
-        SizedBox(height: 20),
+        const SizedBox(height: 20),
         Text('ADD-ONS',
             style: TextStyle(
                 color: _c.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5)),
-        SizedBox(height: 10),
-        ..._unitAddons.map((a) {
-          final isSel = _selectedAddons.contains(a);
-          return GestureDetector(
-            onTap: () => setState(() {
-              if (isSel)
-                _selectedAddons.remove(a);
-              else
-                _selectedAddons.add(a);
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: _c.border),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            children: List.generate(_unitAddons.length, (i) {
+              final a = _unitAddons[i];
+              final isSel = _selectedAddons.contains(a);
+              return Column(children: [
+                if (i > 0)
+                  Divider(height: 1, thickness: 0.5, color: _c.border),
+                InkWell(
+                  borderRadius: BorderRadius.vertical(
+                    top: i == 0 ? const Radius.circular(14) : Radius.zero,
+                    bottom: i == _unitAddons.length - 1
+                        ? const Radius.circular(14)
+                        : Radius.zero,
+                  ),
+                  onTap: () => setState(() {
+                    if (isSel)
+                      _selectedAddons.remove(a);
+                    else
+                      _selectedAddons.add(a);
+                  }),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                    child: Row(children: [
+                      Icon(
+                          isSel
+                              ? Icons.check_box_rounded
+                              : Icons.check_box_outline_blank_rounded,
+                          color: isSel ? _c.accent : _c.muted,
+                          size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: Text(a.name,
+                              style: TextStyle(
+                                  color: _c.text,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14))),
+                      Text(
+                          '₹${(a.pricePaise / 100).toStringAsFixed(0)}/${a.unit}',
+                          style: TextStyle(color: _c.muted, fontSize: 12)),
+                    ]),
+                  ),
+                ),
+              ]);
             }),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                  color: isSel ? _c.accent.withValues(alpha: .08) : _c.bg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isSel ? _c.accent : _c.border)),
-              child: Row(children: [
-                Icon(
-                    isSel
-                        ? Icons.check_box_rounded
-                        : Icons.check_box_outline_blank_rounded,
-                    color: isSel ? _c.accent : _c.muted,
-                    size: 20),
-                SizedBox(width: 10),
-                Expanded(
-                    child: Text(a.name,
-                        style: TextStyle(
-                            color: _c.text,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13))),
-                Text('₹${(a.pricePaise / 100).toStringAsFixed(0)}/${a.unit}',
-                    style: TextStyle(color: _c.muted, fontSize: 12)),
-              ]),
-            ),
-          );
-        }),
+          ),
+        ),
       ],
-      SizedBox(height: 24),
+
+      const SizedBox(height: 24),
     ]);
   }
 
@@ -5512,6 +5210,14 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
                 _unit?.unitType == 'HALF_GROUND' ||
                 (_unit?.minSlotMins ?? 0) >= 240),
             durationMins: _currentDurationMins,
+            slotPricePaise: _unit != null
+                ? BookingPricingEngine.computeTotal(
+                    _unit!,
+                    durationMins: _currentDurationMins,
+                    variantPricePaise: _variantPricePerHour,
+                    date: _selectedDate,
+                  )
+                : 0,
           ),
         if (_selectedSlots.isNotEmpty) ...[
           SizedBox(height: 14),
@@ -5719,41 +5425,107 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               )
             : SizedBox(width: double.infinity, height: 0),
       ),
-      SizedBox(height: 20),
-      // Payment
-      Row(children: [
-        Expanded(
-            child: _FormTextField(
-                label: 'Total (₹)',
-                controller: _totalCtrl,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState(() => _totalEdited = true))),
-        SizedBox(width: 12),
-        Expanded(
-            child: _FormTextField(
-          label: _minAdvancePaise > 0
-              ? 'Advance (min ₹${(_minAdvancePaise / 100).toStringAsFixed(0)})'
-              : 'Advance (₹)',
-          controller: _advanceCtrl,
-          keyboardType: TextInputType.number,
-          onChanged: (_) => setState(() {}),
-        )),
-      ]),
-      SizedBox(height: 16),
-      _SegmentPicker(
-          options: const [
-            ('CASH', 'Cash'),
-            ('UPI', 'UPI'),
-            ('ONLINE', 'Online')
+      const SizedBox(height: 20),
+      // ── Pricing review block ──────────────────────────────────────────────
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _c.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _c.border),
+        ),
+        child: Column(children: [
+          Row(children: [
+            Text('Base price',
+                style: TextStyle(color: _c.muted, fontSize: 14, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Text(
+              '₹${(_totalPaise / 100).toStringAsFixed(0)}',
+              style: TextStyle(color: _c.text, fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+          ]),
+          if (_discountPaise > 0) ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              Text('Discount',
+                  style: TextStyle(color: _c.muted, fontSize: 14, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text(
+                '-₹${(_discountPaise / 100).toStringAsFixed(0)}',
+                style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Divider(color: _c.border, height: 1),
+            const SizedBox(height: 10),
+            Row(children: [
+              Text('Total',
+                  style: TextStyle(color: _c.text, fontSize: 16, fontWeight: FontWeight.w800)),
+              const Spacer(),
+              Text(
+                '₹${(_finalPaise / 100).toStringAsFixed(0)}',
+                style: TextStyle(color: _c.accent, fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+            ]),
+          ] else ...[
+            const SizedBox(height: 10),
+            Divider(color: _c.border, height: 1),
+            const SizedBox(height: 10),
+            Row(children: [
+              Text('Total',
+                  style: TextStyle(color: _c.text, fontSize: 16, fontWeight: FontWeight.w800)),
+              const Spacer(),
+              Text(
+                '₹${(_totalPaise / 100).toStringAsFixed(0)}',
+                style: TextStyle(color: _c.accent, fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+            ]),
           ],
-          selected: _paymentMode,
-          onSelect: (m) => setState(() => _paymentMode = m)),
-      SizedBox(height: 14),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      // ── Discount ──────────────────────────────────────────────────────────
+      _FormTextField(
+        label: 'Discount (₹) — optional',
+        controller: _discountCtrl,
+        icon: Icons.discount_outlined,
+        keyboardType: TextInputType.number,
+        onChanged: (_) => setState(() {}),
+      ),
+      const SizedBox(height: 12),
+      // ── Advance ───────────────────────────────────────────────────────────
+      _FormTextField(
+        label: _minAdvancePaise > 0
+            ? 'Advance (min ₹${(_minAdvancePaise / 100).toStringAsFixed(0)})'
+            : 'Advance collected (₹)',
+        controller: _advanceCtrl,
+        icon: Icons.payments_outlined,
+        keyboardType: TextInputType.number,
+        onChanged: (_) => setState(() {}),
+      ),
+      const SizedBox(height: 20),
+      // ── Payment mode — big boxes ──────────────────────────────────────────
+      Row(children: [
+        _PayMethodBox(
+          label: 'Cash',
+          icon: Icons.payments_rounded,
+          selected: _paymentMode == 'CASH',
+          onTap: () => setState(() => _paymentMode = 'CASH'),
+        ),
+        const SizedBox(width: 12),
+        _PayMethodBox(
+          label: 'Online / UPI',
+          icon: Icons.qr_code_rounded,
+          selected: _paymentMode == 'UPI' || _paymentMode == 'ONLINE',
+          onTap: () => setState(() => _paymentMode = 'UPI'),
+        ),
+      ]),
+      const SizedBox(height: 14),
       _FormTextField(
           label: 'Notes (optional)',
           controller: _notesCtrl,
           icon: Icons.notes_rounded),
-      SizedBox(height: 24),
+      const SizedBox(height: 24),
     ]);
   }
 
@@ -5791,6 +5563,192 @@ String _netPriceLabel(List<ArenaUnitOption> units) {
   }
   if (u.pricePerHourPaise > 0) return '₹${u.pricePerHourPaise ~/ 100}/hr';
   return '';
+}
+
+// ── Ticket header ─────────────────────────────────────────────────────────────
+class _TicketHeader extends StatelessWidget {
+  const _TicketHeader({
+    required this.arenaName,
+    required this.step,
+    required this.stepLabels,
+    required this.selectedDate,
+    required this.onBack,
+    required this.isFirstStep,
+  });
+  final String arenaName;
+  final int step;
+  final List<String> stepLabels;
+  final DateTime selectedDate;
+  final VoidCallback onBack;
+  final bool isFirstStep;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final top = MediaQuery.of(context).padding.top;
+    final accent = _c.accent;
+    return Container(
+      color: _c.bg,
+      padding: EdgeInsets.fromLTRB(20, top + 12, 20, 20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Top row: back + step dots
+        Row(children: [
+          GestureDetector(
+            onTap: onBack,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16, bottom: 4, top: 4),
+              child: Icon(
+                isFirstStep ? Icons.close_rounded : Icons.arrow_back_rounded,
+                color: _c.text,
+                size: 22,
+              ),
+            ),
+          ),
+          const Spacer(),
+          // Dot progress
+          Row(
+            children: List.generate(stepLabels.length, (i) {
+              final done = i < step;
+              final cur = i == step;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                margin: const EdgeInsets.only(left: 6),
+                width: cur ? 20 : 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: done || cur ? accent : _c.border,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              );
+            }),
+          ),
+        ]),
+        const SizedBox(height: 20),
+        // Venue name
+        Text(
+          arenaName.toUpperCase(),
+          style: TextStyle(
+            color: _c.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2.0,
+          ),
+        ),
+        const SizedBox(height: 6),
+        // Step label — big ticket title
+        Text(
+          stepLabels[step],
+          style: TextStyle(
+            color: _c.text,
+            fontSize: 28,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Date row
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              DateFormat('EEE, MMM d').format(selectedDate),
+              style: TextStyle(
+                color: accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${step + 1} of ${stepLabels.length}',
+            style: TextStyle(
+              color: _c.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+// ── Perforated stub divider ───────────────────────────────────────────────────
+class _PerforatedDivider extends StatelessWidget {
+  const _PerforatedDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 24,
+      child: Stack(children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 11,
+          child: LayoutBuilder(builder: (_, constraints) {
+            final dashW = 6.0;
+            final gapW = 5.0;
+            final count = (constraints.maxWidth / (dashW + gapW)).floor();
+            _c = _C.of(_);
+            return Row(
+              children: List.generate(count, (__) => Padding(
+                padding: EdgeInsets.only(right: gapW),
+                child: Container(
+                  width: dashW,
+                  height: 1.5,
+                  color: _c.border,
+                ),
+              )),
+            );
+          }),
+        ),
+        Positioned(
+          left: -12,
+          top: 0,
+          child: _HalfCircle(left: true),
+        ),
+        Positioned(
+          right: -12,
+          top: 0,
+          child: _HalfCircle(left: false),
+        ),
+      ]),
+    );
+  }
+}
+
+class _HalfCircle extends StatelessWidget {
+  const _HalfCircle({required this.left});
+  final bool left;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: Align(
+        alignment: left ? Alignment.centerRight : Alignment.centerLeft,
+        widthFactor: 0.5,
+        child: Builder(builder: (ctx) {
+          _c = _C.of(ctx);
+          return Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: _c.bg,
+              shape: BoxShape.circle,
+            ),
+          );
+        }),
+      ),
+    );
+  }
 }
 
 // ── Step indicator ────────────────────────────────────────────────────────────
@@ -5879,6 +5837,135 @@ class _BookingActionButton extends StatelessWidget {
             Icon(trailing, size: 18, color: enabled ? Colors.white : _c.muted),
           ],
         ]),
+      ),
+    );
+  }
+}
+
+class _CourtCard extends StatelessWidget {
+  const _CourtCard({
+    required this.unit,
+    required this.selected,
+    required this.isWeekend,
+    required this.onTap,
+  });
+  final ArenaUnitOption unit;
+  final bool selected;
+  final bool isWeekend;
+  final VoidCallback onTap;
+
+  bool get _isNet =>
+      unit.unitType == 'CRICKET_NET' || unit.unitType == 'INDOOR_NET';
+
+  String _groundPricing() {
+    final parts = <String>[];
+    if (unit.price4HrPaise != null)
+      parts.add('4hr · ₹${unit.price4HrPaise! ~/ 100}');
+    if (unit.price8HrPaise != null)
+      parts.add('8hr · ₹${unit.price8HrPaise! ~/ 100}');
+    if (unit.priceFullDayPaise != null)
+      parts.add('Full day · ₹${unit.priceFullDayPaise! ~/ 100}');
+    if (parts.isEmpty && unit.pricePerHourPaise > 0)
+      parts.add('₹${unit.pricePerHourPaise ~/ 100}/hr');
+    return parts.join('   ');
+  }
+
+  String _netPricing() {
+    if (unit.netVariants.isNotEmpty) {
+      return unit.netVariants
+          .map((v) =>
+              '${v.label} · ₹${((v.pricePaise ?? unit.pricePerHourPaise) / 100).toStringAsFixed(0)}/hr')
+          .join('   ');
+    }
+    return '₹${unit.pricePerHourPaise ~/ 100}/hr';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final weekendActive = isWeekend && unit.weekendMultiplier > 1.0;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: selected ? _c.accent : _c.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? _c.accent : _c.border,
+            width: selected ? 0 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: selected
+                    ? _c.onAccent.withValues(alpha: 0.15)
+                    : _c.accent.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                _isNet ? Icons.sports_cricket_rounded : Icons.grass_rounded,
+                size: 24,
+                color: selected ? _c.onAccent : _c.accent,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text(
+                      unit.name,
+                      style: TextStyle(
+                        color: selected ? _c.onAccent : _c.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (weekendActive) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? _c.onAccent.withValues(alpha: 0.2)
+                              : _c.accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '${((unit.weekendMultiplier - 1) * 100).round()}% weekend',
+                          style: TextStyle(
+                            color: selected ? _c.onAccent : _c.accent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ]),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              selected
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: selected ? _c.onAccent : _c.border,
+              size: 22,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -6178,13 +6265,15 @@ class _StartTimeGrid extends StatelessWidget {
       required this.busyTimes,
       required this.onSelect,
       this.isGround = false,
-      this.durationMins = 60});
+      this.durationMins = 60,
+      this.slotPricePaise = 0});
   final List<String> times;
   final dynamic selected;
   final Set<String> busyTimes;
   final ValueChanged<String> onSelect;
   final bool isGround;
   final int durationMins;
+  final int slotPricePaise;
 
   String _periodLabel(String hhmm) {
     final h = int.tryParse(hhmm.split(':').first) ?? 0;
@@ -6283,7 +6372,16 @@ class _StartTimeGrid extends StatelessWidget {
                       ),
                     ),
                     if (busy)
-                      Icon(Icons.block_rounded, size: 16, color: _c.muted),
+                      Icon(Icons.block_rounded, size: 16, color: _c.muted)
+                    else if (slotPricePaise > 0)
+                      Text(
+                        '₹${(slotPricePaise / 100).toStringAsFixed(0)}',
+                        style: TextStyle(
+                          color: sel ? _c.onAccent.withValues(alpha: 0.85) : _c.accent,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -6302,7 +6400,7 @@ class _StartTimeGrid extends StatelessWidget {
           return GestureDetector(
             onTap: busy ? null : () => onSelect(t),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
                   color: sel ? _c.accent : (busy ? Colors.transparent : _c.surface),
                   borderRadius: BorderRadius.circular(10),
@@ -6310,14 +6408,32 @@ class _StartTimeGrid extends StatelessWidget {
                       color: sel
                           ? _c.accent
                           : (busy ? _c.border.withValues(alpha: .3) : _c.border))),
-              child: Text(_fmt12(t),
-                  style: TextStyle(
-                      color: sel
-                          ? Colors.white
-                          : (busy ? _c.muted.withValues(alpha: .3) : _c.text),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      decoration: busy ? TextDecoration.lineThrough : null)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_fmt12(t),
+                      style: TextStyle(
+                          color: sel
+                              ? _c.onAccent
+                              : (busy ? _c.muted.withValues(alpha: .3) : _c.text),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          decoration: busy ? TextDecoration.lineThrough : null)),
+                  if (slotPricePaise > 0 && !busy) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹${(slotPricePaise / 100).toStringAsFixed(0)}',
+                      style: TextStyle(
+                        color: sel
+                            ? _c.onAccent.withValues(alpha: 0.75)
+                            : _c.accent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           );
         }).toList());
@@ -6391,6 +6507,54 @@ class _ModeChip extends StatelessWidget {
                 color: selected ? Colors.black : _c.text,
                 fontSize: 13,
                 fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+}
+
+// ── Big payment method selector ───────────────────────────────────────────────
+class _PayMethodBox extends StatelessWidget {
+  const _PayMethodBox({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          height: 88,
+          decoration: BoxDecoration(
+            color: selected ? _c.accent : _c.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? _c.accent : _c.border,
+              width: selected ? 0 : 1,
+            ),
+          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(icon, color: selected ? _c.onAccent : _c.text, size: 28),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? _c.onAccent : _c.text,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ]),
+        ),
       ),
     );
   }

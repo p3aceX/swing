@@ -185,6 +185,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       paymentMode: z.enum(PAYMENT_MODES).default('CASH'),
       amountPaise: z.number().int().min(0),
       advancePaise: z.number().int().min(0).optional(),
+      discountPaise: z.number().int().min(0).optional().default(0),
       notes: z.string().optional(),
       netVariantType: z.string().optional(),
       guestUserId: z.string().optional(),

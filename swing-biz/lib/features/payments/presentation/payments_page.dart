@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../arena/services/arena_profile_providers.dart';
 import '../../../core/router/app_router.dart';
-import '../../bookings/presentation/bookings_page.dart';
+import '../../bookings/presentation/record_payment_sheet.dart';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 class _C {
@@ -387,19 +387,34 @@ class _CollectionsTabState extends ConsumerState<_CollectionsTab>
 
   void _showQuickPay(BuildContext context) {
     final fallbackArena = widget.arena ?? widget.arenas.first;
-    showModalBottomSheet(
+    showModalBottomSheet<(ArenaReservation, ArenaGuest)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: _c.bg,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
       builder: (_) => _QuickPaySheet(
           arena: widget.arena,
           arenas: widget.arenas,
           fallbackArena: fallbackArena),
-    ).then((_) {
+    ).then((result) {
       _invalidatePayments();
       ref.invalidate(_arenaGuestsProvider);
+      if (result == null) return;
+      final (booking, guest) = result;
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => RecordPaymentSheet(
+          booking: booking,
+          defaultPayerName: guest.name,
+          onRecorded: () {
+            _invalidatePayments();
+            ref.invalidate(_arenaGuestsProvider);
+          },
+        ),
+      );
     });
   }
 
@@ -558,11 +573,11 @@ class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
                             arena: _arenaForBooking(widget.arenas,
                                 widget.fallbackArena, item.$2),
                           )),
-                      SizedBox(height: 20),
+                      const SizedBox(height: 20),
                     ],
                     if (upcoming.isNotEmpty) ...[
                       const _SectionLabel('UPCOMING'),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       ...upcoming.map((item) => _QuickPayRow(
                             guest: item.$1,
                             booking: item.$2,
@@ -598,10 +613,7 @@ class _QuickPayRow extends StatelessWidget {
         : '—';
     final balance = booking.balancePaise;
     return GestureDetector(
-      onTap: () {
-        Navigator.pop(context);
-        context.push(AppRoutes.bookingDetailPath(booking.id));
-      },
+      onTap: () => Navigator.pop(context, (booking, guest)),
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1006,9 +1018,23 @@ class _BookingRow extends StatelessWidget {
         : booking.balancePaise;
 
     return GestureDetector(
-      onTap: () => context
-          .push(AppRoutes.bookingDetailPath(booking.id))
-          .then((_) => onRefresh()),
+      onTap: () {
+        if (booking.balancePaise > 0) {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => RecordPaymentSheet(
+              booking: booking,
+              onRecorded: onRefresh,
+            ),
+          ).then((_) => onRefresh());
+        } else {
+          context
+              .push(AppRoutes.bookingDetailPath(booking.id))
+              .then((_) => onRefresh());
+        }
+      },
       behavior: HitTestBehavior.opaque,
       child: Column(
         children: [
@@ -1639,9 +1665,8 @@ class _BookingHistoryRow extends StatelessWidget {
     final date = booking.bookingDate != null
         ? DateFormat('EEE d MMM').format(booking.bookingDate!)
         : '—';
-    final isCheckedIn = booking.checkedInAt != null;
-    final color =
-        isCheckedIn ? _c.accent : Color(0xFFD97706);
+    final isPaid = booking.balancePaise == 0;
+    final color = isPaid ? _c.accent : const Color(0xFFD97706);
 
     return GestureDetector(
       onTap: () => context
@@ -1676,7 +1701,7 @@ class _BookingHistoryRow extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                     color: _c.text)),
             SizedBox(height: 4),
-            _Badge(isCheckedIn ? 'Paid' : 'Pending', color),
+            _Badge(isPaid ? 'Paid' : 'Pending', color),
           ]),
           SizedBox(width: 8),
           Icon(Icons.chevron_right_rounded,

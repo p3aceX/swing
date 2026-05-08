@@ -42,12 +42,13 @@ class AppDrawer extends ConsumerWidget {
                     },
                   ),
                   _DrawerItem(
-                    icon: Icons.account_balance_wallet_outlined,
+                    icon: Icons.currency_rupee_rounded,
                     label: 'Payments',
                     onTap: () {
                       Navigator.pop(context);
-                      // index 3 = Payments tab in DashboardScreen
-                      ref.read(dashboardTabIndexProvider.notifier).state = 3;
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const PaymentsRoute(),
+                      ));
                     },
                   ),
                   _DrawerItem(

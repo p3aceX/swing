@@ -56,9 +56,14 @@ class MatchUpsTab extends ConsumerStatefulWidget {
 
 class _MatchUpsTabState extends ConsumerState<MatchUpsTab> {
   _Lane _lane = _Lane.requests;
+  String? _selectedArenaId;
+
+  List<ArenaListing> get _activeArenas => _selectedArenaId == null
+      ? widget.arenas
+      : widget.arenas.where((a) => a.id == _selectedArenaId).toList();
 
   Future<void> _refresh() async {
-    for (final a in widget.arenas) {
+    for (final a in _activeArenas) {
       ref.invalidate(arenaLobbiesProvider(a.id));
       ref.invalidate(arenaMatchesProvider(a.id));
     }
@@ -68,10 +73,10 @@ class _MatchUpsTabState extends ConsumerState<MatchUpsTab> {
   Widget build(BuildContext context) {
     _c = _C.of(context);
     final lobbyAsyncs = [
-      for (final a in widget.arenas) (a, ref.watch(arenaLobbiesProvider(a.id)))
+      for (final a in _activeArenas) (a, ref.watch(arenaLobbiesProvider(a.id)))
     ];
     final matchAsyncs = [
-      for (final a in widget.arenas) (a, ref.watch(arenaMatchesProvider(a.id)))
+      for (final a in _activeArenas) (a, ref.watch(arenaMatchesProvider(a.id)))
     ];
 
     // Requests  = inbound player lobbies in any pre-pairing state
@@ -109,6 +114,11 @@ class _MatchUpsTabState extends ConsumerState<MatchUpsTab> {
 
     return Column(
       children: [
+        _ArenaFilterBar(
+          arenas: widget.arenas,
+          selectedId: _selectedArenaId,
+          onSelect: (id) => setState(() => _selectedArenaId = id),
+        ),
         _LaneTabs(
           selected: _lane,
           requestsCount: requests.length,
@@ -138,6 +148,102 @@ class _MatchUpsTabState extends ConsumerState<MatchUpsTab> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Arena filter bar ─────────────────────────────────────────────────────────
+
+class _ArenaFilterBar extends StatelessWidget {
+  const _ArenaFilterBar({
+    required this.arenas,
+    required this.selectedId,
+    required this.onSelect,
+  });
+  final List<ArenaListing> arenas;
+  final String? selectedId;
+  final ValueChanged<String?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: SizedBox(
+        height: 36,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: arenas.length + 1,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          if (i == 0) {
+            final active = selectedId == null;
+            return _FilterChip(
+              label: 'All',
+              active: active,
+              onTap: () => onSelect(null),
+            );
+          }
+          final a = arenas[i - 1];
+          final active = a.id == selectedId;
+          return _FilterChip(
+            label: a.name,
+            active: active,
+            icon: Icons.stadium_rounded,
+            onTap: () => onSelect(a.id),
+          );
+        },
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.icon,
+  });
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: active ? _c.accent : _c.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: active ? _c.accent : _c.hair),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 13, color: active ? _c.onAccent : _c.muted),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: active ? _c.onAccent : _c.muted,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
