@@ -3,6 +3,7 @@ import { prisma, FacilityUnitType, Prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { ArenaService } from '../arenas/arena.service'
 import { NotificationService } from '../notifications/notification.service'
+import { bumpDiscoverAllocation, getDiscoverAllocations } from '../../lib/redis'
 import Razorpay from 'razorpay'
 import { areAgeGroupsCompatible } from './matchmaking.utils'
 import {
@@ -968,10 +969,20 @@ export class MatchmakingService {
     }
 
     // Demand signal — count of active searching lobbies per arena on this
-    // date. Drives the load-factor in venue allocation so an arena that's
-    // already attracting many lobbies de-prioritizes for new pairings,
-    // distributing business across the market instead of piling onto one.
-    const arenaLoadByDate = await this.computeArenaLoadByDate(date)
+    // date PLUS recent discover-allocations (a 5-min Redis counter that
+    // ticks every time we surface a B-class tile at an arena). Without the
+    // Redis half, every consecutive Discover sees the same load picture
+    // and the highest-rated arena keeps winning until a real lobby lands;
+    // with it, fairness emerges across many users searching the same date.
+    const baseLoad = await this.computeArenaLoadByDate(date)
+    const dateKey = this.toDateOnly(date)
+    const redisAllocs = await getDiscoverAllocations(
+      Array.from(tentativeArenasById.keys()), dateKey,
+    ).catch(() => new Map<string, number>())
+    const arenaLoadByDate = new Map<string, number>()
+    for (const aid of new Set([...baseLoad.keys(), ...redisAllocs.keys()])) {
+      arenaLoadByDate.set(aid, (baseLoad.get(aid) ?? 0) + (redisAllocs.get(aid) ?? 0))
+    }
 
     // ageGroup is still resolved per candidate so the response payload
     // (used by the client for an age-group label on the tile) stays
@@ -1103,6 +1114,11 @@ export class MatchmakingService {
         winner.arena.id,
         (tentativeAllocCounter.get(winner.arena.id) ?? 0) + 1,
       )
+      // Cross-response signal: bump the Redis counter (5-min TTL) so the
+      // next searcher on this date sees this arena as warmer load and
+      // routes elsewhere. Fire-and-forget — a Redis miss should never
+      // block discover from returning.
+      bumpDiscoverAllocation(winner.arena.id, dateKey).catch(() => undefined)
       return { arena: winner.arena, slot: winner.slot }
     }
 

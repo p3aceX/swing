@@ -112,6 +112,39 @@ export async function getStudioScene(matchId: string): Promise<StudioScene | nul
   try { return JSON.parse(val) } catch { return null }
 }
 
+// ── Matchmaking discover-allocation tracker ─────────────────────────────────
+//
+// Counts how many B-class tiles each arena has been surfaced as the
+// proposed venue for, on a given date, in the last ~5 minutes. Lets the
+// per-pair venue allocator see updated load across consecutive Discover
+// calls — without this, every searcher's response sees the same starting
+// load picture and the highest-rated arena keeps winning until it
+// accumulates real bookings.
+//
+// Bump on each B-allocation; read in batch when scoring the pool.
+const DISCOVER_ALLOC_TTL_SECONDS = 300
+
+export async function bumpDiscoverAllocation(arenaId: string, date: string): Promise<void> {
+  const key = `mm:disc-alloc:${arenaId}:${date}`
+  const count = await redis.incr(key)
+  if (count === 1) await redis.expire(key, DISCOVER_ALLOC_TTL_SECONDS)
+}
+
+export async function getDiscoverAllocations(
+  arenaIds: string[],
+  date: string,
+): Promise<Map<string, number>> {
+  if (arenaIds.length === 0) return new Map()
+  const keys = arenaIds.map((id) => `mm:disc-alloc:${id}:${date}`)
+  const values = await redis.mget(...keys)
+  const out = new Map<string, number>()
+  values.forEach((v, i) => {
+    const n = v === null ? 0 : Number.parseInt(v, 10)
+    if (n > 0) out.set(arenaIds[i], n)
+  })
+  return out
+}
+
 // Batch-check Redis holds for a set of slots. Returns a Set of "unitId:date:startTime" strings that are currently held.
 export async function getHeldSlotsSet(
   entries: Array<{ unitId: string; date: string; startTime: string }>
