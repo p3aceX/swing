@@ -587,29 +587,45 @@ class MmActiveLobbiesResponse {
   const MmActiveLobbiesResponse({
     required this.teams,
     required this.lobbies,
+    required this.allLobbies,
   });
 
   /// Compact info for every team the user belongs to (whether searching or not).
   final List<({String id, String name, String? logoUrl})> teams;
 
-  /// Active lobbies, deduped to one per team.
+  /// Active lobbies, deduped to one per team. Drives the team-switcher chip.
   final List<MmTeamLobbySummary> lobbies;
 
-  factory MmActiveLobbiesResponse.fromJson(Map<String, dynamic> j) =>
-      MmActiveLobbiesResponse(
-        teams: ((j['teams'] as List?) ?? [])
-            .whereType<Map<String, dynamic>>()
-            .map((t) => (
-                  id: t['id'] as String,
-                  name: (t['name'] as String?) ?? 'Team',
-                  logoUrl: t['logoUrl'] as String?,
-                ))
-            .toList(),
-        lobbies: ((j['lobbies'] as List?) ?? [])
+  /// Every active lobby (no de-dup). Drives the Discover Results date
+  /// strip so a multi-date submission's full set of dates restores
+  /// across app restarts, not just the most recent one.
+  final List<MmTeamLobbySummary> allLobbies;
+
+  factory MmActiveLobbiesResponse.fromJson(Map<String, dynamic> j) {
+    final lobbies = ((j['lobbies'] as List?) ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(MmTeamLobbySummary.fromJson)
+        .toList();
+    final allRaw = j['allLobbies'] as List?;
+    final allLobbies = allRaw == null
+        ? lobbies // legacy backend without allLobbies — fall back to one-per-team
+        : allRaw
             .whereType<Map<String, dynamic>>()
             .map(MmTeamLobbySummary.fromJson)
-            .toList(),
-      );
+            .toList();
+    return MmActiveLobbiesResponse(
+      teams: ((j['teams'] as List?) ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map((t) => (
+                id: t['id'] as String,
+                name: (t['name'] as String?) ?? 'Team',
+                logoUrl: t['logoUrl'] as String?,
+              ))
+          .toList(),
+      lobbies: lobbies,
+      allLobbies: allLobbies,
+    );
+  }
 }
 
 class MmCreateLobbyResult {

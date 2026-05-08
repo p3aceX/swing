@@ -240,7 +240,20 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         );
       }
       if (!mounted) return;
-      setState(() => _currentTeam = chosen);
+      // Restore the multi-date date strip from every active lobby of the
+      // chosen team. Without this the strip starts empty after every app
+      // restart even when the user has 3 dates queued.
+      final restoredSubmitted = chosen == null
+          ? const <({String date, String lobbyId})>[]
+          : (res.allLobbies
+              .where((l) => l.teamId == chosen.id)
+              .map((l) => (date: l.date, lobbyId: l.lobbyId))
+              .toList()
+            ..sort((a, b) => a.date.compareTo(b.date)));
+      setState(() {
+        _currentTeam = chosen;
+        _submittedLobbies = restoredSubmitted;
+      });
       // If the chosen team has an active lobby, hydrate prefs + jump to results.
       final active = chosen != null ? _teamLobbies[chosen.id] : null;
       if (active != null) {

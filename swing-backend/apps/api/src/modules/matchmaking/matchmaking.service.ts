@@ -509,30 +509,38 @@ export class MatchmakingService {
       include: { team: true },
       orderBy: { createdAt: 'desc' },
     })
-    // De-dupe to one lobby per team (most recent wins).
+    // De-dupe to one lobby per team (most recent wins). Used by the
+    // team-switcher chip to show *which* of the user's teams are
+    // currently searching — that view only needs one summary per team.
     const byTeam = new Map<string, any>()
     for (const l of lobbies) {
       if (!l.teamId) continue
       if (!byTeam.has(l.teamId)) byTeam.set(l.teamId, l)
     }
+    const serialize = (l: any) => ({
+      lobbyId: l.id,
+      teamId: l.teamId,
+      teamName: l.team?.name ?? null,
+      status: l.status,
+      date: this.toDateOnly(l.date),
+      format: l.format,
+      ballType: l.ballType ?? null,
+      windowsRanked: (l.windowsRanked ?? []) as string[],
+      windowsMatched: (l.windowsMatched ?? []) as string[],
+      groundsRanked: (l.preferredArenaIds ?? []) as string[],
+    })
     return {
       teams: myTeams.map((t) => ({
         id: t.id,
         name: t.name,
         logoUrl: t.logoUrl,
       })),
-      lobbies: Array.from(byTeam.values()).map((l: any) => ({
-        lobbyId: l.id,
-        teamId: l.teamId,
-        teamName: l.team?.name ?? null,
-        status: l.status,
-        date: this.toDateOnly(l.date),
-        format: l.format,
-        ballType: l.ballType ?? null,
-        windowsRanked: (l.windowsRanked ?? []) as string[],
-        windowsMatched: (l.windowsMatched ?? []) as string[],
-        groundsRanked: (l.preferredArenaIds ?? []) as string[],
-      })),
+      // One per team, for the chip.
+      lobbies: Array.from(byTeam.values()).map(serialize),
+      // Every active lobby. Drives the date strip on Discover Results so
+      // a multi-date submission's full set of dates restores after the
+      // app restarts (not just the most recent one).
+      allLobbies: lobbies.map(serialize),
     }
   }
 
