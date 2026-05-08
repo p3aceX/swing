@@ -3276,7 +3276,10 @@ class _LobbyTile extends StatelessWidget {
                         lobby.preferredArenaName!
                       else
                         'Any ground',
-                      '₹${(lobby.pricePerTeamPaise / 100).round()}',
+                      // Prefix with "≈" when the backend marked the price
+                      // as tentative — pairing has no locked ground yet,
+                      // so price is sourced from the would-be allocation.
+                      '${lobby.isTentativePricing ? "≈ " : ""}₹${(lobby.pricePerTeamPaise / 100).round()}',
                     ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

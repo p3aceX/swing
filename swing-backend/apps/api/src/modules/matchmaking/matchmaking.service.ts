@@ -169,7 +169,10 @@ export class MatchmakingService {
         })
       }
 
-      if (slots.length === 0) continue
+      // The Where step in Discover Setup just needs the catalog of
+      // matchable arenas — slot scoping happens later (Dates → Windows).
+      // Don't drop a ground here when its same-day slots are exhausted;
+      // the user will pick a future date in the next step anyway.
       grounds.push({
         id: unit.arenaId,
         unitId: unit.id,
@@ -782,6 +785,56 @@ export class MatchmakingService {
       : []
     const arenasById = new Map(arenas.map((a) => [a.id, a]))
 
+    // Tentative-ground resolution. When a candidate lobby has no concrete
+    // arena (player↔player no-pref pairing), the response would otherwise
+    // ship the ₹900 default and a hollow ground name. Pre-compute one
+    // tentative arena per request (using L1b's smart allocation from the
+    // caller's home arena perspective) and surface its real price + name
+    // marked as tentative — the actual ground gets locked in at lock-time.
+    let tentativeArena: {
+      id: string
+      name: string
+      pricePerHourPaise: number
+      latitude: number
+      longitude: number
+      matchRatingAvg: number
+      matchRatingCount: number
+    } | null = null
+    {
+      const ids = await this.smartAnyGroundAllocation(input.teamId, prisma)
+      const tentativeId = ids[0]
+      if (tentativeId) {
+        const a = await prisma.arena.findUnique({
+          where: { id: tentativeId },
+          select: {
+            id: true,
+            name: true,
+            latitude: true,
+            longitude: true,
+            matchRatingAvg: true,
+            matchRatingCount: true,
+            units: {
+              where: { isActive: true, sport: 'CRICKET' },
+              orderBy: { pricePerHourPaise: 'asc' },
+              take: 1,
+              select: { pricePerHourPaise: true },
+            },
+          },
+        })
+        if (a && a.units[0]) {
+          tentativeArena = {
+            id: a.id,
+            name: a.name,
+            pricePerHourPaise: a.units[0].pricePerHourPaise,
+            latitude: a.latitude,
+            longitude: a.longitude,
+            matchRatingAvg: (a as any).matchRatingAvg ?? 3.0,
+            matchRatingCount: (a as any).matchRatingCount ?? 0,
+          }
+        }
+      }
+    }
+
     // ageGroup is still resolved per candidate so the response payload
     // (used by the client for an age-group label on the tile) stays
     // populated. The age-group FILTER is intentionally OFF for V2 Discover —
@@ -829,20 +882,26 @@ export class MatchmakingService {
       const pick = c.picks[0]
       const unit = pick ? unitsById.get(pick.groundId) : null
       const arena = c.arenaId ? arenasById.get(c.arenaId) : null
-      const arenaName = arena?.name ?? (unit as any)?.arena?.name ?? null
       const cGroundsRanked = (c.preferredArenaIds ?? []) as string[]
       const rank1Arena = cGroundsRanked[0]
         ? arenasById.get(cGroundsRanked[0])
         : null
       const cWindowsRanked = (c.windowsRanked ?? []) as string[]
       const cWindowsMatched = (c.windowsMatched ?? []) as string[]
-      // L3 — rating surfacing. Pull from arena.matchRatingAvg/Count if the
-      // candidate row carries a concrete arena (either via arenaId or via
-      // pick → unit → arena). Tile UI hides the badge when count < 3
-      // ("New ground" state) using ratingCount.
-      const arenaForRating = arena ?? (unit as any)?.arena ?? null
-      const matchRatingAvg = (arenaForRating as any)?.matchRatingAvg ?? null
-      const matchRatingCount = (arenaForRating as any)?.matchRatingCount ?? null
+      // Concrete arena, in priority order: explicit arenaId → unit's arena
+      // → caller's groundsRanked rank-1 → candidate's groundsRanked rank-1.
+      const concreteArena = arena ?? (unit as any)?.arena ?? rank1Arena ?? null
+      // Tentative fallback for fully-unallocated player↔player no-pref
+      // pairings. Used only when no concrete arena exists anywhere.
+      const isTentative = !concreteArena && tentativeArena !== null
+      const arenaName = (concreteArena as any)?.name ?? (isTentative ? tentativeArena!.name : null)
+      // L3 — rating surfacing. Falls back to the tentative arena's rating
+      // when the pairing has no concrete ground yet, so the UI can still
+      // show a "★ 4.6 · 23" badge for the would-be venue.
+      const matchRatingAvg = (concreteArena as any)?.matchRatingAvg
+        ?? (isTentative ? tentativeArena!.matchRatingAvg : null)
+      const matchRatingCount = (concreteArena as any)?.matchRatingCount
+        ?? (isTentative ? tentativeArena!.matchRatingCount : null)
       // Display label combining bucket + clock window. Arena/picks-based
       // candidates render as "MORNING · 10:00 AM – 1:00 PM" (concrete time).
       // Pure-preference candidates (no picks) render as "MORNING window".
@@ -891,6 +950,9 @@ export class MatchmakingService {
           ageGroup: c.teamId ? ages.get(c.teamId) ?? null : null,
           groundName: unit?.name ?? null,
           unitId: pick?.groundId ?? null,
+          // Pricing precedence: concrete unit → tentative arena's cheapest
+          // unit → 90000 fallback. The fallback should only fire when no
+          // arenas are usable at all, which would be a deeper problem.
           pricePerTeam: unit
             ? Math.round(
                 (unit.pricePerHourPaise *
@@ -898,7 +960,16 @@ export class MatchmakingService {
                   60 /
                   2,
               )
-            : 90000,
+            : isTentative
+              ? Math.round(
+                  (tentativeArena!.pricePerHourPaise *
+                    this.formatDurationMins(c.format as MatchmakingFormat)) /
+                    60 /
+                    2,
+                )
+              : 90000,
+          // Tile UI prefixes the price with "≈" when this is 'tentative'.
+          pricingMode: unit ? 'concrete' : isTentative ? 'tentative' : 'unknown',
           slotTime: pick?.slotTime ?? null,
           slotLabel,
           daysFromNow: this.daysFromNow(c.date),

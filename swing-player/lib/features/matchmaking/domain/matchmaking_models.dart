@@ -172,7 +172,10 @@ class MmOpenLobby {
     this.slotLabel,
     this.matchRatingAvg,
     this.matchRatingCount,
+    this.pricingMode,
   });
+
+  bool get isTentativePricing => pricingMode == 'tentative';
 
   final String lobbyId;
   final String teamName;
@@ -211,6 +214,10 @@ class MmOpenLobby {
   // "NEW GROUND" instead.
   final double? matchRatingAvg;
   final int? matchRatingCount;
+  // 'concrete' | 'tentative' | 'unknown'. Tentative = no concrete arena
+  // is locked yet; the price is sourced from the tentative arena the
+  // backend would allocate, so the UI should hint that with a "≈" prefix.
+  final String? pricingMode;
 
   String get displaySlot {
     try {
@@ -281,6 +288,7 @@ class MmOpenLobby {
       slotLabel: j['slotLabel'] as String?,
       matchRatingAvg: (j['matchRatingAvg'] as num?)?.toDouble(),
       matchRatingCount: (j['matchRatingCount'] as num?)?.toInt(),
+      pricingMode: j['pricingMode'] as String?,
     );
   }
 }
