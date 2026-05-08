@@ -737,56 +737,43 @@ class _Ticket extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
-            child: Column(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _TeamRow(
-                  name: myTeamName,
-                  logoUrl: myTeamLogoUrl,
-                  side: 'YOU',
+                Expanded(
+                  child: _TeamCol(
+                    name: myTeamName,
+                    logoUrl: myTeamLogoUrl,
+                    side: 'YOU',
+                  ),
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        height: 0.5,
-                        color: context.stroke.withValues(alpha: 0.18),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: context.fg.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      'VS',
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.2,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: context.fg.withValues(alpha: 0.08),
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          'VS',
-                          style: TextStyle(
-                            color: context.fg,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Container(
-                        height: 0.5,
-                        color: context.stroke.withValues(alpha: 0.18),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 14),
-                _TeamRow(
-                  name: opponentTeamName,
-                  logoUrl: opponentTeamLogoUrl,
-                  side: 'OPPONENT',
+                Expanded(
+                  child: _TeamCol(
+                    name: opponentTeamName,
+                    logoUrl: opponentTeamLogoUrl,
+                    side: 'OPPONENT',
+                  ),
                 ),
               ],
             ),
@@ -797,31 +784,31 @@ class _Ticket extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      dateLabel.toUpperCase(),
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      displaySlot,
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                  ],
+                // Big date + slot label stacked, NBA-card style. Stacking
+                // (instead of one Row) keeps the slotLabel — which can be
+                // a long string like "MORNING · 10:00 AM – 1:00 PM" —
+                // from overflowing on small screens.
+                Text(
+                  dateLabel.toUpperCase(),
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                    height: 1.0,
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
+                Text(
+                  displaySlot,
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -853,6 +840,108 @@ class _Ticket extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// NBA-style vertical team block: logo on top (centered), team name, side
+// label below. Used inside the ticket header in a Row of two — one per
+// side, with VS in the middle.
+class _TeamCol extends StatelessWidget {
+  const _TeamCol({
+    required this.name,
+    required this.logoUrl,
+    required this.side,
+  });
+  final String name;
+  final String? logoUrl;
+  final String side;
+
+  String _initials(String n) {
+    final parts =
+        n.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first.substring(0, 1) + parts[1].substring(0, 1))
+        .toUpperCase();
+  }
+
+  Color _avatarColor(String n) {
+    const palette = <Color>[
+      Color(0xFFE76F51),
+      Color(0xFF2A9D8F),
+      Color(0xFFE9C46A),
+      Color(0xFF8AB17D),
+      Color(0xFF6B5B95),
+      Color(0xFF457B9D),
+      Color(0xFFD64550),
+    ];
+    return palette[n.hashCode.abs() % palette.length];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasLogo = logoUrl != null && logoUrl!.isNotEmpty;
+    final logo = ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        width: 64,
+        height: 64,
+        child: hasLogo
+            ? Image.network(
+                logoUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _initialsBadge(context),
+              )
+            : _initialsBadge(context),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        logo,
+        const SizedBox(height: 10),
+        Text(
+          name,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 14,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.2,
+            height: 1.15,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          side,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _initialsBadge(BuildContext context) {
+    return Container(
+      color: _avatarColor(name),
+      alignment: Alignment.center,
+      child: Text(
+        _initials(name),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
+          letterSpacing: -0.4,
+        ),
       ),
     );
   }
