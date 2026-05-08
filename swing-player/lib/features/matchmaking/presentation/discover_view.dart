@@ -2347,22 +2347,137 @@ class _MatchTimeline extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
-      itemCount: entries.length,
-      itemBuilder: (_, i) {
-        final e = entries[i];
-        return _TimelineRow(
+    // Group hour-sorted entries by their bucket window so the timeline
+    // breaks visually into MORNING / AFTERNOON / EVENING / NIGHT /
+    // LATE_NIGHT sections — the user immediately sees which match falls
+    // in which time-of-day, even when buckets only have one card.
+    final grouped = <String, List<({MmRankedLobby ranked, bool isPrimary, int hour})>>{};
+    for (final e in entries) {
+      final w = _windowFromHour(e.hour);
+      (grouped[w] ??= []).add(e);
+    }
+    const orderedWindows = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT', 'LATE_NIGHT'];
+
+    final children = <Widget>[];
+    var first = true;
+    for (final w in orderedWindows) {
+      final list = grouped[w];
+      if (list == null || list.isEmpty) continue;
+      children.add(_WindowHeader(window: w, withTopGap: !first));
+      first = false;
+      for (final e in list) {
+        children.add(_TimelineRow(
           hourLabel: _hourLabel(e.hour),
           isPrimary: e.isPrimary,
           ranked: e.ranked,
           callerWindowsRanked: prefs.windowsApi,
           callerGroundsRanked: prefs.preferredArenaIdList,
           onTap: () => onChallenge(e.ranked.lobby),
-        );
-      },
+        ));
+      }
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
+      children: children,
     );
+  }
+
+  static String _windowFromHour(int h) {
+    // Mirrors backend bucketForSlotTime boundaries (6:30/11:30/16:30/20:30/23:30).
+    // Hour precision is sufficient for grouping; the boundary half-hours
+    // round into the larger window.
+    if (h >= 6 && h < 11) return 'MORNING';
+    if (h >= 11 && h < 16) return 'AFTERNOON';
+    if (h >= 16 && h < 20) return 'EVENING';
+    if (h >= 20 && h < 23) return 'NIGHT';
+    return 'LATE_NIGHT';
+  }
+}
+
+// Section header introducing a time-of-day group on the timeline. Uses
+// theme colors only — no per-bucket tint — so the surface stays calm.
+class _WindowHeader extends StatelessWidget {
+  const _WindowHeader({required this.window, required this.withTopGap});
+  final String window;
+  final bool withTopGap;
+
+  @override
+  Widget build(BuildContext context) {
+    final view = _windowMeta(window, context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, withTopGap ? 18 : 8, 20, 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(view.icon, size: 16, color: context.fg),
+          const SizedBox(width: 8),
+          Text(
+            view.title,
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              height: 1,
+              color: context.fgSub.withValues(alpha: 0.18),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            view.range,
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  ({String title, String range, IconData icon}) _windowMeta(
+      String w, BuildContext ctx) {
+    switch (w) {
+      case 'MORNING':
+        return (
+          title: 'MORNING',
+          range: '6:30 – 11:30 AM',
+          icon: Icons.wb_sunny_rounded,
+        );
+      case 'AFTERNOON':
+        return (
+          title: 'AFTERNOON',
+          range: '11:30 AM – 4:30 PM',
+          icon: Icons.light_mode_rounded,
+        );
+      case 'EVENING':
+        return (
+          title: 'EVENING',
+          range: '4:30 – 8:30 PM',
+          icon: Icons.wb_twilight_rounded,
+        );
+      case 'NIGHT':
+        return (
+          title: 'NIGHT',
+          range: '8:30 – 11:30 PM',
+          icon: Icons.nights_stay_rounded,
+        );
+      default:
+        return (
+          title: 'LATE NIGHT',
+          range: '11:30 PM – 4 AM',
+          icon: Icons.bedtime_rounded,
+        );
+    }
   }
 }
 
