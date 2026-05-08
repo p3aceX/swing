@@ -277,6 +277,12 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           setState(() => _prefs.windowsRanked = remaining);
         }
         await _runDiscover(skipCelebrate: true, silent: true);
+        // _runDiscover with skipCelebrate=true intentionally doesn't flip
+        // the stage (its other callers — pull-to-refresh, switch-date —
+        // are already on Results). Bootstrap reaches it from Intro, so we
+        // do the flip here.
+        if (!mounted) return;
+        setState(() => _stage = _Stage.results);
       }
     } catch (e) {
       _log('bootstrap error: $e');
