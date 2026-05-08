@@ -22,6 +22,20 @@ import 'matchmaking_providers.dart';
 // ignore: avoid_print
 void _log(String msg) => debugPrint('[Discover] $msg');
 
+// Cache entry for one date's discover results. Lets the date strip
+// switch instantly without waiting on /discover, and surfaces a count
+// badge per chip.
+class _DateResultCache {
+  const _DateResultCache({
+    required this.primary,
+    required this.alternatives,
+    required this.alternativeReason,
+  });
+  final List<MmRankedLobby> primary;
+  final List<MmRankedLobby> alternatives;
+  final String? alternativeReason;
+}
+
 // ── Stage machine ───────────────────────────────────────────────────────────
 
 enum _Stage { intro, setup, celebrating, results }
@@ -170,6 +184,14 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   List<MmRankedLobby> _primary = [];
   List<MmRankedLobby> _alternatives = [];
   String? _alternativeReason;
+  // Per-date results cache. When the user taps a different date in the
+  // strip we render the cached results immediately (no flash of "no
+  // matches") then refresh in the background. Same map drives the
+  // match-count badge on each date chip.
+  final Map<String, _DateResultCache> _resultsByDate = {};
+  // Polls /discover for the active date every 30s while on the Results
+  // stage, so users see new opponents without pulling to refresh.
+  Timer? _autoRefreshTimer;
   String? _error;
   bool _submitting = false;
   Timer? _expiryTicker;
@@ -190,11 +212,26 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     // bounces the user back to Intro automatically.
     _expiryTicker =
         Timer.periodic(const Duration(seconds: 60), (_) => _maybeExpire());
+    // Background refresh — every 30s, silently re-run /discover for the
+    // active date so newly-posted opponents appear without a manual pull.
+    _autoRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _autoRefreshTick(),
+    );
+  }
+
+  Future<void> _autoRefreshTick() async {
+    if (!mounted) return;
+    if (_stage != _Stage.results) return;
+    if (_currentTeam == null || _activeLobbyId == null) return;
+    if (_prefs.windowsRanked.isEmpty) return;
+    await _runDiscover(skipCelebrate: true, silent: true);
   }
 
   @override
   void dispose() {
     _expiryTicker?.cancel();
+    _autoRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -503,6 +540,12 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         groundsRanked: _prefs.preferredArenaIdList,
       );
       if (!mounted) return false;
+      // Cache for ALL dates (multi-date submissions cache each one).
+      _resultsByDate[dateApi] = _DateResultCache(
+        primary: res.primary,
+        alternatives: res.alternatives,
+        alternativeReason: res.alternativeReason,
+      );
       if (recordResponse) {
         setState(() {
           _activeLobbyId = res.yourLobbyId;
@@ -524,6 +567,7 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         });
       } else {
         _lastBackgroundLobbyId = res.yourLobbyId;
+        if (mounted) setState(() {}); // refresh chip badges
       }
       return true;
     } catch (e) {
@@ -561,6 +605,11 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
         groundsRanked: _prefs.preferredArenaIdList,
       );
       if (!mounted) return;
+      _resultsByDate[_prefs.dateApi] = _DateResultCache(
+        primary: res.primary,
+        alternatives: res.alternatives,
+        alternativeReason: res.alternativeReason,
+      );
       setState(() {
         _activeLobbyId = res.yourLobbyId;
         _primary = res.primary;
@@ -831,12 +880,14 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
           onCancel: _cancelSearch,
           onChallenge: (lobby) => widget.onChallenge(lobby, _currentTeam),
           onSwitchDate: (newDateApi) async {
-            // Move active results to the picked date and re-run discover.
             DateTime? d;
             try {
               d = DateTime.parse(newDateApi);
             } catch (_) {}
             if (d == null) return;
+            // Pull cached results for that date so the user sees them
+            // instantly — no flash of "no matches" while /discover loads.
+            final cached = _resultsByDate[newDateApi];
             setState(() {
               _prefs.date = d!;
               if (_prefs.dates.isNotEmpty &&
@@ -844,11 +895,15 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
                       (x) => x.toIso8601String().startsWith(newDateApi))) {
                 _prefs.dates = [..._prefs.dates, d!];
               }
-              // Clear current results while the new date loads.
-              _primary = const [];
-              _alternatives = const [];
+              _primary = cached?.primary ?? const [];
+              _alternatives = cached?.alternatives ?? const [];
+              _alternativeReason = cached?.alternativeReason;
             });
             await _runDiscover(skipCelebrate: true);
+          },
+          dateMatchCounts: {
+            for (final entry in _resultsByDate.entries)
+              entry.key: entry.value.primary.length,
           },
         ),
     };
@@ -2081,6 +2136,7 @@ class _DiscoverResults extends StatefulWidget {
     required this.onCancel,
     required this.onChallenge,
     required this.onSwitchDate,
+    required this.dateMatchCounts,
   });
 
   final _Prefs prefs;
@@ -2098,6 +2154,8 @@ class _DiscoverResults extends StatefulWidget {
   final VoidCallback onCancel;
   final ValueChanged<MmOpenLobby> onChallenge;
   final ValueChanged<String> onSwitchDate;
+  /// dateApi → primary match count. Drives the badge on each date chip.
+  final Map<String, int> dateMatchCounts;
 
   @override
   State<_DiscoverResults> createState() => _DiscoverResultsState();
@@ -2125,6 +2183,7 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
     final onCancel = widget.onCancel;
     final onChallenge = widget.onChallenge;
     final onSwitchDate = widget.onSwitchDate;
+    final dateMatchCounts = widget.dateMatchCounts;
     return Column(
       children: [
         SafeArea(
@@ -2170,6 +2229,7 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
             submitted: submittedLobbies,
             activeDateApi: prefs.dateApi,
             onSelect: onSwitchDate,
+            matchCounts: dateMatchCounts,
           ),
         ),
         // Time-of-day filter strip — chips for each bucket that has at
@@ -2207,22 +2267,23 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
 
 // ── Calendar-timeline (Discover Results) ──────────────────────────────────
 
-// Horizontal date chips spanning 14 days from today.
-//   • Active (the date currently rendered in the timeline) → gold fill.
-//   • Has matches (date the user searched, i.e. in submittedLobbies) →
-//     light-blue fill (sky tint). Tap to switch the timeline to that date.
-//   • No matches yet → white fill with a subtle border. Tap = run a fresh
-//     discover for that date so the user can extend the search range.
+// Horizontal date chips — only dates the user picked in the wizard.
+//   • Active chip → blue fill (context.sky), white text.
+//   • Inactive chip → bare bg + hairline border.
+//   • Match count badge on top-right when /discover has cached results
+//     for that date.
 class _MatchDateStrip extends StatelessWidget {
   const _MatchDateStrip({
     required this.submitted,
     required this.activeDateApi,
     required this.onSelect,
+    this.matchCounts = const {},
   });
 
   final List<({String date, String lobbyId})> submitted;
   final String activeDateApi;
   final ValueChanged<String> onSelect;
+  final Map<String, int> matchCounts;
 
   @override
   Widget build(BuildContext context) {
@@ -2246,68 +2307,97 @@ class _MatchDateStrip extends StatelessWidget {
           try { d = DateTime.parse(api); } catch (_) {}
           if (d == null) return const SizedBox.shrink();
           final isActive = api == activeDateApi;
-          // Plain treatment — active chip filled with the app's foreground
-          // accent (inverted), inactive chips show as bare text on bg with
-          // a hairline border. No coloured fills that fight the theme.
-          final bgColor = isActive ? context.fg : context.bg;
+          final bgColor = isActive ? context.sky : context.bg;
           final borderColor = isActive
               ? Colors.transparent
               : context.fg.withValues(alpha: 0.12);
-          final fgColor = isActive ? context.bg : context.fg;
+          final fgColor = isActive ? Colors.white : context.fg;
           final fgSubColor = isActive
-              ? context.bg.withValues(alpha: 0.65)
+              ? Colors.white.withValues(alpha: 0.75)
               : context.fgSub;
           const monthNames = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
           const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          final count = matchCounts[api] ?? -1;
           return GestureDetector(
             onTap: isActive ? null : () => onSelect(api),
             behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 56,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: borderColor, width: 1),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    monthNames[d.month],
-                    style: TextStyle(
-                      color: fgSubColor,
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                      height: 1.0,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 56,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: borderColor, width: 1),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        monthNames[d.month],
+                        style: TextStyle(
+                          color: fgSubColor,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.6,
+                          height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${d.day}',
+                        style: TextStyle(
+                          color: fgColor,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.4,
+                          height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        dowNames[d.weekday],
+                        style: TextStyle(
+                          color: fgSubColor,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (count > 0)
+                  Positioned(
+                    top: -4,
+                    right: -4,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: context.fg,
+                        shape: BoxShape.rectangle,
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: context.bg, width: 1.5),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '$count',
+                        style: TextStyle(
+                          color: context.bg,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          height: 1.0,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${d.day}',
-                    style: TextStyle(
-                      color: fgColor,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.4,
-                      height: 1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    dowNames[d.weekday],
-                    style: TextStyle(
-                      color: fgSubColor,
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
-                      height: 1.0,
-                    ),
-                  ),
-                ],
-              ),
+              ],
             ),
           );
         },
@@ -2516,8 +2606,10 @@ class _WindowFilterStrip extends StatelessWidget {
             );
           }
           final w = ordered[i - 1];
+          final meta = _shortLabel(w);
           return _WindowChip(
-            label: _shortLabel(w),
+            label: meta.label,
+            icon: meta.icon,
             selected: activeWindow == w,
             onTap: () => onSelect(activeWindow == w ? null : w),
           );
@@ -2526,18 +2618,18 @@ class _WindowFilterStrip extends StatelessWidget {
     );
   }
 
-  static String _shortLabel(String w) {
+  static ({String label, IconData icon}) _shortLabel(String w) {
     switch (w) {
       case 'MORNING':
-        return 'Morning';
+        return (label: 'Morn', icon: Icons.wb_sunny_rounded);
       case 'AFTERNOON':
-        return 'Afternoon';
+        return (label: 'Aft', icon: Icons.light_mode_rounded);
       case 'EVENING':
-        return 'Evening';
+        return (label: 'Eve', icon: Icons.wb_twilight_rounded);
       case 'NIGHT':
-        return 'Night';
+        return (label: 'Night', icon: Icons.nights_stay_rounded);
       default:
-        return 'Late night';
+        return (label: 'Late', icon: Icons.bedtime_rounded);
     }
   }
 }
@@ -2547,20 +2639,23 @@ class _WindowChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.icon,
   });
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
+    final fg = selected ? Colors.white : context.fg;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? context.fg : context.bg,
+          color: selected ? context.sky : context.bg,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: selected
@@ -2569,14 +2664,23 @@ class _WindowChip extends StatelessWidget {
             width: 1,
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? context.bg : context.fg,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.2,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: fg),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
         ),
       ),
     );
