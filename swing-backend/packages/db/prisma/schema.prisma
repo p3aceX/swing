@@ -2222,7 +2222,7 @@ model Team {
   foundedYear         Int?
   // Format & structure
   gender              Gender    @default(MIXED)
-  ageGroup            String    @default("OPEN") // OPEN | U19 | U23 | U30 | VETERANS
+  ageGroup            String    @default("SENIOR") // U14 | U16 | U19 | U23 | SENIOR
   format              String?   // T20 | ODI | TEST | ALL
   skillLevel          String?   // BEGINNER | INTERMEDIATE | ADVANCED | PROFESSIONAL
   isPublic            Boolean   @default(true)

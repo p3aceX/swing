@@ -386,6 +386,23 @@ class _TeamHeroHeader extends ConsumerWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      // Category line — at-a-glance identity:
+                      //   "U-19 · Men · Club/Academy"
+                      // Built from ageGroup + gender + teamType so the
+                      // user knows what bracket the team plays in before
+                      // they read anything else.
+                      if (_categoryLine(team) != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _categoryLine(team)!,
+                          style: TextStyle(
+                            color: context.accent,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 6,
@@ -393,8 +410,6 @@ class _TeamHeroHeader extends ConsumerWidget {
                         children: [
                           if (_hasText(team.city))
                             _Pill(team.city!, color: context.fgSub),
-                          if (_hasText(team.teamTypeLabel))
-                            _Pill(team.teamTypeLabel!, color: context.fgSub),
                           _Pill(
                             '${team.members.length} players',
                             color: context.fgSub,
@@ -788,12 +803,8 @@ class _OverviewTab extends StatelessWidget {
                 children: [
                   if (_hasText(team.city))
                     _InfoTag(Icons.location_on_outlined, team.city!),
-                  if (_hasText(team.teamTypeLabel))
-                    _InfoTag(Icons.shield_outlined, team.teamTypeLabel!),
-                  if (_hasText(team.genderLabel))
-                    _InfoTag(Icons.people_alt_outlined, team.genderLabel!),
-                  if (_hasText(team.ageGroupLabel))
-                    _InfoTag(Icons.cake_outlined, team.ageGroupLabel!),
+                  // Category (ageGroup/gender/teamType) lives in the hero
+                  // header now; no need to duplicate as Overview tags.
                   if (_hasText(team.shortName))
                     _InfoTag(Icons.tag_rounded, team.shortName!),
                   if (team.averageSwingIndex != null)
@@ -3488,6 +3499,18 @@ TeamMember? _memberForRole(PlayerTeam team, String role) {
 }
 
 bool _hasText(String? v) => v != null && v.trim().isNotEmpty;
+
+/// "U-19 · Men · Club/Academy" — built from ageGroup, gender, teamType.
+/// Returns null when no parts are populated (the line is hidden in that case).
+String? _categoryLine(PlayerTeam team) {
+  final parts = <String>[
+    if (_hasText(team.ageGroupLabel)) team.ageGroupLabel!,
+    if (_hasText(team.genderLabel)) team.genderLabel!,
+    if (_hasText(team.teamTypeLabel)) team.teamTypeLabel!,
+  ];
+  if (parts.isEmpty) return null;
+  return parts.join('  ·  ');
+}
 
 String _initials(PlayerTeam team) {
   final src = _hasText(team.shortName) ? team.shortName! : team.name;

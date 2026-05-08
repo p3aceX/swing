@@ -2249,6 +2249,16 @@ export class PlayerService {
           : null
         : (team as any).wicketKeeperId;
 
+    // Corporate teams are always Senior/Open. If the patch flips
+    // teamType to CORPORATE OR the team is already CORPORATE, force
+    // ageGroup to SENIOR before writing.
+    const effectiveTeamType =
+      (data.teamType as string | undefined) ?? (team as any).teamType;
+    const ageGroup =
+      effectiveTeamType === "CORPORATE"
+        ? "SENIOR"
+        : (data.ageGroup || undefined);
+
     const updated = await prisma.team.update({
       where: { id: teamId },
       data: {
@@ -2257,7 +2267,7 @@ export class PlayerService {
         city: data.city?.trim(),
         teamType: (data.teamType as any) || undefined,
         gender: (data.gender as any) || undefined,
-        ageGroup: data.ageGroup || undefined,
+        ageGroup,
         format: data.format ?? undefined,
         skillLevel: data.skillLevel ?? undefined,
         motto: data.motto?.trim(),
@@ -2399,6 +2409,48 @@ export class PlayerService {
   ) {
     const profile = await this.getOrCreateProfile(userId);
     const captainId = data.iAmCaptain ? profile.id : null;
+
+    // Auto-association: Team ↔ Academy/Coach/Arena is decided by who
+    // *creates* the team, not by anything in the form. If the creator
+    // owns/manages an entity, the team is stamped with it. Multiple owned
+    // entities of the same type → pick the most recent (covers the rare
+    // case of an owner with two academies, etc.). The form fields still
+    // win when explicitly passed (admin/club tooling).
+    const [ownedAcademies, coachProfile, ownedArenas] = await Promise.all([
+      data.academyId
+        ? Promise.resolve([])
+        : prisma.academy.findMany({
+            where: { owner: { userId }, isActive: true },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+          }),
+      data.coachId
+        ? Promise.resolve(null)
+        : prisma.coachProfile.findUnique({
+            where: { userId },
+            select: { id: true },
+          }),
+      data.arenaId
+        ? Promise.resolve([])
+        : prisma.arena.findMany({
+            where: { owner: { userId }, isActive: true },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+          }),
+    ]);
+
+    const academyId =
+      data.academyId || (ownedAcademies as { id: string }[])[0]?.id || null;
+    const coachId =
+      data.coachId || (coachProfile as { id: string } | null)?.id || null;
+    const arenaId =
+      data.arenaId || (ownedArenas as { id: string }[])[0]?.id || null;
+
+    // Corporate teams are always Senior/Open. Clamp at the service layer
+    // so a stale client can't post a CORPORATE U-14 squad.
+    const ageGroup =
+      data.teamType === "CORPORATE" ? "SENIOR" : data.ageGroup;
+
     const team = await prisma.team.create({
       data: {
         name: data.name.trim(),
@@ -2406,13 +2458,13 @@ export class PlayerService {
         city: data.city?.trim() || null,
         teamType: data.teamType as any,
         gender: data.gender as any,
-        ageGroup: data.ageGroup,
+        ageGroup,
         captainId,
         playerIds: [profile.id],
         createdByUserId: userId,
-        academyId: data.academyId || null,
-        coachId: data.coachId || null,
-        arenaId: data.arenaId || null,
+        academyId,
+        coachId,
+        arenaId,
         motto: data.motto?.trim() || null,
         homeGroundName: data.homeGroundName?.trim() || null,
         foundedYear: data.foundedYear ?? null,

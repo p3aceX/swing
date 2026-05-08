@@ -120,11 +120,11 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
   ];
 
   static const _ageGroups = [
-    ('OPEN', 'Open'),
+    ('U14', 'Under 14'),
+    ('U16', 'Under 16'),
     ('U19', 'Under 19'),
     ('U23', 'Under 23'),
-    ('U30', 'Under 30'),
-    ('VETERANS', 'Veterans (35+)'),
+    ('SENIOR', 'Senior / Open'),
   ];
 
   static const _formats = [
@@ -549,7 +549,13 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
                 title: 'Squad Type',
                 options: _teamTypes,
                 selected: _teamType,
-                onSelected: (v) => setState(() => _teamType = v),
+                // Corporate teams are always Senior/Open — clamp the age
+                // group automatically so the user can't end up with an
+                // illegal U-14 corporate side.
+                onSelected: (v) => setState(() {
+                  _teamType = v;
+                  if (v == 'CORPORATE') _ageGroup = 'SENIOR';
+                }),
               ),
             ),
             Divider(height: 1, indent: 20, color: context.stroke),
@@ -569,16 +575,21 @@ class _HostCreateTeamScreenState extends ConsumerState<HostCreateTeamScreen> {
             Divider(height: 1, indent: 20, color: context.stroke),
             _PickerTile(
               icon: Icons.people_alt_rounded,
-              label: _ageGroup != null
-                  ? _labelFor(_ageGroup, _ageGroups)
-                  : 'Age group  (required)',
-              isSet: _ageGroup != null,
-              onTap: () => _showPicker(
-                title: 'Age Group',
-                options: _ageGroups,
-                selected: _ageGroup,
-                onSelected: (v) => setState(() => _ageGroup = v),
-              ),
+              label: _teamType == 'CORPORATE'
+                  ? 'Senior / Open  (required for Corporate)'
+                  : (_ageGroup != null
+                      ? _labelFor(_ageGroup, _ageGroups)
+                      : 'Age group  (required)'),
+              isSet: _ageGroup != null || _teamType == 'CORPORATE',
+              // Corporate teams skip the picker — the value is forced.
+              onTap: _teamType == 'CORPORATE'
+                  ? () {}
+                  : () => _showPicker(
+                        title: 'Age Group',
+                        options: _ageGroups,
+                        selected: _ageGroup,
+                        onSelected: (v) => setState(() => _ageGroup = v),
+                      ),
             ),
             Divider(height: 1, indent: 20, color: context.stroke),
             _PickerTile(

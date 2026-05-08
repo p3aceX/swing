@@ -92,11 +92,16 @@ class PlayerTeam {
     final raw = ageGroup;
     if (raw == null || raw.isEmpty) return null;
     return switch (raw) {
-      'OPEN' => 'Open',
-      'U19' => 'Under 19',
-      'U23' => 'Under 23',
-      'U30' => 'Under 30',
-      'VETERANS' => 'Veterans (35+)',
+      'U14' => 'U-14',
+      'U16' => 'U-16',
+      'U19' => 'U-19',
+      'U23' => 'U-23',
+      'SENIOR' => 'Senior / Open',
+      // Legacy values kept for read-back compat — pre-realign teams might
+      // still flow through if a stale revision is talking to the new API.
+      'OPEN' => 'Senior / Open',
+      'U30' => 'Senior / Open',
+      'VETERANS' => 'Senior / Open',
       _ => _titleCase(raw),
     };
   }
