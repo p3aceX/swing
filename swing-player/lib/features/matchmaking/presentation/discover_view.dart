@@ -2154,9 +2154,12 @@ class _DiscoverResults extends StatelessWidget {
 
 // ── Calendar-timeline (Discover Results) ──────────────────────────────────
 
-// Horizontal date chips. Only dates the player submitted appear; empty
-// days are skipped so the strip never feels sparse. Active chip uses the
-// app's gold accent (matches the design reference).
+// Horizontal date chips spanning 14 days from today.
+//   • Active (the date currently rendered in the timeline) → gold fill.
+//   • Has matches (date the user searched, i.e. in submittedLobbies) →
+//     light-blue fill (sky tint). Tap to switch the timeline to that date.
+//   • No matches yet → white fill with a subtle border. Tap = run a fresh
+//     discover for that date so the user can extend the search range.
 class _MatchDateStrip extends StatelessWidget {
   const _MatchDateStrip({
     required this.submitted,
@@ -2170,25 +2173,56 @@ class _MatchDateStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Always include the active date even if it isn't in the submitted list
-    // (single-date discover fires without writing to submittedLobbies).
-    final dates = <String>{
+    final today = DateTime.now();
+    final start = DateTime(today.year, today.month, today.day);
+    // 14-day forward strip — covers the lobby-expiry window. The active
+    // date may be in the past during dev / fixture data; ensure it's
+    // surfaced regardless.
+    final range = <String>{
+      for (var i = 0; i < 14; i++)
+        DateFormat('yyyy-MM-dd').format(start.add(Duration(days: i))),
       activeDateApi,
       for (final s in submitted) s.date,
     }.toList()..sort();
-    if (dates.isEmpty) return const SizedBox.shrink();
+    if (range.isEmpty) return const SizedBox.shrink();
+    final submittedDates = {for (final s in submitted) s.date};
     return SizedBox(
-      height: 64,
+      height: 78,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: dates.length,
+        itemCount: range.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
-          final api = dates[i];
-          final isActive = api == activeDateApi;
+          final api = range[i];
           DateTime? d;
           try { d = DateTime.parse(api); } catch (_) {}
           if (d == null) return const SizedBox.shrink();
+          final isActive = api == activeDateApi;
+          final hasMatches = submittedDates.contains(api) || api == activeDateApi;
+          // Color rule (per the user's design call):
+          //   active        → gold
+          //   has matches   → light blue (sky)
+          //   no matches    → white with a faint border
+          final bgColor = isActive
+              ? context.gold
+              : hasMatches
+                  ? context.sky.withValues(alpha: 0.18)
+                  : context.bg;
+          final borderColor = isActive
+              ? Colors.transparent
+              : hasMatches
+                  ? context.sky.withValues(alpha: 0.45)
+                  : context.fg.withValues(alpha: 0.10);
+          final fgColor = isActive
+              ? Colors.black
+              : hasMatches
+                  ? context.sky
+                  : context.fg;
+          final fgSubColor = isActive
+              ? Colors.black54
+              : hasMatches
+                  ? context.sky.withValues(alpha: 0.75)
+                  : context.fgSub;
           const monthNames = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
           const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -2197,47 +2231,45 @@ class _MatchDateStrip extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             child: Container(
               width: 56,
-              padding: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
-                color: isActive ? context.gold : context.bg,
+                color: bgColor,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isActive
-                      ? Colors.transparent
-                      : context.fg.withValues(alpha: 0.10),
-                  width: 1,
-                ),
+                border: Border.all(color: borderColor, width: 1),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     monthNames[d.month],
                     style: TextStyle(
-                      color: isActive ? Colors.black87 : context.fgSub,
-                      fontSize: 10,
+                      color: fgSubColor,
+                      fontSize: 9.5,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${d.day}',
-                    style: TextStyle(
-                      color: isActive ? Colors.black : context.fg,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
                       height: 1.0,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${d.day}',
+                    style: TextStyle(
+                      color: fgColor,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
                   Text(
                     dowNames[d.weekday],
                     style: TextStyle(
-                      color: isActive ? Colors.black54 : context.fgSub,
-                      fontSize: 11,
+                      color: fgSubColor,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w700,
+                      height: 1.0,
                     ),
                   ),
                 ],
