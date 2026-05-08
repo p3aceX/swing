@@ -1037,12 +1037,24 @@ export class MatchmakingService {
     const tentativeAllocCounter = new Map<string, number>()
     const ratingMultiplier = (avg: number | null | undefined): number => {
       const v = typeof avg === 'number' ? avg : 3.0
-      // Linear map: 1.0 → 0.5, 3.0 → 1.0, 5.0 → 1.5
-      return 0.5 + (Math.max(1, Math.min(5, v)) - 1) * 0.25
+      // Tight linear map: 1.0 → 0.85, 3.0 → 1.025, 5.0 → 1.20.
+      // The original [0.5, 1.5] swing meant a 4.7★ arena dominated cold-
+      // start by 42.5% before any load could push it down — at load=0 (77%
+      // of (arena, date) pairs in our test fixture), quality alone won.
+      // The narrower [0.85, 1.20] band caps quality's advantage at ~14%, so
+      // a single active lobby on the top arena lets a comparable lower-
+      // rated venue take the next allocation. Low-rated arenas still get
+      // priced into the score; they just can't be priced *out* of the
+      // marketplace at zero load.
+      return 0.85 + (Math.max(1, Math.min(5, v)) - 1) * 0.0875
     }
     const loadFactor = (arenaId: string): number => {
       const load = arenaLoadByDate.get(arenaId) ?? 0
-      return 1 / (1 + load / 3)
+      // Steeper decay (denominator 1.5 instead of 3) so a single owner-posted
+      // lobby on an arena drops its draw to ~0.6×, not 0.75×. In sparse
+      // markets a 4.7★ arena would otherwise dominate indefinitely because
+      // no other quality signal can push it down.
+      return 1 / (1 + load / 1.5)
     }
     const diversityFactor = (arenaId: string): number => {
       const used = tentativeAllocCounter.get(arenaId) ?? 0
