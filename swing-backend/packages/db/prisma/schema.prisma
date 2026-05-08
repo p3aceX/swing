@@ -1342,6 +1342,7 @@ model Match {
   leadershipSamples       PlayerLeadershipSample[]
   showcaseItems           ProfileShowcaseItem[]
   performanceMatchReviews PerformanceMatchReview[]
+  arenaReviews            Review[]
   venue                   Venue?                   @relation(fields: [venueId], references: [id])
 
   roles                   MatchRole[]
@@ -2242,6 +2243,7 @@ model Team {
   tournamentTeams    TournamentTeam[]
   matchmakingLobbies MatchmakingLobby[]
   matchmakingInterests MatchmakingInterest[]
+  arenaReviews         Review[]
 
   @@index([city])
   @@index([powerScore])
@@ -2355,6 +2357,12 @@ model Arena {
   verifiedAt         DateTime?
   rating             Float     @default(0)
   totalRatings       Int       @default(0)
+  // Match-context-only rating, Bayesian-smoothed (k=5, prior=3.0). Drives
+  // the rating-weighted ground allocation in L3 — separate from the
+  // all-source `rating` so casual reviews don't pollute the matchmaking
+  // flywheel signal.
+  matchRatingAvg     Float     @default(3.0)
+  matchRatingCount   Int       @default(0)
   isActive           Boolean   @default(true)
   // Per-arena commission override in basis points (8% = 800). NULL falls
   // back to the platform-wide PlatformConfig.commissionRateBps (default 0).
@@ -3139,6 +3147,12 @@ model Review {
   arenaId    String?
   coachId    String?
   gigId      String?
+  // Match-context fields. When set, this review counts toward the arena's
+  // matchRatingAvg / matchRatingCount aggregates and gates the L3
+  // rating-weighted allocation. Captain-submitted only.
+  matchId    String?
+  teamId     String?
+  tags       String[] @default([])
   rating     Int
   comment    String?
   isVerified Boolean  @default(false)
@@ -3146,6 +3160,13 @@ model Review {
 
   reviewer User   @relation(fields: [reviewerId], references: [id])
   arena    Arena? @relation(fields: [arenaId], references: [id])
+  match    Match? @relation(fields: [matchId], references: [id])
+  team     Team?  @relation(fields: [teamId], references: [id])
+
+  // One review per (matchId, teamId) — the captain submits once on behalf
+  // of their team. Both teams in a match can review independently.
+  @@unique([matchId, teamId])
+  @@index([arenaId, matchId])
 }
 
 // ============================================================

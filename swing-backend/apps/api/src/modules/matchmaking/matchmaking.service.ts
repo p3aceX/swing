@@ -2459,24 +2459,30 @@ export class MatchmakingService {
 
     const since = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000)
     const arenaIds = arenas.map((a: { id: string }) => a.id)
+    // Use SlotBooking — the matchmaking match → slotBooking → arenaId chain
+    // is the canonical source of "which arena hosted what". Match.venueId
+    // points to a separate generic Venue table that matchmaking doesn't
+    // populate.
     const counts: Array<{
-      venueId: string | null
+      arenaId: string
       _count: { _all: number }
-      _max: { scheduledAt: Date | null }
-    }> = await client.match.groupBy({
-      by: ['venueId'],
-      where: { venueId: { in: arenaIds }, scheduledAt: { gte: since } },
+      _max: { date: Date | null }
+    }> = await client.slotBooking.groupBy({
+      by: ['arenaId'],
+      where: {
+        arenaId: { in: arenaIds },
+        date: { gte: since },
+        status: { in: ['CONFIRMED', 'CHECKED_IN', 'COMPLETED'] },
+      },
       _count: { _all: true },
-      _max: { scheduledAt: true },
+      _max: { date: true },
     })
     const stats = new Map<string, { count: number; lastAt: Date | null }>()
     for (const c of counts) {
-      if (c.venueId) {
-        stats.set(c.venueId, {
-          count: c._count._all,
-          lastAt: c._max.scheduledAt,
-        })
-      }
+      stats.set(c.arenaId, {
+        count: c._count._all,
+        lastAt: c._max.date,
+      })
     }
     const maxCount = Math.max(
       1,
@@ -4860,5 +4866,144 @@ export class MatchmakingService {
         audience: 'PLAYER',
       }).catch(() => undefined)
     }
+  }
+
+  // ── L2 — Captain arena review ─────────────────────────────────────────────
+  // Captains submit a star+tags rating after the match is over. The review
+  // updates the arena's match-context rating aggregates (Bayesian-smoothed,
+  // k=5, prior=3.0) which feed L3's rating-weighted ground allocation.
+  //
+  // Auth: caller must be the team's captainId (or its createdByUserId, the
+  // existing fallback used everywhere else in this service). One review per
+  // (matchId, teamId).
+  async submitMatchArenaReview(
+    userId: string,
+    args: {
+      matchId: string
+      teamId: string
+      stars: number
+      tags?: string[]
+      comment?: string
+    },
+  ): Promise<{ reviewId: string; arenaId: string; matchRatingAvg: number; matchRatingCount: number }> {
+    if (args.stars < 1 || args.stars > 5) {
+      throw new AppError('INVALID_INPUT', 'Stars must be between 1 and 5.', 400)
+    }
+
+    // Captain auth + team membership in the match.
+    const team = await this.resolveCallerTeam(userId, args.teamId)
+    if (!team) throw Errors.forbidden()
+
+    const match = await prisma.match.findUnique({
+      where: { id: args.matchId },
+      select: {
+        id: true,
+        teamAId: true,
+        teamBId: true,
+        status: true,
+        slotBookingId: true,
+        completedAt: true,
+        startedAt: true,
+      },
+    })
+    if (!match) throw Errors.notFound('Match')
+    if (match.teamAId !== args.teamId && match.teamBId !== args.teamId) {
+      throw new AppError(
+        'NOT_IN_MATCH',
+        'This team did not play in the match.',
+        403,
+      )
+    }
+    // Reviews only after the match has actually happened. We accept STARTED
+    // (mid-match) and COMPLETED — and an unchecked startedAt as a soft
+    // fallback for matches whose status flow lags behind real-world play.
+    if (!match.startedAt && !match.completedAt && match.status !== 'IN_PROGRESS' && match.status !== 'COMPLETED') {
+      throw new AppError(
+        'MATCH_NOT_STARTED',
+        'You can review the ground after the match starts.',
+        400,
+      )
+    }
+
+    // Match → SlotBooking → Arena. Matchmaking matches always have a
+    // slotBookingId; non-matchmaking matches (Venue-only) can't be reviewed
+    // here.
+    if (!match.slotBookingId) {
+      throw new AppError(
+        'NO_ARENA',
+        'This match has no Swing arena to review.',
+        400,
+      )
+    }
+    const slot = await prisma.slotBooking.findUnique({
+      where: { id: match.slotBookingId },
+      select: { arenaId: true, bookedById: true },
+    })
+    if (!slot) throw Errors.notFound('SlotBooking')
+
+    // Idempotent: returning the existing review surfaces the same shape as
+    // a fresh submit, so the client doesn't have to special-case "already
+    // reviewed."
+    const existing = await prisma.review.findFirst({
+      where: { matchId: args.matchId, teamId: args.teamId },
+      select: { id: true },
+    })
+    if (existing) {
+      const arena = await prisma.arena.findUnique({
+        where: { id: slot.arenaId },
+        select: { matchRatingAvg: true, matchRatingCount: true },
+      })
+      return {
+        reviewId: existing.id,
+        arenaId: slot.arenaId,
+        matchRatingAvg: arena?.matchRatingAvg ?? 3.0,
+        matchRatingCount: arena?.matchRatingCount ?? 0,
+      }
+    }
+
+    const reviewerUserId = userId
+    const created = await prisma.review.create({
+      data: {
+        reviewerId: reviewerUserId,
+        arenaId: slot.arenaId,
+        matchId: args.matchId,
+        teamId: args.teamId,
+        rating: args.stars,
+        tags: (args.tags ?? []).slice(0, 12),
+        comment: args.comment ?? null,
+      },
+      select: { id: true },
+    })
+
+    const aggregates = await this.recomputeArenaMatchRating(slot.arenaId)
+    return {
+      reviewId: created.id,
+      arenaId: slot.arenaId,
+      matchRatingAvg: aggregates.matchRatingAvg,
+      matchRatingCount: aggregates.matchRatingCount,
+    }
+  }
+
+  // Bayesian-smoothed avg over match-context reviews only. k=5 prior=3.0 means
+  // the first ~5 reviews can't drag a fresh arena to the extremes (1.0 or
+  // 5.0). Updates Arena.matchRatingAvg + matchRatingCount in one write.
+  private async recomputeArenaMatchRating(
+    arenaId: string,
+  ): Promise<{ matchRatingAvg: number; matchRatingCount: number }> {
+    const stats = await prisma.review.aggregate({
+      where: { arenaId, matchId: { not: null } },
+      _sum: { rating: true },
+      _count: { _all: true },
+    })
+    const count = stats._count._all
+    const sum = stats._sum.rating ?? 0
+    const k = 5
+    const prior = 3.0
+    const matchRatingAvg = (k * prior + sum) / (k + count)
+    await prisma.arena.update({
+      where: { id: arenaId },
+      data: { matchRatingAvg, matchRatingCount: count } as any,
+    })
+    return { matchRatingAvg, matchRatingCount: count }
   }
 }

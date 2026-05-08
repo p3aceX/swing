@@ -236,6 +236,27 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
+  // L2 — Captain arena review. One review per (matchId, teamId). Caller must
+  // be the team's captain (or fallback creator). Stars 1–5, tags optional.
+  app.post('/matches/:matchId/review', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { matchId } = request.params as { matchId: string }
+    const body = z.object({
+      teamId: z.string(),
+      stars: z.number().int().min(1).max(5),
+      tags: z.array(z.string().max(40)).max(12).optional(),
+      comment: z.string().max(500).optional(),
+    }).parse(request.body)
+    const data = await svc.submitMatchArenaReview(user.userId, {
+      matchId,
+      teamId: body.teamId,
+      stars: body.stars,
+      tags: body.tags,
+      comment: body.comment,
+    })
+    return reply.code(201).send({ success: true, data })
+  })
+
   app.delete('/lobbies/:lobbyId', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { lobbyId } = request.params as { lobbyId: string }
