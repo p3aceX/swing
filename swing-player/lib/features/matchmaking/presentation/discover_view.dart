@@ -243,10 +243,11 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       // Restore the multi-date date strip from every active lobby of the
       // chosen team. Without this the strip starts empty after every app
       // restart even when the user has 3 dates queued.
-      final restoredSubmitted = chosen == null
+      final chosenId = chosen?.id;
+      final restoredSubmitted = chosenId == null
           ? const <({String date, String lobbyId})>[]
           : (res.allLobbies
-              .where((l) => l.teamId == chosen.id)
+              .where((l) => l.teamId == chosenId)
               .map((l) => (date: l.date, lobbyId: l.lobbyId))
               .toList()
             ..sort((a, b) => a.date.compareTo(b.date)));
