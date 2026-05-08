@@ -315,33 +315,37 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
       active ??= teamLobbies.isNotEmpty
           ? teamLobbies.last
           : (chosen != null ? _teamLobbies[chosen.id] : null);
-      if (active != null) {
-        _hydratePrefsFromLobby(active);
+      // Hoist into a final non-null local so Dart's flow analysis stops
+      // re-promoting `active` inside the setState closures below.
+      final activeLobby = active;
+      if (activeLobby != null) {
+        _hydratePrefsFromLobby(activeLobby);
         if (_prefs.windowsRanked.isEmpty) return;
         // Fully-matched lobby: render last-known results without re-hitting
         // /discover. A re-fire would 409 SLOT_CONFLICT and surface as the
         // "you're already booked" dialog every time the tab opens.
-        final fullyMatched = active.status == 'matched' ||
-            (active.windowsRanked.isNotEmpty &&
-                active.windowsMatched.length >= active.windowsRanked.length);
+        final fullyMatched = activeLobby.status == 'matched' ||
+            (activeLobby.windowsRanked.isNotEmpty &&
+                activeLobby.windowsMatched.length >=
+                    activeLobby.windowsRanked.length);
         if (fullyMatched) {
           if (!mounted) return;
           setState(() {
-            _activeLobbyId = active.lobbyId;
+            _activeLobbyId = activeLobby.lobbyId;
             _stage = _Stage.results;
           });
           return;
         }
         // Partial match: narrow windowsRanked to the still-unmatched subset
         // so the next /discover doesn't conflict with already-consumed slots.
-        if (active.windowsMatched.isNotEmpty) {
+        if (activeLobby.windowsMatched.isNotEmpty) {
           final remaining = _prefs.windowsRanked
-              .where((w) => !active.windowsMatched.contains(w.apiValue))
+              .where((w) => !activeLobby.windowsMatched.contains(w.apiValue))
               .toList();
           if (remaining.isEmpty) {
             if (!mounted) return;
             setState(() {
-              _activeLobbyId = active.lobbyId;
+              _activeLobbyId = activeLobby.lobbyId;
               _stage = _Stage.results;
             });
             return;
