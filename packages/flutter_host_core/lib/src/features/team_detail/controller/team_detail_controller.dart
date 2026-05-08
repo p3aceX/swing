@@ -135,6 +135,15 @@ class TeamDetailController extends StateNotifier<TeamDetailState> {
     String? shortName,
     String? city,
     String? teamType,
+    String? gender,
+    String? ageGroup,
+    String? format,
+    String? skillLevel,
+    String? motto,
+    String? homeGroundName,
+    int? foundedYear,
+    bool clearFoundedYear = false,
+    bool? isPublic,
     String? logoUrl,
   }) async {
     try {
@@ -144,6 +153,15 @@ class TeamDetailController extends StateNotifier<TeamDetailState> {
         shortName: shortName,
         city: city,
         teamType: teamType,
+        gender: gender,
+        ageGroup: ageGroup,
+        format: format,
+        skillLevel: skillLevel,
+        motto: motto,
+        homeGroundName: homeGroundName,
+        foundedYear: foundedYear,
+        clearFoundedYear: clearFoundedYear,
+        isPublic: isPublic,
         logoUrl: logoUrl,
       );
       await load();

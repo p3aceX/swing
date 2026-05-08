@@ -20,6 +20,7 @@ class TeamDetailCallbacks {
     this.onNavigateToPlayer,
     this.onUploadLogo,
     this.onNavigateBack,
+    this.onEditTeam,
   });
 
   final void Function(BuildContext ctx, String matchId)? onNavigateToMatch;
@@ -27,6 +28,9 @@ class TeamDetailCallbacks {
   final void Function(BuildContext ctx, String playerId)? onNavigateToPlayer;
   final Future<String?> Function(BuildContext ctx)? onUploadLogo;
   final void Function(BuildContext ctx)? onNavigateBack;
+  /// Push the unified edit screen. The host app is responsible for
+  /// navigating to its `HostCreateTeamScreen(mode: edit, ...)` route.
+  final void Function(BuildContext ctx, PlayerTeam team)? onEditTeam;
 }
 
 // ── Screen entry ──────────────────────────────────────────────────────────────
@@ -194,28 +198,11 @@ class _TeamScreen extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               actions: [
-                if (team.isOwner)
+                if (team.isOwner && callbacks?.onEditTeam != null)
                   IconButton(
                     icon: Icon(Icons.edit_rounded, color: context.fg, size: 20),
                     tooltip: 'Edit team',
-                    onPressed: () => showModalBottomSheet<void>(
-                      context: context,
-                      isScrollControlled: true,
-                      backgroundColor: Colors.transparent,
-                      builder: (_) => _EditTeamSheet(
-                        team: team,
-                        teamId: teamId,
-                        currentUserId: currentUserId,
-                        callbacks: callbacks,
-                        onNavigateBack: () {
-                          if (callbacks?.onNavigateBack != null) {
-                            callbacks!.onNavigateBack!(context);
-                          } else {
-                            Navigator.of(context).maybePop();
-                          }
-                        },
-                      ),
-                    ),
+                    onPressed: () => callbacks!.onEditTeam!(context, team),
                   ),
                 if (team.isOwner)
                   IconButton(
@@ -233,6 +220,40 @@ class _TeamScreen extends ConsumerWidget {
                         losses: played.where((m) => m.result == MatchResult.loss).length,
                       );
                     },
+                  ),
+                if (team.isOwner)
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert_rounded,
+                        color: context.fg, size: 20),
+                    color: context.surf,
+                    onSelected: (v) {
+                      if (v == 'delete') {
+                        _confirmDeleteTeam(
+                          context: context,
+                          ref: ref,
+                          teamId: teamId,
+                          currentUserId: currentUserId,
+                          teamName: team.name,
+                          onAfterDelete: callbacks?.onNavigateBack,
+                        );
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline_rounded,
+                                color: context.danger, size: 18),
+                            const SizedBox(width: 10),
+                            Text('Delete team',
+                                style: TextStyle(
+                                    color: context.danger,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 const SizedBox(width: 4),
               ],
@@ -372,8 +393,8 @@ class _TeamHeroHeader extends ConsumerWidget {
                         children: [
                           if (_hasText(team.city))
                             _Pill(team.city!, color: context.fgSub),
-                          if (_hasText(team.teamType))
-                            _Pill(team.teamType!, color: context.fgSub),
+                          if (_hasText(team.teamTypeLabel))
+                            _Pill(team.teamTypeLabel!, color: context.fgSub),
                           _Pill(
                             '${team.members.length} players',
                             color: context.fgSub,
@@ -767,8 +788,12 @@ class _OverviewTab extends StatelessWidget {
                 children: [
                   if (_hasText(team.city))
                     _InfoTag(Icons.location_on_outlined, team.city!),
-                  if (_hasText(team.teamType))
-                    _InfoTag(Icons.shield_outlined, team.teamType!),
+                  if (_hasText(team.teamTypeLabel))
+                    _InfoTag(Icons.shield_outlined, team.teamTypeLabel!),
+                  if (_hasText(team.genderLabel))
+                    _InfoTag(Icons.people_alt_outlined, team.genderLabel!),
+                  if (_hasText(team.ageGroupLabel))
+                    _InfoTag(Icons.cake_outlined, team.ageGroupLabel!),
                   if (_hasText(team.shortName))
                     _InfoTag(Icons.tag_rounded, team.shortName!),
                   if (team.averageSwingIndex != null)
@@ -2473,410 +2498,6 @@ class _EmptyMsg extends StatelessWidget {
   }
 }
 
-// ── Edit team sheet ───────────────────────────────────────────────────────────
-
-class _EditTeamSheet extends ConsumerStatefulWidget {
-  const _EditTeamSheet({
-    required this.team,
-    required this.teamId,
-    required this.currentUserId,
-    this.callbacks,
-    required this.onNavigateBack,
-  });
-
-  final PlayerTeam team;
-  final String teamId;
-  final String? currentUserId;
-  final TeamDetailCallbacks? callbacks;
-  final VoidCallback onNavigateBack;
-
-  @override
-  ConsumerState<_EditTeamSheet> createState() => _EditTeamSheetState();
-}
-
-class _EditTeamSheetState extends ConsumerState<_EditTeamSheet> {
-  late final TextEditingController _nameCtrl;
-  late final TextEditingController _shortNameCtrl;
-  late final TextEditingController _cityCtrl;
-  String? _selectedType;
-  bool _saving = false;
-  String? _error;
-  String? _pendingLogoUrl;
-  bool _uploadingLogo = false;
-
-  static const _teamTypes = [
-    'CLUB',
-    'CORPORATE',
-    'SCHOOL',
-    'COLLEGE',
-    'DISTRICT',
-    'PROFESSIONAL',
-    'AMATEUR',
-    'RECREATIONAL',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _nameCtrl = TextEditingController(text: widget.team.name);
-    _shortNameCtrl =
-        TextEditingController(text: widget.team.shortName ?? '');
-    _cityCtrl = TextEditingController(text: widget.team.city ?? '');
-    final raw =
-        widget.team.teamType?.toUpperCase().replaceAll(' ', '_');
-    _selectedType =
-        raw != null && _teamTypes.contains(raw) ? raw : null;
-  }
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    _shortNameCtrl.dispose();
-    _cityCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickLogo() async {
-    if (widget.callbacks?.onUploadLogo == null) return;
-    setState(() => _uploadingLogo = true);
-    try {
-      final url = await widget.callbacks!.onUploadLogo!(context);
-      if (mounted && url != null) {
-        setState(() => _pendingLogoUrl = url);
-      }
-    } finally {
-      if (mounted) setState(() => _uploadingLogo = false);
-    }
-  }
-
-  Future<void> _save() async {
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = 'Team name is required');
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-
-    final ctrl = ref.read(teamDetailControllerProvider(
-        (teamId: widget.teamId, currentUserId: widget.currentUserId)).notifier);
-
-    final ok = await ctrl.updateTeam(
-      name: name,
-      shortName: _shortNameCtrl.text.trim(),
-      city: _cityCtrl.text.trim(),
-      teamType: _selectedType,
-      logoUrl: _pendingLogoUrl,
-    );
-    if (!mounted) return;
-    setState(() => _saving = false);
-    if (ok) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Team updated')));
-    } else {
-      setState(() => _error = ref
-              .read(teamDetailControllerProvider(
-                  (teamId: widget.teamId, currentUserId: widget.currentUserId)))
-              .error ??
-          'Could not update team');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasLogo = _pendingLogoUrl != null ||
-        (widget.team.logoUrl != null && widget.team.logoUrl!.isNotEmpty);
-    final displayLogoUrl =
-        _pendingLogoUrl ?? widget.team.logoUrl;
-    final canUploadLogo = widget.callbacks?.onUploadLogo != null;
-
-    return Padding(
-      padding: EdgeInsets.only(
-          top: 80, bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Container(
-        decoration: BoxDecoration(
-          color: context.bg,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 5,
-                    decoration: BoxDecoration(
-                        color: context.stroke,
-                        borderRadius: BorderRadius.circular(999)),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text('Edit Team',
-                    style: TextStyle(
-                        color: context.fg,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900)),
-                const SizedBox(height: 20),
-
-                // Logo picker
-                if (canUploadLogo)
-                  Center(
-                    child: GestureDetector(
-                      onTap: _saving ? null : _pickLogo,
-                      child: Stack(
-                        alignment: Alignment.bottomRight,
-                        children: [
-                          Container(
-                            width: 88,
-                            height: 88,
-                            decoration: BoxDecoration(
-                              color: context.surf,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _pendingLogoUrl != null
-                                    ? context.accent
-                                    : context.stroke,
-                                width: 2,
-                              ),
-                              image: hasLogo && displayLogoUrl != null
-                                  ? DecorationImage(
-                                      image:
-                                          NetworkImage(displayLogoUrl),
-                                      fit: BoxFit.cover)
-                                  : null,
-                            ),
-                            child: (!hasLogo)
-                                ? Icon(Icons.shield_rounded,
-                                    color: context.fgSub, size: 36)
-                                : null,
-                          ),
-                          Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              color: context.accent,
-                              shape: BoxShape.circle,
-                              border:
-                                  Border.all(color: context.bg, width: 2),
-                            ),
-                            child: _uploadingLogo
-                                ? const Padding(
-                                    padding: EdgeInsets.all(5),
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white))
-                                : const Icon(Icons.camera_alt_rounded,
-                                    color: Colors.white, size: 13),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (canUploadLogo && _pendingLogoUrl != null) ...[
-                  const SizedBox(height: 6),
-                  Center(
-                    child: Text('New logo selected',
-                        style:
-                            TextStyle(color: context.fgSub, fontSize: 11)),
-                  ),
-                ],
-                if (canUploadLogo) const SizedBox(height: 20),
-
-                _FieldLabel('Team Name'),
-                _HostTextField(
-                    controller: _nameCtrl,
-                    hint: 'e.g. Mumbai Warriors',
-                    prefixIcon: Icons.shield_rounded),
-                const SizedBox(height: 14),
-                _FieldLabel('Short Name'),
-                _HostTextField(
-                    controller: _shortNameCtrl,
-                    hint: 'e.g. MW',
-                    prefixIcon: Icons.short_text_rounded),
-                const SizedBox(height: 14),
-                _FieldLabel('City'),
-                _HostTextField(
-                    controller: _cityCtrl,
-                    hint: 'e.g. Mumbai',
-                    prefixIcon: Icons.location_on_outlined),
-                const SizedBox(height: 14),
-                _FieldLabel('Team Type'),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: context.surf,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: context.stroke),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String?>(
-                      value: _selectedType,
-                      isExpanded: true,
-                      dropdownColor: context.surf,
-                      hint: Text('Select type',
-                          style: TextStyle(
-                              color: context.fgSub, fontSize: 14)),
-                      items: [
-                        DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('None',
-                                style:
-                                    TextStyle(color: context.fgSub))),
-                        ..._teamTypes.map((t) => DropdownMenuItem(
-                              value: t,
-                              child: Text(
-                                  t[0] + t.substring(1).toLowerCase(),
-                                  style: TextStyle(color: context.fg)),
-                            )),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _selectedType = v),
-                    ),
-                  ),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!,
-                      style: TextStyle(
-                          color: context.danger, fontSize: 12)),
-                ],
-                const SizedBox(height: 24),
-
-                GestureDetector(
-                  onTap: _saving ? null : _save,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    decoration: BoxDecoration(
-                        color: context.accent,
-                        borderRadius: BorderRadius.circular(14)),
-                    child: Center(
-                      child: _saving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Text('Save Changes',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700)),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: _saving ? null : _confirmDeleteTeam,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: context.danger.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: context.danger.withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.delete_outline_rounded,
-                            color: context.danger, size: 18),
-                        const SizedBox(width: 8),
-                        Text('Delete Team',
-                            style: TextStyle(
-                                color: context.danger,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmDeleteTeam() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: context.surf,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Delete Team',
-            style: TextStyle(
-                color: context.fg, fontWeight: FontWeight.w700)),
-        content: Text(
-          'Permanently delete "${widget.team.name}"? This cannot be undone.',
-          style: TextStyle(color: context.fgSub, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel',
-                style: TextStyle(color: context.fgSub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Delete',
-                style: TextStyle(
-                    color: context.danger,
-                    fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    if (!mounted) return;
-
-    setState(() => _saving = true);
-    final ctrl = ref.read(teamDetailControllerProvider(
-        (teamId: widget.teamId, currentUserId: widget.currentUserId)).notifier);
-    final ok = await ctrl.deleteTeam();
-    if (!mounted) return;
-    setState(() => _saving = false);
-    if (ok) {
-      Navigator.of(context).pop();
-      widget.onNavigateBack();
-    } else {
-      setState(() => _error = ref
-              .read(teamDetailControllerProvider(
-                  (teamId: widget.teamId, currentUserId: widget.currentUserId)))
-              .error ??
-          'Could not delete team');
-    }
-  }
-}
-
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(left: 2, bottom: 7),
-        child: Text(text,
-            style: TextStyle(
-                color: context.fgSub,
-                fontSize: 12,
-                fontWeight: FontWeight.w600)),
-      );
-}
 
 // ── Minimal text field ────────────────────────────────────────────────────────
 
@@ -3780,6 +3401,61 @@ class _QrStatDivider extends StatelessWidget {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+Future<void> _confirmDeleteTeam({
+  required BuildContext context,
+  required WidgetRef ref,
+  required String teamId,
+  required String? currentUserId,
+  required String teamName,
+  required void Function(BuildContext ctx)? onAfterDelete,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      backgroundColor: context.surf,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text('Delete Team',
+          style: TextStyle(color: context.fg, fontWeight: FontWeight.w700)),
+      content: Text(
+        'Permanently delete "$teamName"? This cannot be undone.',
+        style: TextStyle(color: context.fgSub, height: 1.4),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text('Cancel', style: TextStyle(color: context.fgSub)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text('Delete',
+              style: TextStyle(
+                  color: context.danger, fontWeight: FontWeight.w700)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  final ctrl = ref
+      .read(teamDetailControllerProvider((teamId: teamId, currentUserId: currentUserId))
+          .notifier);
+  final ok = await ctrl.deleteTeam();
+  if (!context.mounted) return;
+  if (ok) {
+    if (onAfterDelete != null) {
+      onAfterDelete(context);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  } else {
+    final err = ref
+            .read(teamDetailControllerProvider(
+                (teamId: teamId, currentUserId: currentUserId)))
+            .error ??
+        'Could not delete team';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+  }
+}
 
 void _showTeamQrSheet(
   BuildContext context,

@@ -358,8 +358,7 @@ export async function playerRoutes(app: FastifyInstance) {
       city: z.string().max(60).optional(),
       // teamType, gender, ageGroup are mandatory at the API layer.
       teamType: z.enum([
-        'CLUB','CORPORATE','ACADEMY','SCHOOL','COLLEGE',
-        'DISTRICT','STATE','NATIONAL','FRIENDLY','GULLY',
+        'SCHOOL','CLUB_ACADEMY','CORPORATE','GULLY','ASSOCIATION',
       ]),
       gender: z.enum(['MALE', 'FEMALE', 'MIXED']),
       ageGroup: z.enum(['OPEN', 'U19', 'U23', 'U30', 'VETERANS']),
@@ -386,8 +385,7 @@ export async function playerRoutes(app: FastifyInstance) {
       shortName: z.string().max(6).optional(),
       city: z.string().max(60).optional(),
       teamType: z.enum([
-        'CLUB','CORPORATE','ACADEMY','SCHOOL','COLLEGE',
-        'DISTRICT','STATE','NATIONAL','FRIENDLY','GULLY',
+        'SCHOOL','CLUB_ACADEMY','CORPORATE','GULLY','ASSOCIATION',
       ]).optional(),
       gender: z.enum(['MALE', 'FEMALE', 'MIXED']).optional(),
       ageGroup: z.enum(['OPEN', 'U19', 'U23', 'U30', 'VETERANS']).optional(),

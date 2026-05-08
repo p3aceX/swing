@@ -710,6 +710,30 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           return HostTeamDetailScreen(
             teamId: state.pathParameters['teamId']!,
             currentUserId: userId,
+            callbacks: TeamDetailCallbacks(
+              onEditTeam: (innerCtx, team) => innerCtx.push(
+                '${AppRoutes.team}/${team.id}/edit',
+                extra: team,
+              ),
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: '${AppRoutes.team}/:teamId/edit',
+        builder: (ctx, state) {
+          final initial = state.extra as PlayerTeam?;
+          final userId = ProviderScope.containerOf(ctx)
+              .read(meProvider)
+              .valueOrNull
+              ?.user
+              .id;
+          return HostCreateTeamScreen(
+            mode: HostCreateTeamMode.edit,
+            teamId: state.pathParameters['teamId']!,
+            initialTeam: initial,
+            currentUserId: userId,
+            onSaved: (_) => Navigator.of(ctx).maybePop(),
           );
         },
       ),

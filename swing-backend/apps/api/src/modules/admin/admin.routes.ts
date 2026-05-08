@@ -2149,16 +2149,11 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post("/teams", auth, async (request, reply) => {
     const user = (request as any).user as { userId: string };
     const TEAM_TYPES = [
-      "CLUB",
-      "CORPORATE",
-      "ACADEMY",
       "SCHOOL",
-      "COLLEGE",
-      "DISTRICT",
-      "STATE",
-      "NATIONAL",
-      "FRIENDLY",
+      "CLUB_ACADEMY",
+      "CORPORATE",
       "GULLY",
+      "ASSOCIATION",
     ] as const;
     const OPTIONAL_LOGO = z
       .string()
@@ -2202,16 +2197,11 @@ export async function adminRoutes(app: FastifyInstance) {
     const user = (request as any).user as { userId: string };
     const { id } = request.params as { id: string };
     const TEAM_TYPES = [
-      "CLUB",
-      "CORPORATE",
-      "ACADEMY",
       "SCHOOL",
-      "COLLEGE",
-      "DISTRICT",
-      "STATE",
-      "NATIONAL",
-      "FRIENDLY",
+      "CLUB_ACADEMY",
+      "CORPORATE",
       "GULLY",
+      "ASSOCIATION",
     ] as const;
     const OPTIONAL_LOGO = z
       .string()

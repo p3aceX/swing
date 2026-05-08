@@ -49,6 +49,14 @@ class PlayerTeam {
     this.logoUrl,
     this.city,
     this.teamType,
+    this.gender,
+    this.ageGroup,
+    this.format,
+    this.skillLevel,
+    this.motto,
+    this.homeGroundName,
+    this.foundedYear,
+    this.isPublic = true,
     this.members = const [],
     this.isOwner = false,
   });
@@ -58,11 +66,48 @@ class PlayerTeam {
   final String? shortName;
   final String? logoUrl;
   final String? city;
+  /// Raw enum value: CLUB | CORPORATE | ACADEMY | SCHOOL | COLLEGE | DISTRICT |
+  /// STATE | NATIONAL | FRIENDLY | GULLY. Use [teamTypeLabel] for display.
   final String? teamType;
+  /// Raw enum value as MALE | FEMALE | MIXED.
+  final String? gender;
+  /// Raw enum value as OPEN | U19 | U23 | U30 | VETERANS.
+  final String? ageGroup;
+  /// Raw enum value as T20 | ODI | TEST | ALL.
+  final String? format;
+  /// Raw enum value as BEGINNER | INTERMEDIATE | ADVANCED | PROFESSIONAL.
+  final String? skillLevel;
+  final String? motto;
+  final String? homeGroundName;
+  final int? foundedYear;
+  final bool isPublic;
   final List<TeamMember> members;
 
   /// True when the current player created this team.
   final bool isOwner;
+
+  String? get teamTypeLabel => _titleCase(teamType);
+  String? get genderLabel => _titleCase(gender);
+  String? get ageGroupLabel {
+    final raw = ageGroup;
+    if (raw == null || raw.isEmpty) return null;
+    return switch (raw) {
+      'OPEN' => 'Open',
+      'U19' => 'Under 19',
+      'U23' => 'Under 23',
+      'U30' => 'Under 30',
+      'VETERANS' => 'Veterans (35+)',
+      _ => _titleCase(raw),
+    };
+  }
+
+  static String? _titleCase(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    return raw
+        .split('_')
+        .map((p) => p.isEmpty ? p : '${p[0]}${p.substring(1).toLowerCase()}')
+        .join(' ');
+  }
 
   int get totalXp =>
       members.fold<int>(0, (sum, member) => sum + (member.totalXp ?? 0));

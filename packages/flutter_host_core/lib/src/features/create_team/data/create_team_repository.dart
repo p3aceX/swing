@@ -16,6 +16,8 @@ class HostCreateTeamRepository {
     String? logoUrl,
     String? city,
     required String teamType,
+    required String gender,
+    required String ageGroup,
     required bool iAmCaptain,
     // Context ownership
     String? academyId,
@@ -26,7 +28,6 @@ class HostCreateTeamRepository {
     String? homeGroundName,
     int? foundedYear,
     // Format & structure
-    String? ageGroup,
     String? format,
     String? skillLevel,
     bool isPublic = true,
@@ -39,6 +40,8 @@ class HostCreateTeamRepository {
         if ((logoUrl ?? '').trim().isNotEmpty) 'logoUrl': logoUrl!.trim(),
         if ((city ?? '').trim().isNotEmpty) 'city': city!.trim(),
         'teamType': teamType,
+        'gender': gender,
+        'ageGroup': ageGroup,
         'iAmCaptain': iAmCaptain,
         // Context ownership
         if ((academyId ?? '').trim().isNotEmpty) 'academyId': academyId!.trim(),
@@ -49,7 +52,6 @@ class HostCreateTeamRepository {
         if ((homeGroundName ?? '').trim().isNotEmpty) 'homeGroundName': homeGroundName!.trim(),
         if (foundedYear != null) 'foundedYear': foundedYear,
         // Format & structure
-        if ((ageGroup ?? '').trim().isNotEmpty) 'ageGroup': ageGroup!.trim(),
         if ((format ?? '').trim().isNotEmpty) 'format': format!.trim(),
         if ((skillLevel ?? '').trim().isNotEmpty) 'skillLevel': skillLevel!.trim(),
         'isPublic': isPublic,

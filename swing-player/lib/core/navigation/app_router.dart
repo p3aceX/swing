@@ -22,6 +22,8 @@ import 'package:flutter_host_core/flutter_host_core.dart'
         HostMatchDetailScreen,
         MatchDetailCallbacks,
         HostCreateTeamScreen,
+        HostCreateTeamMode,
+        PlayerTeam,
         HostScheduleScreen,
         HostScheduleCallbacks,
         PlayingElevenScreen,
@@ -395,8 +397,40 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             },
             onNavigateBack: (ctx) =>
                 Navigator.of(ctx).canPop() ? Navigator.of(ctx).pop() : null,
+            onEditTeam: (ctx, team) =>
+                ctx.push('/team/${team.id}/edit', extra: team),
           ),
         ),
+      ),
+      GoRoute(
+        path: '/team/:id/edit',
+        builder: (context, state) {
+          final initial = state.extra as PlayerTeam?;
+          return HostCreateTeamScreen(
+            mode: HostCreateTeamMode.edit,
+            teamId: state.pathParameters['id'] ?? '',
+            initialTeam: initial,
+            currentUserId: ref.read(currentPlayerIdProvider),
+            onPickLogo: () async {
+              final picker = ImagePicker();
+              final file = await picker.pickImage(
+                  source: ImageSource.gallery,
+                  imageQuality: 85,
+                  maxWidth: 1200);
+              if (file == null) return null;
+              final bytes = await file.readAsBytes();
+              final dot = file.name.lastIndexOf('.');
+              final ext = (dot != -1 && dot < file.name.length - 1)
+                  ? file.name.substring(dot + 1).toLowerCase()
+                  : 'jpg';
+              return (bytes: bytes, extension: ext);
+            },
+            onUploadLogo: (bytes, ext) =>
+                SupabaseStorageService().uploadTeamLogoBytes(bytes, ext),
+            onSuccess: () => ref.invalidate(teamsControllerProvider),
+            onSaved: (_) => Navigator.of(context).maybePop(),
+          );
+        },
       ),
       // Deep-link route shared via WhatsApp — auto-shows join sheet on load
       GoRoute(

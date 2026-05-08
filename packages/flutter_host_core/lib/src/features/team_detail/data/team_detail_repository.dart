@@ -137,13 +137,31 @@ class HostTeamDetailRepository {
     String? shortName,
     String? city,
     String? teamType,
+    String? gender,
+    String? ageGroup,
+    String? format,
+    String? skillLevel,
+    String? motto,
+    String? homeGroundName,
+    int? foundedYear,
+    bool clearFoundedYear = false,
+    bool? isPublic,
     String? logoUrl,
   }) async {
-    final payload = {
+    final payload = <String, Object?>{
       if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
       if (shortName != null) 'shortName': shortName.trim(),
       if (city != null) 'city': city.trim(),
       if (teamType != null) 'teamType': teamType,
+      if (gender != null) 'gender': gender,
+      if (ageGroup != null) 'ageGroup': ageGroup,
+      if (format != null) 'format': format,
+      if (skillLevel != null) 'skillLevel': skillLevel,
+      if (motto != null) 'motto': motto.trim(),
+      if (homeGroundName != null) 'homeGroundName': homeGroundName.trim(),
+      if (clearFoundedYear) 'foundedYear': null
+      else if (foundedYear != null) 'foundedYear': foundedYear,
+      if (isPublic != null) 'isPublic': isPublic,
       if (logoUrl != null && logoUrl.isNotEmpty) 'logoUrl': logoUrl,
     };
     await _dio.patch(_paths.teamUpdate(teamId), data: payload);
@@ -317,7 +335,16 @@ class HostTeamDetailRepository {
       shortName: _orNull(_str(raw['shortName'])),
       logoUrl: _orNull(_str(raw['logoUrl'])),
       city: _orNull(_str(raw['city'])),
-      teamType: _displayTeamType(_str(raw['teamType'])),
+      // Raw enums — display formatting lives in PlayerTeam.*Label getters.
+      teamType: _orNull(_str(raw['teamType']).toUpperCase()),
+      gender: _orNull(_str(raw['gender']).toUpperCase()),
+      ageGroup: _orNull(_str(raw['ageGroup']).toUpperCase()),
+      format: _orNull(_str(raw['format']).toUpperCase()),
+      skillLevel: _orNull(_str(raw['skillLevel']).toUpperCase()),
+      motto: _orNull(_str(raw['motto'])),
+      homeGroundName: _orNull(_str(raw['homeGroundName'])),
+      foundedYear: (raw['foundedYear'] as num?)?.toInt(),
+      isPublic: raw['isPublic'] != false,
       members: members,
       isOwner: isOwner,
     );
@@ -522,13 +549,6 @@ class HostTeamDetailRepository {
     };
   }
 
-  String? _displayTeamType(String raw) {
-    if (raw.isEmpty) return null;
-    return raw
-        .split('_')
-        .map((p) => '${p[0]}${p.substring(1).toLowerCase()}')
-        .join(' ');
-  }
 }
 
 final hostTeamDetailRepositoryProvider = Provider<HostTeamDetailRepository>(
