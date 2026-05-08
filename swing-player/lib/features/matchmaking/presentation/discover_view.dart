@@ -2173,19 +2173,14 @@ class _MatchDateStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final start = DateTime(today.year, today.month, today.day);
-    // 14-day forward strip — covers the lobby-expiry window. The active
-    // date may be in the past during dev / fixture data; ensure it's
-    // surfaced regardless.
+    // Strip shows ONLY the dates the user picked in the Setup wizard
+    // (submittedLobbies). The activeDate is included as a fallback for
+    // single-date discovers that don't write to submittedLobbies.
     final range = <String>{
-      for (var i = 0; i < 14; i++)
-        DateFormat('yyyy-MM-dd').format(start.add(Duration(days: i))),
       activeDateApi,
       for (final s in submitted) s.date,
     }.toList()..sort();
     if (range.isEmpty) return const SizedBox.shrink();
-    final submittedDates = {for (final s in submitted) s.date};
     return SizedBox(
       height: 78,
       child: ListView.separated(
@@ -2198,31 +2193,20 @@ class _MatchDateStrip extends StatelessWidget {
           try { d = DateTime.parse(api); } catch (_) {}
           if (d == null) return const SizedBox.shrink();
           final isActive = api == activeDateApi;
-          final hasMatches = submittedDates.contains(api) || api == activeDateApi;
-          // Color rule (per the user's design call):
+          // Color rule:
           //   active        → gold
-          //   has matches   → light blue (sky)
-          //   no matches    → white with a faint border
+          //   user-picked   → light blue (sky tint) — date is searched
+          // Dates not in this list don't render at all.
           final bgColor = isActive
               ? context.gold
-              : hasMatches
-                  ? context.sky.withValues(alpha: 0.18)
-                  : context.bg;
+              : context.sky.withValues(alpha: 0.18);
           final borderColor = isActive
               ? Colors.transparent
-              : hasMatches
-                  ? context.sky.withValues(alpha: 0.45)
-                  : context.fg.withValues(alpha: 0.10);
-          final fgColor = isActive
-              ? Colors.black
-              : hasMatches
-                  ? context.sky
-                  : context.fg;
+              : context.sky.withValues(alpha: 0.45);
+          final fgColor = isActive ? Colors.black : context.sky;
           final fgSubColor = isActive
               ? Colors.black54
-              : hasMatches
-                  ? context.sky.withValues(alpha: 0.75)
-                  : context.fgSub;
+              : context.sky.withValues(alpha: 0.75);
           const monthNames = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
           const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
