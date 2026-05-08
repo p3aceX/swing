@@ -169,6 +169,7 @@ class MmOpenLobby {
     this.groundsRanked = const [],
     this.teamId,
     this.status,
+    this.slotLabel,
   });
 
   final String lobbyId;
@@ -198,6 +199,10 @@ class MmOpenLobby {
   // Optional V2 fields (not always present on legacy responses).
   final String? teamId;
   final String? status;
+  // Backend-rendered display label combining bucket + clock window. Examples:
+  // "MORNING · 10:00 AM – 1:00 PM" (arena/picks-based), "MORNING window"
+  // (pure-preference). Null on legacy responses; clients fall back to slotTime.
+  final String? slotLabel;
 
   String get displaySlot {
     try {
@@ -265,6 +270,7 @@ class MmOpenLobby {
           .toList(),
       teamId: j['teamId'] as String?,
       status: j['status'] as String?,
+      slotLabel: j['slotLabel'] as String?,
     );
   }
 }

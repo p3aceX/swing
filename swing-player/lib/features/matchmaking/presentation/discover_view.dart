@@ -2491,6 +2491,25 @@ class _StatusBannerState extends State<_StatusBanner>
   }
 }
 
+// Maps the backend's semantic differs[] tags to a single user-facing caveat
+// line. Returns null when there's nothing to flag (primary match — clean).
+//
+// Tag set from backend scoreRankedCandidate:
+//   ground_other / ground_rank_2 / ground_rank_3
+//   window_other / window_rank_2 / window_rank_3
+//   date_other (alternatives across dates)
+String? _differsLabel(List<String> differs) {
+  if (differs.isEmpty) return null;
+  final hasGround = differs.any((d) => d.startsWith('ground_'));
+  final hasWindow = differs.any((d) => d.startsWith('window_'));
+  final hasDate = differs.any((d) => d.startsWith('date_'));
+  if (hasGround && hasWindow) return 'Match found — different ground & time';
+  if (hasGround) return 'Match found — different ground';
+  if (hasWindow) return 'Match found — different time horizon';
+  if (hasDate) return 'Match found — different date';
+  return null;
+}
+
 String _dateLabel(DateTime d) {
   final today = DateTime.now();
   final t = DateTime(today.year, today.month, today.day);
@@ -3266,31 +3285,30 @@ class _LobbyTile extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (differs.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        for (final d in differs)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: context.warn.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'DIFF · ${d.toUpperCase()}',
-                              style: TextStyle(
-                                color: context.warn,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.6,
-                              ),
-                            ),
-                          ),
-                      ],
+                  if (lobby.slotLabel != null && lobby.slotLabel!.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      lobby.slotLabel!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                  if (_differsLabel(differs) != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _differsLabel(differs)!,
+                      style: TextStyle(
+                        color: context.warn,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.1,
+                      ),
                     ),
                   ],
                 ],

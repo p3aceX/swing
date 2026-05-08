@@ -831,6 +831,34 @@ export class MatchmakingService {
         : null
       const cWindowsRanked = (c.windowsRanked ?? []) as string[]
       const cWindowsMatched = (c.windowsMatched ?? []) as string[]
+      // Display label combining bucket + clock window. Arena/picks-based
+      // candidates render as "MORNING · 10:00 AM – 1:00 PM" (concrete time).
+      // Pure-preference candidates (no picks) render as "MORNING window".
+      const slotLabel = (() => {
+        if (pick?.slotTime) {
+          const parts = pick.slotTime.split(':')
+          const h = parseInt(parts[0], 10)
+          const m = parseInt(parts[1], 10)
+          if (Number.isFinite(h) && Number.isFinite(m)) {
+            const startMin = h * 60 + m
+            const dur = this.formatDurationMins(c.format as MatchmakingFormat)
+            const endMin = startMin + dur
+            const fmtClock = (mins: number) => {
+              const hh = Math.floor(mins / 60) % 24
+              const mm = mins % 60
+              const ampm = hh < 12 ? 'AM' : 'PM'
+              const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+              return `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`
+            }
+            const bucket = bucketForSlotTime(pick.slotTime)
+            return bucket
+              ? `${bucket} · ${fmtClock(startMin)} – ${fmtClock(endMin)}`
+              : `${fmtClock(startMin)} – ${fmtClock(endMin)}`
+          }
+        }
+        const w0 = cWindowsRanked.find((w) => !cWindowsMatched.includes(w))
+        return w0 ? `${w0} window` : null
+      })()
 
       return {
         // Unified wire-contract Lobby JSON.
@@ -860,6 +888,7 @@ export class MatchmakingService {
               )
             : 90000,
           slotTime: pick?.slotTime ?? null,
+          slotLabel,
           daysFromNow: this.daysFromNow(c.date),
           preferredArenaName: rank1Arena?.name ?? null,
         },
@@ -976,10 +1005,10 @@ export class MatchmakingService {
 
     const intersects = bestWindow !== null && bestGround !== null
     if (!intersects) {
-      // Diagnostic differs labels even on no-intersect, so the client can
-      // surface "windows don't match" / "ground doesn't match" if needed.
-      if (bestWindow === null) differs.push('window')
-      if (bestGround === null) differs.push('ground')
+      // Non-intersecting candidates are filtered out upstream; we only
+      // emit diagnostic tags here for completeness.
+      if (bestWindow === null) differs.push('window_other')
+      if (bestGround === null) differs.push('ground_other')
     } else {
       matchedOn.push('window')
       matchedOn.push('ground')
@@ -1033,21 +1062,44 @@ export class MatchmakingService {
     const weight = 30 + 20 + 15 + 10 + 5
     const value = weight > 0 ? total / weight : 0
 
-    // primary IFF caller's rank-1 window is in candidate's active windowsRanked
-    //          AND candidate's rank-1 (active) window is in caller's
-    //          AND analogous for grounds (with non-empty grounds on both sides).
+    // primary classification:
+    //   • windowsPrimary = both sides' rank-0 mutually present in the other's list.
+    //   • groundsPrimary = same rule, OR either side has empty groundsRanked
+    //     ("any nearby" — the system will allocate, so it counts as primary).
+    // When intersects but NOT primary, tag the deviation in differs[] so the
+    // UI can render "different ground" / "different time horizon" precisely.
     const callerW0 = p.callerWindowsRanked[0]
     const candW0 = candWindowsActive[0]
     const windowsPrimary =
       !!callerW0 && !!candW0 &&
       candWindowsActive.includes(callerW0) &&
       p.callerWindowsRanked.includes(candW0)
+    if (intersects && !windowsPrimary && bestWindow) {
+      const myRank = (bestWindow as { myRank: number }).myRank
+      if (myRank === 1) differs.push('window_rank_2')
+      else if (myRank === 2) differs.push('window_rank_3')
+      else differs.push('window_other')
+    }
+
     const callerG0 = p.callerGroundsRanked[0]
     const candG0 = candGrounds[0]
     const groundsPrimary =
-      !!callerG0 && !!candG0 &&
-      candGrounds.includes(callerG0) &&
-      p.callerGroundsRanked.includes(candG0)
+      // "Any nearby" on either side is a soft-primary — the player who
+      // chose no ground preference is happy with whatever the candidate
+      // offers (or the system allocates).
+      p.callerGroundsRanked.length === 0 || candGrounds.length === 0
+        ? true
+        : !!callerG0 && !!candG0 &&
+          candGrounds.includes(callerG0) &&
+          p.callerGroundsRanked.includes(candG0)
+    if (intersects && !groundsPrimary && bestGround) {
+      const bg = bestGround as { myRank: number; theirRank: number; soft: boolean }
+      if (!bg.soft) {
+        if (bg.myRank === 1) differs.push('ground_rank_2')
+        else if (bg.myRank === 2) differs.push('ground_rank_3')
+        else differs.push('ground_other')
+      }
+    }
     const isPrimary = windowsPrimary && groundsPrimary && intersects
 
     return {
