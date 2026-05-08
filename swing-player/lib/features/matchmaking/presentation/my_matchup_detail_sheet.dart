@@ -72,8 +72,12 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
       dateLabel: candidate.dateLabel,
       displaySlot: candidate.slotLabel ?? candidate.displaySlot,
       format: candidate.format,
-      confirmationRupees: priceRupees,
-      remainingRupees: 0,
+      // Candidate preview: in test mode the advance is 0, so the user
+      // pays the full share at the venue. When CONFIRMATION_FEE_PAISE
+      // flips to a real value, the real (lock advance, remainder) split
+      // surfaces post-lockAndPay; this preview doesn't lie.
+      confirmationRupees: 0,
+      remainingRupees: priceRupees,
       myTeamPaid: false,
       opponentPaid: false,
       status: 'preview',
@@ -186,6 +190,33 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
 
   bool get _canCancel => widget.status != 'started' && !widget.isCandidate;
   bool get _isPostPayment => _bothPaid;
+
+  // Early bird = match date is at least 2 days out from today. Visual
+  // nudge only — no actual discount applied yet (would need backend
+  // pricing tier support).
+  bool get _isEarlyBird {
+    DateTime? matchDay;
+    try {
+      // dateLabel is a friendly string ("Today", "Tomorrow", "May 10").
+      // Parse the friendly cases first; for "May 10" we leave matchDay
+      // null and skip the early-bird treatment.
+      final l = widget.dateLabel.toLowerCase().trim();
+      if (l == 'today') matchDay = DateTime.now();
+      if (l == 'tomorrow') {
+        matchDay = DateTime.now().add(const Duration(days: 1));
+      }
+      if (l == 'yesterday') return false;
+    } catch (_) {}
+    if (matchDay == null) {
+      // No reliable date parse — assume eligible if not today/tomorrow.
+      // (The friendly labels above already reject those.)
+      return widget.dateLabel.toLowerCase().trim() != 'today' &&
+          widget.dateLabel.toLowerCase().trim() != 'tomorrow';
+    }
+    final today = DateTime.now();
+    final start = DateTime(today.year, today.month, today.day);
+    return matchDay.difference(start).inDays >= 2;
+  }
 
   Future<void> _openReviewSheet() async {
     final teamId = widget.myTeamId;
@@ -416,6 +447,18 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
                 formatDuration: _formatDuration,
                 statusLabel: _statusTone(context).label,
                 statusColor: _statusTone(context).color,
+              ),
+
+              const SizedBox(height: 16),
+
+              _PricingCard(
+                yourShareRupees:
+                    widget.confirmationRupees + widget.remainingRupees,
+                lockNowRupees: widget.confirmationRupees,
+                payAtVenueRupees: widget.remainingRupees,
+                format: widget.format,
+                formatDuration: _formatDuration,
+                isEarlyBird: _isEarlyBird,
               ),
 
               const SizedBox(height: 18),
@@ -1197,6 +1240,180 @@ class _ActionStatus extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// Pricing breakdown card. Shows the full ground fee, the user's split,
+// and the lock-now / pay-at-venue split. Plus an early-bird nudge when
+// the match is 2+ days out.
+class _PricingCard extends StatelessWidget {
+  const _PricingCard({
+    required this.yourShareRupees,
+    required this.lockNowRupees,
+    required this.payAtVenueRupees,
+    required this.format,
+    required this.formatDuration,
+    required this.isEarlyBird,
+  });
+
+  final int yourShareRupees;
+  final int lockNowRupees;
+  final int payAtVenueRupees;
+  final String format;
+  final String formatDuration;
+  final bool isEarlyBird;
+
+  int get _groundFeeRupees => yourShareRupees * 2;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: BoxDecoration(
+            color: Color.alphaBlend(
+              context.fg.withValues(alpha: 0.04),
+              context.bg,
+            ),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'PRICING',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.4,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '$format · $formatDuration',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _PriceRow(
+                label: 'Ground fee (full unit)',
+                amountRupees: _groundFeeRupees,
+                emphasis: false,
+              ),
+              const SizedBox(height: 6),
+              _PriceRow(
+                label: 'Your share (split 50/50)',
+                amountRupees: yourShareRupees,
+                emphasis: true,
+              ),
+              const SizedBox(height: 10),
+              Container(
+                height: 1,
+                color: context.fgSub.withValues(alpha: 0.12),
+              ),
+              const SizedBox(height: 10),
+              _PriceRow(
+                label: 'Lock now',
+                amountRupees: lockNowRupees,
+                emphasis: false,
+                muted: lockNowRupees == 0,
+              ),
+              const SizedBox(height: 6),
+              _PriceRow(
+                label: 'Pay at venue',
+                amountRupees: payAtVenueRupees,
+                emphasis: false,
+              ),
+            ],
+          ),
+        ),
+        if (isEarlyBird) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: context.gold.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: context.gold.withValues(alpha: 0.4),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.bolt_rounded, color: context.gold, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Early bird booking — lock the slot ahead of time.',
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PriceRow extends StatelessWidget {
+  const _PriceRow({
+    required this.label,
+    required this.amountRupees,
+    this.emphasis = false,
+    this.muted = false,
+  });
+
+  final String label;
+  final int amountRupees;
+  final bool emphasis;
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = muted ? context.fgSub : context.fg;
+    final amountStr = amountRupees == 0 ? 'Free' : '₹$amountRupees';
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: emphasis ? fg : context.fgSub,
+              fontSize: emphasis ? 13 : 12.5,
+              fontWeight: emphasis ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ),
+        Text(
+          amountStr,
+          style: TextStyle(
+            color: muted ? context.success : fg,
+            fontSize: emphasis ? 16 : 13,
+            fontWeight: emphasis ? FontWeight.w900 : FontWeight.w800,
+            letterSpacing: -0.2,
+          ),
+        ),
+      ],
     );
   }
 }
