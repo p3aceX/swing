@@ -498,7 +498,7 @@ class _QuickPaySheetState extends ConsumerState<_QuickPaySheet> {
                 final unpaid = <(ArenaGuest, ArenaReservation)>[];
                 for (final g in guests) {
                   for (final b in g.recentBookings) {
-                    if (!b.isPaid && b.status != 'CANCELLED') {
+                    if (b.balancePaise > 0 && b.status != 'CANCELLED') {
                       unpaid.add((g, b));
                     }
                   }
@@ -716,10 +716,10 @@ class _CollectionsList extends StatelessWidget {
   Widget build(BuildContext context) {
     _c = _C.of(context);
     final unpaidBookings =
-        data.pendingBookings.where((b) => !b.isPaid).toList();
+        data.pendingBookings.where((b) => b.balancePaise > 0).toList();
     final collectedBookings = [
       ...data.checkedInBookings,
-      ...data.pendingBookings.where((b) => b.isPaid),
+      ...data.pendingBookings.where((b) => b.balancePaise == 0),
     ];
     final collected = collectedBookings.fold(
         0, (sum, b) => sum + b.totalAmountPaise);
@@ -998,7 +998,7 @@ class _BookingRow extends StatelessWidget {
     final dateStr = booking.bookingDate != null
         ? DateFormat('EEE d MMM').format(booking.bookingDate!)
         : '—';
-    final isPaid = booking.isPaid;
+    final isPaid = booking.balancePaise == 0;
     final badgeColor =
         isPaid ? _c.accent : Color(0xFFD97706);
     final amount = isPaid
@@ -1185,7 +1185,7 @@ class _BookingListSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             child: Text(
-              '₹${(bookings.fold(0, (s, b) => s + (b.isPaid ? b.totalAmountPaise : b.balancePaise)) / 100).toStringAsFixed(0)} total',
+              '₹${(bookings.fold(0, (s, b) => s + (b.balancePaise == 0 ? b.totalAmountPaise : b.balancePaise)) / 100).toStringAsFixed(0)} total',
               style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -1369,7 +1369,7 @@ class _CustomerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     _c = _C.of(context);
     final unpaid = guest.recentBookings
-        .where((b) => !b.isPaid && b.status != 'CANCELLED');
+        .where((b) => b.balancePaise > 0 && b.status != 'CANCELLED');
     final balancePaise = unpaid.fold(0, (s, b) => s + b.balancePaise);
     final hasBalance = balancePaise > 0;
 
@@ -1469,9 +1469,9 @@ class _CustomerDetailSheetState
     final bottom = MediaQuery.of(context).padding.bottom;
     final guest = widget.guest;
     final checkedIn =
-        guest.recentBookings.where((b) => b.isPaid).toList();
+        guest.recentBookings.where((b) => b.balancePaise == 0).toList();
     final pending = guest.recentBookings
-        .where((b) => !b.isPaid && b.status != 'CANCELLED')
+        .where((b) => b.balancePaise > 0 && b.status != 'CANCELLED')
         .toList();
     final actualBalancePaise = pending.fold(0, (sum, b) => sum + b.balancePaise);
 

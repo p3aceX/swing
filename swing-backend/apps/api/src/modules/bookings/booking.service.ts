@@ -1273,11 +1273,17 @@ export class BookingService {
       },
     })
 
-    // If total payments now cover the full amount, auto-confirm + set paidAt
-    if (newTotal >= booking.totalAmountPaise && booking.status !== 'CONFIRMED' && booking.status !== 'CHECKED_IN') {
+    // If total payments now cover the full amount, set paidAt.
+    // Also promote to CONFIRMED if not already in a terminal state.
+    if (newTotal >= booking.totalAmountPaise) {
+      const alreadyActive = booking.status === 'CONFIRMED' || booking.status === 'CHECKED_IN'
       await prisma.slotBooking.update({
         where: { id: bookingId },
-        data: { status: 'CONFIRMED', paidAt: new Date(), paymentMode: data.paymentMode },
+        data: {
+          paidAt: new Date(),
+          paymentMode: data.paymentMode,
+          ...(!alreadyActive ? { status: 'CONFIRMED' } : {}),
+        },
       })
     }
 
