@@ -59,6 +59,7 @@ class PlayerMatch {
     this.ballType,
     this.tossWinner,
     this.tossDecision,
+    this.captainScoringEnabled = true,
   });
 
   final String id;
@@ -96,28 +97,54 @@ class PlayerMatch {
   ///   null         — read-only
   final String? myRole;
 
+  /// True when the match was created from the player app — captains have
+  /// auto-write privilege via the batting guard. False when created by
+  /// arena/academy/coach apps — only the creator and an explicitly
+  /// assigned scorer can record balls.
+  final bool captainScoringEnabled;
+
   bool get _isCaptain => myRole == 'captain-A' || myRole == 'captain-B';
 
   /// Only the match owner can delete a match. Captains cannot.
   bool get canDelete => myRole == 'owner';
 
-  /// Manage XI / toss / edit. Owner, Manager, and either captain may.
+  /// Manage XI / toss / edit. Owner / Manager always; captains only when
+  /// the match was player-created (otherwise they have no inherent rights).
   bool get canManage =>
-      myRole == 'owner' || myRole == 'manager' || _isCaptain;
+      myRole == 'owner' ||
+      myRole == 'manager' ||
+      (_isCaptain && captainScoringEnabled);
 
   /// True when this user is the assigned active scorer.
   bool get isActiveScorer => myRole == 'scorer';
 
+  /// Whether the matches-list "Resume / Start Scoring" CTA should render
+  /// for this user on this match.
+  ///
+  /// For flag-false matches (arena/academy/coach-created), the CTA only
+  /// shows for the explicitly assigned scorer — owner/manager can manage
+  /// the match but can't score until they take over via Manage Scorer.
+  ///
+  /// For flag-true matches (player-created), the legacy behavior holds —
+  /// owner / manager / scorer / captain see the CTA. The captain's
+  /// batting-guard kicks in when they actually try to record balls.
+  bool get canScoreFromList {
+    if (!captainScoringEnabled) return isActiveScorer;
+    return canManage || isActiveScorer;
+  }
+
   /// Static "could potentially score" check for UI hints. The authoritative
-  /// per-ball check is server-side (Phase 2 batting guard) — do not rely on
-  /// this for security decisions, only for whether to show the score button.
+  /// per-ball check is server-side — do not rely on this for security
+  /// decisions, only for whether to show the score button.
   ///
   /// `battingTeam` is the live innings's batting team ('A' or 'B'), or null
-  /// before toss is taken. A captain can score when their team is batting.
+  /// before toss is taken. A captain can score when their team is batting,
+  /// **and only in player-created matches**.
   bool canScoreNow({String? battingTeam}) {
     if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
       return true;
     }
+    if (!captainScoringEnabled) return false;
     if (battingTeam == null) return false; // pre-toss: nobody can score
     if (myRole == 'captain-A' && battingTeam == 'A') return true;
     if (myRole == 'captain-B' && battingTeam == 'B') return true;
@@ -250,6 +277,9 @@ class MatchCenter {
     this.teamAShortName,
     this.teamBShortName,
     this.myRole,
+    this.captainScoringEnabled = true,
+    this.activeScorerName,
+    this.activeScorerProfileId,
   });
 
   final String id;
@@ -284,6 +314,14 @@ class MatchCenter {
   final List<MatchSquad> squads;
 
   final String? myRole;
+  /// True for player-created matches; false for arena/academy/coach
+  /// where the creator must explicitly assign a scorer.
+  final bool captainScoringEnabled;
+  /// Display name of the currently assigned scorer (if any).
+  final String? activeScorerName;
+  /// Profile ID of the currently assigned scorer (if any).
+  final String? activeScorerProfileId;
+
   bool get canManage => myRole == 'owner' || myRole == 'manager';
   bool get isActiveScorer => myRole == 'scorer';
 }

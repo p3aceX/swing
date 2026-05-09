@@ -769,10 +769,12 @@ export class MatchService {
     const resolvedMatchType =
       data.matchType ?? (category === 'GULLY' ? 'FRIENDLY' : 'RANKED')
 
-    // For non-PLAYER-created matches the creator is the de facto scorer
-    // until they hand it off. Stamp activeScorerId + lock so the toss/
-    // innings auto-shift won't move the gloves to a captain.
-    const initialActiveScorerId = !captainScoringEnabled ? player?.id ?? null : null
+    // For non-PLAYER-created matches scoring is locked until the owner
+    // explicitly assigns someone — including assigning themselves. We
+    // only set scorerLockedByOwner=true so the auto-shift on toss/innings
+    // can't sneak an assignment in. activeScorerId stays NULL: no one can
+    // record balls until the owner picks via Manage Scorer.
+    const initialActiveScorerId: string | null = null
     const initialScorerLocked = !captainScoringEnabled
 
     const match = await prisma.match.create({

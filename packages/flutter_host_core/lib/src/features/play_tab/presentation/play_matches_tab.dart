@@ -601,6 +601,8 @@ class _HostedMatchItem extends StatelessWidget {
             ? Icons.tune_rounded
             : Icons.sports_cricket_rounded;
 
+    final showScoringCta = match.canScoreFromList;
+    final hasActionRow = showScoringCta || onDelete != null;
     return InkWell(
       onTap: callbacks.onNavigateToMatch != null && match.id.isNotEmpty
           ? () => callbacks.onNavigateToMatch!(context, match.id)
@@ -609,67 +611,69 @@ class _HostedMatchItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           HostMatchCard(match: match),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-            child: Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _onResume(context),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      decoration: BoxDecoration(
-                        color: phaseColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: phaseColor.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(phaseIcon, color: phaseColor, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            phaseLabel,
-                            style: TextStyle(
-                              color: phaseColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.8,
+          if (hasActionRow)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+              child: Row(
+                children: [
+                  if (showScoringCta)
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _onResume(context),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          decoration: BoxDecoration(
+                            color: phaseColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: phaseColor.withValues(alpha: 0.35),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                if (onDelete != null) ...[
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: onDelete,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: context.danger.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: context.danger.withValues(alpha: 0.25),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(phaseIcon, color: phaseColor, size: 16),
+                              const SizedBox(width: 6),
+                              Text(
+                                phaseLabel,
+                                style: TextStyle(
+                                  color: phaseColor,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      child: Icon(
-                        Icons.delete_outline_rounded,
-                        color: context.danger,
-                        size: 18,
+                    ),
+                  if (onDelete != null) ...[
+                    if (showScoringCta) const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: onDelete,
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: context.danger.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: context.danger.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.delete_outline_rounded,
+                          color: context.danger,
+                          size: 18,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
         ],
       ),
     );
