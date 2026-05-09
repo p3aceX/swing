@@ -223,7 +223,13 @@ class _HostCreateTournamentScreenState
         category: _category,
         onCategoryChanged: (v) => setState(() {
           _category = v;
-          if (v == 'CORPORATE' || v == 'GULLY') _ageGroup = 'SENIOR';
+          if (v == 'CORPORATE' || v == 'GULLY') {
+            _ageGroup = 'SENIOR';
+          } else if (v == 'SCHOOL' && _ageGroup == 'SENIOR') {
+            // School cricket is youth-only — drop off Senior if it was
+            // carried over from a previous category.
+            _ageGroup = 'U19';
+          }
         }),
         ageGroup: _ageGroup,
         onAgeGroupChanged: (v) => setState(() => _ageGroup = v),
@@ -656,41 +662,32 @@ class _Step1Identity extends StatelessWidget {
             selected: category,
             onSelected: onCategoryChanged,
           ),
-          const SizedBox(height: 24),
-
-          // Age group — Corporate / Gully are open-age, so we lock them.
-          _FieldLabel(label: 'Age group'),
-          const SizedBox(height: 10),
-          if (category == 'CORPORATE' || category == 'GULLY')
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: context.bg,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: context.fg.withOpacity(0.08)),
-              ),
-              child: Text(
-                'Senior / Open',
-                style: TextStyle(
-                  color: context.fg.withOpacity(0.7),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )
-          else
+          // Age group — Corporate / Gully are open-age by convention, so we
+          // skip the picker entirely and let the backend default to SENIOR.
+          // School cricket is youth-only, so Senior is excluded from the chips.
+          if (category != 'CORPORATE' && category != 'GULLY') ...[
+            const SizedBox(height: 24),
+            _FieldLabel(label: 'Age group'),
+            const SizedBox(height: 10),
             _ChipGrid(
-              options: const [
-                ('U14', 'U-14'),
-                ('U16', 'U-16'),
-                ('U19', 'U-19'),
-                ('U23', 'U-23'),
-                ('SENIOR', 'Senior / Open'),
-              ],
+              options: category == 'SCHOOL'
+                  ? const [
+                      ('U14', 'U-14'),
+                      ('U16', 'U-16'),
+                      ('U19', 'U-19'),
+                      ('U23', 'U-23'),
+                    ]
+                  : const [
+                      ('U14', 'U-14'),
+                      ('U16', 'U-16'),
+                      ('U19', 'U-19'),
+                      ('U23', 'U-23'),
+                      ('SENIOR', 'Senior / Open'),
+                    ],
               selected: ageGroup,
               onSelected: onAgeGroupChanged,
             ),
+          ],
         ],
       ),
     );

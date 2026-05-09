@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../contracts/host_path_config.dart';
@@ -11,6 +12,21 @@ class HostMatchSummary {
     required this.teamBId,
     required this.teamAName,
     required this.teamBName,
+    this.teamALogoUrl,
+    this.teamBLogoUrl,
+    this.teamACity,
+    this.teamBCity,
+    this.format,
+    this.matchType,
+    this.category,
+    this.ageGroup,
+    this.ballType,
+    this.venueId,
+    this.venueName,
+    this.venueCity,
+    this.scheduledAt,
+    this.customOvers,
+    this.hasImpactPlayer,
   });
 
   final String id;
@@ -18,6 +34,21 @@ class HostMatchSummary {
   final String teamBId;
   final String teamAName;
   final String teamBName;
+  final String? teamALogoUrl;
+  final String? teamBLogoUrl;
+  final String? teamACity;
+  final String? teamBCity;
+  final String? format;
+  final String? matchType;
+  final String? category;
+  final String? ageGroup;
+  final String? ballType;
+  final String? venueId;
+  final String? venueName;
+  final String? venueCity;
+  final DateTime? scheduledAt;
+  final int? customOvers;
+  final bool? hasImpactPlayer;
 }
 
 class HostCreateMatchRepository {
@@ -56,12 +87,53 @@ class HostCreateMatchRepository {
       return fallback;
     }
 
+    String? pickNested(String nested, String key) {
+      final obj = data[nested];
+      if (obj is Map) {
+        final v = '${obj[key] ?? ''}'.trim();
+        if (v.isNotEmpty) return v;
+      }
+      return null;
+    }
+
+    DateTime? parseDate(Object? raw) {
+      if (raw == null) return null;
+      try {
+        return DateTime.parse('$raw').toLocal();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    String? trimToNull(Object? v) {
+      final s = '${v ?? ''}'.trim();
+      return s.isEmpty ? null : s;
+    }
+
+    final venue = data['venue'];
+    final venueObj = venue is Map ? Map<String, dynamic>.from(venue) : null;
+
     return HostMatchSummary(
       id: '${data['id'] ?? matchId}',
       teamAId: pickId('teamAId', 'teamA'),
       teamBId: pickId('teamBId', 'teamB'),
       teamAName: pickName('teamAName', 'teamA', 'Team A'),
       teamBName: pickName('teamBName', 'teamB', 'Team B'),
+      teamALogoUrl: pickNested('teamA', 'logoUrl'),
+      teamBLogoUrl: pickNested('teamB', 'logoUrl'),
+      teamACity: pickNested('teamA', 'city'),
+      teamBCity: pickNested('teamB', 'city'),
+      format: trimToNull(data['format']),
+      matchType: trimToNull(data['matchType']),
+      category: trimToNull(data['category']),
+      ageGroup: trimToNull(data['ageGroup']),
+      ballType: trimToNull(data['ballType']),
+      venueId: trimToNull(data['facilityId'] ?? venueObj?['id']),
+      venueName: trimToNull(data['venueName'] ?? venueObj?['name']),
+      venueCity: trimToNull(data['venueCity'] ?? venueObj?['city']),
+      scheduledAt: parseDate(data['scheduledAt']),
+      customOvers: (data['customOvers'] as num?)?.toInt(),
+      hasImpactPlayer: data['hasImpactPlayer'] == true,
     );
   }
 
@@ -85,39 +157,93 @@ class HostCreateMatchRepository {
     List<String>? teamAPlayerIds,
     List<String>? teamBPlayerIds,
   }) async {
-    final response = await _dio.post(
-      _paths.createMatch,
-      data: {
-        'teamAName': teamAName.trim(),
-        'teamBName': teamBName.trim(),
-        if ((teamAId ?? '').isNotEmpty) 'teamAId': teamAId,
-        if ((teamBId ?? '').isNotEmpty) 'teamBId': teamBId,
-        if (venueName.trim().isNotEmpty) 'venueName': venueName.trim(),
-        if (venueCity.trim().isNotEmpty) 'venueCity': venueCity.trim(),
-        'scheduledAt': scheduledAt.toUtc().toIso8601String(),
-        'format': format,
-        'category': category,
-        'ageGroup': ageGroup,
-        if ((matchType ?? '').isNotEmpty) 'matchType': matchType,
-        'hasImpactPlayer': hasImpactPlayer,
-        if (format == 'CUSTOM' && customOvers != null)
-          'customOvers': customOvers,
-        if ((ballType ?? '').isNotEmpty) 'ballType': ballType,
-        if ((facilityId ?? '').isNotEmpty) 'facilityId': facilityId,
-        if ((tournamentId ?? '').isNotEmpty) 'tournamentId': tournamentId,
-        'teamAPlayerIds': teamAPlayerIds ?? const <String>[],
-        'teamBPlayerIds': teamBPlayerIds ?? const <String>[],
-      },
-    );
-    final data = response.data;
-    if (data is Map<String, dynamic>) {
-      final payload = data['data'] is Map<String, dynamic>
-          ? data['data'] as Map<String, dynamic>
-          : data;
-      final id = '${payload['id'] ?? ''}'.trim();
-      if (id.isNotEmpty) return id;
+    final body = <String, dynamic>{
+      'teamAName': teamAName.trim(),
+      'teamBName': teamBName.trim(),
+      if ((teamAId ?? '').isNotEmpty) 'teamAId': teamAId,
+      if ((teamBId ?? '').isNotEmpty) 'teamBId': teamBId,
+      if (venueName.trim().isNotEmpty) 'venueName': venueName.trim(),
+      if (venueCity.trim().isNotEmpty) 'venueCity': venueCity.trim(),
+      'scheduledAt': scheduledAt.toUtc().toIso8601String(),
+      'format': format,
+      'category': category,
+      'ageGroup': ageGroup,
+      if ((matchType ?? '').isNotEmpty) 'matchType': matchType,
+      'hasImpactPlayer': hasImpactPlayer,
+      if (format == 'CUSTOM' && customOvers != null) 'customOvers': customOvers,
+      if ((ballType ?? '').isNotEmpty) 'ballType': ballType,
+      if ((facilityId ?? '').isNotEmpty) 'facilityId': facilityId,
+      if ((tournamentId ?? '').isNotEmpty) 'tournamentId': tournamentId,
+      'teamAPlayerIds': teamAPlayerIds ?? const <String>[],
+      'teamBPlayerIds': teamBPlayerIds ?? const <String>[],
+    };
+    debugPrint('[CreateMatch] → POST ${_paths.createMatch} body=$body');
+    try {
+      final response = await _dio.post(_paths.createMatch, data: body);
+      debugPrint('[CreateMatch] ← ${response.statusCode} body=${response.data}');
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        final payload = data['data'] is Map<String, dynamic>
+            ? data['data'] as Map<String, dynamic>
+            : data;
+        final id = '${payload['id'] ?? ''}'.trim();
+        if (id.isNotEmpty) return id;
+      }
+      throw StateError('Match created but no match id was returned.');
+    } on DioException catch (e) {
+      debugPrint(
+        '[CreateMatch] FAIL status=${e.response?.statusCode} '
+        'type=${e.type.name} msg=${e.message}',
+      );
+      debugPrint('[CreateMatch] error body: ${e.response?.data}');
+      rethrow;
     }
-    throw StateError('Match created but no match id was returned.');
+  }
+
+  /// Bulk-edit pre-match settings on an existing match (PATCH /matches/:id).
+  /// Only sends the fields the caller passes — preserves toss / scoring /
+  /// playing-11 state on the existing row.
+  Future<void> updateMatchSettings(
+    String matchId, {
+    String? format,
+    String? ballType,
+    String? category,
+    String? ageGroup,
+    String? venueName,
+    String? venueCity,
+    String? facilityId,
+    DateTime? scheduledAt,
+    int? customOvers,
+    bool? hasImpactPlayer,
+    String? teamAName,
+    String? teamBName,
+  }) async {
+    final body = <String, dynamic>{
+      if (format != null) 'format': format,
+      if (ballType != null) 'ballType': ballType,
+      if (category != null) 'category': category,
+      if (ageGroup != null) 'ageGroup': ageGroup,
+      if ((venueName ?? '').isNotEmpty) 'venueName': venueName,
+      if ((venueCity ?? '').isNotEmpty) 'venueCity': venueCity,
+      if ((facilityId ?? '').isNotEmpty) 'facilityId': facilityId,
+      if (scheduledAt != null)
+        'scheduledAt': scheduledAt.toUtc().toIso8601String(),
+      if (customOvers != null) 'customOvers': customOvers,
+      if (hasImpactPlayer != null) 'hasImpactPlayer': hasImpactPlayer,
+      if ((teamAName ?? '').isNotEmpty) 'teamAName': teamAName,
+      if ((teamBName ?? '').isNotEmpty) 'teamBName': teamBName,
+    };
+    debugPrint('[EditMatch] → PATCH ${_paths.match(matchId)} body=$body');
+    try {
+      final response =
+          await _dio.patch(_paths.match(matchId), data: body);
+      debugPrint(
+          '[EditMatch] ← ${response.statusCode} body=${response.data}');
+    } on DioException catch (e) {
+      debugPrint(
+          '[EditMatch] FAIL status=${e.response?.statusCode} body=${e.response?.data}');
+      rethrow;
+    }
   }
 
   /// Replaces the Playing 11 rosters + role assignments for both sides of a

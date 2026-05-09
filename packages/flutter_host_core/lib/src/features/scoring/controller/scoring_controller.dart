@@ -258,10 +258,19 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       final match = results[0] as ScoringMatch;
       final players = results[1] as ScoringPlayersData;
       final innings = match.activeInnings;
-      final nextStrikerId = players.normalizeId(innings?.currentStrikerId);
+      // `normalizeId` returns '' (not null) when the server hasn't
+      // persisted a current striker/non-striker/bowler yet — e.g. between
+      // toss and first ball. Coerce to null so copyWith's `?? this.x`
+      // preserves any pick the user made client-side. Without this, any
+      // action that calls _init() before the first ball (changing the
+      // wicket-keeper, schedule, overs, etc.) wipes the lineup choices.
+      String? toNullable(String raw) => raw.isEmpty ? null : raw;
+      final nextStrikerId =
+          toNullable(players.normalizeId(innings?.currentStrikerId));
       final nextNonStrikerId =
-          players.normalizeId(innings?.currentNonStrikerId);
-      final nextBowlerId = players.normalizeId(innings?.currentBowlerId);
+          toNullable(players.normalizeId(innings?.currentNonStrikerId));
+      final nextBowlerId =
+          toNullable(players.normalizeId(innings?.currentBowlerId));
 
       state = state.copyWith(
         isLoading: false,

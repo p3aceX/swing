@@ -481,11 +481,26 @@ export class MatchService {
     return user
   }
 
+  /**
+   * Single rule for who can mutate a match:
+   *
+   *   OWNER tier   → only `owner` role passes. Used for delete.
+   *   MANAGER tier → owner or manager passes. Used for edit / patch / toss /
+   *                  set XI / change WK / overs / schedule / assign scorer.
+   *   SCORER tier  → owner, manager, or whoever is `match.activeScorerId`.
+   *                  Used for ball recording, undo, complete innings,
+   *                  complete match.
+   *   ADMIN tier   → swing-admin only.
+   *
+   * Captain seats are pure metadata. They have no permission. If the
+   * captain wants to score, the owner must assign them via assignScorer.
+   */
   private async authorizeMutation(matchId: string, userId: string, options: MutationOptions = {}) {
     const match = await prisma.match.findUnique({ where: { id: matchId } })
     if (!match) throw Errors.notFound('Match')
 
-    if ((options.access ?? 'SCORER') === 'ADMIN') {
+    const required = options.access ?? 'SCORER'
+    if (required === 'ADMIN') {
       await this.verifyAdminUser(userId)
       return match
     }
@@ -493,15 +508,8 @@ export class MatchService {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
     if (!player) throw Errors.forbidden()
 
-    const required = options.access ?? 'SCORER'
     const role = await resolveMatchRole(player.id, matchId)
-
-    // Role hierarchy for management tiers (OWNER / MANAGER access). Captain-A
-    // and -B are treated as manager-equivalent here so a captain can run XI /
-    // toss / edit on their team.
-    const roleIsCaptain = role === 'captain-A' || role === 'captain-B'
     const isOwnerOrManager = role === 'owner' || role === 'manager'
-    const isManagerOrAbove = isOwnerOrManager || roleIsCaptain
 
     if (required === 'OWNER') {
       if (role !== 'owner') {
@@ -511,96 +519,20 @@ export class MatchService {
     }
 
     if (required === 'MANAGER') {
-      if (!isManagerOrAbove) {
-        throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager can perform this action', 403)
+      if (!isOwnerOrManager) {
+        throw new AppError('INSUFFICIENT_ROLE', 'Only the match owner or a manager can perform this action', 403)
       }
       return match
     }
 
-    // SCORER — write authority hierarchy:
-    //   1. Explicit active scorer (deliberately pinned) — always.
-    //   2. Captain (anyone seated on a team's captain seat — even if also
-    //      owner/manager) — only when *their team is batting* (the batting
-    //      guard governs the actual scorer at the crease).
-    //   3. Owner / Manager who isn't a captain — always.
-    //   4. Anyone else — denied.
-    //
-    // Captain identity is checked against the match's captain seats directly
-    // (not just the role string) so an owner who's also playing as a captain
-    // still goes through the batting guard. This matches the on-field
-    // reality: if you're captaining a side, your authority to record balls
-    // depends on whether your side is at the crease, not on who created the
-    // match record.
-    // captainScoringEnabled is stamped at create from the creator's
-    // activeRole. PLAYER-created → true (batting captain auto-scores).
-    // Arena/academy/coach-created → false: only the activeScorerId can
-    // record balls. Owner/manager have management rights (delete, edit,
-    // assign scorer) but to record balls themselves they have to take
-    // over via assignScorer first.
-    const captainScoringAllowed =
-      (match as any).captainScoringEnabled !== false
-
-    // 1. Explicit active scorer (deliberately assigned) — always.
-    const isActiveScorer = match.activeScorerId === player.id
-    if (isActiveScorer) return match
-
-    // 2. Flag-false matches lock scoring to the activeScorerId. No owner
-    //    or captain shortcut. Owner can take over via assignScorer.
-    if (!captainScoringAllowed) {
-      throw new AppError(
-        'NOT_SCORER',
-        'Only the assigned scorer can record balls in this match. ' +
-          'Owners/managers can take over via Manage Scorer.',
-        403,
-      )
-    }
-
-    const isCaptainA = match.teamACaptainId === player.id
-    const isCaptainB = match.teamBCaptainId === player.id
-    const isCaptainSeat = isCaptainA || isCaptainB
-
-    // 3. Player-created match, caller isn't a captain → owner/manager
-    //    fall through; everyone else 403.
-    if (!isCaptainSeat) {
-      if (isOwnerOrManager) return match
-      throw new AppError(
-        'NOT_SCORER',
-        'Only the active scorer or a manager can update this match',
-        403,
-      )
-    }
-
-    // 4. Captain seat in a player-created match — apply batting guard
-    //    below (do NOT short-circuit on owner role; owner-captain is
-    //    a player on the field and follows the at-the-crease rule).
-
-    // Captain path — find the live innings and check whether the captain's
-    // team is the one currently batting. The batting captain (closer to the
-    // action and usually setting the strike) is the authoritative scorer.
-    const liveInnings = await prisma.innings.findFirst({
-      where: { matchId, isCompleted: false },
-      orderBy: { inningsNumber: 'desc' },
-      select: { battingTeam: true, inningsNumber: true },
-    })
-    if (!liveInnings) {
-      // Pre-toss or all innings complete — captains cannot score.
-      throw new AppError(
-        'NOT_BATTING_CAPTAIN',
-        'Wait for the toss / next innings to start scoring.',
-        403,
-      )
-    }
-    const captainTeam: 'A' | 'B' = isCaptainA ? 'A' : 'B'
-    const isBatting = liveInnings.battingTeam === captainTeam
-    if (!isBatting) {
-      throw new AppError(
-        'NOT_BATTING_CAPTAIN',
-        "Your team is bowling — you can only score when your team is batting.",
-        403,
-      )
-    }
-
-    return match
+    // SCORER tier
+    if (isOwnerOrManager) return match
+    if (match.activeScorerId === player.id) return match
+    throw new AppError(
+      'NOT_SCORER',
+      'Only the match owner or assigned scorer can record balls.',
+      403,
+    )
   }
 
   private async resolveEffectivePlayerCount(match: any, side: 'A' | 'B') {
@@ -675,28 +607,8 @@ export class MatchService {
     }
   }
 
-  async createMatch(
-    userId: string,
-    data: any,
-    options: { callerActiveRole?: string } = {},
-  ) {
+  async createMatch(userId: string, data: any) {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
-    // The caller's activeRole is read from the JWT (route layer) — that's
-    // baked in at login time, so it always reflects which app made the
-    // request. Falling back to the DB row only when the route didn't
-    // forward it (older callers / tests).
-    let activeRole = options.callerActiveRole
-    if (!activeRole) {
-      const creator = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { activeRole: true },
-      })
-      activeRole = creator?.activeRole
-    }
-    // Player-app matches keep the rule (batting captain auto-scores).
-    // Arena/academy/coach/business owner-created matches lock scoring
-    // to the creator + an explicitly assigned scorer.
-    const captainScoringEnabled = activeRole === 'PLAYER'
     let resolvedVenueName = data.venueName?.trim() || null
     let resolvedFacilityId = data.facilityId?.trim() || null
     const resolvedCustomOvers =
@@ -769,22 +681,11 @@ export class MatchService {
     const resolvedMatchType =
       data.matchType ?? (category === 'GULLY' ? 'FRIENDLY' : 'RANKED')
 
-    // For non-PLAYER-created matches scoring is locked until the owner
-    // explicitly assigns someone — including assigning themselves. We
-    // only set scorerLockedByOwner=true so the auto-shift on toss/innings
-    // can't sneak an assignment in. activeScorerId stays NULL: no one can
-    // record balls until the owner picks via Manage Scorer.
-    const initialActiveScorerId: string | null = null
-    const initialScorerLocked = !captainScoringEnabled
-
     const match = await prisma.match.create({
       data: {
         matchType: resolvedMatchType, format: data.format,
         category,
         ageGroup,
-        captainScoringEnabled,
-        activeScorerId: initialActiveScorerId,
-        scorerLockedByOwner: initialScorerLocked,
         teamAName: data.teamAName, teamBName: data.teamBName,
         teamAPlayerIds,
         teamBPlayerIds,
@@ -834,15 +735,6 @@ export class MatchService {
     })
     console.log('[recordToss] OK newStatus=%s', newStatus)
     fireStudioEvent(matchId, TriggerEventType.TOSS_DONE)
-
-    // Auto-assign scorer to the batting team's captain. tossDecision='BAT'
-    // means the toss winner bats; 'BOWL' means the other team bats.
-    const battingTeam: 'A' | 'B' =
-      tossDecision === 'BAT'
-        ? (tossWonBy as 'A' | 'B')
-        : (tossWonBy === 'A' ? 'B' : 'A')
-    this.autoAssignScorerForBattingTeam(matchId, battingTeam).catch(() => undefined)
-
     return updated
   }
 
@@ -986,7 +878,7 @@ export class MatchService {
       // auto-shift (Phase 4) doesn't overwrite this owner's intent.
       await tx.match.update({
         where: { id: matchId },
-        data: { activeScorerId: target.id, scorerLockedByOwner: true },
+        data: { activeScorerId: target.id },
       })
     })
 
@@ -1023,7 +915,7 @@ export class MatchService {
   /**
    * Owner / Manager-only: revoke the manually assigned Scorer.
    * Releases the match back to innings-transition auto-shift behaviour
-   * (clears scorerLockedByOwner). Use this when the assigned scorer is
+   * Use this when the assigned scorer is
    * unavailable and you want the bowling captain to score by default.
    */
   async revokeScorer(matchId: string, userId: string) {
@@ -1047,7 +939,7 @@ export class MatchService {
       await tx.matchRole.deleteMany({ where: { matchId, role: 'SCORER' } })
       await tx.match.update({
         where: { id: matchId },
-        data: { activeScorerId: null, scorerLockedByOwner: false },
+        data: { activeScorerId: null },
       })
     })
 
@@ -1068,76 +960,6 @@ export class MatchService {
     }
 
     return { matchId, activeScorerId: null }
-  }
-
-  private async autoAssignScorerForBattingTeam(matchId: string, battingTeam: 'A' | 'B') {
-    const match = await prisma.match.findUnique({ where: { id: matchId } })
-    if (!match) return
-
-    // Phase 3/4 sticky-assignment guard: once an Owner or Manager has
-    // explicitly pinned a scorer (assignScorer sets this true; revokeScorer
-    // clears it), innings transitions must not overwrite their choice.
-    if ((match as any).scorerLockedByOwner === true) {
-      console.log(
-        `[autoShift] skipped match=${matchId} battingTeam=${battingTeam} reason=scorer-locked-by-owner`,
-      )
-      return
-    }
-
-    // Don't auto-shift on a finished match.
-    if (['COMPLETED', 'CANCELLED', 'ABANDONED'].includes(match.status)) {
-      console.log(
-        `[autoShift] skipped match=${matchId} status=${match.status}`,
-      )
-      return
-    }
-
-    const captainId = battingTeam === 'A' ? match.teamACaptainId : match.teamBCaptainId
-    if (!captainId) return
-
-    const prev = match.activeScorerId
-
-    await prisma.$transaction(async (tx) => {
-      await tx.matchRole.deleteMany({ where: { matchId, role: 'SCORER' } })
-      await tx.matchRole.create({
-        data: {
-          id: `${matchId}-${captainId}-SCORER-${Date.now()}`,
-          matchId,
-          profileId: captainId,
-          role: 'SCORER',
-          grantedBy: null,
-        },
-      })
-      await tx.match.update({ where: { id: matchId }, data: { activeScorerId: captainId } })
-    })
-
-    const scorer = await prisma.playerProfile.findUnique({ where: { id: captainId }, select: { userId: true } })
-    if (scorer) {
-      notificationSvc.createNotification(scorer.userId, {
-        type: 'scorer_assigned',
-        title: 'You\'re the Scorer',
-        body: `${battingTeam === 'A' ? match.teamAName : match.teamBName} is batting — you're now the scorer`,
-        entityType: 'match',
-        entityId: matchId,
-        sendPush: true,
-        audience: 'PLAYER',
-      }).catch(() => undefined)
-    }
-
-    if (prev && prev !== captainId) {
-      const prevProfile = await prisma.playerProfile.findUnique({ where: { id: prev }, select: { userId: true } })
-      if (prevProfile) {
-        notificationSvc.createNotification(prevProfile.userId, {
-          type: 'scorer_handedoff',
-          title: 'Scoring Handed Off',
-          body: `Scoring for ${match.teamAName} vs ${match.teamBName} has been passed to the bowling captain`,
-          entityType: 'match',
-          entityId: matchId,
-          sendPush: true,
-          audience: 'PLAYER',
-        }).catch(() => undefined)
-      }
-    }
   }
 
   private async seedMatchRoles(
@@ -1609,19 +1431,15 @@ export class MatchService {
 
     if (!isMultiInnings) {
       // Limited overs: after innings 1, create innings 2 for the other team.
-      // Scorer follows the new batting team's captain.
       if (inningsNum === 1) {
         const nextBatting = innings.battingTeam === 'A' ? 'B' : 'A'
         await prisma.innings.create({ data: { matchId, inningsNumber: 2, battingTeam: nextBatting } })
-        this.autoAssignScorerForBattingTeam(matchId, nextBatting as 'A' | 'B').catch(() => undefined)
       }
     } else {
-      // Test / two-innings: up to 4 innings — same rule, scorer follows the
-      // batting team's captain at every transition.
+      // Test / two-innings: up to 4 innings.
       if (inningsNum === 1) {
         const nextBatting = innings.battingTeam === 'A' ? 'B' : 'A'
         await prisma.innings.create({ data: { matchId, inningsNumber: 2, battingTeam: nextBatting } })
-        this.autoAssignScorerForBattingTeam(matchId, nextBatting as 'A' | 'B').catch(() => undefined)
       } else if (inningsNum === 2) {
         const inn1 = match.innings.find(i => i.inningsNumber === 1)
         const inn2 = match.innings.find(i => i.inningsNumber === 2)
@@ -1641,11 +1459,9 @@ export class MatchService {
         // Team 1 bats again in innings 3 (same side as innings 1 batted).
         const inn3BattingTeam: 'A' | 'B' = (inn1?.battingTeam ?? 'A') as 'A' | 'B'
         await prisma.innings.create({ data: { matchId, inningsNumber: 3, battingTeam: inn3BattingTeam } })
-        this.autoAssignScorerForBattingTeam(matchId, inn3BattingTeam).catch(() => undefined)
       } else if (inningsNum === 3) {
         const nextBatting = innings.battingTeam === 'A' ? 'B' : 'A'
         await prisma.innings.create({ data: { matchId, inningsNumber: 4, battingTeam: nextBatting } })
-        this.autoAssignScorerForBattingTeam(matchId, nextBatting as 'A' | 'B').catch(() => undefined)
       }
     }
     fireStudioEvent(matchId, TriggerEventType.INNINGS_COMPLETED)
@@ -1670,10 +1486,6 @@ export class MatchService {
     const nextBattingTeam: 'A' | 'B' =
       lastCompleted.battingTeam === 'A' ? 'B' : 'A'
     await prisma.innings.create({ data: { matchId, inningsNumber: nextNum, battingTeam: nextBattingTeam } })
-
-    // Scorer shifts to the new batting team's captain.
-    this.autoAssignScorerForBattingTeam(matchId, nextBattingTeam).catch(() => undefined)
-
     return this.getMatch(matchId)
   }
 
@@ -1854,7 +1666,6 @@ export class MatchService {
       category: (match as any).category,
       ageGroup: (match as any).ageGroup,
       ballType: (match as any).ballType,
-      captainScoringEnabled: (match as any).captainScoringEnabled !== false,
       format: match.format,
       round: match.round,
       venueName: match.venueName,

@@ -255,9 +255,7 @@ class _HostMatchDetailScreenState extends ConsumerState<HostMatchDetailScreen>
     final centerRole = center.myRole;
     final centerCanScore = centerRole == 'owner' ||
         centerRole == 'manager' ||
-        centerRole == 'scorer' ||
-        centerRole == 'captain-A' ||
-        centerRole == 'captain-B';
+        centerRole == 'scorer';
     final canScore =
         widget.initialMatch?.canScoreNow() == true || centerCanScore;
     final isLiveOrUpcoming = center.lifecycle == MatchLifecycle.live ||
@@ -273,7 +271,16 @@ class _HostMatchDetailScreenState extends ConsumerState<HostMatchDetailScreen>
     }());
 
 
-    return Scaffold(
+    final navigateBack = widget.callbacks?.onNavigateBack;
+    return PopScope(
+      // Intercept system back too — `go`-routed pages have nothing to pop, so
+      // the default behavior is silent. We always route through onNavigateBack
+      // (which falls back to /home).
+      canPop: navigateBack == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && navigateBack != null) navigateBack(context);
+      },
+      child: Scaffold(
       backgroundColor: context.bg,
       body: Column(
         children: [
@@ -281,8 +288,8 @@ class _HostMatchDetailScreenState extends ConsumerState<HostMatchDetailScreen>
           _HeroHeader(
             center: center,
             isInlineVideoVisible: _isInlineVideoVisible,
-            onBack: widget.callbacks?.onNavigateBack != null
-                ? () => widget.callbacks!.onNavigateBack!(context)
+            onBack: navigateBack != null
+                ? () => navigateBack(context)
                 : null,
             onWatchTap: () {
               if (_has(center.youtubeUrl)) {
@@ -319,16 +326,19 @@ class _HostMatchDetailScreenState extends ConsumerState<HostMatchDetailScreen>
             ),
           ),
 
-          // ── Resume Scoring bar (only for player-created live matches) ──
+          // ── Resume Scoring bar — live/upcoming + you can score ─────
+          // Edit Match lives on the Match Review (scoring) page, not here.
           if (canScore && isLiveOrUpcoming)
             _ResumeScoringBar(
               matchId: widget.matchId,
               isLive: center.lifecycle == MatchLifecycle.live,
+              showScoringCta: true,
               teamAName: center.teamAName,
               teamBName: center.teamBName,
               callbacks: widget.callbacks,
             ),
         ],
+      ),
       ),
     );
   }
@@ -351,10 +361,12 @@ class _ResumeScoringBar extends StatelessWidget {
     required this.isLive,
     required this.teamAName,
     required this.teamBName,
+    this.showScoringCta = true,
     this.callbacks,
   });
   final String matchId;
   final bool isLive;
+  final bool showScoringCta;
   final String teamAName;
   final String teamBName;
   final MatchDetailCallbacks? callbacks;
@@ -363,7 +375,6 @@ class _ResumeScoringBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).padding.bottom;
     final screenWidth = MediaQuery.of(context).size.width;
-    final canEdit = !isLive && callbacks?.onEditMatch != null;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.hasBoundedWidth ? constraints.maxWidth : screenWidth;
@@ -374,56 +385,30 @@ class _ResumeScoringBar extends StatelessWidget {
             color: context.surf,
             border: Border(top: BorderSide(color: context.stroke)),
           ),
-          child: Row(
-            children: [
-              if (canEdit) ...[
-                IntrinsicWidth(
-                  child: SizedBox(
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        callbacks!.onEditMatch!(context, matchId, teamAName, teamBName),
-                    icon: const Icon(Icons.edit_rounded, size: 16),
-                    label: const Text('Edit',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: context.fgSub,
-                      side: BorderSide(color: context.stroke),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-              ],
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      if (callbacks?.onScoreMatch != null) {
-                        callbacks!.onScoreMatch!(context, matchId);
-                      }
-                    },
-                    icon: const Icon(Icons.sports_cricket_rounded, size: 18),
-                    label: Text(
-                      isLive ? 'Resume Scoring' : 'Start Scoring',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: context.accent,
-                      foregroundColor: context.fg,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
+          child: SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                if (callbacks?.onScoreMatch != null) {
+                  callbacks!.onScoreMatch!(context, matchId);
+                }
+              },
+              icon: const Icon(Icons.sports_cricket_rounded, size: 18),
+              label: Text(
+                isLive ? 'Resume Scoring' : 'Start Scoring',
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: context.accent,
+                foregroundColor: context.fg,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
-            ],
+            ),
           ),
         );
       },
@@ -512,13 +497,20 @@ class _HeroHeader extends ConsumerWidget {
                 children: [
                   IconButton(
                     icon: Icon(Icons.arrow_back_ios_new_rounded,
-                        size: 18, color: context.fg.withValues(alpha: 0.6)),
-                    onPressed: onBack ??
-                        () {
-                          if (Navigator.of(context).canPop()) {
-                            Navigator.of(context).pop();
-                          }
-                        },
+                        size: 20, color: context.fg),
+                    tooltip: 'Back',
+                    onPressed: () {
+                      debugPrint(
+                        '[MatchDetail] back tapped — '
+                        'hasCallback=${onBack != null} '
+                        'canPop=${Navigator.of(context).canPop()}',
+                      );
+                      if (onBack != null) {
+                        onBack!();
+                      } else if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      }
+                    },
                   ),
                   Expanded(
                     child: Text(

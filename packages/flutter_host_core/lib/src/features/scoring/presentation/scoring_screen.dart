@@ -875,38 +875,25 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     );
   }
 
-  /// Mirrors the backend's authorizeMutation SCORER tier. If the user is
-  /// seated as a captain, they can only score when their team is batting —
-  /// even if they're also the match owner. Anyone else with owner / manager /
-  /// active-scorer access can always score.
+  /// Mirrors the backend's authorizeMutation SCORER tier. The match owner,
+  /// the assigned scorer, or a manager can record balls. Captains have no
+  /// inherent rights — assignScorer is the only way to grant them write
+  /// access. We default to true when we can't decide locally so the UI
+  /// stays out of the way; the server is the authoritative gate.
   bool _userCanScore(HostScoringState state) {
     final me = (widget.currentPlayerId ?? '').trim();
     final match = state.match;
-    final players = state.players;
     if (me.isEmpty || match == null) return true;
 
-    // Active-scorer override (deliberately pinned).
+    // Active assigned scorer.
+    if ((match.activeScorerId ?? '').trim() == me) return true;
+    // Legacy single-field scorer pointer (creator on older matches).
     if ((match.scorerId ?? '').trim() == me) return true;
 
-    final captainAId = (players?.teamACaptainId ?? '').trim();
-    final captainBId = (players?.teamBCaptainId ?? '').trim();
-    final isCaptainA = captainAId.isNotEmpty && captainAId == me;
-    final isCaptainB = captainBId.isNotEmpty && captainBId == me;
-    if (!isCaptainA && !isCaptainB) {
-      // Not seated as a captain — owner / manager / scorer all pass.
-      return true;
-    }
-
-    // Captains in non-player-created matches don't get auto-write access —
-    // they need an explicit assignScorer from the creator.
-    if (!match.captainScoringEnabled) return false;
-
-    // Captain seat in a player-created match — apply batting guard.
-    final battingTeam = state.activeInnings?.battingTeam;
-    if (battingTeam == null) return false; // pre-toss / between innings
-    if (isCaptainA && battingTeam == 'A') return true;
-    if (isCaptainB && battingTeam == 'B') return true;
-    return false;
+    // We don't have role info on the scoring state, so we trust the
+    // server. Render the buttons; if the API rejects the write, we
+    // surface the error.
+    return true;
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
@@ -1321,9 +1308,9 @@ class _ScoringBody extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Your team is bowling — the batting captain or '
-                    'an assigned scorer records the ball. You\'ll see '
-                    'the score buttons once your team is at the crease.',
+                    'Only the match owner or the assigned scorer can record '
+                    'balls. Ask the owner to assign you via Manage Scorer if '
+                    'you need to score.',
                     style: TextStyle(
                       color: context.fgSub,
                       fontSize: 13,
@@ -2464,8 +2451,7 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
     if (name.isNotEmpty) return name;
     final id = (m.activeScorerId ?? '').trim();
     if (id.isNotEmpty) return 'Assigned';
-    if (!m.captainScoringEnabled) return 'Not assigned';
-    return 'Batting captain (auto)';
+    return 'Owner only';
   }
 
   Future<void> _openScorerSheet() async {
@@ -2902,21 +2888,6 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
               label: const Text('Manage scorer'),
             ),
           ),
-          if (!match.captainScoringEnabled &&
-              (match.activeScorerId ?? '').isEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'No scorer assigned — captains can\'t score in this match. '
-                'Assign someone or take over.',
-                style: TextStyle(
-                  color: context.warn,
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 12),
           if ((match.tossWonBy ?? '').isNotEmpty) ...[
             _DetailRow(

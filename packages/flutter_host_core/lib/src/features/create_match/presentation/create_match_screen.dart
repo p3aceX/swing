@@ -10,6 +10,7 @@ import '../../../repositories/host_arena_repository.dart';
 import '../../../repositories/host_team_repository.dart';
 import '../../../theme/host_colors.dart';
 import '../../arena_booking/domain/arena_booking_models.dart';
+import '../data/create_match_repository.dart';
 import '../../my_teams/controller/my_teams_controller.dart';
 import '../../my_teams/domain/my_teams_models.dart';
 import '../../playing_eleven/presentation/playing_eleven_screen.dart';
@@ -30,6 +31,9 @@ class CreateMatchScreen extends ConsumerStatefulWidget {
     this.currentUserId,
     this.onTossCompleted,
     this.onBack,
+    this.initialPrefill,
+    this.editMatchId,
+    this.onEditSaved,
   });
 
   /// User id whose owned teams should appear under "Your squads". Pass `null`
@@ -44,8 +48,68 @@ class CreateMatchScreen extends ConsumerStatefulWidget {
   /// AppBar back action. Defaults to `Navigator.maybePop`.
   final VoidCallback? onBack;
 
+  /// When set, the form opens pre-populated with the existing match's values
+  /// (used by the Edit Match flow).
+  final CreateMatchPrefill? initialPrefill;
+
+  /// When non-null, the form is in edit mode. Submit PATCHes this match in
+  /// place (preserving toss / Playing 11 / scoring state) and pops back
+  /// instead of progressing to Playing 11.
+  final String? editMatchId;
+
+  /// Called after a successful in-place edit save. Hosts use this to navigate
+  /// back to the scoring/match-detail screen. Defaults to `Navigator.pop`.
+  final void Function(BuildContext context, String matchId)? onEditSaved;
+
   @override
   ConsumerState<CreateMatchScreen> createState() => _CreateMatchScreenState();
+}
+
+/// Initial values used to pre-fill [CreateMatchScreen] when editing a match.
+class CreateMatchPrefill {
+  const CreateMatchPrefill({
+    this.teamAId,
+    this.teamAName,
+    this.teamALogoUrl,
+    this.teamACity,
+    this.teamBId,
+    this.teamBName,
+    this.teamBLogoUrl,
+    this.teamBCity,
+    this.format,
+    this.category,
+    this.ageGroup,
+    this.ballType,
+    this.venueId,
+    this.venueName,
+    this.venueCity,
+    this.scheduledAt,
+    this.customOvers,
+    this.hasImpactPlayer,
+  });
+
+  final String? teamAId;
+  final String? teamAName;
+  final String? teamALogoUrl;
+  final String? teamACity;
+  final String? teamBId;
+  final String? teamBName;
+  final String? teamBLogoUrl;
+  final String? teamBCity;
+  /// API value: T10 / T20 / ONE_DAY / TEST / BOX_CRICKET / CUSTOM.
+  final String? format;
+  /// API value: SCHOOL / CLUB_ACADEMY / CORPORATE / GULLY / ASSOCIATION.
+  final String? category;
+  /// API value: U14 / U16 / U19 / U23 / SENIOR.
+  final String? ageGroup;
+  /// API value: LEATHER / TENNIS / TAPE / RUBBER / CORK / OTHER.
+  final String? ballType;
+  final String? venueId;
+  final String? venueName;
+  final String? venueCity;
+  final DateTime? scheduledAt;
+  final int? customOvers;
+  final bool? hasImpactPlayer;
 }
 
 class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
@@ -78,6 +142,7 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   @override
   void initState() {
     super.initState();
+    _applyPrefill();
     // Kick off the my-teams load right away so the picker has data ready.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -92,6 +157,95 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
     _customOversCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _applyPrefill() {
+    final p = widget.initialPrefill;
+    if (p == null) return;
+
+    if ((p.teamAId ?? '').isNotEmpty && (p.teamAName ?? '').isNotEmpty) {
+      _teamA = HostMyTeam(
+        id: p.teamAId!,
+        name: p.teamAName!,
+        city: p.teamACity,
+        logoUrl: p.teamALogoUrl,
+        playerCount: 0,
+        isOwner: true,
+      );
+    }
+    if ((p.teamBId ?? '').isNotEmpty && (p.teamBName ?? '').isNotEmpty) {
+      _teamB = _OpponentTeam(
+        id: p.teamBId!,
+        name: p.teamBName!,
+        city: p.teamBCity,
+        logoUrl: p.teamBLogoUrl,
+      );
+    }
+
+    final fmt = (p.format ?? '').toUpperCase();
+    if (fmt.isNotEmpty) {
+      for (final f in _MatchFormat.values) {
+        if (f.apiValue == fmt) {
+          _format = f;
+          break;
+        }
+      }
+    }
+
+    final cat = (p.category ?? '').toUpperCase();
+    if (cat.isNotEmpty) {
+      for (final c in _Category.values) {
+        if (c.apiValue == cat) {
+          _category = c;
+          break;
+        }
+      }
+    }
+
+    final age = (p.ageGroup ?? '').toUpperCase();
+    if (age.isNotEmpty) {
+      for (final a in _AgeGroup.values) {
+        if (a.apiValue == age) {
+          _ageGroup = a;
+          break;
+        }
+      }
+    }
+
+    final ball = (p.ballType ?? '').toUpperCase();
+    if (ball.isNotEmpty) {
+      for (final b in _BallKind.values) {
+        if (b.apiValue == ball) {
+          _ball = b;
+          break;
+        }
+      }
+    }
+
+    if ((p.venueName ?? '').trim().isNotEmpty) {
+      _venue = _VenueChoice(
+        id: p.venueId ?? '',
+        name: p.venueName!,
+        city: p.venueCity ?? '',
+      );
+    }
+
+    if (p.scheduledAt != null) {
+      _scheduledAt = p.scheduledAt!;
+      _scheduleForLater = true;
+    }
+
+    if (p.customOvers != null && p.customOvers! > 0) {
+      _customOversCtrl.text = '${p.customOvers}';
+    }
+
+    if (p.hasImpactPlayer == true) _hasImpactPlayer = true;
+
+    // Fast-forward through the progressive reveal so the user lands on a
+    // fully-expanded form (no need to "Next" through pre-filled steps).
+    if (_teamA != null && _teamB != null) {
+      _step = _stepOptions;
+    }
   }
 
   void _advance(int next) {
@@ -229,25 +383,53 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
                                     picked == _Category.gully) {
                                   _ageGroup = _AgeGroup.senior;
                                 }
+                                // School cricket is youth-only — snap off
+                                // Senior if it was carried in from a previous
+                                // category.
+                                if (picked == _Category.school &&
+                                    _ageGroup == _AgeGroup.senior) {
+                                  _ageGroup = _AgeGroup.u19;
+                                }
+                                // Gully = tennis-ball cricket by definition.
+                                // Snap ball to Tennis so the form matches the
+                                // category. Other categories default to
+                                // Leather; respect any explicit user pick.
+                                if (picked == _Category.gully) {
+                                  _ball = _BallKind.tennis;
+                                } else if (_ball == _BallKind.tennis) {
+                                  _ball = _BallKind.leather;
+                                }
                               });
                             }
                           },
                         ),
-                        _SettingsRow(
-                          label: 'Age',
-                          value: _ageGroup.label,
-                          onTap: () async {
-                            final picked = await _showOptionPicker<_AgeGroup>(
-                              title: 'Age group',
-                              options: _AgeGroup.values,
-                              selected: _ageGroup,
-                              labelOf: (e) => e.label,
-                            );
-                            if (picked != null) {
-                              setState(() => _ageGroup = picked);
-                            }
-                          },
-                        ),
+                        // Age row only shows when the category isn't open-age.
+                        // Corporate + Gully are always Senior/Open by convention.
+                        if (_category != _Category.corporate &&
+                            _category != _Category.gully)
+                          _SettingsRow(
+                            label: 'Age',
+                            value: _ageGroup.label,
+                            onTap: () async {
+                              // School cricket excludes Senior — only youth
+                              // brackets are valid.
+                              final options = _category == _Category.school
+                                  ? _AgeGroup.values
+                                      .where((e) => e != _AgeGroup.senior)
+                                      .toList()
+                                  : _AgeGroup.values;
+                              final picked =
+                                  await _showOptionPicker<_AgeGroup>(
+                                title: 'Age group',
+                                options: options,
+                                selected: _ageGroup,
+                                labelOf: (e) => e.label,
+                              );
+                              if (picked != null) {
+                                setState(() => _ageGroup = picked);
+                              }
+                            },
+                          ),
                         _SettingsRow(
                           label: 'Format',
                           value: _format.label,
@@ -595,6 +777,62 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
         ? int.tryParse(_customOversCtrl.text.trim())
         : null;
 
+    // Edit mode: PATCH the existing match in place — keeps toss/playing-11/
+    // scoring state intact.
+    final editId = widget.editMatchId;
+    if (editId != null && editId.isNotEmpty) {
+      debugPrint(
+        '[CreateMatch] EDIT submit — matchId=$editId '
+        'teamA="${teamA.name}" teamB="${teamB.name}" '
+        'format=${_format.apiValue} ball=${_ball.apiValue} '
+        'category=${_category.apiValue} ageGroup=${_ageGroup.apiValue}',
+      );
+      try {
+        await ref.read(hostCreateMatchRepositoryProvider).updateMatchSettings(
+              editId,
+              format: _format.apiValue,
+              ballType: _ball.apiValue,
+              category: _category.apiValue,
+              ageGroup: _ageGroup.apiValue,
+              venueName: _venue?.name,
+              venueCity: _venue?.city,
+              facilityId: _venue?.id,
+              scheduledAt: _scheduledAt,
+              customOvers: overs,
+              hasImpactPlayer: _hasImpactPlayer,
+              teamAName: teamA.name,
+              teamBName: teamB.name,
+            );
+      } catch (e) {
+        debugPrint('[CreateMatch] EDIT failed: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save: $e')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Match updated')),
+      );
+      final onSaved = widget.onEditSaved;
+      if (onSaved != null) {
+        onSaved(context, editId);
+      } else {
+        Navigator.of(context).maybePop();
+      }
+      return;
+    }
+
+    debugPrint(
+      '[CreateMatch] submit tapped — '
+      'teamA="${teamA.name}"(${teamA.id}) vs teamB="${teamB.name}"(${teamB.id}) '
+      'venue="${_venue?.name}"(${_venue?.id}) city="${_venue?.city}" '
+      'scheduled=$_scheduledAt format=${_format.apiValue} '
+      'category=${_category.apiValue} ageGroup=${_ageGroup.apiValue} '
+      'ball=${_ball.apiValue} customOvers=$overs impact=$_hasImpactPlayer',
+    );
+
     final matchId = await ref
         .read(hostCreateMatchControllerProvider.notifier)
         .createMatch(
@@ -614,6 +852,10 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
           facilityId: _venue?.id,
         );
 
+    if (matchId == null) {
+      final err = ref.read(hostCreateMatchControllerProvider).error;
+      debugPrint('[CreateMatch] _submit aborting — controller error: $err');
+    }
     if (!mounted || matchId == null) return;
     Navigator.of(context).push(
       MaterialPageRoute(

@@ -640,11 +640,7 @@ export class PlayerService {
         myRole,
         meIsActiveScorer,
         // legacy field — kept for backwards compat, derived from myRole
-        isHost:
-          myRole === 'owner' ||
-          myRole === 'manager' ||
-          myRole === 'captain-A' ||
-          myRole === 'captain-B',
+        isHost: myRole === 'owner' || myRole === 'manager',
         match: {
           ...item.match,
           teamALogoUrl: teamByName.get(item.match.teamAName)?.logoUrl ?? null,

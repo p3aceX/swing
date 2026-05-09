@@ -587,11 +587,6 @@ class HostMatchDetailRepository {
       tossWinner: _buildTossSummary(match, firstTeam, secondTeam),
       tossDecision: null,
       myRole: _orNull(_str(raw['myRole'] ?? stat['myRole'])),
-      // Default true keeps legacy clients reading older API responses
-      // working. Backend stamps this from the creator's activeRole.
-      captainScoringEnabled:
-          (match['captainScoringEnabled'] ?? raw['captainScoringEnabled']) !=
-              false,
       activeScorerProfileId: _orNull(
         _str(match['activeScorerId'] ?? raw['activeScorerId']),
       ),
@@ -751,11 +746,6 @@ class HostMatchDetailRepository {
         teamBName: teamBName.isEmpty ? 'Team B' : teamBName,
       ),
       myRole: _orNull(_str(matchRoot['myRole'] ?? merged['myRole'])),
-      // Default true keeps legacy responses (no flag) on the historical
-      // captain-can-score behavior.
-      captainScoringEnabled: (matchRoot['captainScoringEnabled'] ??
-              merged['captainScoringEnabled']) !=
-          false,
       activeScorerProfileId: _orNull(
           _str(matchRoot['activeScorerId'] ?? merged['activeScorerId'])),
       activeScorerName: _orNull(_str(

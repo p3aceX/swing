@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/create_match_repository.dart';
@@ -81,7 +82,9 @@ class HostCreateMatchController extends StateNotifier<HostCreateMatchState> {
         clearError: true,
       );
       return matchId;
-    } catch (error) {
+    } catch (error, stack) {
+      debugPrint('[CreateMatch] controller caught error: $error');
+      debugPrint('[CreateMatch] stack: $stack');
       state = state.copyWith(
         isSubmitting: false,
         error: error.toString(),

@@ -51,6 +51,23 @@ class HostMatchRepository {
     );
   }
 
+  /// Owner/manager-only. Pins `targetProfileId` as the active scorer for
+  /// this match and locks the auto-shift on innings transitions. Use this
+  /// to give a non-captain (or a specific captain) the gloves when the
+  /// default rule isn't right for the match.
+  Future<void> assignScorer(String matchId, String targetProfileId) async {
+    await _dio.post(
+      '${_paths.match(matchId)}/assign-scorer',
+      data: {'profileId': targetProfileId},
+    );
+  }
+
+  /// Owner/manager-only. Clears the explicit scorer assignment, lets the
+  /// auto-shift take over again on the next innings transition.
+  Future<void> revokeScorer(String matchId) async {
+    await _dio.delete('${_paths.match(matchId)}/scorer');
+  }
+
   Future<void> recordToss(
     String matchId, {
     required String tossWonBy,

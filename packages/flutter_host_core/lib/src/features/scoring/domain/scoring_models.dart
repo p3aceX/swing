@@ -12,12 +12,18 @@ class ScoringMatch {
     this.winnerId,
     this.winMargin,
     this.matchType,
+    this.ballType,
+    this.category,
+    this.ageGroup,
     this.hasImpactPlayer = false,
     this.teamAPlayerIds = const [],
     this.teamBPlayerIds = const [],
     this.teamAId,
     this.teamBId,
     this.scorerId,
+    this.activeScorerId,
+    this.activeScorerName,
+    this.createdByUserId,
     this.venueName,
     this.venueCity,
     this.scheduledAt,
@@ -35,12 +41,27 @@ class ScoringMatch {
   final String? winnerId;
   final String? winMargin;
   final String? matchType;
+  /// e.g. 'LEATHER' | 'TENNIS' | 'TAPE' | 'RUBBER' | 'CORK' | 'OTHER'.
+  final String? ballType;
+  /// Squad-style category: SCHOOL | CLUB_ACADEMY | CORPORATE | GULLY | ASSOCIATION.
+  final String? category;
+  /// U14 | U16 | U19 | U23 | SENIOR.
+  final String? ageGroup;
   final bool hasImpactPlayer;
   final List<String> teamAPlayerIds;
   final List<String> teamBPlayerIds;
   final String? teamAId;
   final String? teamBId;
   final String? scorerId;
+  /// Profile ID of the currently pinned scorer (set by assignScorer / auto
+  /// shift on innings transitions). Distinct from `scorerId` which is the
+  /// legacy single-field assignment.
+  final String? activeScorerId;
+  /// Display name of the active scorer if the API surfaced it.
+  final String? activeScorerName;
+  /// User ID of the match creator. Used by the Scorer manage sheet to
+  /// decide who can edit the assignment.
+  final String? createdByUserId;
   final String? venueName;
   final String? venueCity;
   final DateTime? scheduledAt;
@@ -84,12 +105,18 @@ class ScoringMatch {
       winnerId: _nullableString(payload['winnerId']),
       winMargin: _nullableString(payload['winMargin']),
       matchType: _nullableString(payload['matchType']),
+      ballType: _nullableString(payload['ballType']),
+      category: _nullableString(payload['category']),
+      ageGroup: _nullableString(payload['ageGroup']),
       hasImpactPlayer: payload['hasImpactPlayer'] == true,
       teamAPlayerIds: _list(payload['teamAPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       teamBPlayerIds: _list(payload['teamBPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       teamAId: _nullableString(payload['teamAId'] ?? _map(payload['teamA'])['id']),
       teamBId: _nullableString(payload['teamBId'] ?? _map(payload['teamB'])['id']),
       scorerId: _nullableString(payload['scorerId']),
+      activeScorerId: _nullableString(payload['activeScorerId']),
+      activeScorerName: _nullableString(payload['activeScorerName']),
+      createdByUserId: _nullableString(payload['createdByUserId']),
       venueName: _nullableString(payload['venueName']),
       venueCity: _nullableString(payload['venueCity']),
       scheduledAt: parsedAt,

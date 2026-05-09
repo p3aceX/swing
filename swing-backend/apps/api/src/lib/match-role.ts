@@ -3,35 +3,22 @@ import { prisma } from '@swing/db'
 /**
  * Effective role of a caller on a match.
  *
- * - 'owner'      → full authority (delete, manage, score)
- * - 'manager'    → manage XI/toss, score, assign Scorer (no delete)
- * - 'scorer'     → score only (assigned by Owner / Manager)
- * - 'captain-A'  → captain of team A; manage their team; **scoring gated by
- *                  batting team check at write time** (Phase 2)
- * - 'captain-B'  → captain of team B; same as above for team B
- * - null         → no authority
+ *   'owner'    → full authority. Created the match (or was added explicitly
+ *                as MatchRole(OWNER)). Can edit, delete, patch, assign or
+ *                revoke a scorer, and record balls.
+ *   'manager'  → owner-equivalent for management actions (edit, delete,
+ *                assign scorer). Can also record balls.
+ *   'scorer'   → assigned by an owner or manager. Can record balls. Cannot
+ *                manage the match.
+ *   null       → read-only.
  *
- * Captain-A/B exists so the write-time guard can decide whether the caller is
- * the currently-batting team's captain. For *management* checks (XI / toss /
- * editing the match), captain-A/B are treated as manager-equivalent — see
- * `authorizeMutation` in match.service.ts.
+ * Captain seats on the match are pure metadata — they have no permission
+ * implication. If the captain wants to score, the owner has to assign them
+ * via assignScorer.
  */
-export type MatchRoleValue =
-  | 'owner'
-  | 'manager'
-  | 'scorer'
-  | 'captain-A'
-  | 'captain-B'
-  | null
+export type MatchRoleValue = 'owner' | 'manager' | 'scorer' | null
 
-/**
- * Resolves the highest role a profile holds on a match.
- *
- * Priority: OWNER > MANAGER > SCORER > captain-A/B > null
- *
- * Falls back to legacy scorerId / teamACaptainId / teamBCaptainId for matches
- * that predate the MatchRole table (Phase 5 backfill will eliminate this path).
- */
+/** Highest role the profile holds on the match. */
 export async function resolveMatchRole(
   profileId: string,
   matchId: string,
@@ -43,41 +30,30 @@ export async function resolveMatchRole(
     }),
     prisma.match.findUnique({
       where: { id: matchId },
-      select: {
-        scorerId: true,
-        teamACaptainId: true,
-        teamBCaptainId: true,
-        activeScorerId: true,
-        tournamentId: true,
-      },
+      select: { scorerId: true, activeScorerId: true },
     }),
   ])
 
   if (!match) return null
 
   const roleSet = new Set(roles.map((r) => r.role))
-
   if (roleSet.has('OWNER')) return 'owner'
   if (roleSet.has('MANAGER')) return 'manager'
   if (roleSet.has('SCORER')) return 'scorer'
 
-  // Legacy fallback — matches without MatchRole rows yet
+  // Legacy fallback for matches that predate MatchRole — promote the
+  // historical scorerId field to OWNER. Phase 5 backfill will eliminate
+  // this path eventually.
   if (match.scorerId === profileId) return 'owner'
 
-  // For non-tournament matches, captains map to captain-A/B so the write-time
-  // bowling guard (Phase 2) can decide whether they're allowed to score.
-  if (!match.tournamentId) {
-    if (match.teamACaptainId === profileId) return 'captain-A'
-    if (match.teamBCaptainId === profileId) return 'captain-B'
-  }
+  // Active scorer assignment (post-create) doesn't auto-create a role row in
+  // every flow, so honour it as a SCORER fallback.
+  if (match.activeScorerId === profileId) return 'scorer'
 
   return null
 }
 
-/**
- * Batch-resolves roles for multiple matches at once (used in list endpoints).
- * Returns a Map of matchId → role.
- */
+/** Same as `resolveMatchRole` but batched across many matches. */
 export async function resolveMatchRoleBatch(
   profileId: string,
   matchIds: string[],
@@ -91,17 +67,10 @@ export async function resolveMatchRoleBatch(
     }),
     prisma.match.findMany({
       where: { id: { in: matchIds } },
-      select: {
-        id: true,
-        scorerId: true,
-        teamACaptainId: true,
-        teamBCaptainId: true,
-        tournamentId: true,
-      },
+      select: { id: true, scorerId: true, activeScorerId: true },
     }),
   ])
 
-  // Group MatchRole rows by matchId
   const rolesByMatch = new Map<string, Set<string>>()
   for (const r of roles) {
     if (!rolesByMatch.has(r.matchId)) rolesByMatch.set(r.matchId, new Set())
@@ -113,7 +82,7 @@ export async function resolveMatchRoleBatch(
 
   for (const matchId of matchIds) {
     const roleSet = rolesByMatch.get(matchId) ?? new Set()
-    const match = matchMap.get(matchId)
+    const m = matchMap.get(matchId)
 
     if (roleSet.has('OWNER')) {
       result.set(matchId, 'owner')
@@ -127,23 +96,14 @@ export async function resolveMatchRoleBatch(
       result.set(matchId, 'scorer')
       continue
     }
-
-    // Legacy fallback
-    if (match?.scorerId === profileId) {
+    if (m?.scorerId === profileId) {
       result.set(matchId, 'owner')
       continue
     }
-    if (!match?.tournamentId) {
-      if (match?.teamACaptainId === profileId) {
-        result.set(matchId, 'captain-A')
-        continue
-      }
-      if (match?.teamBCaptainId === profileId) {
-        result.set(matchId, 'captain-B')
-        continue
-      }
+    if (m?.activeScorerId === profileId) {
+      result.set(matchId, 'scorer')
+      continue
     }
-
     result.set(matchId, null)
   }
 

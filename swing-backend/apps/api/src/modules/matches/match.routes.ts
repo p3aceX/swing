@@ -18,21 +18,11 @@ export async function matchRoutes(app: FastifyInstance) {
   const auth = { onRequest: [(app as any).authenticate] }
 
   app.post('/', auth, async (request, reply) => {
-    // The JWT carries activeRole baked in at login time — that's what tells
-    // us which app the request came from (biz login → BUSINESS_OWNER /
-    // ARENA_OWNER, player login → PLAYER, etc.). Forward it to the service
-    // so captainScoringEnabled is stamped from the request, not from the
-    // user's possibly-stale DB activeRole.
-    const user = (request as any).user as {
-      userId: string
-      activeRole?: string
-    }
+    const user = (request as any).user as { userId: string }
     const body = createMatchRequestSchema.parse(request.body)
     return reply.code(201).send({
       success: true,
-      data: await svc.createMatch(user.userId, body, {
-        callerActiveRole: user.activeRole,
-      }),
+      data: await svc.createMatch(user.userId, body),
     })
   })
 

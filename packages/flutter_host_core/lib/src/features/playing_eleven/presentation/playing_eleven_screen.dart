@@ -123,6 +123,11 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
         selected: _prefillSelected(
           current: isA ? _teamA.asLoaded : _teamB.asLoaded,
           players: players,
+          mustInclude: {
+            if (roster.captainId != null) roster.captainId!,
+            if (roster.viceCaptainId != null) roster.viceCaptainId!,
+            if (roster.wicketKeeperId != null) roster.wicketKeeperId!,
+          },
         ),
         captainId: roster.captainId,
         viceCaptainId: roster.viceCaptainId,
@@ -305,13 +310,25 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
   Set<String> _prefillSelected({
     required _LoadedRoster? current,
     required List<_RosterPlayer> players,
+    Set<String> mustInclude = const <String>{},
   }) {
     final available = players.map((p) => p.profileId).toSet();
     if (current != null) {
       final kept = current.selected.where(available.contains).toSet();
       if (kept.isNotEmpty) return kept;
     }
-    return {for (final p in players.take(_squadSize)) p.profileId};
+    // Captain / VC / WK are pinned first so they never get bumped out of the
+    // playing 11 when the team has more than 11 members. Roster order fills
+    // the remaining slots.
+    final picked = <String>{
+      for (final id in mustInclude)
+        if (available.contains(id)) id,
+    };
+    for (final p in players) {
+      if (picked.length >= _squadSize) break;
+      picked.add(p.profileId);
+    }
+    return picked;
   }
 
   void _setRole(bool isA, String profileId, _Role role) {
@@ -596,8 +613,10 @@ class _RosterPane extends StatelessWidget {
       return _EmptyState(onRetry: onRetry, onAddPlayer: onAddPlayer);
     }
 
-    // rows: [0] = status strip, [1] = add player button, [2..] = players
-    final playerCount = loaded.players.length;
+    // rows: [0] = status strip, [1] = add player button, [2..] = players.
+    // Captain → VC → WK → rest, so the role players are always at the top.
+    final orderedPlayers = loaded.displayPlayers;
+    final playerCount = orderedPlayers.length;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
       itemCount: playerCount + 2,
@@ -621,7 +640,7 @@ class _RosterPane extends StatelessWidget {
             ),
           );
         }
-        final player = loaded.players[i - 2];
+        final player = orderedPlayers[i - 2];
         if (i >= 2) {
           final isSelected = loaded.selected.contains(player.profileId);
           return _PlayerRow(
@@ -1733,5 +1752,27 @@ class _LoadedRoster {
     if (profileId == viceCaptainId) roles.add(_Role.viceCaptain);
     if (profileId == wicketKeeperId) roles.add(_Role.wicketKeeper);
     return roles;
+  }
+
+  /// Players sorted for display: Captain → Vice-captain → Wicket-keeper →
+  /// everyone else (in roster order). The underlying `players` list stays
+  /// untouched.
+  List<_RosterPlayer> get displayPlayers {
+    int rank(_RosterPlayer p) {
+      if (p.profileId == captainId) return 0;
+      if (p.profileId == viceCaptainId) return 1;
+      if (p.profileId == wicketKeeperId) return 2;
+      return 3;
+    }
+
+    final indexed =
+        players.asMap().entries.toList(growable: false);
+    indexed.sort((a, b) {
+      final ra = rank(a.value);
+      final rb = rank(b.value);
+      if (ra != rb) return ra.compareTo(rb);
+      return a.key.compareTo(b.key);
+    });
+    return [for (final e in indexed) e.value];
   }
 }
