@@ -633,9 +633,12 @@ export class PlayerService {
 
     const enriched = data.map((item) => {
       const myRole = roleMap.get(item.matchId) ?? null
+      const activeScorerId = (item.match as any).activeScorerId as string | null
+      const meIsActiveScorer = !!activeScorerId && activeScorerId === profileId
       return {
         ...item,
         myRole,
+        meIsActiveScorer,
         // legacy field — kept for backwards compat, derived from myRole
         isHost:
           myRole === 'owner' ||

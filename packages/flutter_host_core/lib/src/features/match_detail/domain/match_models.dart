@@ -60,6 +60,8 @@ class PlayerMatch {
     this.tossWinner,
     this.tossDecision,
     this.captainScoringEnabled = true,
+    this.activeScorerProfileId,
+    this.meIsActiveScorer = false,
   });
 
   final String id;
@@ -99,9 +101,21 @@ class PlayerMatch {
 
   /// True when the match was created from the player app — captains have
   /// auto-write privilege via the batting guard. False when created by
-  /// arena/academy/coach apps — only the creator and an explicitly
-  /// assigned scorer can record balls.
+  /// arena/academy/coach apps — only an explicitly assigned scorer can
+  /// record balls.
   final bool captainScoringEnabled;
+
+  /// Profile ID of the currently assigned active scorer on this match,
+  /// or null if no one is assigned. Distinct from `myRole` — the owner
+  /// (who has 'owner' role) can also be the active scorer; checking this
+  /// id is the canonical "are you the scorer right now" question.
+  final String? activeScorerProfileId;
+
+  /// Server-computed: true when the requesting user IS the active scorer
+  /// (regardless of their role). Set by the backend by comparing
+  /// `activeScorerId` against the requester's profile id. Falls back to
+  /// `myRole == 'scorer'` when the API didn't surface the flag.
+  final bool meIsActiveScorer;
 
   bool get _isCaptain => myRole == 'captain-A' || myRole == 'captain-B';
 
@@ -115,8 +129,12 @@ class PlayerMatch {
       myRole == 'manager' ||
       (_isCaptain && captainScoringEnabled);
 
-  /// True when this user is the assigned active scorer.
-  bool get isActiveScorer => myRole == 'scorer';
+  /// True when this user is the assigned active scorer. Uses the server
+  /// flag when surfaced; falls back to `myRole == 'scorer'` for older
+  /// API responses. Both signals are true after `assignScorer` — the
+  /// server-computed bool is authoritative when an owner takes over and
+  /// keeps role='owner' but is the active scorer by id.
+  bool get isActiveScorer => meIsActiveScorer || myRole == 'scorer';
 
   /// Whether the matches-list "Resume / Start Scoring" CTA should render
   /// for this user on this match.
