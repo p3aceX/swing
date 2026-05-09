@@ -786,52 +786,22 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                 OutlinedButton.icon(
                   onPressed: () async {
                     Navigator.pop(sheetCtx);
-                    final all = [...players.teamA, ...players.teamB];
-                    if (all.isEmpty) return;
+                    if (players.teamA.isEmpty && players.teamB.isEmpty) return;
                     final picked =
-                        await showModalBottomSheet<ScoringMatchPlayer>(
-                      context: context,
-                      isScrollControlled: true,
-                      backgroundColor:
-                          Theme.of(context).colorScheme.surface,
-                      shape: const RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(16)),
-                      ),
-                      builder: (ctx) => SafeArea(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxHeight:
-                                MediaQuery.of(ctx).size.height * 0.7,
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(height: 12),
-                              Text(
-                                'Pick a scorer',
-                                style: TextStyle(
-                                  color: ctx.fg,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Flexible(
-                                child: ListView.builder(
-                                  shrinkWrap: true,
-                                  itemCount: all.length,
-                                  itemBuilder: (_, i) {
-                                    final p = all[i];
-                                    return ListTile(
-                                      title: Text(p.name),
-                                      onTap: () => Navigator.pop(ctx, p),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
+                        await Navigator.of(context).push<ScoringMatchPlayer>(
+                      MaterialPageRoute(
+                        builder: (_) => ScorerPickerScreen(
+                          teamAName: match.teamAName,
+                          teamBName: match.teamBName,
+                          teamA: players.teamA,
+                          teamB: players.teamB,
+                          captainAId: players.teamACaptainId,
+                          viceCaptainAId: players.teamAViceCaptainId,
+                          wicketKeeperAId: players.teamAWicketKeeperId,
+                          captainBId: players.teamBCaptainId,
+                          viceCaptainBId: players.teamBViceCaptainId,
+                          wicketKeeperBId: players.teamBWicketKeeperId,
+                          currentScorerId: match.activeScorerId,
                         ),
                       ),
                     );
@@ -2585,52 +2555,23 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
     HostMatchRepository repo,
     ScoringPlayersData players,
   ) async {
-    final all = [...players.teamA, ...players.teamB];
-    if (all.isEmpty) return;
-    final picked = await showModalBottomSheet<ScoringMatchPlayer>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    if (players.teamA.isEmpty && players.teamB.isEmpty) return;
+    final picked = await Navigator.of(context).push<ScoringMatchPlayer>(
+      MaterialPageRoute(
+        builder: (_) => ScorerPickerScreen(
+          teamAName: widget.match.teamAName,
+          teamBName: widget.match.teamBName,
+          teamA: players.teamA,
+          teamB: players.teamB,
+          captainAId: players.teamACaptainId,
+          viceCaptainAId: players.teamAViceCaptainId,
+          wicketKeeperAId: players.teamAWicketKeeperId,
+          captainBId: players.teamBCaptainId,
+          viceCaptainBId: players.teamBViceCaptainId,
+          wicketKeeperBId: players.teamBWicketKeeperId,
+          currentScorerId: widget.match.activeScorerId,
+        ),
       ),
-      builder: (ctx) {
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 12),
-                Text(
-                  'Pick a scorer',
-                  style: TextStyle(
-                    color: ctx.fg,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: all.length,
-                    itemBuilder: (_, i) {
-                      final p = all[i];
-                      return ListTile(
-                        title: Text(p.name),
-                        onTap: () => Navigator.pop(ctx, p),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
     if (picked == null) return;
     await _assignScorerById(repo, picked.profileId, 'Assigned ${picked.name}');
@@ -3143,6 +3084,307 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Scorer picker page ──────────────────────────────────────────────────────
+
+class ScorerPickerScreen extends StatelessWidget {
+  const ScorerPickerScreen({
+    super.key,
+    required this.teamAName,
+    required this.teamBName,
+    required this.teamA,
+    required this.teamB,
+    required this.captainAId,
+    required this.viceCaptainAId,
+    required this.wicketKeeperAId,
+    required this.captainBId,
+    required this.viceCaptainBId,
+    required this.wicketKeeperBId,
+    required this.currentScorerId,
+  });
+
+  final String teamAName;
+  final String teamBName;
+  final List<ScoringMatchPlayer> teamA;
+  final List<ScoringMatchPlayer> teamB;
+  final String? captainAId;
+  final String? viceCaptainAId;
+  final String? wicketKeeperAId;
+  final String? captainBId;
+  final String? viceCaptainBId;
+  final String? wicketKeeperBId;
+  final String? currentScorerId;
+
+  /// Default to whichever tab the current scorer is on (if any), otherwise
+  /// team A.
+  int _initialTabIndex() {
+    if (currentScorerId == null || currentScorerId!.isEmpty) return 0;
+    final onB = teamB.any((p) => p.matchesId(currentScorerId!));
+    return onB ? 1 : 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      initialIndex: _initialTabIndex(),
+      child: Scaffold(
+        backgroundColor: context.bg,
+        appBar: AppBar(
+          backgroundColor: context.bg,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          leading: IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: Icon(Icons.arrow_back_ios_new_rounded,
+                color: context.fg, size: 18),
+          ),
+          titleSpacing: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Pick a scorer',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              Text(
+                'They record balls until you change them',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(46),
+            child: TabBar(
+              labelColor: context.fg,
+              unselectedLabelColor: context.fgSub,
+              indicatorColor: context.accent,
+              indicatorWeight: 2,
+              labelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.1,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+              tabs: [
+                Tab(text: '$teamAName  (${teamA.length})'),
+                Tab(text: '$teamBName  (${teamB.length})'),
+              ],
+            ),
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _TeamPlayerList(
+              players: teamA,
+              captainId: captainAId,
+              viceCaptainId: viceCaptainAId,
+              wicketKeeperId: wicketKeeperAId,
+              currentScorerId: currentScorerId,
+            ),
+            _TeamPlayerList(
+              players: teamB,
+              captainId: captainBId,
+              viceCaptainId: viceCaptainBId,
+              wicketKeeperId: wicketKeeperBId,
+              currentScorerId: currentScorerId,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TeamPlayerList extends StatelessWidget {
+  const _TeamPlayerList({
+    required this.players,
+    required this.captainId,
+    required this.viceCaptainId,
+    required this.wicketKeeperId,
+    required this.currentScorerId,
+  });
+
+  final List<ScoringMatchPlayer> players;
+  final String? captainId;
+  final String? viceCaptainId;
+  final String? wicketKeeperId;
+  final String? currentScorerId;
+
+  @override
+  Widget build(BuildContext context) {
+    if (players.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'No players on this side yet.',
+            style: TextStyle(color: context.fgSub, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: players.length,
+      itemBuilder: (_, i) {
+        final p = players[i];
+        return _ScorerPickerRow(
+          player: p,
+          isCaptain: captainId != null && p.matchesId(captainId!),
+          isViceCaptain:
+              viceCaptainId != null && p.matchesId(viceCaptainId!),
+          isWicketKeeper:
+              wicketKeeperId != null && p.matchesId(wicketKeeperId!),
+          isCurrentScorer:
+              currentScorerId != null && p.matchesId(currentScorerId!),
+        );
+      },
+    );
+  }
+}
+
+class _ScorerPickerRow extends StatelessWidget {
+  const _ScorerPickerRow({
+    required this.player,
+    required this.isCaptain,
+    required this.isViceCaptain,
+    required this.isWicketKeeper,
+    required this.isCurrentScorer,
+  });
+
+  final ScoringMatchPlayer player;
+  final bool isCaptain;
+  final bool isViceCaptain;
+  final bool isWicketKeeper;
+  final bool isCurrentScorer;
+
+  String get _initials {
+    final parts = player.name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
+    return (parts.first[0] + parts.last[0]).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pop(player),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          child: Row(
+            children: [
+              // Avatar
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: context.surf,
+                  border: Border.all(color: context.stroke),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _initials,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Name + role chips
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        player.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (isCaptain) ...[
+                      const SizedBox(width: 6),
+                      _RoleChip(label: 'C', tone: context.accent),
+                    ],
+                    if (isViceCaptain) ...[
+                      const SizedBox(width: 6),
+                      _RoleChip(label: 'VC', tone: context.fgSub),
+                    ],
+                    if (isWicketKeeper) ...[
+                      const SizedBox(width: 6),
+                      _RoleChip(label: 'WK', tone: context.fgSub),
+                    ],
+                  ],
+                ),
+              ),
+              // Current scorer marker
+              if (isCurrentScorer)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(
+                    Icons.check_circle_rounded,
+                    color: context.success,
+                    size: 18,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleChip extends StatelessWidget {
+  const _RoleChip({required this.label, required this.tone});
+
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: tone,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.4,
+        ),
+      ),
     );
   }
 }

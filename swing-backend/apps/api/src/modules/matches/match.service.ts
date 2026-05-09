@@ -848,9 +848,19 @@ export class MatchService {
     const requester = await prisma.playerProfile.findUnique({ where: { userId }, select: { id: true } })
     if (!requester) throw Errors.forbidden()
 
+    // Anyone with current scoring authority can hand off the gloves —
+    // owner / manager (delegate at any time) and the active scorer
+    // themselves (so they can pass control to someone else without
+    // bouncing through the owner). Pure spectators are blocked.
     const role = await resolveMatchRole(requester.id, matchId)
-    if (role !== 'owner' && role !== 'manager') {
-      throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager or owner can assign the scorer', 403)
+    const isOwnerOrManager = role === 'owner' || role === 'manager'
+    const isActiveScorer = match.activeScorerId === requester.id
+    if (!isOwnerOrManager && !isActiveScorer) {
+      throw new AppError(
+        'INSUFFICIENT_ROLE',
+        'Only the owner, a manager, or the current scorer can reassign the scorer',
+        403,
+      )
     }
 
     const target = await prisma.playerProfile.findUnique({
@@ -913,10 +923,10 @@ export class MatchService {
   }
 
   /**
-   * Owner / Manager-only: revoke the manually assigned Scorer.
-   * Releases the match back to innings-transition auto-shift behaviour
-   * Use this when the assigned scorer is
-   * unavailable and you want the bowling captain to score by default.
+   * Releases the match's active-scorer assignment back to "owner only"
+   * (activeScorerId = null). Allowed for owners, managers, and the
+   * current scorer (so a scorer can hand the gloves back without
+   * bouncing through the owner).
    */
   async revokeScorer(matchId: string, userId: string) {
     const match = await prisma.match.findUnique({ where: { id: matchId } })
@@ -929,8 +939,14 @@ export class MatchService {
     if (!requester) throw Errors.forbidden()
 
     const role = await resolveMatchRole(requester.id, matchId)
-    if (role !== 'owner' && role !== 'manager') {
-      throw new AppError('INSUFFICIENT_ROLE', 'Only a match manager or owner can revoke the scorer', 403)
+    const isOwnerOrManager = role === 'owner' || role === 'manager'
+    const isActiveScorer = match.activeScorerId === requester.id
+    if (!isOwnerOrManager && !isActiveScorer) {
+      throw new AppError(
+        'INSUFFICIENT_ROLE',
+        'Only the owner, a manager, or the current scorer can release scoring',
+        403,
+      )
     }
 
     const prevScorerId = match.activeScorerId
