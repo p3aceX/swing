@@ -496,12 +496,12 @@ export class MatchService {
     const required = options.access ?? 'SCORER'
     const role = await resolveMatchRole(player.id, matchId)
 
-    // Captain-A/B are treated as manager-equivalent for non-write management
-    // actions (XI, toss, edit). Score writes are additionally bowling-gated
-    // below — a captain whose team is currently batting cannot record balls.
-    const isCaptain = role === 'captain-A' || role === 'captain-B'
+    // Role hierarchy for management tiers (OWNER / MANAGER access). Captain-A
+    // and -B are treated as manager-equivalent here so a captain can run XI /
+    // toss / edit on their team.
+    const roleIsCaptain = role === 'captain-A' || role === 'captain-B'
     const isOwnerOrManager = role === 'owner' || role === 'manager'
-    const isManagerOrAbove = isOwnerOrManager || isCaptain
+    const isManagerOrAbove = isOwnerOrManager || roleIsCaptain
 
     if (required === 'OWNER') {
       if (role !== 'owner') {
@@ -518,13 +518,28 @@ export class MatchService {
     }
 
     // SCORER — write authority hierarchy:
-    //   1. Explicit active scorer (assigned by Owner/Manager) — always.
-    //   2. Owner / Manager — always.
-    //   3. Captain — only when *their team is bowling* in the current innings.
+    //   1. Explicit active scorer (deliberately pinned) — always.
+    //   2. Captain (anyone seated on a team's captain seat — even if also
+    //      owner/manager) — only when *their team is batting* (the batting
+    //      guard governs the actual scorer at the crease).
+    //   3. Owner / Manager who isn't a captain — always.
+    //   4. Anyone else — denied.
+    //
+    // Captain identity is checked against the match's captain seats directly
+    // (not just the role string) so an owner who's also playing as a captain
+    // still goes through the batting guard. This matches the on-field
+    // reality: if you're captaining a side, your authority to record balls
+    // depends on whether your side is at the crease, not on who created the
+    // match record.
     const isActiveScorer = match.activeScorerId === player.id
-    if (isActiveScorer || isOwnerOrManager) return match
+    if (isActiveScorer) return match
 
-    if (!isCaptain) {
+    const isCaptainA = match.teamACaptainId === player.id
+    const isCaptainB = match.teamBCaptainId === player.id
+    const isCaptainSeat = isCaptainA || isCaptainB
+    if (!isCaptainSeat && isOwnerOrManager) return match
+
+    if (!isCaptainSeat) {
       throw new AppError('NOT_SCORER', 'Only the active scorer or a manager can update this match', 403)
     }
 
@@ -544,7 +559,7 @@ export class MatchService {
         403,
       )
     }
-    const captainTeam: 'A' | 'B' = role === 'captain-A' ? 'A' : 'B'
+    const captainTeam: 'A' | 'B' = isCaptainA ? 'A' : 'B'
     const isBatting = liveInnings.battingTeam === captainTeam
     if (!isBatting) {
       throw new AppError(
