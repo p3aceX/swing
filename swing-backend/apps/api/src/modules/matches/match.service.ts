@@ -675,17 +675,28 @@ export class MatchService {
     }
   }
 
-  async createMatch(userId: string, data: any) {
+  async createMatch(
+    userId: string,
+    data: any,
+    options: { callerActiveRole?: string } = {},
+  ) {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
-    // Read the creator's activeRole to decide whether the captain batting
-    // guard applies to this match. Player-app matches keep the rule (batting
-    // captain auto-scores). Arena/academy/coach/business owner-created
-    // matches lock scoring to the creator + an explicitly assigned scorer.
-    const creator = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { activeRole: true },
-    })
-    const captainScoringEnabled = creator?.activeRole === 'PLAYER'
+    // The caller's activeRole is read from the JWT (route layer) — that's
+    // baked in at login time, so it always reflects which app made the
+    // request. Falling back to the DB row only when the route didn't
+    // forward it (older callers / tests).
+    let activeRole = options.callerActiveRole
+    if (!activeRole) {
+      const creator = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { activeRole: true },
+      })
+      activeRole = creator?.activeRole
+    }
+    // Player-app matches keep the rule (batting captain auto-scores).
+    // Arena/academy/coach/business owner-created matches lock scoring
+    // to the creator + an explicitly assigned scorer.
+    const captainScoringEnabled = activeRole === 'PLAYER'
     let resolvedVenueName = data.venueName?.trim() || null
     let resolvedFacilityId = data.facilityId?.trim() || null
     const resolvedCustomOvers =
