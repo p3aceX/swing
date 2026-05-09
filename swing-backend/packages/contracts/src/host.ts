@@ -35,6 +35,16 @@ export const BALL_TYPES = [
   "OTHER",
 ] as const;
 
+export const TEAM_CATEGORIES = [
+  "SCHOOL",
+  "CLUB_ACADEMY",
+  "CORPORATE",
+  "GULLY",
+  "ASSOCIATION",
+] as const;
+
+export const AGE_GROUPS = ["U14", "U16", "U19", "U23", "SENIOR"] as const;
+
 export const TOSS_SIDES = ["A", "B"] as const;
 export const TOSS_DECISIONS = ["BAT", "BOWL"] as const;
 
@@ -104,7 +114,11 @@ export const EVENT_STATUSES = [
 ] as const;
 
 export const createMatchRequestSchema = z.object({
-  matchType: z.enum(MATCH_TYPES),
+  // Legacy field — clients on the new flow send `category` + `ageGroup` and
+  // omit matchType (the service auto-derives it).
+  matchType: z.enum(MATCH_TYPES).optional(),
+  category: z.enum(TEAM_CATEGORIES).optional(),
+  ageGroup: z.enum(AGE_GROUPS).optional(),
   format: z.enum(MATCH_FORMATS),
   teamAName: z.string().min(1),
   teamBName: z.string().min(1),
@@ -120,6 +134,7 @@ export const createMatchRequestSchema = z.object({
   ballType: z.enum(BALL_TYPES).optional(),
   scheduledAt: z.string(),
   venueName: z.string().optional(),
+  venueCity: z.string().optional(),
   facilityId: z.string().optional(),
   customOvers: z.number().int().min(1).max(100).optional(),
   academyId: z.string().optional(),
@@ -235,6 +250,8 @@ export const createHostedTournamentRequestSchema = z.object({
   name: z.string().min(1).max(120),
   format: z.enum(HOST_TOURNAMENT_MATCH_FORMATS),
   tournamentFormat: z.enum(TOURNAMENT_FORMATS).optional(),
+  category: z.enum(TEAM_CATEGORIES).optional(),
+  ageGroup: z.enum(AGE_GROUPS).optional(),
   startDate: z.string(),
   endDate: z.string().optional(),
   city: z.string().max(60).optional(),
@@ -245,6 +262,11 @@ export const createHostedTournamentRequestSchema = z.object({
   prizePool: z.string().max(120).optional(),
   description: z.string().max(500).optional(),
   isPublic: z.boolean().optional(),
+  ballType: z.enum(BALL_TYPES).optional(),
+  earlyBirdDeadline: z.string().optional(),
+  earlyBirdFee: z.number().int().min(0).optional(),
+  organiserName: z.string().max(120).optional(),
+  organiserPhone: z.string().max(40).optional(),
 });
 
 export const createEventRequestSchema = z.object({
