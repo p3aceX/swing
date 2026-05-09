@@ -23,6 +23,7 @@ class ScoringScreen extends ConsumerStatefulWidget {
     this.onNavigateToPlaying11,
     this.onNavigateToToss,
     this.onMatchDeleted,
+    this.onEditMatch,
     this.teamAName = 'Team A',
     this.teamBName = 'Team B',
   });
@@ -35,7 +36,9 @@ class ScoringScreen extends ConsumerStatefulWidget {
   final void Function(
     BuildContext context,
     String matchId,
+    String teamAId,
     String teamAName,
+    String teamBId,
     String teamBName,
   )? onNavigateToPlaying11;
   /// Called when the match has no toss recorded yet. Host supplies the
@@ -49,6 +52,15 @@ class ScoringScreen extends ConsumerStatefulWidget {
   final String teamAName;
   final String teamBName;
   final void Function(BuildContext context, String matchId)? onMatchDeleted;
+  /// Open the create-match form pre-populated with this match. Hosts use this
+  /// to let the scorer fix overs / format / lineup / venue from the pre-toss
+  /// review card. When null, no Edit button is rendered.
+  final void Function(
+    BuildContext context,
+    String matchId,
+    String teamAName,
+    String teamBName,
+  )? onEditMatch;
 
   @override
   ConsumerState<ScoringScreen> createState() => _ScoringScreenState();
@@ -197,19 +209,46 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     await _pickPlayer(
       title: 'Select Bowler',
       players: eligible,
-      onPicked: (p) {
+      onPicked: (p) async {
         _ctrl.setBowler(p.profileId);
+        // A player can either be the wicket-keeper OR be bowling, never both
+        // simultaneously. If the picked bowler is the current WK, force a
+        // fresh WK pick (excluding the bowler) before scoring resumes.
         if (keeperId != null && p.matchesId(keeperId) && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${p.name} is bowling — assign a new wicket keeper',
-              ),
-              duration: const Duration(seconds: 4),
-            ),
+          await _pickReplacementKeeper(
+            bowlingSide: bowlingSide,
+            excludePlayerId: p.profileId,
           );
         }
       },
+    );
+  }
+
+  Future<void> _pickReplacementKeeper({
+    required String bowlingSide,
+    required String excludePlayerId,
+  }) async {
+    final state = ref.read(hostScoringControllerProvider(widget.matchId));
+    final players = state.players;
+    if (players == null) return;
+    final candidates = players
+        .forSide(bowlingSide)
+        .where((p) => !p.matchesId(excludePlayerId))
+        .toList();
+    if (candidates.isEmpty) return;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bowler can\'t also be wicket-keeper — pick a new WK'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+    await _pickPlayer(
+      title: 'Select Wicket-Keeper',
+      players: candidates,
+      onPicked: (wk) =>
+          _ctrl.changeWicketKeeper(bowlingSide, wk.profileId),
     );
   }
 
@@ -348,6 +387,11 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
         match: match,
         innings: inn,
         canStartNextInnings: canStartNext,
+        onManageScorer: () {
+          Navigator.pop(ctx);
+          final s = ref.read(hostScoringControllerProvider(widget.matchId));
+          _openScorerSheetFromScreen(s);
+        },
         onEndMatch: () async {
           Navigator.pop(ctx);
           final before = ref.read(hostScoringControllerProvider(widget.matchId));
@@ -661,24 +705,244 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     return result;
   }
 
+  /// Opens the Manage Scorer bottom sheet — same one used by the
+  /// in-card "Manage scorer" entry. Hosts the Take over / Assign / Release
+  /// actions. Available from the live scoring page header and the
+  /// end-of-innings sheet so the owner can change scorer at any time.
+  Future<void> _openScorerSheetFromScreen(HostScoringState state) async {
+    final match = state.match;
+    final players = state.players;
+    if (match == null || players == null) return;
+    final repo = ref.read(hostMatchRepositoryProvider);
+    final me = (widget.currentPlayerId ?? '').trim();
+
+    Future<void> assignById(String profileId, String label) async {
+      if (profileId.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not identify profile')),
+          );
+        }
+        return;
+      }
+      try {
+        await repo.assignScorer(match.id, profileId.trim());
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$label — done')),
+        );
+        await _ctrl.refresh();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not assign: $e')),
+        );
+      }
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Manage scorer',
+                  style: TextStyle(
+                    color: sheetCtx.fg,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Owner / manager only. Pick someone to record balls. '
+                  'They\'ll keep the gloves until you change them again.',
+                  style: TextStyle(
+                    color: sheetCtx.fgSub,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(sheetCtx);
+                    await assignById(me, 'Take over');
+                  },
+                  icon: const Icon(Icons.person_pin_circle_rounded, size: 18),
+                  label: const Text('Take over scoring'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(sheetCtx);
+                    final all = [...players.teamA, ...players.teamB];
+                    if (all.isEmpty) return;
+                    final picked =
+                        await showModalBottomSheet<ScoringMatchPlayer>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor:
+                          Theme.of(context).colorScheme.surface,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(16)),
+                      ),
+                      builder: (ctx) => SafeArea(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight:
+                                MediaQuery.of(ctx).size.height * 0.7,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 12),
+                              Text(
+                                'Pick a scorer',
+                                style: TextStyle(
+                                  color: ctx.fg,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Flexible(
+                                child: ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: all.length,
+                                  itemBuilder: (_, i) {
+                                    final p = all[i];
+                                    return ListTile(
+                                      title: Text(p.name),
+                                      onTap: () => Navigator.pop(ctx, p),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                    if (picked == null) return;
+                    await assignById(picked.profileId,
+                        'Assigned ${picked.name}');
+                  },
+                  icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+                  label: const Text('Assign someone else'),
+                ),
+                if ((match.activeScorerId ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(sheetCtx);
+                      try {
+                        await repo.revokeScorer(match.id);
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Scorer assignment cleared'),
+                          ),
+                        );
+                        await _ctrl.refresh();
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Could not clear: $e')),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.lock_open_rounded, size: 16),
+                    label: const Text('Release control'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Mirrors the backend's authorizeMutation SCORER tier. If the user is
+  /// seated as a captain, they can only score when their team is batting —
+  /// even if they're also the match owner. Anyone else with owner / manager /
+  /// active-scorer access can always score.
+  bool _userCanScore(HostScoringState state) {
+    final me = (widget.currentPlayerId ?? '').trim();
+    final match = state.match;
+    final players = state.players;
+    if (me.isEmpty || match == null) return true;
+
+    // Active-scorer override (deliberately pinned).
+    if ((match.scorerId ?? '').trim() == me) return true;
+
+    final captainAId = (players?.teamACaptainId ?? '').trim();
+    final captainBId = (players?.teamBCaptainId ?? '').trim();
+    final isCaptainA = captainAId.isNotEmpty && captainAId == me;
+    final isCaptainB = captainBId.isNotEmpty && captainBId == me;
+    if (!isCaptainA && !isCaptainB) {
+      // Not seated as a captain — owner / manager / scorer all pass.
+      return true;
+    }
+
+    // Captains in non-player-created matches don't get auto-write access —
+    // they need an explicit assignScorer from the creator.
+    if (!match.captainScoringEnabled) return false;
+
+    // Captain seat in a player-created match — apply batting guard.
+    final battingTeam = state.activeInnings?.battingTeam;
+    if (battingTeam == null) return false; // pre-toss / between innings
+    if (isCaptainA && battingTeam == 'A') return true;
+    if (isCaptainB && battingTeam == 'B') return true;
+    return false;
+  }
+
   // ─── Build ─────────────────────────────────────────────────────────────────
+
+  void _handleBack() {
+    debugPrint(
+      '[ScoringScreen] back invoked — '
+      'hasCallback=${widget.onNavigateBack != null} '
+      'canPop=${Navigator.of(context).canPop()}',
+    );
+    if (widget.onNavigateBack != null) {
+      widget.onNavigateBack!(context, widget.matchId);
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(hostScoringControllerProvider(widget.matchId));
     final match = state.match;
 
-    return Scaffold(
+    return PopScope(
+      // Always intercept the system back so we can call _handleBack ourselves —
+      // GoRouter `go`-routed pages have no Navigator stack to pop, so the
+      // default system-back ends up doing nothing on this screen.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (widget.onNavigateBack != null) {
-              widget.onNavigateBack!(context, widget.matchId);
-            } else {
-              Navigator.maybePop(context);
-            }
-          },
+          tooltip: 'Back',
+          onPressed: _handleBack,
         ),
         title: Text(
           match == null
@@ -686,6 +950,14 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
               : '${match.teamAName} vs ${match.teamBName}',
         ),
         actions: [
+          if (match != null)
+            IconButton(
+              icon: const Icon(Icons.manage_accounts_rounded),
+              tooltip: 'Manage scorer',
+              onPressed: state.isLoading
+                  ? null
+                  : () => _openScorerSheetFromScreen(state),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: state.isLoading ? null : _ctrl.refresh,
@@ -721,6 +993,10 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
               : _ScoringBody(
                   matchId: widget.matchId,
                   state: state,
+                  userCanScore: _userCanScore(state),
+                  currentPlayerId: widget.currentPlayerId,
+                  scorerRepo: ref.read(hostMatchRepositoryProvider),
+                  onScorerChanged: () => _ctrl.refresh(),
                   currentOverBalls: _currentOverBalls(state),
                   onWheelZoneTap: (zone) {
                     final current = state.zone;
@@ -763,6 +1039,16 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                       : null,
                   onNavigateToPlaying11: widget.onNavigateToPlaying11 != null
                       ? () => widget.onNavigateToPlaying11!(
+                            context,
+                            widget.matchId,
+                            match.teamAId ?? '',
+                            match.teamAName,
+                            match.teamBId ?? '',
+                            match.teamBName,
+                          )
+                      : null,
+                  onEditMatch: widget.onEditMatch != null
+                      ? () => widget.onEditMatch!(
                             context,
                             widget.matchId,
                             match.teamAName,
@@ -829,6 +1115,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     return true;
                   },
                 ),
+      ),
     );
   }
 }
@@ -839,6 +1126,10 @@ class _ScoringBody extends StatelessWidget {
   const _ScoringBody({
     required this.matchId,
     required this.state,
+    required this.userCanScore,
+    required this.currentPlayerId,
+    required this.scorerRepo,
+    required this.onScorerChanged,
     required this.currentOverBalls,
     required this.onWheelZoneTap,
     required this.onPickStriker,
@@ -855,6 +1146,7 @@ class _ScoringBody extends StatelessWidget {
     required this.onContinueInnings,
     this.onNavigateToToss,
     this.onNavigateToPlaying11,
+    this.onEditMatch,
     this.onDeleteMatch,
     required this.onDot,
     required this.onOverthrow,
@@ -868,6 +1160,10 @@ class _ScoringBody extends StatelessWidget {
 
   final String matchId;
   final HostScoringState state;
+  final bool userCanScore;
+  final String? currentPlayerId;
+  final HostMatchRepository? scorerRepo;
+  final VoidCallback? onScorerChanged;
   final List<ScoringBall> currentOverBalls;
   final void Function(String zone) onWheelZoneTap;
   final VoidCallback onPickStriker;
@@ -884,6 +1180,7 @@ class _ScoringBody extends StatelessWidget {
   final Future<bool> Function() onContinueInnings;
   final VoidCallback? onNavigateToToss;
   final VoidCallback? onNavigateToPlaying11;
+  final VoidCallback? onEditMatch;
   final Future<void> Function()? onDeleteMatch;
   final VoidCallback onDot;
   final VoidCallback onOverthrow;
@@ -974,6 +1271,10 @@ class _ScoringBody extends StatelessWidget {
           const SizedBox(height: 16),
           _InactiveInningsSection(
             match: match,
+            players: state.players,
+            scorerRepo: scorerRepo,
+            currentPlayerId: currentPlayerId,
+            onScorerChanged: onScorerChanged,
             isSubmitting: state.isSubmitting,
             onStart: onStartMatch,
             onUpdateMatchOvers: onUpdateMatchOvers,
@@ -981,7 +1282,57 @@ class _ScoringBody extends StatelessWidget {
             onContinue: onContinueInnings,
             onNavigateToToss: onNavigateToToss,
             onNavigateToPlaying11: onNavigateToPlaying11,
+            onEditMatch: onEditMatch,
             onDelete: onDeleteMatch,
+          ),
+          const SizedBox(height: 32),
+        ] else if (!userCanScore) ...[
+          // Live innings, but the caller isn't allowed to record balls
+          // (e.g. captain of the bowling team). Show a read-only banner so
+          // they understand why the score buttons are gone.
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: context.surf,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: context.stroke),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.lock_outline_rounded,
+                          size: 18, color: context.fgSub),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Scoring locked',
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Your team is bowling — the batting captain or '
+                    'an assigned scorer records the ball. You\'ll see '
+                    'the score buttons once your team is at the crease.',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 32),
         ] else ...[
@@ -1834,6 +2185,7 @@ class _EndOfInningsSheet extends StatelessWidget {
     required this.onStartNextInnings,
     required this.onEndMatch,
     required this.onUndo,
+    this.onManageScorer,
   });
 
   final ScoringMatch match;
@@ -1842,6 +2194,10 @@ class _EndOfInningsSheet extends StatelessWidget {
   final VoidCallback onStartNextInnings;
   final VoidCallback onEndMatch;
   final VoidCallback onUndo;
+  /// When set, renders a "Manage scorer" entry. Used so the owner can hand
+  /// the gloves over (or take them back) before starting the next innings
+  /// or ending the match.
+  final VoidCallback? onManageScorer;
 
   @override
   Widget build(BuildContext context) {
@@ -1938,6 +2294,23 @@ class _EndOfInningsSheet extends StatelessWidget {
                 ),
               ),
             ),
+            if (onManageScorer != null) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 48,
+                child: TextButton.icon(
+                  onPressed: onManageScorer,
+                  icon: const Icon(Icons.manage_accounts_rounded, size: 18),
+                  label: const Text(
+                    'Manage scorer',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
           ],
         ),
@@ -1984,12 +2357,21 @@ class _InactiveInningsSection extends StatefulWidget {
     required this.onUpdateMatchOvers,
     required this.onUpdateMatchSchedule,
     required this.onContinue,
+    this.players,
+    this.scorerRepo,
+    this.currentPlayerId,
+    this.onScorerChanged,
     this.onNavigateToToss,
     this.onNavigateToPlaying11,
+    this.onEditMatch,
     this.onDelete,
   });
 
   final ScoringMatch match;
+  final ScoringPlayersData? players;
+  final HostMatchRepository? scorerRepo;
+  final String? currentPlayerId;
+  final VoidCallback? onScorerChanged;
   final bool isSubmitting;
   final Future<bool> Function() onStart;
   final Future<bool> Function(int overs) onUpdateMatchOvers;
@@ -1997,6 +2379,7 @@ class _InactiveInningsSection extends StatefulWidget {
   final Future<bool> Function() onContinue;
   final VoidCallback? onNavigateToToss;
   final VoidCallback? onNavigateToPlaying11;
+  final VoidCallback? onEditMatch;
   final Future<void> Function()? onDelete;
 
   @override
@@ -2054,12 +2437,16 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
   }
 
   String? _ballTypeLabel() {
-    final t = widget.match.matchType?.toUpperCase();
-    if (t == 'LEATHER') return 'Leather ball';
-    if (t == 'TENNIS') return 'Tennis ball';
-    if (t == 'RUBBER') return 'Rubber ball';
-    if (t != null && t.isNotEmpty) return t[0] + t.substring(1).toLowerCase();
-    return null;
+    final t = widget.match.ballType?.toUpperCase();
+    if (t == null || t.isEmpty) return null;
+    return switch (t) {
+      'LEATHER' => 'Leather ball',
+      'TENNIS' => 'Tennis ball',
+      'RUBBER' => 'Rubber ball',
+      'TAPE' => 'Tape ball',
+      'CORK' => 'Cork ball',
+      _ => t[0] + t.substring(1).toLowerCase(),
+    };
   }
 
   String _playersLabel() {
@@ -2069,6 +2456,198 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
     if (a == 0 && b == 0) return 'No players added yet';
     if (a == b) return '$a players per team';
     return '${m.teamAName}: $a  ·  ${m.teamBName}: $b';
+  }
+
+  String _scorerLabel() {
+    final m = widget.match;
+    final name = (m.activeScorerName ?? '').trim();
+    if (name.isNotEmpty) return name;
+    final id = (m.activeScorerId ?? '').trim();
+    if (id.isNotEmpty) return 'Assigned';
+    if (!m.captainScoringEnabled) return 'Not assigned';
+    return 'Batting captain (auto)';
+  }
+
+  Future<void> _openScorerSheet() async {
+    final ctx = context;
+    final repo = widget.scorerRepo;
+    final players = widget.players;
+    if (repo == null || players == null) return;
+
+    await showModalBottomSheet<void>(
+      context: ctx,
+      backgroundColor: Theme.of(ctx).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Manage scorer',
+                  style: TextStyle(
+                    color: sheetCtx.fg,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Owner / manager only. Pick someone to record balls. '
+                  'They\'ll keep the gloves until you change them again.',
+                  style: TextStyle(
+                    color: sheetCtx.fgSub,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(sheetCtx);
+                    await _assignScorerById(
+                      repo,
+                      widget.currentPlayerId ?? '',
+                      'Take over',
+                    );
+                  },
+                  icon: const Icon(Icons.person_pin_circle_rounded, size: 18),
+                  label: const Text('Take over scoring'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(sheetCtx);
+                    await _pickAndAssignScorer(repo, players);
+                  },
+                  icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+                  label: const Text('Assign someone else'),
+                ),
+                if ((widget.match.activeScorerId ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(sheetCtx);
+                      try {
+                        await repo.revokeScorer(widget.match.id);
+                        if (mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                              content: Text('Scorer assignment cleared'),
+                            ),
+                          );
+                          widget.onScorerChanged?.call();
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Could not clear: $e')),
+                          );
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.lock_open_rounded, size: 16),
+                    label: const Text('Release control'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _assignScorerById(
+    HostMatchRepository repo,
+    String profileId,
+    String label,
+  ) async {
+    final id = profileId.trim();
+    if (id.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not identify your profile')),
+        );
+      }
+      return;
+    }
+    try {
+      await repo.assignScorer(widget.match.id, id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$label — done')),
+        );
+        widget.onScorerChanged?.call();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not assign: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickAndAssignScorer(
+    HostMatchRepository repo,
+    ScoringPlayersData players,
+  ) async {
+    final all = [...players.teamA, ...players.teamB];
+    if (all.isEmpty) return;
+    final picked = await showModalBottomSheet<ScoringMatchPlayer>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Text(
+                  'Pick a scorer',
+                  style: TextStyle(
+                    color: ctx.fg,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: all.length,
+                    itemBuilder: (_, i) {
+                      final p = all[i];
+                      return ListTile(
+                        title: Text(p.name),
+                        onTap: () => Navigator.pop(ctx, p),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked == null) return;
+    await _assignScorerById(repo, picked.profileId, 'Assigned ${picked.name}');
   }
 
   String? _venueLabel() {
@@ -2247,52 +2826,8 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
           ),
           const SizedBox(height: 20),
 
-          // ── Teams row ────────────────────────────────────────────────────
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  match.teamAName,
-                  textAlign: TextAlign.start,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  'vs',
-                  style: TextStyle(
-                    color: context.fgSub.withValues(alpha: 0.5),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.4,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  match.teamBName,
-                  textAlign: TextAlign.end,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
+          // Teams row removed — the AppBar title already shows
+          // "${teamA} vs ${teamB}" so duplicating it here was redundant.
 
           // ── Detail rows ──────────────────────────────────────────────────
           _DetailRow(
@@ -2351,6 +2886,38 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
             value: _playersLabel(),
           ),
           const SizedBox(height: 12),
+          // Scorer row — visible always; warning style when no scorer is
+          // assigned and captains can't auto-score (host-app match).
+          _DetailRow(
+            icon: Icons.edit_note_rounded,
+            label: 'Scorer',
+            value: _scorerLabel(),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: busy ? null : _openScorerSheet,
+              icon: const Icon(Icons.manage_accounts_rounded, size: 16),
+              label: const Text('Manage scorer'),
+            ),
+          ),
+          if (!match.captainScoringEnabled &&
+              (match.activeScorerId ?? '').isEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'No scorer assigned — captains can\'t score in this match. '
+                'Assign someone or take over.',
+                style: TextStyle(
+                  color: context.warn,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
           if ((match.tossWonBy ?? '').isNotEmpty) ...[
             _DetailRow(
               icon: Icons.monetization_on_outlined,
@@ -2378,20 +2945,92 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
 
           const SizedBox(height: 8),
 
-          // ── Primary CTA ───────────────────────────────────────────────────
+          // ── Edit row ─────────────────────────────────────────────────────
+          // Two equal-width outlined buttons side-by-side: lineup edits on
+          // the left, full match-settings edits on the right. Hidden when
+          // there's no Playing 11 yet (the primary CTA below covers that).
+          if (!_needsPlayingXI &&
+              (_resolvePlaying11Nav() != null ||
+                  widget.onEditMatch != null)) ...[
+            Row(
+              children: [
+                if (_resolvePlaying11Nav() != null)
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: busy ? null : _resolvePlaying11Nav(),
+                        icon: const Icon(Icons.groups_rounded, size: 18),
+                        label: const Text(
+                          'Edit Playing 11',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: context.fg,
+                          side: BorderSide(color: context.stroke),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_resolvePlaying11Nav() != null &&
+                    widget.onEditMatch != null)
+                  const SizedBox(width: 10),
+                if (widget.onEditMatch != null)
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: busy ? null : widget.onEditMatch,
+                        icon: const Icon(Icons.edit_rounded, size: 18),
+                        label: const Text(
+                          'Edit Match Details',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: context.fg,
+                          side: BorderSide(color: context.stroke),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // ── Primary CTA — one big block ──────────────────────────────────
           if (_needsPlayingXI) ...[
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 60,
               child: FilledButton.icon(
                 onPressed: busy ? null : _resolvePlaying11Nav(),
-                icon: const Icon(Icons.groups_rounded, size: 20),
+                icon: const Icon(Icons.groups_rounded, size: 22),
                 label: const Text(
                   'Select Playing 11',
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 17,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.2,
+                  ),
+                ),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -2406,16 +3045,21 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
           ] else if (_needsToss) ...[
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 60,
               child: FilledButton.icon(
                 onPressed: busy ? null : widget.onNavigateToToss,
-                icon: const Icon(Icons.monetization_on_rounded, size: 20),
+                icon: const Icon(Icons.monetization_on_rounded, size: 22),
                 label: const Text(
                   'Record Toss',
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 17,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.2,
+                  ),
+                ),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -2423,15 +3067,20 @@ class _InactiveInningsSectionState extends State<_InactiveInningsSection> {
           ] else ...[
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 60,
               child: FilledButton(
                 onPressed: busy
                     ? null
                     : (_canContinue ? widget.onContinue : widget.onStart),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
                 child: Text(
                   _canContinue ? 'Start Next Innings' : 'Start Match',
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 17,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.2,
                   ),

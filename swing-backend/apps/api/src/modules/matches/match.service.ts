@@ -531,24 +531,37 @@ export class MatchService {
     // reality: if you're captaining a side, your authority to record balls
     // depends on whether your side is at the crease, not on who created the
     // match record.
+    // captainScoringEnabled is stamped at create from the creator's
+    // activeRole. PLAYER-created → true (batting captain auto-scores).
+    // Arena/academy/coach-created → false: only the activeScorerId can
+    // record balls. Owner/manager have management rights (delete, edit,
+    // assign scorer) but to record balls themselves they have to take
+    // over via assignScorer first.
+    const captainScoringAllowed =
+      (match as any).captainScoringEnabled !== false
+
     // 1. Explicit active scorer (deliberately assigned) — always.
     const isActiveScorer = match.activeScorerId === player.id
     if (isActiveScorer) return match
+
+    // 2. Flag-false matches lock scoring to the activeScorerId. No owner
+    //    or captain shortcut. Owner can take over via assignScorer.
+    if (!captainScoringAllowed) {
+      throw new AppError(
+        'NOT_SCORER',
+        'Only the assigned scorer can record balls in this match. ' +
+          'Owners/managers can take over via Manage Scorer.',
+        403,
+      )
+    }
 
     const isCaptainA = match.teamACaptainId === player.id
     const isCaptainB = match.teamBCaptainId === player.id
     const isCaptainSeat = isCaptainA || isCaptainB
 
-    // captainScoringEnabled is stamped at create from the creator's
-    // activeRole. PLAYER-created → true (batting captain auto-scores).
-    // Arena/academy/coach-created → false: captains have no auto-rights;
-    // only owner/manager + explicit assigned scorer.
-    const captainScoringAllowed =
-      (match as any).captainScoringEnabled !== false
-
-    // 2. No auto-captain-rights here (or caller isn't a captain) →
-    //    fall back to role check. Owner / manager pass; else 403.
-    if (!captainScoringAllowed || !isCaptainSeat) {
+    // 3. Player-created match, caller isn't a captain → owner/manager
+    //    fall through; everyone else 403.
+    if (!isCaptainSeat) {
       if (isOwnerOrManager) return match
       throw new AppError(
         'NOT_SCORER',
@@ -557,10 +570,9 @@ export class MatchService {
       )
     }
 
-    // 3. Captain seat in a player-created match — apply batting guard
-    //    below (and importantly, do NOT short-circuit on owner role,
-    //    because an owner who's also captain is a player on the field
-    //    and needs to follow the at-the-crease rule).
+    // 4. Captain seat in a player-created match — apply batting guard
+    //    below (do NOT short-circuit on owner role; owner-captain is
+    //    a player on the field and follows the at-the-crease rule).
 
     // Captain path — find the live innings and check whether the captain's
     // team is the one currently batting. The batting captain (closer to the
@@ -746,12 +758,20 @@ export class MatchService {
     const resolvedMatchType =
       data.matchType ?? (category === 'GULLY' ? 'FRIENDLY' : 'RANKED')
 
+    // For non-PLAYER-created matches the creator is the de facto scorer
+    // until they hand it off. Stamp activeScorerId + lock so the toss/
+    // innings auto-shift won't move the gloves to a captain.
+    const initialActiveScorerId = !captainScoringEnabled ? player?.id ?? null : null
+    const initialScorerLocked = !captainScoringEnabled
+
     const match = await prisma.match.create({
       data: {
         matchType: resolvedMatchType, format: data.format,
         category,
         ageGroup,
         captainScoringEnabled,
+        activeScorerId: initialActiveScorerId,
+        scorerLockedByOwner: initialScorerLocked,
         teamAName: data.teamAName, teamBName: data.teamBName,
         teamAPlayerIds,
         teamBPlayerIds,
