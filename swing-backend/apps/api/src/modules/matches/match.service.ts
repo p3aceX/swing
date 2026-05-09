@@ -531,17 +531,36 @@ export class MatchService {
     // reality: if you're captaining a side, your authority to record balls
     // depends on whether your side is at the crease, not on who created the
     // match record.
+    // 1. Explicit active scorer (deliberately assigned) — always.
     const isActiveScorer = match.activeScorerId === player.id
     if (isActiveScorer) return match
 
     const isCaptainA = match.teamACaptainId === player.id
     const isCaptainB = match.teamBCaptainId === player.id
     const isCaptainSeat = isCaptainA || isCaptainB
-    if (!isCaptainSeat && isOwnerOrManager) return match
 
-    if (!isCaptainSeat) {
-      throw new AppError('NOT_SCORER', 'Only the active scorer or a manager can update this match', 403)
+    // captainScoringEnabled is stamped at create from the creator's
+    // activeRole. PLAYER-created → true (batting captain auto-scores).
+    // Arena/academy/coach-created → false: captains have no auto-rights;
+    // only owner/manager + explicit assigned scorer.
+    const captainScoringAllowed =
+      (match as any).captainScoringEnabled !== false
+
+    // 2. No auto-captain-rights here (or caller isn't a captain) →
+    //    fall back to role check. Owner / manager pass; else 403.
+    if (!captainScoringAllowed || !isCaptainSeat) {
+      if (isOwnerOrManager) return match
+      throw new AppError(
+        'NOT_SCORER',
+        'Only the active scorer or a manager can update this match',
+        403,
+      )
     }
+
+    // 3. Captain seat in a player-created match — apply batting guard
+    //    below (and importantly, do NOT short-circuit on owner role,
+    //    because an owner who's also captain is a player on the field
+    //    and needs to follow the at-the-crease rule).
 
     // Captain path — find the live innings and check whether the captain's
     // team is the one currently batting. The batting captain (closer to the
@@ -646,6 +665,15 @@ export class MatchService {
 
   async createMatch(userId: string, data: any) {
     const player = await prisma.playerProfile.findUnique({ where: { userId } })
+    // Read the creator's activeRole to decide whether the captain batting
+    // guard applies to this match. Player-app matches keep the rule (batting
+    // captain auto-scores). Arena/academy/coach/business owner-created
+    // matches lock scoring to the creator + an explicitly assigned scorer.
+    const creator = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { activeRole: true },
+    })
+    const captainScoringEnabled = creator?.activeRole === 'PLAYER'
     let resolvedVenueName = data.venueName?.trim() || null
     let resolvedFacilityId = data.facilityId?.trim() || null
     const resolvedCustomOvers =
@@ -723,6 +751,7 @@ export class MatchService {
         matchType: resolvedMatchType, format: data.format,
         category,
         ageGroup,
+        captainScoringEnabled,
         teamAName: data.teamAName, teamBName: data.teamBName,
         teamAPlayerIds,
         teamBPlayerIds,
@@ -1789,6 +1818,10 @@ export class MatchService {
       id: match.id,
       status: match.status,
       matchType: match.matchType,
+      category: (match as any).category,
+      ageGroup: (match as any).ageGroup,
+      ballType: (match as any).ballType,
+      captainScoringEnabled: (match as any).captainScoringEnabled !== false,
       format: match.format,
       round: match.round,
       venueName: match.venueName,

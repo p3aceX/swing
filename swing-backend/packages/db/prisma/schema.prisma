@@ -1283,6 +1283,11 @@ model Match {
   matchType           MatchType
   category            TeamType          @default(CLUB_ACADEMY)
   ageGroup            String            @default("SENIOR") // U14 | U16 | U19 | U23 | SENIOR
+  /// True when the match was created from the player app — batting captain
+  /// gets auto-score privilege via the batting guard. False when created
+  /// from arena/academy/coach apps — only the creator + an explicitly
+  /// assigned scorer can record balls. Defaults true to preserve legacy.
+  captainScoringEnabled Boolean         @default(true)
   format              MatchFormat
   status              MatchStatus       @default(SCHEDULED)
   teamAName           String
