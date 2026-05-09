@@ -1093,6 +1093,62 @@ export class MatchService {
     })
   }
 
+  /// Bulk-edit pre-match settings. Accepts the same fields the create-match
+  /// form exposes; ignores anything the caller didn't send. Locked to
+  /// SCHEDULED / TOSS_DONE — once IN_PROGRESS, settings shouldn't drift.
+  async updateMatchSettings(
+    matchId: string,
+    userId: string,
+    input: {
+      format?: string
+      ballType?: string
+      category?: string
+      ageGroup?: string
+      venueName?: string
+      venueCity?: string
+      facilityId?: string
+      scheduledAt?: string
+      customOvers?: number
+      hasImpactPlayer?: boolean
+      teamAName?: string
+      teamBName?: string
+    },
+  ) {
+    const match = await this.authorizeMutation(matchId, userId, { access: 'MANAGER' })
+    if (!['SCHEDULED', 'TOSS_DONE'].includes(match.status)) {
+      throw new AppError(
+        'INVALID_STATE',
+        'Match settings can only be edited before the match starts',
+        400,
+      )
+    }
+
+    // Build the patch from defined keys only — leaves toss / scoring rows
+    // untouched, so existing toss/playing-11 state is preserved.
+    const data: Record<string, unknown> = {}
+    if (input.format !== undefined) data.format = input.format
+    if (input.ballType !== undefined) data.ballType = input.ballType
+    if (input.category !== undefined) data.category = input.category
+    if (input.ageGroup !== undefined) {
+      const cat = (data.category ?? match.category) as string | undefined
+      data.ageGroup =
+        cat === 'CORPORATE' || cat === 'GULLY' ? 'SENIOR' : input.ageGroup
+    }
+    if (input.venueName !== undefined) data.venueName = input.venueName
+    if (input.facilityId !== undefined) data.facilityId = input.facilityId
+    if (input.scheduledAt !== undefined) {
+      data.scheduledAt = new Date(input.scheduledAt)
+    }
+    if (input.customOvers !== undefined) data.customOvers = input.customOvers
+    if (input.hasImpactPlayer !== undefined) {
+      data.hasImpactPlayer = input.hasImpactPlayer
+    }
+    if (input.teamAName !== undefined) data.teamAName = input.teamAName
+    if (input.teamBName !== undefined) data.teamBName = input.teamBName
+
+    return prisma.match.update({ where: { id: matchId }, data })
+  }
+
   async cancelMatch(matchId: string, userId: string, options: MutationOptions = {}) {
     const match = await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'OWNER' })
     if (!['SCHEDULED', 'TOSS_DONE', 'CREATED'].includes(match.status)) {

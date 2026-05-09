@@ -36,6 +36,31 @@ export async function matchRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.startMatch(id, user.userId) })
   })
 
+  app.patch('/:id', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = z
+      .object({
+        format: z.string().optional(),
+        ballType: z.string().optional(),
+        category: z.string().optional(),
+        ageGroup: z.string().optional(),
+        venueName: z.string().optional(),
+        venueCity: z.string().optional(),
+        facilityId: z.string().optional(),
+        scheduledAt: z.string().optional(),
+        customOvers: z.number().int().positive().optional(),
+        hasImpactPlayer: z.boolean().optional(),
+        teamAName: z.string().optional(),
+        teamBName: z.string().optional(),
+      })
+      .parse(request.body)
+    return reply.send({
+      success: true,
+      data: await svc.updateMatchSettings(id, user.userId, body),
+    })
+  })
+
   app.patch('/:id/overs', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
