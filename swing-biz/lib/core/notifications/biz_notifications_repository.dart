@@ -90,9 +90,20 @@ class OneSignalSyncPayload {
   final Map<String, dynamic>? data;
 }
 
-const Set<String> kArenaOwnerNotificationTypes = {
+const Set<String> kBookingNotificationTypes = {
   'NEW_BOOKING',
   'BOOKING_CANCELLED',
+  'BOOKING_UPDATED',
+  'PAYMENT_RECEIVED',
+};
+
+const Set<String> kMatchupNotificationTypes = {
+  'mm_interest_expressed',
+};
+
+const Set<String> kArenaOwnerNotificationTypes = {
+  ...kBookingNotificationTypes,
+  ...kMatchupNotificationTypes,
 };
 
 class BizNotificationsRepository {

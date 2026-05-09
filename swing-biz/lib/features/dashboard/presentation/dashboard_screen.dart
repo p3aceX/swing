@@ -284,6 +284,7 @@ class _ProfileAvatar extends ConsumerWidget {
 
 class _HomeTab extends ConsumerWidget {
   const _HomeTab();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final arenasAsync = ref.watch(ownedArenasProvider);
@@ -311,27 +312,12 @@ class _HomeTab extends ConsumerWidget {
         final currentMonthSummary = _combineAsyncSummaryMaps([
           ...selectedArenas.map(
             (a) => ref.watch(
-              _homeMonthSummaryProvider((arenaId: a.id, month: currentMonthKey)),
+              _homeMonthSummaryProvider(
+                  (arenaId: a.id, month: currentMonthKey)),
             ),
           ),
         ]);
         final previousMonthSummary = _combineAsyncSummaryMaps([
-          ...selectedArenas.map(
-            (a) => ref.watch(
-              _homeMonthSummaryProvider(
-                (arenaId: a.id, month: previousMonthKey),
-              ),
-            ),
-          ),
-        ]);
-        final trendSummary = _combineAsyncSummaryMaps([
-          ...selectedArenas.map(
-            (a) => ref.watch(
-              _homeMonthSummaryProvider(
-                (arenaId: a.id, month: currentMonthKey),
-              ),
-            ),
-          ),
           ...selectedArenas.map(
             (a) => ref.watch(
               _homeMonthSummaryProvider(
@@ -363,9 +349,12 @@ class _HomeTab extends ConsumerWidget {
           for (final a in selectedArenas) {
             ref.invalidate(_homeAllBookingsProvider(a.id));
             ref.invalidate(_homeTodayAvailabilityProvider(a.id));
-            ref.invalidate(_homeMonthSummaryProvider((arenaId: a.id, month: currentMonthKey)));
-            ref.invalidate(_homeMonthSummaryProvider((arenaId: a.id, month: previousMonthKey)));
-            ref.invalidate(_homeMonthPaymentsProvider((arenaId: a.id, month: currentMonthKey)));
+            ref.invalidate(_homeMonthSummaryProvider(
+                (arenaId: a.id, month: currentMonthKey)));
+            ref.invalidate(_homeMonthSummaryProvider(
+                (arenaId: a.id, month: previousMonthKey)));
+            ref.invalidate(_homeMonthPaymentsProvider(
+                (arenaId: a.id, month: currentMonthKey)));
           }
         }
 
@@ -395,10 +384,20 @@ class _HomeTab extends ConsumerWidget {
                         slotsAsync: todayAvailability,
                       ),
                       const _ThinDivider(),
-                      _BookingsTrendSection(summaryAsync: trendSummary),
+                      _BookingsTrendSection(bookingsAsync: allBookings),
                       const _ThinDivider(),
-                      _SlotsDonutSection(slotsAsync: todayAvailability),
-                      const SizedBox(height: 32),
+                      _DailyUtilizationSection(
+                        bookingsAsync: allBookings,
+                        arenas: selectedArenas,
+                      ),
+                      const _ThinDivider(),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+                        child: _WeeklyHeatmapSection(
+                          bookingsAsync: allBookings,
+                          arenas: selectedArenas,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -981,483 +980,620 @@ class _RecentBookingsSkeleton extends StatelessWidget {
   }
 }
 
-// ─── Bookings + Revenue combo chart ──────────────────────────────────────────
+// ─── Bookings + Revenue combo chart (last 14 days) ───────────────────────────
 
 class _BookingsTrendSection extends StatelessWidget {
-  const _BookingsTrendSection({required this.summaryAsync});
-  final AsyncValue<Map<String, ArenaDaySummary>> summaryAsync;
+  const _BookingsTrendSection({required this.bookingsAsync});
+  final AsyncValue<List<ArenaReservation>> bookingsAsync;
+
+  static Map<String, ArenaDaySummary> _summarise(
+      List<ArenaReservation> bookings) {
+    final today = DateTime.now();
+    // window: 6 days back … 7 days forward (14 days centred on today)
+    final from = DateTime(today.year, today.month, today.day - 6);
+    final to = DateTime(today.year, today.month, today.day + 7);
+    final map = <String, ArenaDaySummary>{};
+    for (final b in bookings) {
+      final date = b.bookingDate;
+      if (date == null) continue;
+      if (!_isActiveBooking(b)) continue;
+      final day = DateTime(date.year, date.month, date.day);
+      if (day.isBefore(from) || day.isAfter(to)) continue;
+      final key = DateFormat('yyyy-MM-dd').format(day);
+      final existing = map[key];
+      map[key] = ArenaDaySummary(
+        count: (existing?.count ?? 0) + 1,
+        revenuePaise: (existing?.revenuePaise ?? 0) +
+            (_countsAsRevenue(b) ? b.totalAmountPaise : 0),
+      );
+    }
+    return map;
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final today = DateTime.now();
+    // 14-day window: 6 days ago → today → 7 days ahead
+    final days = List.generate(
+      14,
+      (i) => DateTime(today.year, today.month, today.day - 6 + i),
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+      child: bookingsAsync.when(
+        loading: () => const _BlockSkeleton(height: 240),
+        error: (_, __) => const SizedBox.shrink(),
+        data: (bookings) {
+          final summary = _summarise(bookings);
+          final counts = days
+              .map((d) =>
+                  summary[DateFormat('yyyy-MM-dd').format(d)]?.count ?? 0)
+              .toList();
+          final revenues = days
+              .map((d) =>
+                  (summary[DateFormat('yyyy-MM-dd').format(d)]?.revenuePaise ??
+                      0) /
+                  100.0)
+              .toList();
+          final totalCount = counts.fold(0, (s, v) => s + v);
+          final totalRevenue = revenues.fold(0.0, (s, v) => s + v);
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Bookings & Revenue',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                        color: scheme.onSurface,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Bookings & Revenue',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Past 6 days · Today · Next 7 days',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurface.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: scheme.primary.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(2.5),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Bookings',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSurface.withValues(alpha: 0.6),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(
+                            width: 14,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: scheme.onSurface,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Revenue',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSurface.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Last 7 days',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      if (totalCount > 0)
+                        Text(
+                          '$totalCount bookings · ₹${_compactAmount(totalRevenue)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface.withValues(alpha: 0.45),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 200,
+                child: _BookingsRevenueChart(
+                  days: days,
+                  counts: counts,
+                  revenues: revenues,
                 ),
               ),
-              _LegendChip(
-                color: scheme.primary.withValues(alpha: 0.55),
-                label: 'Bookings',
-                square: true,
-              ),
-              const SizedBox(width: 12),
-              _LegendChip(
-                color: scheme.onSurface,
-                label: 'Revenue',
-                square: false,
-              ),
             ],
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 220,
-            child: summaryAsync.when(
-              loading: () => const _ChartLoading(),
-              error: (e, _) => const _ChartMessage('Could not load graph'),
-              data: (summary) => _BookingsRevenueComboChart(summary: summary),
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-class _LegendChip extends StatelessWidget {
-  const _LegendChip({
-    required this.color,
-    required this.label,
-    required this.square,
+class _BookingsRevenueChart extends StatelessWidget {
+  const _BookingsRevenueChart({
+    required this.days,
+    required this.counts,
+    required this.revenues,
   });
-  final Color color;
-  final String label;
-  final bool square;
+  final List<DateTime> days;
+  final List<int> counts;
+  final List<double> revenues;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: square ? 10 : 14,
-          height: square ? 10 : 3,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius:
-                BorderRadius.circular(square ? 2.5 : 2),
+    final today = DateTime.now();
+    final maxCount = counts.fold(0, (m, v) => v > m ? v : m).toDouble();
+    final maxRevenue = revenues.fold(0.0, (m, v) => v > m ? v : m);
+
+    if (maxCount == 0 && maxRevenue == 0) {
+      return Center(
+        child: Text(
+          'No bookings in this period',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface.withValues(alpha: 0.40),
           ),
         ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: scheme.onSurface.withValues(alpha: 0.7),
+      );
+    }
+
+    const maxY = 100.0;
+    double normCount(int v) =>
+        maxCount == 0 ? 0 : (v / maxCount) * 96;
+    double normRevenue(double v) =>
+        maxRevenue == 0 ? 0 : (v / maxRevenue) * 96;
+
+    final barData = BarChartData(
+      maxY: maxY,
+      minY: 0,
+      gridData: const FlGridData(show: false),
+      borderData: FlBorderData(show: false),
+      alignment: BarChartAlignment.spaceAround,
+      titlesData: FlTitlesData(
+        leftTitles:
+            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles:
+            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles:
+            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        bottomTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 26,
+            interval: 1,
+            getTitlesWidget: (value, meta) {
+              final i = value.toInt();
+              if (i < 0 || i >= days.length) return const SizedBox();
+              final d = days[i];
+              final isToday = d.day == today.day &&
+                  d.month == today.month &&
+                  d.year == today.year;
+              // label every other bar to avoid crowding
+              if (i % 2 != 0 && !isToday) return const SizedBox();
+              return Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Text(
+                  isToday ? 'T' : '${d.day}',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight:
+                        isToday ? FontWeight.w900 : FontWeight.w600,
+                    color: isToday
+                        ? scheme.primary
+                        : scheme.onSurface.withValues(alpha: 0.40),
+                  ),
+                ),
+              );
+            },
           ),
+        ),
+      ),
+      barTouchData: BarTouchData(
+        touchTooltipData: BarTouchTooltipData(
+          getTooltipColor: (_) => scheme.inverseSurface,
+          tooltipRoundedRadius: 8,
+          tooltipPadding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          getTooltipItem: (group, _, rod, __) {
+            final i = group.x;
+            return BarTooltipItem(
+              '${DateFormat('d MMM').format(days[i])}\n'
+              '${counts[i]} booking${counts[i] == 1 ? '' : 's'} · '
+              '₹${_compactAmount(revenues[i])}',
+              TextStyle(
+                color: scheme.onInverseSurface,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            );
+          },
+        ),
+      ),
+      barGroups: List.generate(days.length, (i) {
+        final d = days[i];
+        final isToday = d.day == today.day &&
+            d.month == today.month &&
+            d.year == today.year;
+        return BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: normCount(counts[i]),
+              width: 13,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(4)),
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: isToday
+                    ? [
+                        scheme.primary,
+                        scheme.primary.withValues(alpha: 0.75),
+                      ]
+                    : [
+                        scheme.primary.withValues(alpha: 0.50),
+                        scheme.primary.withValues(alpha: 0.20),
+                      ],
+              ),
+              backDrawRodData: BackgroundBarChartRodData(
+                show: true,
+                toY: maxY,
+                color: scheme.surfaceContainerHighest,
+              ),
+            ),
+          ],
+        );
+      }),
+    );
+
+    final spots = List.generate(
+      days.length,
+      (i) => FlSpot(i.toDouble(), normRevenue(revenues[i])),
+    );
+
+    final lineData = LineChartData(
+      minX: 0,
+      maxX: (days.length - 1).toDouble(),
+      minY: 0,
+      maxY: maxY,
+      gridData: const FlGridData(show: false),
+      borderData: FlBorderData(show: false),
+      titlesData: const FlTitlesData(show: false),
+      lineTouchData: const LineTouchData(enabled: false),
+      lineBarsData: [
+        LineChartBarData(
+          spots: spots,
+          isCurved: true,
+          curveSmoothness: 0.35,
+          preventCurveOverShooting: true,
+          barWidth: 2.5,
+          isStrokeCapRound: true,
+          color: scheme.onSurface,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, _, __, index) => FlDotCirclePainter(
+              radius: index == spots.length - 1 ? 4.5 : 2.5,
+              color: scheme.surface,
+              strokeWidth: index == spots.length - 1 ? 2.5 : 1.5,
+              strokeColor: scheme.onSurface,
+            ),
+          ),
+          belowBarData: BarAreaData(
+            show: true,
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                scheme.onSurface.withValues(alpha: 0.08),
+                scheme.onSurface.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return Stack(
+      children: [
+        BarChart(barData),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 26),
+          child: IgnorePointer(child: LineChart(lineData)),
         ),
       ],
     );
   }
 }
 
-class _BookingsRevenueComboChart extends StatelessWidget {
-  const _BookingsRevenueComboChart({required this.summary});
-  final Map<String, ArenaDaySummary> summary;
+// ─── Daily slot utilization ───────────────────────────────────────────────────
+
+class _DailyUtilizationSection extends StatelessWidget {
+  const _DailyUtilizationSection({
+    required this.bookingsAsync,
+    required this.arenas,
+  });
+  final AsyncValue<List<ArenaReservation>> bookingsAsync;
+  final List<ArenaListing> arenas;
+
+  static int _toMin(String t) {
+    final p = t.split(':');
+    return (int.tryParse(p[0]) ?? 0) * 60 +
+        (p.length > 1 ? (int.tryParse(p[1]) ?? 0) : 0);
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final today = DateTime.now();
     final days = List.generate(
-      7,
-      (i) => DateTime(today.year, today.month, today.day - (6 - i)),
+      14,
+      (i) => DateTime(today.year, today.month, today.day - 6 + i),
     );
 
-    final bookingCounts = <double>[];
-    final revenue = <double>[];
-    for (final d in days) {
-      final daily = summary[DateFormat('yyyy-MM-dd').format(d)];
-      bookingCounts.add((daily?.count ?? 0).toDouble());
-      revenue.add((daily?.revenuePaise ?? 0) / 100);
-    }
+    // Total bookable minutes per day across all selected arenas.
+    // Each unit contributes (closeTime − openTime) minutes per day.
+    final totalAvailMin = arenas.fold(0, (sum, arena) {
+      final unitCount = arena.units.length;
+      if (unitCount == 0) return sum;
+      final open = _toMin(arena.openTime);
+      final close = _toMin(arena.closeTime);
+      return sum + (close - open).clamp(0, 24 * 60) * unitCount;
+    });
 
-    final maxBookings =
-        bookingCounts.fold<double>(0, (m, v) => v > m ? v : m);
-    final maxRevenue = revenue.fold<double>(0, (m, v) => v > m ? v : m);
-    if (maxBookings == 0 && maxRevenue == 0) {
-      return const _ChartMessage('No data yet');
-    }
-
-    const maxY = 110.0;
-    double normBooking(double v) =>
-        maxBookings == 0 ? 0 : (v / maxBookings) * 100;
-    double normRevenue(double v) =>
-        maxRevenue == 0 ? 0 : (v / maxRevenue) * 100;
-
-    final lineColor = scheme.onSurface;
-
-    final commonTitles = FlTitlesData(
-      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      rightTitles:
-          const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      bottomTitles: AxisTitles(
-        sideTitles: SideTitles(
-          showTitles: true,
-          reservedSize: 30,
-          interval: 1,
-          getTitlesWidget: (value, meta) {
-            final i = value.toInt();
-            if (i < 0 || i >= days.length) return const SizedBox();
-            final d = days[i];
-            final isToday = d.day == today.day &&
-                d.month == today.month &&
-                d.year == today.year;
-            return Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                DateFormat('E').format(d),
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight:
-                      isToday ? FontWeight.w900 : FontWeight.w700,
-                  color: isToday
-                      ? scheme.primary
-                      : scheme.onSurface.withValues(alpha: 0.5),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-
-    final barChart = BarChart(
-      BarChartData(
-        maxY: maxY,
-        minY: 0,
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        alignment: BarChartAlignment.spaceAround,
-        titlesData: commonTitles,
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (_) => scheme.onSurface,
-            tooltipRoundedRadius: 10,
-            tooltipPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            getTooltipItem: (group, _, rod, __) {
-              final i = group.x;
-              final d = days[i];
-              return BarTooltipItem(
-                '${DateFormat('EEE, d MMM').format(d)}\n'
-                '${bookingCounts[i].toInt()} bookings · '
-                '₹${_compactAmount(revenue[i])}',
-                TextStyle(
-                  color: scheme.surface,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              );
-            },
-          ),
-        ),
-        barGroups: List.generate(days.length, (i) {
-          final d = days[i];
-          final isToday = d.day == today.day &&
-              d.month == today.month &&
-              d.year == today.year;
-          return BarChartGroupData(
-            x: i,
-            barRods: [
-              BarChartRodData(
-                toY: normBooking(bookingCounts[i]),
-                width: 22,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(8)),
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: isToday
-                      ? [
-                          scheme.primary,
-                          scheme.primary.withValues(alpha: 0.7),
-                        ]
-                      : [
-                          scheme.primary.withValues(alpha: 0.55),
-                          scheme.primary.withValues(alpha: 0.25),
-                        ],
-                ),
-                backDrawRodData: BackgroundBarChartRodData(
-                  show: true,
-                  toY: maxY,
-                  color: scheme.surfaceContainerHighest,
-                ),
-              ),
-            ],
-          );
-        }),
-      ),
-    );
-
-    final spots = List.generate(
-      days.length,
-      (i) => FlSpot(i.toDouble(), normRevenue(revenue[i])),
-    );
-
-    final lineChart = LineChart(
-      LineChartData(
-        minX: 0,
-        maxX: (days.length - 1).toDouble(),
-        minY: 0,
-        maxY: maxY,
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        titlesData: const FlTitlesData(show: false),
-        lineTouchData: const LineTouchData(enabled: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: spots,
-            isCurved: true,
-            curveSmoothness: 0.4,
-            preventCurveOverShooting: true,
-            barWidth: 3,
-            isStrokeCapRound: true,
-            color: lineColor,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, barData, index) {
-                final isLast = index == spots.length - 1;
-                return FlDotCirclePainter(
-                  radius: isLast ? 5 : 3.5,
-                  color: scheme.surface,
-                  strokeWidth: isLast ? 3 : 2,
-                  strokeColor: lineColor,
-                );
-              },
-            ),
-            belowBarData: BarAreaData(
-              show: true,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  lineColor.withValues(alpha: 0.10),
-                  lineColor.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    return Stack(
-      children: [
-        barChart,
-        Padding(
-          // line chart gets extra horizontal padding so the line sits in the
-          // middle of each bar's slot rather than at the edges
-          padding: const EdgeInsets.fromLTRB(0, 0, 0, 30),
-          child: IgnorePointer(child: lineChart),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Slots donut ─────────────────────────────────────────────────────────────
-
-class _SlotsDonutSection extends StatelessWidget {
-  const _SlotsDonutSection({required this.slotsAsync});
-  final AsyncValue<List<AvailabilitySlot>> slotsAsync;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Slot utilization',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-              color: scheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Today across selected arenas',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 180,
-            child: slotsAsync.when(
-              loading: () => const _ChartLoading(),
-              error: (e, _) => const _ChartMessage('Could not load'),
-              data: (slots) => _SlotsDonut(slots: slots),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+      child: bookingsAsync.when(
+        loading: () => const _BlockSkeleton(height: 170),
+        error: (_, __) => const SizedBox.shrink(),
+        data: (bookings) {
+          // Sum booked minutes per day key
+          final bookedByDay = <String, int>{};
+          for (final b in bookings) {
+            final date = b.bookingDate;
+            if (date == null || !_isActiveBooking(b)) continue;
+            final key = DateFormat('yyyy-MM-dd')
+                .format(DateTime(date.year, date.month, date.day));
+            final mins =
+                (_toMin(b.endTime) - _toMin(b.startTime)).clamp(0, 24 * 60);
+            bookedByDay[key] = (bookedByDay[key] ?? 0) + mins;
+          }
 
-class _SlotsDonut extends StatelessWidget {
-  const _SlotsDonut({required this.slots});
-  final List<AvailabilitySlot> slots;
+          double util(DateTime d) {
+            if (totalAvailMin == 0) return 0;
+            final key = DateFormat('yyyy-MM-dd').format(d);
+            return ((bookedByDay[key] ?? 0) / totalAvailMin * 100)
+                .clamp(0.0, 100.0);
+          }
 
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (slots.isEmpty) return const _ChartMessage('No slots today');
-    final total = slots.length;
-    final booked = slots.where((s) => !s.available).length;
-    final available = total - booked;
-    final pct = total == 0 ? 0 : (booked / total * 100).round();
-    return Row(
-      children: [
-        SizedBox(
-          width: 160,
-          height: 160,
-          child: Stack(
-            alignment: Alignment.center,
+          final todayPct = util(DateTime(today.year, today.month, today.day));
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              PieChart(
-                PieChartData(
-                  startDegreeOffset: -90,
-                  sectionsSpace: 3,
-                  centerSpaceRadius: 52,
-                  sections: [
-                    PieChartSectionData(
-                      value: booked.toDouble().clamp(0.0001, double.infinity),
-                      color: scheme.primary,
-                      radius: 22,
-                      showTitle: false,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Slot utilization',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Booked time vs capacity · ±7 days',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurface.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
                     ),
-                    PieChartSectionData(
-                      value:
-                          available.toDouble().clamp(0.0001, double.infinity),
-                      color: scheme.surfaceContainerHighest,
-                      radius: 22,
-                      showTitle: false,
+                  ),
+                  if (totalAvailMin > 0)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          'Today ${todayPct.round()}%',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: todayPct >= 50
+                                ? const Color(0xFF059669)
+                                : scheme.error,
+                          ),
+                        ),
+                        Text(
+                          todayPct >= 50
+                              ? 'Good utilization'
+                              : 'Low utilization',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurface.withValues(alpha: 0.45),
+                          ),
+                        ),
+                      ],
                     ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 110,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < days.length; i++) ...[
+                      Expanded(
+                        child: _UtilBar(
+                          day: days[i],
+                          pct: util(days[i]),
+                          isToday: i == days.length - 1,
+                        ),
+                      ),
+                      if (i < days.length - 1) const SizedBox(width: 3),
+                    ],
                   ],
                 ),
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
+              const SizedBox(height: 10),
+              Row(
                 children: [
-                  Text(
-                    '$pct%',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -1,
-                      color: scheme.onSurface,
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF059669),
+                      borderRadius: BorderRadius.circular(3),
                     ),
                   ),
-                  Text('booked',
-                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(width: 5),
+                  Text(
+                    '≥ 50%',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: scheme.error,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '< 50%',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface.withValues(alpha: 0.55),
+                    ),
+                  ),
                 ],
               ),
             ],
-          ),
-        ),
-        const SizedBox(width: 24),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _LegendRow(
-                color: scheme.primary,
-                label: 'Booked',
-                value: booked.toString(),
-              ),
-              const SizedBox(height: 16),
-              _LegendRow(
-                color: scheme.surfaceContainerHighest,
-                label: 'Available',
-                value: available.toString(),
-              ),
-            ],
-          ),
-        ),
-      ],
+          );
+        },
+      ),
     );
   }
 }
 
-class _LegendRow extends StatelessWidget {
-  const _LegendRow({
-    required this.color,
-    required this.label,
-    required this.value,
-  });
-  final Color color;
-  final String label;
-  final String value;
+class _UtilBar extends StatelessWidget {
+  const _UtilBar({required this.day, required this.pct, required this.isToday});
+  final DateTime day;
+  final double pct;
+  final bool isToday;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Row(
+    final barColor = pct == 0
+        ? scheme.onSurface.withValues(alpha: 0.09)
+        : pct >= 50
+            ? const Color(0xFF059669)
+            : scheme.error;
+
+    return Column(
       children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        SizedBox(
+          height: 18,
+          child: pct > 0
+              ? Text(
+                  '${pct.round()}%',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: barColor,
+                  ),
+                )
+              : null,
         ),
-        const SizedBox(width: 12),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                  color: scheme.onSurface,
-                ),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 5),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final barH = pct == 0
+                    ? 3.0
+                    : (pct / 100 * constraints.maxHeight)
+                        .clamp(4.0, constraints.maxHeight);
+                return Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    height: barH,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: barColor,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        Text(
+          '${day.day}',
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: isToday ? FontWeight.w900 : FontWeight.w600,
+            color: isToday
+                ? scheme.primary
+                : scheme.onSurface.withValues(alpha: 0.40),
           ),
         ),
       ],
@@ -1466,45 +1602,6 @@ class _LegendRow extends StatelessWidget {
 }
 
 // ─── Helpers shared by home tab ──────────────────────────────────────────────
-
-class _ChartLoading extends StatelessWidget {
-  const _ChartLoading();
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      alignment: Alignment.center,
-      child: const CircularProgressIndicator(strokeWidth: 2),
-    );
-  }
-}
-
-class _ChartMessage extends StatelessWidget {
-  const _ChartMessage(this.message);
-  final String message;
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        message,
-        style: TextStyle(
-          color: scheme.onSurface.withValues(alpha: 0.55),
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
 
 class _BlockSkeleton extends StatelessWidget {
   const _BlockSkeleton({required this.height});
@@ -2263,3 +2360,414 @@ String _joinNonEmpty(List<String?> v, {String s = ', '}) => v
     .where((x) => x != null && x.trim().isNotEmpty)
     .map((x) => x!.trim())
     .join(s);
+
+// ─── Monthly calendar heatmap ─────────────────────────────────────────────────
+
+class _WeeklyHeatmapSection extends StatelessWidget {
+  const _WeeklyHeatmapSection({
+    required this.bookingsAsync,
+    required this.arenas,
+  });
+
+  final AsyncValue<List<ArenaReservation>> bookingsAsync;
+  final List<ArenaListing> arenas;
+
+  @override
+  Widget build(BuildContext context) {
+    return bookingsAsync.when(
+      loading: () => const _BlockSkeleton(height: 300),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (bookings) {
+        if (arenas.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Text('No arenas selected'),
+            ),
+          );
+        }
+        final scheme = Theme.of(context).colorScheme;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Heatmap',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 16),
+            for (int i = 0; i < arenas.length; i++) ...[
+              _ArenaCalendar(arena: arenas[i], allBookings: bookings),
+              if (i < arenas.length - 1) const SizedBox(height: 32),
+            ],
+            const SizedBox(height: 20),
+            _HeatmapLegend(),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ArenaCalendar extends StatelessWidget {
+  const _ArenaCalendar({required this.arena, required this.allBookings});
+
+  final ArenaListing arena;
+  final List<ArenaReservation> allBookings;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final today = DateTime.now();
+
+    // Current month bounds
+    final firstOfMonth = DateTime(today.year, today.month, 1);
+    final daysInMonth = DateTime(today.year, today.month + 1, 0).day;
+    // Mon=1 → offset 0, Sun=7 → offset 6
+    final offset = firstOfMonth.weekday - 1;
+    final rowCount = ((offset + daysInMonth) / 7).ceil();
+
+    // Tally bookings for this arena this month (no arenaId filter —
+    // all bookings are already fetched per-arena from the provider)
+    final Map<int, int> activeByDay = {};
+    final Map<int, int> cancelledByDay = {};
+    final Map<int, int> pendingByDay = {};
+
+    for (final b in allBookings) {
+      final date = b.bookingDate;
+      if (date == null) continue;
+      if (date.year != today.year || date.month != today.month) continue;
+      // If multiple arenas selected, only count bookings for this arena
+      if (b.arenaId.isNotEmpty && b.arenaId != arena.id) continue;
+      final d = date.day;
+      final status = b.status.toUpperCase();
+      if (status == 'CANCELLED' || status == 'CANCELLED_BY_OWNER') {
+        cancelledByDay[d] = (cancelledByDay[d] ?? 0) + 1;
+      } else if (status == 'HELD') {
+        pendingByDay[d] = (pendingByDay[d] ?? 0) + 1;
+      } else {
+        activeByDay[d] = (activeByDay[d] ?? 0) + 1;
+      }
+    }
+
+    final totalBooked = activeByDay.values.fold(0, (s, v) => s + v);
+    final totalBlocked = cancelledByDay.values.fold(0, (s, v) => s + v);
+
+    const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    const cellGap = 4.0;
+    const cellH = 46.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Calendar header ──────────────────────────────────────────────────
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              DateFormat('MMMM yyyy').format(today),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface.withValues(alpha: 0.5),
+              ),
+            ),
+            const Spacer(),
+            RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w800),
+                children: [
+                  TextSpan(
+                    text: '$totalBooked BOOKED',
+                    style: const TextStyle(color: Color(0xFF16A34A)),
+                  ),
+                  TextSpan(
+                    text: '  ·  ',
+                    style: TextStyle(
+                        color: scheme.onSurface.withValues(alpha: 0.35)),
+                  ),
+                  TextSpan(
+                    text: '$totalBlocked BLOCKED',
+                    style: const TextStyle(color: Color(0xFFDC2626)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // ── Day-of-week header ───────────────────────────────────────────────
+        Row(
+          children: List.generate(
+            7,
+            (i) => Expanded(
+              child: Text(
+                dayLabels[i],
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface.withValues(alpha: 0.35),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        // ── Calendar grid ────────────────────────────────────────────────────
+        for (int row = 0; row < rowCount; row++) ...[
+          if (row > 0) const SizedBox(height: cellGap),
+          SizedBox(
+            height: cellH,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: List.generate(7, (col) {
+                final cellIndex = row * 7 + col;
+                final dayNum = cellIndex - offset + 1;
+                final isValid = dayNum >= 1 && dayNum <= daysInMonth;
+
+                Widget child;
+                if (!isValid) {
+                  child = const SizedBox.shrink();
+                } else {
+                  final dayDate =
+                      DateTime(today.year, today.month, dayNum);
+                  final isPast = dayDate
+                      .isBefore(DateTime(today.year, today.month, today.day));
+                  final isToday = dayNum == today.day;
+                  final active = activeByDay[dayNum] ?? 0;
+                  final cancelled = cancelledByDay[dayNum] ?? 0;
+                  final pending = pendingByDay[dayNum] ?? 0;
+                  child = _CalendarCell(
+                    dayNum: dayNum,
+                    active: active,
+                    cancelled: cancelled,
+                    pending: pending,
+                    isPast: isPast,
+                    isToday: isToday,
+                  );
+                }
+
+                return Expanded(
+                  child: Padding(
+                    padding:
+                        EdgeInsets.only(right: col < 6 ? cellGap : 0),
+                    child: child,
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _CalendarCell extends StatelessWidget {
+  const _CalendarCell({
+    required this.dayNum,
+    required this.active,
+    required this.cancelled,
+    required this.pending,
+    required this.isPast,
+    required this.isToday,
+  });
+
+  final int dayNum;
+  final int active;
+  final int cancelled;
+  final int pending;
+  final bool isPast;
+  final bool isToday;
+
+  Color _bgColor() {
+    if (active > 0) {
+      if (active >= 6) return const Color(0xFF14532D);
+      if (active >= 4) return const Color(0xFF15803D);
+      if (active >= 2) return const Color(0xFF16A34A);
+      return const Color(0xFF22C55E);
+    }
+    if (cancelled > 0) return const Color(0xFFDC2626);
+    if (pending > 0) return const Color(0xFFEAB308);
+    return Colors.transparent;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasBooking = active > 0 || cancelled > 0 || pending > 0;
+    final bg = _bgColor();
+    const radius = BorderRadius.all(Radius.circular(8));
+
+    if (!hasBooking && isPast) {
+      return ClipRRect(
+        borderRadius: radius,
+        child: CustomPaint(
+          painter: const _HatchPainter(),
+          child: Container(
+            color: const Color(0xFFF3F4F6),
+            alignment: Alignment.center,
+            child: Text(
+              '$dayNum',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface.withValues(alpha: 0.25),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: hasBooking
+            ? bg
+            : scheme.onSurface.withValues(alpha: 0.05),
+        borderRadius: radius,
+        border: isToday && !hasBooking
+            ? Border.all(color: scheme.primary, width: 2)
+            : null,
+      ),
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$dayNum',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: isToday ? FontWeight.w900 : FontWeight.w700,
+              color: hasBooking
+                  ? Colors.white
+                  : isToday
+                      ? scheme.primary
+                      : scheme.onSurface.withValues(alpha: 0.45),
+            ),
+          ),
+          if (active > 0) ...[
+            const SizedBox(height: 2),
+            Text(
+              '$active',
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                color: Colors.white70,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _HatchPainter extends CustomPainter {
+  const _HatchPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFD1D5DB)
+      ..strokeWidth = 1.0;
+    const spacing = 5.0;
+    for (double i = -size.height; i < size.width + size.height; i += spacing) {
+      canvas.drawLine(
+          Offset(i, size.height), Offset(i + size.height, 0), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_HatchPainter oldDelegate) => false;
+}
+
+class _HeatmapLegend extends StatelessWidget {
+  const _HeatmapLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    const radius = BorderRadius.all(Radius.circular(4));
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      children: [
+        _LegendDot(
+            color: const Color(0xFF22C55E), label: '1–2 bookings'),
+        _LegendDot(
+            color: const Color(0xFF15803D), label: '4+ bookings'),
+        _LegendDot(
+            color: const Color(0xFFDC2626), label: 'Blocked'),
+        _LegendDot(
+            color: const Color(0xFFEAB308), label: 'Pending'),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: ClipRRect(
+                borderRadius: radius,
+                child: CustomPaint(
+                  painter: const _HatchPainter(),
+                  child: Container(color: const Color(0xFFF3F4F6)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              'Past (empty)',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface.withValues(alpha: 0.55),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label});
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+              color: color,
+              borderRadius: const BorderRadius.all(Radius.circular(4))),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context)
+                .colorScheme
+                .onSurface
+                .withValues(alpha: 0.55),
+          ),
+        ),
+      ],
+    );
+  }
+}

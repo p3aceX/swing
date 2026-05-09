@@ -32,9 +32,27 @@ class BizNotificationsScreen extends ConsumerStatefulWidget {
 }
 
 class _BizNotificationsScreenState
-    extends ConsumerState<BizNotificationsScreen> {
+    extends ConsumerState<BizNotificationsScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tab;
   bool _markingAll = false;
   bool _clearing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 2, vsync: this);
+    _tab.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
+  }
+
+  Set<String> get _currentTypes =>
+      _tab.index == 0 ? kBookingNotificationTypes : kMatchupNotificationTypes;
 
   Future<void> _clearAll() async {
     final confirmed = await showDialog<bool>(
@@ -65,7 +83,7 @@ class _BizNotificationsScreenState
     try {
       await ref
           .read(bizNotificationsRepositoryProvider)
-          .clearAll(types: kArenaOwnerNotificationTypes);
+          .clearAll(types: _currentTypes);
       ref.invalidate(_notificationsProvider);
       ref.invalidate(bizUnreadCountProvider);
     } finally {
@@ -78,7 +96,7 @@ class _BizNotificationsScreenState
     try {
       await ref
           .read(bizNotificationsRepositoryProvider)
-          .markAllRead(types: kArenaOwnerNotificationTypes);
+          .markAllRead(types: _currentTypes);
       ref.invalidate(_notificationsProvider);
       ref.invalidate(bizUnreadCountProvider);
     } finally {
@@ -114,40 +132,61 @@ class _BizNotificationsScreenState
         ),
         actions: [
           async.maybeWhen(
-            data: (page) => page.unreadCount > 0
-                ? TextButton(
-                    onPressed: _markingAll ? null : _markAllRead,
-                    child: Text(
-                      _markingAll ? 'Marking…' : 'Mark all read',
-                      style: const TextStyle(
-                          color: Color(0xFF059669),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700),
-                    ),
-                  )
-                : const SizedBox.shrink(),
+            data: (page) {
+              final tabItems = _itemsForTab(page.items);
+              final hasUnread = tabItems.any((n) => !n.isRead);
+              return hasUnread
+                  ? TextButton(
+                      onPressed: _markingAll ? null : _markAllRead,
+                      child: Text(
+                        _markingAll ? 'Marking…' : 'Mark all read',
+                        style: const TextStyle(
+                            color: Color(0xFF059669),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    )
+                  : const SizedBox.shrink();
+            },
             orElse: () => const SizedBox.shrink(),
           ),
           async.maybeWhen(
-            data: (page) => page.items.isNotEmpty
-                ? IconButton(
-                    onPressed: _clearing ? null : _clearAll,
-                    icon: _clearing
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                color: Color(0xFFDC2626), strokeWidth: 2),
-                          )
-                        : const Icon(Icons.delete_sweep_rounded,
-                            color: Color(0xFFDC2626), size: 22),
-                    tooltip: 'Clear all',
-                  )
-                : const SizedBox.shrink(),
+            data: (page) {
+              final tabItems = _itemsForTab(page.items);
+              return tabItems.isNotEmpty
+                  ? IconButton(
+                      onPressed: _clearing ? null : _clearAll,
+                      icon: _clearing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  color: Color(0xFFDC2626), strokeWidth: 2),
+                            )
+                          : const Icon(Icons.delete_sweep_rounded,
+                              color: Color(0xFFDC2626), size: 22),
+                      tooltip: 'Clear all',
+                    )
+                  : const SizedBox.shrink();
+            },
             orElse: () => const SizedBox.shrink(),
           ),
           const SizedBox(width: 4),
         ],
+        bottom: TabBar(
+          controller: _tab,
+          indicatorColor: const Color(0xFF059669),
+          labelColor: const Color(0xFF059669),
+          unselectedLabelColor: const Color(0xFF6E7685),
+          labelStyle:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          unselectedLabelStyle:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          tabs: const [
+            Tab(text: 'Booking'),
+            Tab(text: 'Match-Up'),
+          ],
+        ),
       ),
       body: async.when(
         loading: () => const Center(
@@ -171,45 +210,100 @@ class _BizNotificationsScreenState
             ),
           ]),
         ),
-        data: (page) {
-          if (page.items.isEmpty) {
-            return const Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.notifications_none_rounded,
-                    color: Color(0xFF6E7685), size: 48),
-                SizedBox(height: 14),
-                Text('No notifications yet',
-                    style: TextStyle(
-                        color: Color(0xFF0D1117),
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800)),
-                SizedBox(height: 6),
-                Text('Booking alerts will appear here',
-                    style: TextStyle(
-                        color: Color(0xFF6E7685),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600)),
-              ]),
-            );
-          }
-
-          return RefreshIndicator(
-            color: const Color(0xFF059669),
-            onRefresh: () async {
-              ref.invalidate(_notificationsProvider);
-              await ref.read(_notificationsProvider.future);
-            },
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              itemCount: page.items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, i) => _NotificationCard(
-                item: page.items[i],
-                onTap: () => _markRead(page.items[i]),
-              ),
+        data: (page) => TabBarView(
+          controller: _tab,
+          children: [
+            _NotificationList(
+              items: _itemsForTab(page.items,
+                  types: kBookingNotificationTypes),
+              onTap: _markRead,
+              onRefresh: () async {
+                ref.invalidate(_notificationsProvider);
+                await ref.read(_notificationsProvider.future);
+              },
+              emptyIcon: Icons.calendar_month_rounded,
+              emptyTitle: 'No booking notifications',
+              emptySubtitle: 'Booking alerts will appear here',
             ),
-          );
-        },
+            _NotificationList(
+              items: _itemsForTab(page.items,
+                  types: kMatchupNotificationTypes),
+              onTap: _markRead,
+              onRefresh: () async {
+                ref.invalidate(_notificationsProvider);
+                await ref.read(_notificationsProvider.future);
+              },
+              emptyIcon: Icons.sports_cricket_rounded,
+              emptyTitle: 'No match-up notifications',
+              emptySubtitle: 'Match interest alerts will appear here',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<BizNotificationItem> _itemsForTab(
+    List<BizNotificationItem> all, {
+    Set<String>? types,
+  }) {
+    final filter = types ?? _currentTypes;
+    return all.where((n) => filter.contains(n.type)).toList();
+  }
+}
+
+// ─── Per-tab list ─────────────────────────────────────────────────────────────
+
+class _NotificationList extends StatelessWidget {
+  const _NotificationList({
+    required this.items,
+    required this.onTap,
+    required this.onRefresh,
+    required this.emptyIcon,
+    required this.emptyTitle,
+    required this.emptySubtitle,
+  });
+
+  final List<BizNotificationItem> items;
+  final Future<void> Function(BizNotificationItem) onTap;
+  final Future<void> Function() onRefresh;
+  final IconData emptyIcon;
+  final String emptyTitle;
+  final String emptySubtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(emptyIcon, color: const Color(0xFF6E7685), size: 48),
+          const SizedBox(height: 14),
+          Text(emptyTitle,
+              style: const TextStyle(
+                  color: Color(0xFF0D1117),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(emptySubtitle,
+              style: const TextStyle(
+                  color: Color(0xFF6E7685),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
+        ]),
+      );
+    }
+
+    return RefreshIndicator(
+      color: const Color(0xFF059669),
+      onRefresh: onRefresh,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (context, i) => _NotificationCard(
+          item: items[i],
+          onTap: () => onTap(items[i]),
+        ),
       ),
     );
   }
@@ -229,6 +323,7 @@ class _NotificationCard extends StatelessWidget {
       'BOOKING_CANCELLED' => Icons.event_busy_rounded,
       'BOOKING_UPDATED' => Icons.edit_calendar_rounded,
       'PAYMENT_RECEIVED' => Icons.payments_rounded,
+      'mm_interest_expressed' => Icons.bolt_rounded,
       _ => Icons.notifications_rounded,
     };
   }
@@ -238,6 +333,7 @@ class _NotificationCard extends StatelessWidget {
       'NEW_BOOKING' => const Color(0xFF059669),
       'BOOKING_CANCELLED' => const Color(0xFFDC2626),
       'PAYMENT_RECEIVED' => const Color(0xFF0EA5E9),
+      'mm_interest_expressed' => const Color(0xFFF59E0B),
       _ => const Color(0xFF6E7685),
     };
   }
@@ -247,6 +343,7 @@ class _NotificationCard extends StatelessWidget {
       'NEW_BOOKING' => const Color(0xFFD1FAE5),
       'BOOKING_CANCELLED' => const Color(0xFFFEE2E2),
       'PAYMENT_RECEIVED' => const Color(0xFFE0F2FE),
+      'mm_interest_expressed' => const Color(0xFFFEF3C7),
       _ => const Color(0xFFF1F5F9),
     };
   }
@@ -313,16 +410,14 @@ class _NotificationCard extends StatelessWidget {
                 ],
               ),
             ),
-            if (!item.isRead) ...[
-              const SizedBox(width: 8),
-              Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(top: 4),
-                decoration: const BoxDecoration(
-                    color: Color(0xFF059669), shape: BoxShape.circle),
-              ),
-            ],
+            const SizedBox(width: 8),
+            Container(
+              width: 8,
+              height: 8,
+              margin: const EdgeInsets.only(top: 4),
+              decoration: const BoxDecoration(
+                  color: Color(0xFF059669), shape: BoxShape.circle),
+            ),
           ],
         ),
       ),
@@ -334,6 +429,7 @@ class _NotificationCard extends StatelessWidget {
         'BOOKING_CANCELLED' => 'Booking Cancelled',
         'BOOKING_UPDATED' => 'Booking Updated',
         'PAYMENT_RECEIVED' => 'Payment Received',
+        'mm_interest_expressed' => 'Match Interest',
         _ => 'Notification',
       };
 
