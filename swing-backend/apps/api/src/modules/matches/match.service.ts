@@ -1648,7 +1648,10 @@ export class MatchService {
   }
 
   async changeWicketKeeper(matchId: string, userId: string, team: 'A' | 'B', wicketKeeperId: string, options: MutationOptions = {}) {
-    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'MANAGER' })
+    // Same access tier as recording a ball — the active scorer can swap WK
+    // mid-innings (e.g. when the existing WK is now bowling). Captains pass
+    // through the bowling-team guard inside authorizeMutation as usual.
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'SCORER' })
     const data = team === 'A'
       ? { teamAWicketKeeperId: wicketKeeperId }
       : { teamBWicketKeeperId: wicketKeeperId }
