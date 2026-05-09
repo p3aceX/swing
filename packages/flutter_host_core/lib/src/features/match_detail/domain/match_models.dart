@@ -91,8 +91,8 @@ class PlayerMatch {
   ///   'owner'      — full authority
   ///   'manager'    — manage XI/toss, score, assign Scorer
   ///   'scorer'     — score only (assigned)
-  ///   'captain-A'  — captain of team A (write-time bowling guard applies)
-  ///   'captain-B'  — captain of team B (write-time bowling guard applies)
+  ///   'captain-A'  — captain of team A (write-time batting guard applies)
+  ///   'captain-B'  — captain of team B (write-time batting guard applies)
   ///   null         — read-only
   final String? myRole;
 
@@ -109,18 +109,18 @@ class PlayerMatch {
   bool get isActiveScorer => myRole == 'scorer';
 
   /// Static "could potentially score" check for UI hints. The authoritative
-  /// per-ball check is server-side (Phase 2 bowling guard) — do not rely on
+  /// per-ball check is server-side (Phase 2 batting guard) — do not rely on
   /// this for security decisions, only for whether to show the score button.
   ///
   /// `battingTeam` is the live innings's batting team ('A' or 'B'), or null
-  /// before toss is taken.
+  /// before toss is taken. A captain can score when their team is batting.
   bool canScoreNow({String? battingTeam}) {
     if (myRole == 'owner' || myRole == 'manager' || myRole == 'scorer') {
       return true;
     }
     if (battingTeam == null) return false; // pre-toss: nobody can score
-    if (myRole == 'captain-A' && battingTeam == 'B') return true;
-    if (myRole == 'captain-B' && battingTeam == 'A') return true;
+    if (myRole == 'captain-A' && battingTeam == 'A') return true;
+    if (myRole == 'captain-B' && battingTeam == 'B') return true;
     return false;
   }
 

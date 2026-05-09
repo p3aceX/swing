@@ -7,12 +7,12 @@ import { prisma } from '@swing/db'
  * - 'manager'    → manage XI/toss, score, assign Scorer (no delete)
  * - 'scorer'     → score only (assigned by Owner / Manager)
  * - 'captain-A'  → captain of team A; manage their team; **scoring gated by
- *                  bowling team check at write time** (Phase 2)
+ *                  batting team check at write time** (Phase 2)
  * - 'captain-B'  → captain of team B; same as above for team B
  * - null         → no authority
  *
  * Captain-A/B exists so the write-time guard can decide whether the caller is
- * the currently-bowling team's captain. For *management* checks (XI / toss /
+ * the currently-batting team's captain. For *management* checks (XI / toss /
  * editing the match), captain-A/B are treated as manager-equivalent — see
  * `authorizeMutation` in match.service.ts.
  */
