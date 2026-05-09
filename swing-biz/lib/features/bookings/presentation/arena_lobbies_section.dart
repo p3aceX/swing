@@ -1012,7 +1012,8 @@ class _AssignTeamSheetState extends ConsumerState<AssignTeamSheet> {
     setState(() { _searching = true; });
     try {
       final dio = ref.read(hostDioProvider);
-      final resp = await dio.get('/player/teams/search', queryParameters: {'q': q.trim(), 'limit': '20'});
+      final paths = ref.read(hostPathConfigProvider);
+      final resp = await dio.get(paths.teamSearch, queryParameters: {'q': q.trim(), 'limit': '20'});
       final body = resp.data;
       final data = (body is Map) ? (body['data'] ?? body) : body;
       final list = (data is Map) ? (data['teams'] as List?) : null;

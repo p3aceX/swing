@@ -194,16 +194,6 @@ class HostPathConfig {
         matchHistoryPath: '/admin/matches',
       );
 
-  /// Paths for the arena app. Teams created under `/arena/teams` are
-  /// automatically linked to the authenticated arena owner's `arenaId`.
-  factory HostPathConfig.arena() => const HostPathConfig(
-        teamsBase: '/arena/teams',
-        teamsMutationBase: '/arena/teams',
-        tournamentsBase: '/arena/tournaments',
-        matchesBase: '/matches',
-        arenasBase: '/arenas',
-        playerSearchPath: '/player/search',
-      );
 }
 
 /// Override this in each host's `ProviderScope`. Defaults to the player

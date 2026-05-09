@@ -4,9 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/matches_repository.dart';
 import '../domain/match_models.dart';
 
-final matchesRepositoryProvider =
-    Provider<MatchesRepository>((ref) => MatchesRepository());
-
 class MatchesState {
   const MatchesState({
     this.isLoading = false,

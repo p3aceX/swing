@@ -1281,6 +1281,8 @@ model FeePayment {
 model Match {
   id                  String            @id @default(cuid())
   matchType           MatchType
+  category            TeamType          @default(CLUB_ACADEMY)
+  ageGroup            String            @default("SENIOR") // U14 | U16 | U19 | U23 | SENIOR
   format              MatchFormat
   status              MatchStatus       @default(SCHEDULED)
   teamAName           String
@@ -2154,6 +2156,8 @@ model Tournament {
   isVerified        Boolean          @default(false)
   status            String           @default("UPCOMING")
   tournamentFormat  TournamentFormat @default(LEAGUE)
+  category          TeamType         @default(CLUB_ACADEMY)
+  ageGroup          String           @default("SENIOR") // U14 | U16 | U19 | U23 | SENIOR
   seriesMatchCount  Int?
   groupCount        Int              @default(1)
   pointsForWin      Int              @default(2)

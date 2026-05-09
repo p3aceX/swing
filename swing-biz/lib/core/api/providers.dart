@@ -11,3 +11,10 @@ final dioProvider = Provider<Dio>((ref) => ApiClient.instance.dio);
 final hostDioOverride = hostDioProvider.overrideWith(
   (ref) => ref.watch(dioProvider),
 );
+
+/// Biz creates matches/tournaments on behalf of arena guests, so it talks to
+/// the player-facing endpoints. Make this explicit instead of relying on the
+/// host_core default.
+final hostPathConfigOverride = hostPathConfigProvider.overrideWithValue(
+  HostPathConfig.player(),
+);

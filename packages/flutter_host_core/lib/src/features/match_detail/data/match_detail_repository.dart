@@ -377,6 +377,37 @@ class HostMatchDetailRepository {
     return const [];
   }
 
+  /// Public match list for another player's profile (read-only).
+  /// 404 raises [PlayerNotFoundException].
+  Future<List<PlayerMatch>> loadPublicPlayerMatches(
+    String playerId, {
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        _paths.publicPlayerMatches(playerId),
+        queryParameters: {'limit': limit, 'offset': offset},
+      );
+      final items = _unwrapList(response.data);
+      final now = DateTime.now();
+      final result = <PlayerMatch>[];
+      for (final item in items) {
+        if (item is! Map<String, dynamic>) continue;
+        final raw = Map<String, dynamic>.from(item);
+        _normalizeTeamMatchShape(raw);
+        final m = _mapMatch(raw, now);
+        if (m.id.isNotEmpty) result.add(m);
+      }
+      return result;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        throw const PlayerNotFoundException();
+      }
+      rethrow;
+    }
+  }
+
   Future<List<PlayerMatch>> loadTeamMatches(String teamId) async {
     try {
       final response = await _dio.get(

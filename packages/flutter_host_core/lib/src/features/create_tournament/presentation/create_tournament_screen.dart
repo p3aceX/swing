@@ -54,6 +54,8 @@ class _HostCreateTournamentScreenState
   String _format = 'T20';
   String _tournamentFormat = 'LEAGUE';
   String _ballType = 'LEATHER';
+  String _category = 'CLUB_ACADEMY';
+  String _ageGroup = 'SENIOR';
   DateTime _startDate = DateTime.now().add(const Duration(days: 7));
   DateTime? _endDate;
   DateTime? _earlyBirdDeadline;
@@ -159,6 +161,8 @@ class _HostCreateTournamentScreenState
                     ? int.tryParse(_seriesMatchCountController.text.trim())
                     : null,
                 ballType: _ballType,
+                category: _category,
+                ageGroup: _ageGroup,
                 earlyBirdDeadline: _earlyBirdDeadline,
                 earlyBirdFee:
                     int.tryParse(_earlyBirdFeeController.text.trim()),
@@ -216,6 +220,13 @@ class _HostCreateTournamentScreenState
         nameController: _nameController,
         format: _format,
         onFormatChanged: (v) => setState(() => _format = v),
+        category: _category,
+        onCategoryChanged: (v) => setState(() {
+          _category = v;
+          if (v == 'CORPORATE' || v == 'GULLY') _ageGroup = 'SENIOR';
+        }),
+        ageGroup: _ageGroup,
+        onAgeGroupChanged: (v) => setState(() => _ageGroup = v),
       ),
       _Step2Structure(
         tournamentFormat: _tournamentFormat,
@@ -572,12 +583,20 @@ class _Step1Identity extends StatelessWidget {
     required this.nameController,
     required this.format,
     required this.onFormatChanged,
+    required this.category,
+    required this.onCategoryChanged,
+    required this.ageGroup,
+    required this.onAgeGroupChanged,
   });
 
   final GlobalKey<FormState> formKey;
   final TextEditingController nameController;
   final String format;
   final ValueChanged<String> onFormatChanged;
+  final String category;
+  final ValueChanged<String> onCategoryChanged;
+  final String ageGroup;
+  final ValueChanged<String> onAgeGroupChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -621,6 +640,57 @@ class _Step1Identity extends StatelessWidget {
             selected: format,
             onSelected: onFormatChanged,
           ),
+          const SizedBox(height: 24),
+
+          // Match type (category)
+          _FieldLabel(label: 'Match type'),
+          const SizedBox(height: 10),
+          _ChipGrid(
+            options: const [
+              ('SCHOOL', 'School'),
+              ('CLUB_ACADEMY', 'Club / Academy'),
+              ('CORPORATE', 'Corporate'),
+              ('GULLY', 'Gully (tennis)'),
+              ('ASSOCIATION', 'Association'),
+            ],
+            selected: category,
+            onSelected: onCategoryChanged,
+          ),
+          const SizedBox(height: 24),
+
+          // Age group — Corporate / Gully are open-age, so we lock them.
+          _FieldLabel(label: 'Age group'),
+          const SizedBox(height: 10),
+          if (category == 'CORPORATE' || category == 'GULLY')
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: context.bg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: context.fg.withOpacity(0.08)),
+              ),
+              child: Text(
+                'Senior / Open',
+                style: TextStyle(
+                  color: context.fg.withOpacity(0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          else
+            _ChipGrid(
+              options: const [
+                ('U14', 'U-14'),
+                ('U16', 'U-16'),
+                ('U19', 'U-19'),
+                ('U23', 'U-23'),
+                ('SENIOR', 'Senior / Open'),
+              ],
+              selected: ageGroup,
+              onSelected: onAgeGroupChanged,
+            ),
         ],
       ),
     );

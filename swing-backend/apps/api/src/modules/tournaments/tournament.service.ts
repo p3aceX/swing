@@ -32,6 +32,8 @@ export type TournamentInput = {
   isPublic?: boolean
   seriesMatchCount?: number | null
   ballType?: string
+  category?: string // TeamType: SCHOOL | CLUB_ACADEMY | CORPORATE | GULLY | ASSOCIATION
+  ageGroup?: string // U14 | U16 | U19 | U23 | SENIOR
   earlyBirdDeadline?: string
   earlyBirdFee?: number
   organiserName?: string
@@ -50,12 +52,21 @@ export class TournamentService {
 
   async createHostedTournament(userId: string, input: TournamentInput) {
     const isSeries = input.tournamentFormat === 'SERIES'
+    const category = (input.category as any) || 'CLUB_ACADEMY'
+    // CORPORATE and GULLY are open-age formats; force SENIOR if the client
+    // didn't specify, regardless of what they sent.
+    const ageGroup =
+      category === 'CORPORATE' || category === 'GULLY'
+        ? 'SENIOR'
+        : input.ageGroup || 'SENIOR'
     return prisma.tournament.create({
       data: {
         createdByUserId: userId,
         name: input.name.trim(),
         format: input.format as any,
         tournamentFormat: (input.tournamentFormat as any) || "LEAGUE",
+        category,
+        ageGroup,
         startDate: new Date(input.startDate),
         endDate: input.endDate ? new Date(input.endDate) : null,
         city: input.city?.trim() || null,

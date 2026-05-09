@@ -689,9 +689,25 @@ export class MatchService {
     const liveCode = await this.generateUniqueMatchLiveCode()
     const livePin = this.generateMatchLivePin()
 
+    // Squad-style category + age group (new fields). Falls back to defaults
+    // when older clients don't send them.
+    const category = (data.category as any) || 'CLUB_ACADEMY'
+    const ageGroup =
+      category === 'CORPORATE' || category === 'GULLY'
+        ? 'SENIOR'
+        : data.ageGroup || 'SENIOR'
+    // Tennis-ball games are never ranked. Tournament-linked matches retain
+    // their tournament's `matchType` if the caller sent one; otherwise we
+    // pick FRIENDLY for GULLY and RANKED for everything else.
+    const isRanked = category !== 'GULLY' && data.matchType !== 'FRIENDLY'
+    const resolvedMatchType =
+      data.matchType ?? (category === 'GULLY' ? 'FRIENDLY' : 'RANKED')
+
     const match = await prisma.match.create({
       data: {
-        matchType: data.matchType, format: data.format,
+        matchType: resolvedMatchType, format: data.format,
+        category,
+        ageGroup,
         teamAName: data.teamAName, teamBName: data.teamBName,
         teamAPlayerIds,
         teamBPlayerIds,
@@ -706,7 +722,7 @@ export class MatchService {
         ballType: data.ballType, scheduledAt: new Date(data.scheduledAt), venueName: resolvedVenueName,
         facilityId: resolvedFacilityId, academyId: data.academyId,
         tournamentId: data.tournamentId, scorerId: player?.id ?? null,
-        isRanked: data.matchType === 'RANKED',
+        isRanked,
         liveCode,
         livePin,
       },

@@ -10,7 +10,7 @@ Future<void> main() async {
   await OneSignalService.instance.initialize();
   runApp(
     ProviderScope(
-      overrides: [hostDioOverride],
+      overrides: [hostDioOverride, hostPathConfigOverride],
       child: const SwingBizApp(),
     ),
   );

@@ -295,8 +295,9 @@ class _SplitBookingSheetState extends ConsumerState<SplitBookingSheet> {
     setState(() => _searching = true);
     try {
       final dio = ref.read(hostDioProvider);
+      final paths = ref.read(hostPathConfigProvider);
       final resp = await dio.get(
-        '/player/teams/search',
+        paths.teamSearch,
         queryParameters: {'q': q.trim(), 'limit': 20},
       );
       final body = resp.data;

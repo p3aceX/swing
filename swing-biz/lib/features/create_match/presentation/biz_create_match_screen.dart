@@ -79,8 +79,9 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
   Future<String> _resolveTeamId(Dio dio, String teamName) async {
     if (teamName.trim().isEmpty) return '';
     try {
+      final paths = ref.read(host.hostPathConfigProvider);
       final resp = await dio.get<Map<String, dynamic>>(
-        '/player/teams/search',
+        paths.teamSearch,
         queryParameters: {'q': teamName.trim(), 'limit': 10},
       );
       final body = resp.data ?? {};

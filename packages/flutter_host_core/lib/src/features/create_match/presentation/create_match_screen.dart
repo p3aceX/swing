@@ -51,7 +51,8 @@ class CreateMatchScreen extends ConsumerStatefulWidget {
 class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   HostMyTeam? _teamA;
   _OpponentTeam? _teamB;
-  _MatchType _matchType = _MatchType.friendly;
+  _Category _category = _Category.clubAcademy;
+  _AgeGroup _ageGroup = _AgeGroup.senior;
   _MatchFormat _format = _MatchFormat.t20;
   _BallKind _ball = _BallKind.leather;
   _VenueChoice? _venue;
@@ -210,16 +211,40 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
                       children: [
                         _SettingsRow(
                           label: 'Type',
-                          value: _matchType.label,
+                          value: _category.label,
                           onTap: () async {
-                            final picked = await _showOptionPicker<_MatchType>(
+                            final picked = await _showOptionPicker<_Category>(
                               title: 'Match type',
-                              options: _MatchType.values,
-                              selected: _matchType,
+                              options: _Category.values,
+                              selected: _category,
                               labelOf: (e) => e.label,
                             );
                             if (picked != null) {
-                              setState(() => _matchType = picked);
+                              setState(() {
+                                _category = picked;
+                                // Corporate / Gully games are open-age by
+                                // convention — snap age to Senior so the user
+                                // doesn't have to backtrack.
+                                if (picked == _Category.corporate ||
+                                    picked == _Category.gully) {
+                                  _ageGroup = _AgeGroup.senior;
+                                }
+                              });
+                            }
+                          },
+                        ),
+                        _SettingsRow(
+                          label: 'Age',
+                          value: _ageGroup.label,
+                          onTap: () async {
+                            final picked = await _showOptionPicker<_AgeGroup>(
+                              title: 'Age group',
+                              options: _AgeGroup.values,
+                              selected: _ageGroup,
+                              labelOf: (e) => e.label,
+                            );
+                            if (picked != null) {
+                              setState(() => _ageGroup = picked);
                             }
                           },
                         ),
@@ -581,7 +606,8 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
           venueCity: _venue?.city ?? '',
           scheduledAt: _scheduledAt,
           format: _format.apiValue,
-          matchType: _matchType.apiValue,
+          category: _category.apiValue,
+          ageGroup: _ageGroup.apiValue,
           customOvers: overs,
           hasImpactPlayer: _hasImpactPlayer,
           ballType: _ball.apiValue,
@@ -609,14 +635,29 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
 // ENUMS
 // ══════════════════════════════════════════════════════════════════════════════
 
-enum _MatchType {
-  friendly('Friendly', 'FRIENDLY'),
-  club('Club', 'RANKED'),
-  tournament('Tournament', 'TOURNAMENT'),
+/// Squad-style category for the match. Mirrors the `TeamType` enum on the
+/// backend (SCHOOL / CLUB_ACADEMY / CORPORATE / GULLY / ASSOCIATION) so a
+/// match's category can be reasoned about the same way as a team's.
+enum _Category {
+  school('School', 'SCHOOL'),
+  clubAcademy('Club / Academy', 'CLUB_ACADEMY'),
   corporate('Corporate', 'CORPORATE'),
-  academy('Academy', 'ACADEMY');
+  gully('Gully (tennis)', 'GULLY'),
+  association('Association', 'ASSOCIATION');
 
-  const _MatchType(this.label, this.apiValue);
+  const _Category(this.label, this.apiValue);
+  final String label;
+  final String apiValue;
+}
+
+enum _AgeGroup {
+  u14('Under 14', 'U14'),
+  u16('Under 16', 'U16'),
+  u19('Under 19', 'U19'),
+  u23('Under 23', 'U23'),
+  senior('Senior / Open', 'SENIOR');
+
+  const _AgeGroup(this.label, this.apiValue);
   final String label;
   final String apiValue;
 }
