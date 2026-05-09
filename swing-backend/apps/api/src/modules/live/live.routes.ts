@@ -2,117 +2,16 @@ import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '@swing/db'
 import { redis } from '../../lib/redis'
+import { signOverlayToken } from '../../lib/overlay-token'
+import { overlayFeedRoutes } from './overlay-feed.routes'
 
 const LIVE_SESSION_TTL = 28800 // 8 hours
 const sessionKey = (matchId: string) => `live:session:${matchId}`
 
-// ─── Overlay builder ─────────────────────────────────────────────────────────
-async function buildOverlay(matchId: string) {
-  const match = await prisma.match.findUnique({
-    where: { id: matchId },
-    include: {
-      innings: {
-        orderBy: { inningsNumber: 'asc' },
-      },
-    },
-  })
-  if (!match) return null
-
-  const teams = await prisma.team.findMany({
-    where: {
-      OR: [
-        { name: { equals: match.teamAName, mode: 'insensitive' } },
-        { name: { equals: match.teamBName, mode: 'insensitive' } },
-      ],
-    },
-    select: { name: true, shortName: true, logoUrl: true },
-  })
-  const findTeamMeta = (name: string) =>
-    teams.find((team) => team.name.trim().toLowerCase() === name.trim().toLowerCase()) ?? null
-  const teamAMeta = findTeamMeta(match.teamAName)
-  const teamBMeta = findTeamMeta(match.teamBName)
-  const teamAShortName = teamAMeta?.shortName ?? match.teamAName
-  const teamBShortName = teamBMeta?.shortName ?? match.teamBName
-
-  const currentInnings =
-    match.innings.find((i) => !i.isCompleted) ??
-    match.innings[match.innings.length - 1]
-  const prevInnings = match.innings.find(
-    (i) => i.isCompleted && i.inningsNumber === 1
-  )
-
-  // Resolve player names for striker / non-striker / bowler
-  async function resolvePlayer(playerId: string | null) {
-    if (!playerId) return null
-    const p = await prisma.playerProfile.findUnique({
-      where: { id: playerId },
-      include: { user: { select: { name: true } } },
-    })
-    if (!p) return null
-    const stats = await prisma.playerMatchStats.findFirst({
-      where: { matchId, playerProfileId: playerId },
-    })
-    return {
-      name: p.user.name,
-      runs: stats?.runs ?? 0,
-      balls: stats?.balls ?? 0,
-      wickets: stats?.wickets ?? 0,
-      runsConceded: stats?.runsConceded ?? 0,
-      oversBowled: stats?.oversBowled ?? 0,
-    }
-  }
-
-  const [striker, nonStriker, bowler] = await Promise.all([
-    resolvePlayer(currentInnings?.currentStrikerId ?? null),
-    resolvePlayer(currentInnings?.currentNonStrikerId ?? null),
-    resolvePlayer(currentInnings?.currentBowlerId ?? null),
-  ])
-
-  let tournamentName: string | null = null
-  if (match.tournamentId) {
-    const t = await prisma.tournament.findUnique({
-      where: { id: match.tournamentId },
-      select: { name: true },
-    })
-    tournamentName = t?.name ?? null
-  }
-
-  return {
-    matchId,
-    teamA: match.teamAName,
-    teamB: match.teamBName,
-    teamAName: match.teamAName,
-    teamAShortName,
-    teamALogoUrl: teamAMeta?.logoUrl ?? null,
-    teamBName: match.teamBName,
-    teamBShortName,
-    teamBLogoUrl: teamBMeta?.logoUrl ?? null,
-    tournamentName,
-    status: match.status,
-    currentInnings: currentInnings
-      ? {
-          battingTeam: currentInnings.battingTeam,
-          teamName: currentInnings.battingTeam === 'A' ? match.teamAName : match.teamBName,
-          teamShortName:
-            currentInnings.battingTeam === 'A' ? teamAShortName : teamBShortName,
-          teamLogoUrl:
-            currentInnings.battingTeam === 'A'
-              ? teamAMeta?.logoUrl ?? null
-              : teamBMeta?.logoUrl ?? null,
-          runs: currentInnings.totalRuns,
-          wickets: currentInnings.totalWickets,
-          overs: currentInnings.totalOvers.toFixed(1),
-        }
-      : null,
-    target: prevInnings ? prevInnings.totalRuns + 1 : null,
-    striker,
-    nonStriker,
-    bowler,
-    lastUpdated: new Date().toISOString(),
-  }
-}
-
 export async function liveRoutes(app: FastifyInstance) {
+  // Overlay feed (bootstrap + tick) — token-gated, mounted under /live
+  await app.register(overlayFeedRoutes)
+
   // ─── 1. Validate match access ─────────────────────────────────────────────
   app.post('/validate-match', async (request, reply) => {
     const body = z
@@ -150,6 +49,8 @@ export async function liveRoutes(app: FastifyInstance) {
     const activeSessionRaw = await redis.get(sessionKey(match.id))
     const activeSession = activeSessionRaw ? JSON.parse(activeSessionRaw) : null
 
+    const overlayToken = signOverlayToken(match.id)
+
     return reply.send({
       success: true,
       data: {
@@ -171,6 +72,9 @@ export async function liveRoutes(app: FastifyInstance) {
           showBatsmen: true,
           showBowler: true,
         },
+        // Overlay JWT — pass as `Authorization: Bearer …` to
+        // /live/matches/:matchId/bootstrap and /tick (or `?token=` for SSE).
+        overlayToken,
         liveSession: activeSession,
       },
     })
@@ -243,26 +147,10 @@ export async function liveRoutes(app: FastifyInstance) {
     })
   })
 
-  // ─── 4. Overlay live data (cached 10s) ───────────────────────────────────
-  app.get('/matches/:matchId/overlay', async (request, reply) => {
-    const { matchId } = request.params as { matchId: string }
-
-    const cached = await redis.get(`live:overlay:${matchId}`)
-    if (cached) {
-      return reply.send({ success: true, data: JSON.parse(cached) })
-    }
-
-    const overlay = await buildOverlay(matchId)
-    if (!overlay) {
-      return reply.code(404).send({
-        success: false,
-        error: { code: 'MATCH_NOT_FOUND', message: 'Match not found' },
-      })
-    }
-
-    await redis.setex(`live:overlay:${matchId}`, 10, JSON.stringify(overlay))
-    return reply.send({ success: true, data: overlay })
-  })
+  // ─── 4. Overlay feed ──────────────────────────────────────────────────────
+  // Removed legacy GET /matches/:matchId/overlay.
+  // Use GET /live/matches/:matchId/bootstrap (snapshot) + /tick (SSE) — both
+  // require the overlay JWT issued by POST /live/validate-match.
 
   // ─── 5. Start live session ────────────────────────────────────────────────
   app.post('/session/start', async (request, reply) => {
@@ -375,7 +263,7 @@ export async function liveRoutes(app: FastifyInstance) {
       .parse(request.body)
 
     await redis.del(sessionKey(body.matchId))
-    await redis.del(`live:overlay:${body.matchId}`)
+    await redis.del(`live:overlay:bootstrap:${body.matchId}`)
 
     return reply.send({ success: true, data: { stopped: true } })
   })
