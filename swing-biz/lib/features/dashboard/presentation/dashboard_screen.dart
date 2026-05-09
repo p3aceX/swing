@@ -395,7 +395,7 @@ class _HomeTab extends ConsumerWidget {
                         slotsAsync: todayAvailability,
                       ),
                       const _ThinDivider(),
-                      _BookingsTrendSection(summaryAsync: currentMonthSummary),
+                      _BookingsTrendSection(summaryAsync: trendSummary),
                       const _ThinDivider(),
                       _SlotsDonutSection(slotsAsync: todayAvailability),
                       const SizedBox(height: 32),
