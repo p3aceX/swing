@@ -320,12 +320,13 @@ async function buildTick(matchId: string) {
     null
   const prevInnings = match.innings.find((i) => i.isCompleted && i.inningsNumber === 1)
 
-  // Fetch live ball events for the current innings + last 6 balls overall.
-  const lastBalls = currentInnings
+  // Fetch ALL balls of the current innings — we derive live batter/
+  // bowler stats from these directly. PlayerMatchStats is only updated
+  // at match-end aggregation, so it's all zeros mid-match.
+  const inningsBalls = currentInnings
     ? await prisma.ballEvent.findMany({
         where: { inningsId: currentInnings.id },
-        orderBy: [{ overNumber: 'desc' }, { ballNumber: 'desc' }],
-        take: 6,
+        orderBy: [{ overNumber: 'asc' }, { ballNumber: 'asc' }],
         select: {
           id: true,
           overNumber: true,
@@ -350,58 +351,84 @@ async function buildTick(matchId: string) {
         },
       })
     : []
-
-  const livePlayerIds = new Set<string>()
-  if (currentInnings?.currentStrikerId) livePlayerIds.add(currentInnings.currentStrikerId)
-  if (currentInnings?.currentNonStrikerId) livePlayerIds.add(currentInnings.currentNonStrikerId)
-  if (currentInnings?.currentBowlerId) livePlayerIds.add(currentInnings.currentBowlerId)
-
-  const liveStats = livePlayerIds.size
-    ? await prisma.playerMatchStats.findMany({
-        where: { matchId, playerProfileId: { in: [...livePlayerIds] } },
-        select: {
-          playerProfileId: true,
-          runs: true,
-          balls: true,
-          fours: true,
-          sixes: true,
-          strikeRate: true,
-          isOut: true,
-          oversBowled: true,
-          wickets: true,
-          runsConceded: true,
-          economy: true,
-          wides: true,
-          noBalls: true,
-        },
-      })
-    : []
-  const statsByPlayer = new Map(liveStats.map((s) => [s.playerProfileId, s]))
+  // Last 6 balls (newest last) for the lower-third recent-balls strip.
+  const lastBalls = inningsBalls.slice(-6)
 
   const buildBatter = (id: string | null) => {
     if (!id) return null
-    const s = statsByPlayer.get(id)
+    let runs = 0
+    let balls = 0
+    let fours = 0
+    let sixes = 0
+    let isOut = false
+    for (const b of inningsBalls) {
+      if (b.batterId !== id) continue
+      // Bat-runs only; extras (wides/byes) don't count toward batter total.
+      runs += b.runs
+      // Balls faced: any delivery the batter is on strike for, EXCEPT
+      // wides (which count as deliveries but not balls faced).
+      if (b.outcome !== 'WIDE') balls += 1
+      if (b.runs === 4) fours += 1
+      if (b.runs === 6) sixes += 1
+      if (b.isWicket && (b.dismissedPlayerId ?? id) === id) isOut = true
+    }
+    const strikeRate = balls > 0 ? (runs * 100) / balls : 0
     return {
       playerId: id,
-      runs: s?.runs ?? 0,
-      balls: s?.balls ?? 0,
-      fours: s?.fours ?? 0,
-      sixes: s?.sixes ?? 0,
-      strikeRate: s?.strikeRate ?? 0,
-      isOut: s?.isOut ?? false,
+      runs,
+      balls,
+      fours,
+      sixes,
+      strikeRate: Number(strikeRate.toFixed(2)),
+      isOut,
     }
   }
+
   const buildBowler = (id: string | null) => {
     if (!id) return null
-    const s = statsByPlayer.get(id)
+    let legalBalls = 0
+    let runsConceded = 0
+    let wickets = 0
+    let wides = 0
+    let noBalls = 0
+    for (const b of inningsBalls) {
+      if (b.bowlerId !== id) continue
+      // Runs charged to the bowler = bat-runs + wides + no-balls.
+      // Byes / leg-byes are extras NOT charged to bowler — but we don't
+      // have outcome enum to distinguish reliably here, so we follow
+      // the simpler convention: extras counted only if WIDE/NO_BALL.
+      runsConceded += b.runs
+      if (b.outcome === 'WIDE') {
+        wides += 1
+        runsConceded += b.extras
+      } else if (b.outcome === 'NO_BALL') {
+        noBalls += 1
+        runsConceded += b.extras
+      } else {
+        legalBalls += 1
+      }
+      // Run-outs and retired-hurts aren't credited to the bowler.
+      if (
+        b.isWicket &&
+        b.dismissalType !== 'RUN_OUT' &&
+        b.dismissalType !== 'RETIRED_HURT' &&
+        b.dismissalType !== 'OBSTRUCTING_FIELD'
+      ) {
+        wickets += 1
+      }
+    }
+    const completedOvers = Math.floor(legalBalls / 6)
+    const ballsInOver = legalBalls % 6
+    const oversBowled = Number(`${completedOvers}.${ballsInOver}`)
+    const economy = legalBalls > 0 ? (runsConceded * 6) / legalBalls : 0
     return {
       playerId: id,
-      oversBowled: s?.oversBowled ?? 0,
-      wickets: s?.wickets ?? 0,
-      runsConceded: s?.runsConceded ?? 0,
-      economy: s?.economy ?? 0,
-      wides: s?.wides ?? 0,
-      noBalls: s?.noBalls ?? 0,
+      oversBowled,
+      wickets,
+      runsConceded,
+      economy: Number(economy.toFixed(2)),
+      wides,
+      noBalls,
     }
   }
 
@@ -457,7 +484,8 @@ async function buildTick(matchId: string) {
       match.status === 'COMPLETED'
         ? { winnerId: match.winnerId, margin: match.winMargin }
         : null,
-    lastBalls: lastBalls.reverse(),
+    // Already in chronological order (oldest of last-6 first, newest last).
+    lastBalls,
     serverAt: new Date().toISOString(),
   }
 }
