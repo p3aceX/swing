@@ -101,7 +101,7 @@ class RoleSelectionScreen extends ConsumerWidget {
                 )
               else if (availableProfiles.isEmpty)
                 _EmptyState(
-                  onTap: () => context.go(AppRoutes.chooseProfile),
+                  onTap: () => context.go(AppRoutes.dashboard),
                 )
               else
                 ...availableProfiles.map(
@@ -122,7 +122,7 @@ class RoleSelectionScreen extends ConsumerWidget {
               if (availableProfiles.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 TextButton(
-                  onPressed: () => context.go(AppRoutes.chooseProfile),
+                  onPressed: () => context.go(AppRoutes.dashboard),
                   child: const Text('Add Another Profile'),
                 ),
               ],
