@@ -156,7 +156,7 @@ class YouTubeService {
 
       debugPrint("[DEBUG] YouTubeService: Credentials ready for '$broadcastTitle'.");
       return {
-        'url': ingestionInfo?.ingestionAddress ?? 'rtmp://a.rtmp.youtube.com/live2',
+        'url': ingestionInfo?.ingestionAddress?.replaceAll("rtmp://", "rtmps://") ?? 'rtmps://a.rtmp.youtube.com/live2',
         'key': ingestionInfo?.streamName ?? '',
         'title': broadcastTitle ?? 'Swing Live',
       };

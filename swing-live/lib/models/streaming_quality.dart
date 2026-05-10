@@ -1,4 +1,11 @@
 enum StreamingQuality {
+  auto(
+    label: "Auto (Professional Optimized)",
+    width: 1920,
+    height: 1080,
+    bitrate: 6000 * 1000,
+    fps: 60,
+  ),
   standard720p30(
     label: "720p 30fps",
     width: 1280,
@@ -26,6 +33,13 @@ enum StreamingQuality {
     height: 1440,
     bitrate: 10000 * 1000,
     fps: 30,
+  ),
+  elite2k60(
+    label: "1440p 60fps",
+    width: 2560,
+    height: 1440,
+    bitrate: 15000 * 1000,
+    fps: 60,
   );
 
   final String label;

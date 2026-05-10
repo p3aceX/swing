@@ -7,6 +7,10 @@ class SwingCamera {
   static const EventChannel _eventChannel = EventChannel('com.dhandha.swing/camera/events');
 
   StreamSubscription? _eventSubscription;
+  final StreamController<Map<String, dynamic>> _eventController = StreamController<Map<String, dynamic>>.broadcast();
+  
+  Stream<Map<String, dynamic>> get onEvent => _eventController.stream;
+
   final VoidCallback onInitialized;
   final Function(String) onError;
   final VoidCallback onConnectionSuccess;
@@ -39,6 +43,7 @@ class SwingCamera {
 
       _eventSubscription = _eventChannel.receiveBroadcastStream().listen((event) {
         final Map<String, dynamic> eventMap = Map<String, dynamic>.from(event);
+        _eventController.add(eventMap);
         final String type = eventMap['type'];
 
         switch (type) {
@@ -107,8 +112,13 @@ class SwingCamera {
     await _channel.invokeMethod('setBatteryShield', {'enabled': enabled});
   }
 
+  Future<void> setBitrate(int bitrate) async {
+    await _channel.invokeMethod('setBitrate', {'bitrate': bitrate});
+  }
+
   Future<void> dispose() async {
     await _eventSubscription?.cancel();
+    _eventController.close();
     await _channel.invokeMethod('dispose');
   }
 }

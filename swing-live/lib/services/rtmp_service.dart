@@ -10,6 +10,8 @@ class RTMPService {
   
   SwingCamera? get controller => _controller;
 
+  Stream<Map<String, dynamic>> get onEvent => _controller?.onEvent ?? const Stream.empty();
+
   Future<void> init(
     StreamingQuality quality,
     bool isVertical,
@@ -80,8 +82,10 @@ class RTMPService {
 
   Future<void> applyQuality(StreamingQuality quality, bool isVertical) async {
     if (_controller == null) return;
-    // For now, SwingCamera handles orientation switching internally if needed.
-    // To support dynamic quality changes during preview, we'd add an updateConfig method.
+    await _controller!.setBitrate(quality.bitrate);
+    // Note: Changing resolution (width/height) usually requires stopping and 
+    // restarting the stream on most RTMP implementations. For now we only 
+    // update bitrate which can be done "on the fly".
   }
 
   Future<void> startStreaming(String url, String streamKey) async {
@@ -113,6 +117,7 @@ class RTMPService {
     } catch (e, stack) {
       debugPrint("[STREAM_DEBUG] startStreaming() THREW ERROR: $e");
       debugPrint("[STREAM_DEBUG] Stack: $stack");
+      rethrow;
     }
   }
 
@@ -171,6 +176,20 @@ class RTMPService {
       } catch (e) {
         // Suppress
       }
+    }
+  }
+
+  /// Re-arms the preview after the activity returns from background.
+  /// Pedro keeps its Camera2 device alive on most devices, but the GL
+  /// surface inside OpenGlView is destroyed when the window goes invisible.
+  /// Calling startPreview again re-binds Pedro to the freshly-created
+  /// surface; safe to call when already previewing (Pedro no-ops then).
+  Future<void> restartPreview() async {
+    if (_controller == null) return;
+    try {
+      await _controller!.startPreview();
+    } catch (e) {
+      debugPrint("[CAMERA_DEBUG] restartPreview error: $e");
     }
   }
 
