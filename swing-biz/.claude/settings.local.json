@@ -43,7 +43,11 @@
       "Bash(gcloud beta builds log 604f06ab-1b96-43f2-bc8a-d2ed008aacb5 *)",
       "Bash(gcloud beta *)",
       "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx scripts/fix_falsely_paid_bookings.ts --dry-run)",
-      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx scripts/fix_falsely_paid_bookings.ts)"
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx scripts/fix_falsely_paid_bookings.ts)",
+      "Bash(awk *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(k,':',v\\) for k,v in d.get\\('scripts',{}\\).items\\(\\) if any\\(x in v.lower\\(\\) for x in ['deploy','gcloud','gcp','run','build']\\)]\")",
+      "Bash(flutter build *)",
+      "Bash(git *)"
     ]
   }
 }

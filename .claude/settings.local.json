@@ -108,7 +108,22 @@
       "Bash(DATABASE_URL=__CMDSUB_OUTPUT__ npx tsx -e ' *)",
       "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx /tmp/mm-test/probe.ts)",
       "Bash(ln -sf /Users/sangwanhq/dhandha/swing/swing-backend/node_modules /tmp/mm-test/node_modules)",
-      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx /tmp/mm-test/sim.ts)"
+      "Bash(DATABASE_URL=$\\(gcloud secrets versions access latest --secret=DATABASE_URL --project=project-0e62f040-2f77-4498-abd \\) npx tsx /tmp/mm-test/sim.ts)",
+      "Bash(npx tsx *)",
+      "Bash(SCALE_TEAMS=1000 SCALE_ARENAS_PER_CITY=5 SCALE_OWNER_LOBBIES=2000 SCALE_PLAYER_LOBBIES=8000 SCALE_DATES=14 npx tsx synthetic.ts)",
+      "Bash(grep -nB1 -A8 \"ScoringScreen\\(\" /Users/sangwanhq/dhandha/swing/swing-player/lib/core/navigation/app_router.dart)",
+      "Bash(grep -nB1 -A6 \"ScoringScreen\\(\" /Users/sangwanhq/dhandha/swing/swing-biz/lib/core/router/app_router.dart)",
+      "Bash(grep -nB1 -A20 \"path: '/create-match'\" /Users/sangwanhq/dhandha/swing/swing-player/lib/core/navigation/app_router.dart)",
+      "Bash(grep -n \"Widget build\\(BuildContext context\\)\\\\|Widget _buildScaffold\\\\|Widget _wrapAmoled\\\\|^  }$\\\\|^}$\" /Users/sangwanhq/dhandha/swing/packages/flutter_host_core/lib/src/features/scoring/presentation/scoring_screen.dart)",
+      "Bash(grep -n \"body:\\\\|^      \\),\\\\|^    \\),\\\\|^  \\);\\\\|^}\\\\|^  }$\")",
+      "Bash(flutter --version)",
+      "Bash(dart run *)",
+      "Bash(WINDOWS=EVENING dart run scripts/test_matchmaking.dart)",
+      "Bash(WINDOWS=NIGHT,LATE_NIGHT dart run scripts/test_matchmaking.dart)",
+      "Bash(DATE=2026-05-11 WINDOWS=MORNING,EVENING dart run scripts/test_matchmaking.dart)",
+      "Bash(DATE=2026-05-12 WINDOWS=MORNING FORMAT=ODI dart run scripts/test_matchmaking.dart)",
+      "Bash(DATE=2026-05-13 WINDOWS=AFTERNOON FORMAT=T20 dart run scripts/test_matchmaking.dart)",
+      "Bash(DATE=2026-05-12 WINDOWS=AFTERNOON dart run scripts/test_matchmaking.dart)"
     ]
   }
 }

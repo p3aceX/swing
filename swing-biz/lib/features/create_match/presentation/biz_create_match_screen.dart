@@ -11,9 +11,15 @@ class BizCreateMatchScreen extends ConsumerStatefulWidget {
   const BizCreateMatchScreen({
     super.key,
     this.existingMatchId,
+    this.editMode = false,
   });
 
   final String? existingMatchId;
+
+  /// When true, opens the create-match form pre-populated with the existing
+  /// match's values (Edit Match flow). When false (default), follows the
+  /// resume flow that lands on Playing 11.
+  final bool editMode;
 
   @override
   ConsumerState<BizCreateMatchScreen> createState() =>
@@ -25,12 +31,12 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
   String? _resumeError;
   bool _resumeLoaded = false;
 
-  bool get _isResume => (widget.existingMatchId ?? '').trim().isNotEmpty;
+  bool get _hasMatchId => (widget.existingMatchId ?? '').trim().isNotEmpty;
 
   @override
   void initState() {
     super.initState();
-    if (_isResume) _loadResumeMatch();
+    if (_hasMatchId) _loadResumeMatch();
   }
 
   Future<void> _loadResumeMatch() async {
@@ -56,15 +62,31 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
 
       if (!mounted) return;
       setState(() {
-        _resumeMatch = teamAId == summary.teamAId && teamBId == summary.teamBId
-            ? summary
-            : host.HostMatchSummary(
-                id: summary.id,
-                teamAId: teamAId,
-                teamBId: teamBId,
-                teamAName: summary.teamAName,
-                teamBName: summary.teamBName,
-              );
+        _resumeMatch =
+            teamAId == summary.teamAId && teamBId == summary.teamBId
+                ? summary
+                : host.HostMatchSummary(
+                    id: summary.id,
+                    teamAId: teamAId,
+                    teamBId: teamBId,
+                    teamAName: summary.teamAName,
+                    teamBName: summary.teamBName,
+                    teamALogoUrl: summary.teamALogoUrl,
+                    teamBLogoUrl: summary.teamBLogoUrl,
+                    teamACity: summary.teamACity,
+                    teamBCity: summary.teamBCity,
+                    format: summary.format,
+                    matchType: summary.matchType,
+                    category: summary.category,
+                    ageGroup: summary.ageGroup,
+                    ballType: summary.ballType,
+                    venueId: summary.venueId,
+                    venueName: summary.venueName,
+                    venueCity: summary.venueCity,
+                    scheduledAt: summary.scheduledAt,
+                    customOvers: summary.customOvers,
+                    hasImpactPlayer: summary.hasImpactPlayer,
+                  );
         _resumeLoaded = true;
       });
     } catch (error) {
@@ -105,14 +127,15 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
   Widget build(BuildContext context) {
     final currentUserId = ref.watch(meProvider).valueOrNull?.user.id;
 
-    if (_isResume) {
+    // Resume + Edit both need the match summary loaded first.
+    if (_hasMatchId) {
       if (!_resumeLoaded) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       }
       final summary = _resumeMatch;
       if (summary == null) {
         return Scaffold(
-          appBar: AppBar(title: const Text('Resume match')),
+          appBar: AppBar(title: const Text('Match')),
           body: Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -124,6 +147,41 @@ class _BizCreateMatchScreenState extends ConsumerState<BizCreateMatchScreen> {
           ),
         );
       }
+
+      // Edit mode: open the create-match form pre-populated. Submit PATCHes
+      // the existing match (toss / Playing 11 / scoring all preserved) and
+      // pops back to the previous screen.
+      if (widget.editMode) {
+        return host.CreateMatchScreen(
+          currentUserId: currentUserId,
+          onTossCompleted: _onTossCompleted,
+          onBack: () => context.pop(),
+          editMatchId: summary.id,
+          onEditSaved: (ctx, _) => ctx.pop(),
+          initialPrefill: host.CreateMatchPrefill(
+            teamAId: summary.teamAId,
+            teamAName: summary.teamAName,
+            teamALogoUrl: summary.teamALogoUrl,
+            teamACity: summary.teamACity,
+            teamBId: summary.teamBId,
+            teamBName: summary.teamBName,
+            teamBLogoUrl: summary.teamBLogoUrl,
+            teamBCity: summary.teamBCity,
+            format: summary.format,
+            category: summary.category,
+            ageGroup: summary.ageGroup,
+            ballType: summary.ballType,
+            venueId: summary.venueId,
+            venueName: summary.venueName,
+            venueCity: summary.venueCity,
+            scheduledAt: summary.scheduledAt,
+            customOvers: summary.customOvers,
+            hasImpactPlayer: summary.hasImpactPlayer,
+          ),
+        );
+      }
+
+      // Resume mode: jump straight to Playing 11.
       return host.PlayingElevenScreen(
         matchId: summary.id,
         teamAId: summary.teamAId,

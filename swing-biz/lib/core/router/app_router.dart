@@ -681,6 +681,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.createMatch,
         builder: (_, state) => BizCreateMatchScreen(
           existingMatchId: state.uri.queryParameters['matchId'],
+          editMode: state.uri.queryParameters['mode'] == 'edit',
         ),
       ),
       GoRoute(
@@ -691,12 +692,51 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '${AppRoutes.scoreMatch}/:matchId',
         builder: (_, state) => ScoringScreen(
           matchId: state.pathParameters['matchId']!,
+          onNavigateBack: (ctx, id) {
+            if (Navigator.of(ctx).canPop()) {
+              Navigator.of(ctx).pop();
+            } else {
+              ctx.go('${AppRoutes.match}/$id');
+            }
+          },
+          onNavigateToMatchDetail: (ctx, id) =>
+              ctx.push('${AppRoutes.match}/$id'),
+          // Open the create-match form pre-populated from this match in
+          // edit mode — `mode=edit` keeps the wrapper out of resume → Playing
+          // 11 and renders the host CreateMatchScreen with initial values.
+          onEditMatch: (ctx, id, teamA, teamB) => ctx.push(
+              '${AppRoutes.createMatch}?matchId=$id&mode=edit'),
+          // Lets the host re-open Playing 11 from the Match Review card to
+          // tweak lineups / captain / VC / WK before the match starts.
+          onNavigateToPlaying11: (ctx, id, teamAId, teamAName, teamBId,
+                  teamBName) =>
+              Navigator.of(ctx).push(
+            MaterialPageRoute<void>(
+              builder: (_) => PlayingElevenScreen(
+                matchId: id,
+                teamAId: teamAId,
+                teamAName: teamAName,
+                teamBId: teamBId,
+                teamBName: teamBName,
+                onBack: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+          ),
         ),
       ),
       GoRoute(
         path: '${AppRoutes.match}/:matchId',
         builder: (_, state) => HostMatchDetailScreen(
           matchId: state.pathParameters['matchId']!,
+          callbacks: MatchDetailCallbacks(
+            onNavigateBack: (ctx) => Navigator.of(ctx).canPop()
+                ? Navigator.of(ctx).pop()
+                : ctx.go(AppRoutes.dashboard),
+            onScoreMatch: (ctx, id) =>
+                ctx.push('${AppRoutes.scoreMatch}/$id'),
+            onEditMatch: (ctx, id, _, __) =>
+                ctx.push('${AppRoutes.createMatch}?matchId=$id'),
+          ),
         ),
       ),
       GoRoute(
