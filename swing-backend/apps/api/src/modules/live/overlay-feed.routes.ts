@@ -71,21 +71,55 @@ async function buildBootstrap(matchId: string) {
         where: { id: { in: allPlayerIds } },
         include: {
           user: { select: { name: true, avatarUrl: true } },
-          competitiveProfile: {
-            select: {
-              currentRankKey: true,
-              currentDivision: true,
-              lifetimeImpactPoints: true,
-              rankProgressPoints: true,
-              winStreak: true,
-              mvpCount: true,
-              hasPremiumPass: true,
-            },
-          },
         },
       })
     : []
-  const playerById = new Map(players.map((p) => [p.id, p]))
+
+  // competitive_profile is optional — the table may be missing on some
+  // environments (DB drift). Fetch it best-effort and degrade gracefully.
+  let competitiveByPlayerId = new Map<
+    string,
+    {
+      currentRankKey: string
+      currentDivision: number
+      lifetimeImpactPoints: number
+      rankProgressPoints: number
+      winStreak: number
+      mvpCount: number
+      hasPremiumPass: boolean
+    }
+  >()
+  if (allPlayerIds.length) {
+    try {
+      const competitive = await prisma.playerCompetitiveProfile.findMany({
+        where: { playerId: { in: allPlayerIds } },
+        select: {
+          playerId: true,
+          currentRankKey: true,
+          currentDivision: true,
+          lifetimeImpactPoints: true,
+          rankProgressPoints: true,
+          winStreak: true,
+          mvpCount: true,
+          hasPremiumPass: true,
+        },
+      })
+      competitiveByPlayerId = new Map(
+        competitive.map((c) => [c.playerId, c]),
+      )
+    } catch (e) {
+      // Table missing or column drift — skip rank info. Logged for ops.
+      // eslint-disable-next-line no-console
+      console.warn('[overlay-feed] competitiveProfile fetch failed:', e instanceof Error ? e.message : e)
+    }
+  }
+
+  const playerById = new Map(
+    players.map((p) => [
+      p.id,
+      { ...p, competitiveProfile: competitiveByPlayerId.get(p.id) ?? null },
+    ]),
+  )
 
   const buildPlayer = (
     id: string,
