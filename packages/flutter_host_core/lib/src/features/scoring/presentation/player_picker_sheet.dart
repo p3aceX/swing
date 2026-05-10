@@ -12,6 +12,7 @@ class PlayerPickerSheet extends StatefulWidget {
     this.subtitle,
     this.roleLabelsForPlayer,
     this.onSearchExternal,
+    this.wicketKeeperId,
   });
 
   final String title;
@@ -20,6 +21,11 @@ class PlayerPickerSheet extends StatefulWidget {
   final ValueChanged<ScoringMatchPlayer> onSelected;
   final List<String> Function(ScoringMatchPlayer player)? roleLabelsForPlayer;
   final Future<List<ScoringMatchPlayer>> Function(String query)? onSearchExternal;
+
+  /// Profile id of the team's wicket-keeper. The matching row in the list
+  /// is rendered with a "WK" chip and a subtle highlight so the scorer can
+  /// quickly spot the keeper while picking a batter or bowler.
+  final String? wicketKeeperId;
 
   @override
   State<PlayerPickerSheet> createState() => _PlayerPickerSheetState();
@@ -221,9 +227,13 @@ class _PlayerPickerSheetState extends State<PlayerPickerSheet> {
                       final sub = labels.isNotEmpty
                           ? labels.join(' • ')
                           : (player.phone?.isNotEmpty == true ? player.phone! : null);
+                      final wkId = widget.wicketKeeperId;
+                      final isKeeper =
+                          wkId != null && wkId.isNotEmpty && player.matchesId(wkId);
                       return _PlayerRow(
                         player: player,
                         subtitle: sub,
+                        isKeeper: isKeeper,
                         onTap: () => widget.onSelected(player),
                       );
                     },
@@ -240,16 +250,18 @@ class _PlayerRow extends StatelessWidget {
     required this.player,
     required this.onTap,
     this.subtitle,
+    this.isKeeper = false,
   });
 
   final ScoringMatchPlayer player;
   final String? subtitle;
   final VoidCallback onTap;
+  final bool isKeeper;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.transparent,
+      color: isKeeper ? context.accent.withValues(alpha: 0.08) : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -262,13 +274,41 @@ class _PlayerRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      player.name,
-                      style: TextStyle(
-                        color: context.fg,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            player.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: context.fg,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (isKeeper) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: context.accent.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'WK',
+                              style: TextStyle(
+                                color: context.accent,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     if (subtitle != null)
                       Text(

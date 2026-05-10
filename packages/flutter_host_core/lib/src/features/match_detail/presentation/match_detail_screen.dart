@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../theme/host_colors.dart';
+import '../../scoring/presentation/scoring_widgets.dart';
 import '../controller/match_detail_controller.dart';
 import '../domain/match_models.dart';
 
@@ -3211,11 +3212,13 @@ class _AnalysisTab extends StatefulWidget {
 class _AnalysisTabState extends State<_AnalysisTab>
     with SingleTickerProviderStateMixin {
   late TabController _ctrl;
+  // null = "All teams"
+  String? _teamFilter;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = TabController(length: 4, vsync: this);
+    _ctrl = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -3226,11 +3229,18 @@ class _AnalysisTabState extends State<_AnalysisTab>
 
   @override
   Widget build(BuildContext context) {
+    final teams = <String>[];
+    for (final inn in widget.center.innings) {
+      if (inn.isSuperOver) continue;
+      if (!teams.contains(inn.battingTeamName)) {
+        teams.add(inn.battingTeamName);
+      }
+    }
     return Column(
       children: [
         Container(
           color: context.bg,
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
           child: Container(
             decoration: BoxDecoration(
               color: context.cardBg,
@@ -3253,22 +3263,52 @@ class _AnalysisTabState extends State<_AnalysisTab>
               unselectedLabelStyle:
                   const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
               tabs: const [
-                Tab(text: 'Batting'),
-                Tab(text: 'Bowling'),
-                Tab(text: 'Partnerships'),
-                Tab(text: 'Charts'),
+                Tab(text: 'Stats'),
+                Tab(text: 'Visuals'),
               ],
             ),
           ),
         ),
+        if (teams.length > 1)
+          Container(
+            color: context.bg,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _TeamChip(
+                    label: 'All',
+                    selected: _teamFilter == null,
+                    onTap: () => setState(() => _teamFilter = null),
+                  ),
+                  const SizedBox(width: 8),
+                  for (final t in teams) ...[
+                    _TeamChip(
+                      label: t,
+                      selected: _teamFilter == t,
+                      onTap: () => setState(() => _teamFilter = t),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ),
+          ),
         Expanded(
           child: TabBarView(
             controller: _ctrl,
             children: [
-              _BattingAnalysis(center: widget.center),
-              _BowlingAnalysis(center: widget.center),
-              _PartnershipAnalysis(center: widget.center),
-              _ChartsAnalysis(matchId: widget.matchId, center: widget.center),
+              _StatsTab(
+                center: widget.center,
+                matchId: widget.matchId,
+                teamFilter: _teamFilter,
+              ),
+              _VisualsTab(
+                center: widget.center,
+                matchId: widget.matchId,
+                teamFilter: _teamFilter,
+              ),
             ],
           ),
         ),
@@ -3277,16 +3317,56 @@ class _AnalysisTabState extends State<_AnalysisTab>
   }
 }
 
-class _BattingAnalysis extends StatelessWidget {
-  const _BattingAnalysis({required this.center});
+class _TeamChip extends StatelessWidget {
+  const _TeamChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color:
+                selected ? context.accent.withValues(alpha: 0.15) : context.bg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? context.accent : context.stroke,
+              width: selected ? 1.4 : 1.0,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? context.accent : context.fgSub,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+}
+
+class _StatsTab extends StatelessWidget {
+  const _StatsTab({required this.center, required this.matchId, this.teamFilter});
   final MatchCenter center;
+  final String matchId;
+  final String? teamFilter;
 
   @override
   Widget build(BuildContext context) {
+    // Batters from innings whose batting team matches the filter.
     final batters =
         <String, ({int runs, int balls, int fours, int sixes, String sr})>{};
     for (final inn in center.innings) {
       if (inn.isSuperOver) continue;
+      if (teamFilter != null && inn.battingTeamName != teamFilter) continue;
       for (final b in inn.batting) {
         batters[b.name] = (
           runs: (batters[b.name]?.runs ?? 0) + b.runs,
@@ -3297,121 +3377,16 @@ class _BattingAnalysis extends StatelessWidget {
         );
       }
     }
-
-    final sorted = batters.entries.toList()
+    final sortedBat = batters.entries.toList()
       ..sort((a, b) => b.value.runs.compareTo(a.value.runs));
 
-    if (sorted.isEmpty) {
-      return const _EmptyState(
-          'No batting data yet.', Icons.sports_cricket_rounded);
-    }
-
-    final maxRuns = sorted.first.value.runs.toDouble();
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
-      children: [
-        _analysisHeader(context, 'TOP SCORERS'),
-        Container(
-          decoration: BoxDecoration(
-            color: context.cardBg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: context.stroke),
-          ),
-          child: Column(
-            children: sorted.asMap().entries.map((e) {
-              final name = e.value.key;
-              final s = e.value.value;
-              final isLast = e.key == sorted.length - 1;
-              final frac = maxRuns > 0 ? s.runs / maxRuns : 0.0;
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700)),
-                            ),
-                            RichText(
-                              text: TextSpan(children: [
-                                TextSpan(
-                                    text: '${s.runs}',
-                                    style: TextStyle(
-                                        color: context.accent,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w900,
-                                        fontFeatures: const [
-                                          FontFeature.tabularFigures()
-                                        ])),
-                                TextSpan(
-                                    text: ' (${s.balls}b)',
-                                    style: TextStyle(
-                                        color: context.fgSub, fontSize: 12)),
-                              ]),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 7),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(3),
-                                child: LinearProgressIndicator(
-                                  value: frac,
-                                  minHeight: 5,
-                                  backgroundColor: context.panel,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      context.accent.withValues(alpha: 0.7)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              '${s.fours}×4  ${s.sixes}×6  SR ${s.sr}',
-                              style: TextStyle(
-                                  color: context.fgSub,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!isLast)
-                    Divider(
-                        color: context.stroke.withValues(alpha: 0.5),
-                        height: 1),
-                ],
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _BowlingAnalysis extends StatelessWidget {
-  const _BowlingAnalysis({required this.center});
-  final MatchCenter center;
-
-  @override
-  Widget build(BuildContext context) {
+    // Bowlers belong to the team that was NOT batting in a given innings,
+    // so flip the team filter when collecting bowlers.
     final bowlers =
         <String, ({int wkts, int runs, String overs, String eco})>{};
     for (final inn in center.innings) {
       if (inn.isSuperOver) continue;
+      if (teamFilter != null && inn.battingTeamName == teamFilter) continue;
       for (final b in inn.bowling) {
         bowlers[b.name] = (
           wkts: (bowlers[b.name]?.wkts ?? 0) + b.wickets,
@@ -3421,8 +3396,7 @@ class _BowlingAnalysis extends StatelessWidget {
         );
       }
     }
-
-    final sorted = bowlers.entries.toList()
+    final sortedBow = bowlers.entries.toList()
       ..sort((a, b) {
         if (b.value.wkts != a.value.wkts) {
           return b.value.wkts.compareTo(a.value.wkts);
@@ -3430,103 +3404,158 @@ class _BowlingAnalysis extends StatelessWidget {
         return a.value.runs.compareTo(b.value.runs);
       });
 
-    if (sorted.isEmpty) {
+    if (sortedBat.isEmpty && sortedBow.isEmpty) {
       return const _EmptyState(
-          'No bowling data yet.', Icons.sports_cricket_rounded);
+          'No data yet for this selection.', Icons.sports_cricket_rounded);
     }
-
-    final maxW = sorted.first.value.wkts.toDouble();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
       children: [
-        _analysisHeader(context, 'WICKET TAKERS'),
-        Container(
-          decoration: BoxDecoration(
-            color: context.cardBg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: context.stroke),
+        _MatchHighlightsCard(
+            matchId: matchId, center: center, teamFilter: teamFilter),
+        _PhaseBreakdown(matchId: matchId, teamFilter: teamFilter),
+        if (sortedBat.isNotEmpty) ...[
+          _analysisHeader(context, 'TOP SCORERS'),
+          _StatList(
+            rows: sortedBat
+                .map((e) => _StatRow(
+                      name: e.key,
+                      bigValue: '${e.value.runs}',
+                      bigSuffix: ' (${e.value.balls}b)',
+                      meta:
+                          '${e.value.fours}×4  ${e.value.sixes}×6  SR ${e.value.sr}',
+                      barFraction: sortedBat.first.value.runs > 0
+                          ? e.value.runs / sortedBat.first.value.runs
+                          : 0,
+                    ))
+                .toList(),
           ),
-          child: Column(
-            children: sorted.asMap().entries.map((e) {
-              final name = e.value.key;
-              final s = e.value.value;
-              final isLast = e.key == sorted.length - 1;
-              final frac = maxW > 0 ? s.wkts / maxW : 0.0;
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    child: Column(
+          const SizedBox(height: 16),
+        ],
+        if (sortedBow.isNotEmpty) ...[
+          _analysisHeader(context, 'WICKET TAKERS'),
+          _StatList(
+            rows: sortedBow
+                .map((e) => _StatRow(
+                      name: e.key,
+                      bigValue: '${e.value.wkts}',
+                      bigSuffix: ' wkts',
+                      meta:
+                          '${e.value.overs} ov  ${e.value.runs}r  ECO ${e.value.eco}',
+                      barFraction: sortedBow.first.value.wkts > 0
+                          ? e.value.wkts / sortedBow.first.value.wkts
+                          : 0,
+                    ))
+                .toList(),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StatRow {
+  const _StatRow({
+    required this.name,
+    required this.bigValue,
+    required this.bigSuffix,
+    required this.meta,
+    required this.barFraction,
+  });
+  final String name;
+  final String bigValue;
+  final String bigSuffix;
+  final String meta;
+  final double barFraction;
+}
+
+class _StatList extends StatelessWidget {
+  const _StatList({required this.rows});
+  final List<_StatRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.stroke),
+      ),
+      child: Column(
+        children: List.generate(rows.length, (i) {
+          final r = rows[i];
+          final isLast = i == rows.length - 1;
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Column(
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700)),
-                            ),
-                            RichText(
-                              text: TextSpan(children: [
-                                TextSpan(
-                                    text: '${s.wkts}',
-                                    style: TextStyle(
-                                        color: context.accent,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w900,
-                                        fontFeatures: const [
-                                          FontFeature.tabularFigures()
-                                        ])),
-                                TextSpan(
-                                    text: ' wkts',
-                                    style: TextStyle(
-                                        color: context.fgSub, fontSize: 12)),
-                              ]),
-                            ),
-                          ],
+                        Expanded(
+                          child: Text(r.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700)),
                         ),
-                        const SizedBox(height: 7),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(3),
-                                child: LinearProgressIndicator(
-                                  value: frac,
-                                  minHeight: 5,
-                                  backgroundColor: context.panel,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      context.accent.withValues(alpha: 0.7)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              '${s.overs} ov  ${s.runs}r  ECO ${s.eco}',
-                              style: TextStyle(
-                                  color: context.fgSub,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
+                        RichText(
+                          text: TextSpan(children: [
+                            TextSpan(
+                                text: r.bigValue,
+                                style: TextStyle(
+                                    color: context.accent,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures()
+                                    ])),
+                            TextSpan(
+                                text: r.bigSuffix,
+                                style: TextStyle(
+                                    color: context.fgSub, fontSize: 12)),
+                          ]),
                         ),
                       ],
                     ),
-                  ),
-                  if (!isLast)
-                    Divider(
-                        color: context.stroke.withValues(alpha: 0.5),
-                        height: 1),
-                ],
-              );
-            }).toList(),
-          ),
-        ),
-      ],
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(3),
+                            child: LinearProgressIndicator(
+                              value: r.barFraction,
+                              minHeight: 5,
+                              backgroundColor: context.panel,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  context.accent.withValues(alpha: 0.7)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(r.meta,
+                            style: TextStyle(
+                                color: context.fgSub,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (!isLast)
+                Divider(
+                    color: context.stroke.withValues(alpha: 0.5),
+                    height: 1),
+            ],
+          );
+        }),
+      ),
     );
   }
 }
@@ -3543,171 +3572,36 @@ Widget _analysisHeader(BuildContext context, String t) => Padding(
 
 // ── Partnership analysis ───────────────────────────────────────────────────────
 
-class _PartnershipAnalysis extends StatelessWidget {
-  const _PartnershipAnalysis({required this.center});
+// ══════════════════════════════════════════════════════════════════════════════
+// VISUALS ANALYSIS TAB — wagon wheel, runs-per-over, partnerships
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _VisualsTab extends ConsumerWidget {
+  const _VisualsTab({
+    required this.center,
+    required this.matchId,
+    this.teamFilter,
+  });
   final MatchCenter center;
-
-  @override
-  Widget build(BuildContext context) {
-    // Collect all partnerships across non-super-over innings, tagged with team
-    final items = <({String teamName, MatchPartnership p})>[];
-    for (final inn in center.innings) {
-      if (inn.isSuperOver) continue;
-      for (final p in inn.partnerships) {
-        if (p.runs > 0 || p.balls > 0) {
-          items.add((teamName: inn.battingTeamName, p: p));
-        }
-      }
-    }
-
-    if (items.isEmpty) {
-      return const _EmptyState(
-          'Partnership data will appear once innings begin.',
-          Icons.people_alt_outlined);
-    }
-
-    final maxRuns =
-        items.map((i) => i.p.runs).fold(0, (a, b) => a > b ? a : b).toDouble();
-
-    // Group by team
-    final teams = items.map((i) => i.teamName).toSet().toList();
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 48),
-      children: [
-        for (final team in teams) ...[
-          _analysisHeader(context, team.toUpperCase()),
-          Container(
-            decoration: BoxDecoration(
-              color: context.cardBg,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: context.stroke),
-            ),
-            child: Column(
-              children: items
-                  .asMap()
-                  .entries
-                  .where((e) => e.value.teamName == team)
-                  .map((e) {
-                final p = e.value.p;
-                final idx = items
-                    .where((i) => i.teamName == team)
-                    .toList()
-                    .indexOf(e.value);
-                final isLast =
-                    idx == items.where((i) => i.teamName == team).length - 1;
-                final frac = maxRuns > 0 ? p.runs / maxRuns : 0.0;
-                final sr = p.balls > 0
-                    ? (p.runs * 100 / p.balls).toStringAsFixed(1)
-                    : '-';
-
-                return Column(children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    child: Column(children: [
-                      Row(children: [
-                        Container(
-                          width: 22,
-                          height: 22,
-                          margin: const EdgeInsets.only(right: 10),
-                          decoration: BoxDecoration(
-                            color: context.accent.withValues(alpha: 0.12),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text('${idx + 1}',
-                                style: TextStyle(
-                                    color: context.accent,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800)),
-                          ),
-                        ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(p.batter1,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700)),
-                              Text('& ${p.batter2}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: context.fgSub, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        RichText(
-                          text: TextSpan(children: [
-                            TextSpan(
-                                text: '${p.runs}',
-                                style: TextStyle(
-                                    color: context.accent,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w900,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures()
-                                    ])),
-                            TextSpan(
-                                text: ' (${p.balls}b)',
-                                style: TextStyle(
-                                    color: context.fgSub, fontSize: 12)),
-                          ]),
-                        ),
-                      ]),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: frac,
-                              minHeight: 6,
-                              backgroundColor: context.panel,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                  context.accent.withValues(alpha: 0.65)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text('SR $sr',
-                            style: TextStyle(
-                                color: context.fgSub,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600)),
-                      ]),
-                    ]),
-                  ),
-                  if (!isLast)
-                    Divider(
-                        color: context.stroke.withValues(alpha: 0.5),
-                        height: 1),
-                ]);
-              }).toList(),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// CHARTS ANALYSIS TAB
-// ══════════════════════════════════════════════════════════════════════════════
-
-class _ChartsAnalysis extends ConsumerWidget {
-  const _ChartsAnalysis({required this.matchId, required this.center});
   final String matchId;
-  final MatchCenter center;
+  final String? teamFilter;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(matchAnalysisProvider(matchId));
+    // Partnerships come from MatchCenter — independent of the analysis fetch
+    // so they render even if the wagon-wheel data is loading.
+    final partnerships = <({String teamName, MatchPartnership p})>[];
+    for (final inn in center.innings) {
+      if (inn.isSuperOver) continue;
+      if (teamFilter != null && inn.battingTeamName != teamFilter) continue;
+      for (final p in inn.partnerships) {
+        if (p.runs > 0 || p.balls > 0) {
+          partnerships.add((teamName: inn.battingTeamName, p: p));
+        }
+      }
+    }
+
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(
@@ -3716,14 +3610,11 @@ class _ChartsAnalysis extends ConsumerWidget {
           children: [
             Icon(Icons.bar_chart, size: 40, color: context.fgSub),
             const SizedBox(height: 12),
-            Text('Could not load charts',
+            Text('Could not load visuals',
                 style: TextStyle(
                     color: context.fg,
                     fontSize: 15,
                     fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Text('Pull down to refresh',
-                style: TextStyle(color: context.fgSub, fontSize: 13)),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: () => ref.invalidate(matchAnalysisProvider(matchId)),
@@ -3734,27 +3625,847 @@ class _ChartsAnalysis extends ConsumerWidget {
         ),
       ),
       data: (analysis) {
-        if (analysis.innings.isEmpty) {
+        final filteredInnings = teamFilter == null
+            ? analysis.innings
+            : analysis.innings
+                .where((i) => i.battingTeam == teamFilter)
+                .toList();
+
+        if (filteredInnings.isEmpty && partnerships.isEmpty) {
           return const _EmptyState('No data yet.', Icons.bar_chart);
         }
+
+        // Worm overlays both innings — only meaningful when no team filter.
+        final showWorm = teamFilter == null && analysis.innings.length >= 2;
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 48),
           children: [
-            for (final inn in analysis.innings) ...[
-              _analysisHeader(
-                  context, '${inn.battingTeam.toUpperCase()} — RUNS PER OVER'),
+            if (showWorm) _WormChart(innings: analysis.innings),
+            for (final inn in filteredInnings) ...[
+              _analysisHeader(context,
+                  '${inn.battingTeam.toUpperCase()} — RUNS PER OVER'),
               _ManhattanChart(innings: inn),
               const SizedBox(height: 16),
               _analysisHeader(
                   context, '${inn.battingTeam.toUpperCase()} — WAGON WHEEL'),
               _WagonWheelCard(innings: inn),
+              const SizedBox(height: 12),
+              _OffLegSplit(balls: inn.wagonWheel),
               const SizedBox(height: 20),
             ],
+            if (partnerships.isNotEmpty)
+              _PartnershipsBlock(items: partnerships),
           ],
         );
       },
     );
   }
+}
+
+class _PartnershipsBlock extends StatelessWidget {
+  const _PartnershipsBlock({required this.items});
+  final List<({String teamName, MatchPartnership p})> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxRuns = items
+        .map((i) => i.p.runs)
+        .fold(0, (a, b) => a > b ? a : b)
+        .toDouble();
+    final teams = <String>[];
+    for (final i in items) {
+      if (!teams.contains(i.teamName)) teams.add(i.teamName);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final team in teams) ...[
+          _analysisHeader(context, '${team.toUpperCase()} — PARTNERSHIPS'),
+          Container(
+            decoration: BoxDecoration(
+              color: context.cardBg,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: context.stroke),
+            ),
+            child: Builder(builder: (context) {
+              final teamRows = items.where((i) => i.teamName == team).toList();
+              return Column(
+                children: List.generate(teamRows.length, (i) {
+                  final p = teamRows[i].p;
+                  final isLast = i == teamRows.length - 1;
+                  final frac = maxRuns > 0 ? p.runs / maxRuns : 0.0;
+                  final sr = p.balls > 0
+                      ? (p.runs * 100 / p.balls).toStringAsFixed(1)
+                      : '-';
+                  return Column(children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      child: Column(children: [
+                        Row(children: [
+                          Container(
+                            width: 22,
+                            height: 22,
+                            margin: const EdgeInsets.only(right: 10),
+                            decoration: BoxDecoration(
+                              color: context.accent.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text('${i + 1}',
+                                  style: TextStyle(
+                                      color: context.accent,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800)),
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(p.batter1,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                            fontWeight: FontWeight.w700)),
+                                Text('& ${p.batter2}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: context.fgSub, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          RichText(
+                            text: TextSpan(children: [
+                              TextSpan(
+                                  text: '${p.runs}',
+                                  style: TextStyle(
+                                      color: context.accent,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w900,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures()
+                                      ])),
+                              TextSpan(
+                                  text: ' (${p.balls}b)',
+                                  style: TextStyle(
+                                      color: context.fgSub, fontSize: 12)),
+                            ]),
+                          ),
+                        ]),
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: frac,
+                                minHeight: 6,
+                                backgroundColor: context.panel,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    context.accent.withValues(alpha: 0.65)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text('SR $sr',
+                              style: TextStyle(
+                                  color: context.fgSub,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600)),
+                        ]),
+                      ]),
+                    ),
+                    if (!isLast)
+                      Divider(
+                          color: context.stroke.withValues(alpha: 0.5),
+                          height: 1),
+                  ]);
+                }),
+              );
+            }),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INSIGHT WIDGETS — highlights, phase breakdown, worm chart, off/leg split
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _Highlight {
+  const _Highlight({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.sub,
+    required this.color,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+  final String sub;
+  final Color color;
+}
+
+class _MatchHighlightsCard extends ConsumerWidget {
+  const _MatchHighlightsCard({
+    required this.matchId,
+    required this.center,
+    this.teamFilter,
+  });
+  final String matchId;
+  final MatchCenter center;
+  final String? teamFilter;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(matchAnalysisProvider(matchId));
+    return async.maybeWhen(
+      data: (analysis) {
+        final items = _compute(analysis, center, teamFilter);
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _analysisHeader(context, 'MATCH HIGHLIGHTS'),
+            Container(
+              decoration: BoxDecoration(
+                color: context.cardBg,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: context.stroke),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                children: [
+                  for (int i = 0; i < items.length; i++) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: items[i].color.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(items[i].icon,
+                                size: 18, color: items[i].color),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(items[i].label,
+                                    style: TextStyle(
+                                        color: context.fgSub,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.4)),
+                                const SizedBox(height: 2),
+                                Text(items[i].sub,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: context.fg,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                          Text(items[i].value,
+                              style: TextStyle(
+                                  color: items[i].color,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures()
+                                  ])),
+                        ],
+                      ),
+                    ),
+                    if (i != items.length - 1)
+                      Divider(
+                          color: context.stroke.withValues(alpha: 0.5),
+                          height: 1),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
+  List<_Highlight> _compute(
+      MatchAnalysis analysis, MatchCenter center, String? team) {
+    final out = <_Highlight>[];
+
+    // Biggest over
+    MatchOverStat? topOver;
+    String? topOverTeam;
+    for (final inn in analysis.innings) {
+      if (team != null && inn.battingTeam != team) continue;
+      for (final o in inn.overStats) {
+        if (topOver == null || o.runs > topOver.runs) {
+          topOver = o;
+          topOverTeam = inn.battingTeam;
+        }
+      }
+    }
+    if (topOver != null) {
+      out.add(_Highlight(
+        icon: Icons.local_fire_department_rounded,
+        label: 'BIGGEST OVER',
+        value: '${topOver.runs}r',
+        sub: 'Over ${topOver.over} · $topOverTeam',
+        color: const Color(0xFFEF4444),
+      ));
+    }
+
+    // Top boundary hitter
+    String? topName;
+    int topBdy = 0;
+    int topBdyRuns = 0;
+    for (final inn in center.innings) {
+      if (inn.isSuperOver) continue;
+      if (team != null && inn.battingTeamName != team) continue;
+      for (final b in inn.batting) {
+        final bdy = b.fours + b.sixes;
+        if (bdy > topBdy) {
+          topBdy = bdy;
+          topName = b.name;
+          topBdyRuns = b.fours * 4 + b.sixes * 6;
+        }
+      }
+    }
+    if (topName != null && topBdy > 0) {
+      out.add(_Highlight(
+        icon: Icons.sports_cricket_rounded,
+        label: 'BOUNDARY KING',
+        value: '$topBdy',
+        sub: '$topName · $topBdyRuns boundary runs',
+        color: const Color(0xFFE0B94B),
+      ));
+    }
+
+    // Longest dot streak (per batter, consecutive)
+    int maxStreak = 0;
+    String? streakBatter;
+    for (final inn in analysis.innings) {
+      if (team != null && inn.battingTeam != team) continue;
+      int cur = 0;
+      String curBat = '';
+      for (final ball in inn.wagonWheel) {
+        if (ball.batter != curBat) {
+          cur = 0;
+          curBat = ball.batter;
+        }
+        if (ball.runs == 0 && !ball.isWicket) {
+          cur++;
+        } else {
+          cur = 0;
+        }
+        if (cur > maxStreak) {
+          maxStreak = cur;
+          streakBatter = curBat;
+        }
+      }
+    }
+    if (maxStreak >= 3) {
+      out.add(_Highlight(
+        icon: Icons.do_not_disturb_alt_rounded,
+        label: 'LONGEST DOT STREAK',
+        value: '$maxStreak',
+        sub: streakBatter ?? '',
+        color: const Color(0xFF9CA3AF),
+      ));
+    }
+
+    // Top partnership
+    MatchPartnership? topP;
+    for (final inn in center.innings) {
+      if (inn.isSuperOver) continue;
+      if (team != null && inn.battingTeamName != team) continue;
+      for (final p in inn.partnerships) {
+        if (topP == null || p.runs > topP.runs) topP = p;
+      }
+    }
+    if (topP != null && topP.runs > 0) {
+      out.add(_Highlight(
+        icon: Icons.handshake_rounded,
+        label: 'TOP PARTNERSHIP',
+        value: '${topP.runs}r',
+        sub: '${topP.batter1} & ${topP.batter2} (${topP.balls}b)',
+        color: const Color(0xFF22D3EE),
+      ));
+    }
+
+    return out;
+  }
+}
+
+class _PhaseBreakdown extends ConsumerWidget {
+  const _PhaseBreakdown({required this.matchId, this.teamFilter});
+  final String matchId;
+  final String? teamFilter;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(matchAnalysisProvider(matchId));
+    return async.maybeWhen(
+      data: (analysis) {
+        final innings = teamFilter == null
+            ? analysis.innings
+            : analysis.innings
+                .where((i) => i.battingTeam == teamFilter)
+                .toList();
+        if (innings.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _analysisHeader(context, 'PHASE BREAKDOWN'),
+            for (int i = 0; i < innings.length; i++) ...[
+              _PhaseInningsCard(innings: innings[i]),
+              if (i != innings.length - 1) const SizedBox(height: 8),
+            ],
+            const SizedBox(height: 16),
+          ],
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _PhaseInningsCard extends StatelessWidget {
+  const _PhaseInningsCard({required this.innings});
+  final MatchAnalysisInnings innings;
+
+  @override
+  Widget build(BuildContext context) {
+    final overs = innings.overStats;
+    if (overs.isEmpty) return const SizedBox.shrink();
+    final maxOver = overs.fold(0, (a, o) => o.over > a ? o.over : a);
+    int ppEnd, midEnd;
+    if (maxOver <= 20) {
+      ppEnd = 6;
+      midEnd = 15;
+    } else if (maxOver <= 50) {
+      ppEnd = 10;
+      midEnd = 40;
+    } else {
+      ppEnd = 15;
+      midEnd = 35;
+    }
+
+    final pp = _phase(overs, 1, ppEnd);
+    final mid = _phase(overs, ppEnd + 1, midEnd);
+    final death = _phase(overs, midEnd + 1, maxOver);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.stroke),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(innings.battingTeam.toUpperCase(),
+              style: TextStyle(
+                  color: context.fg,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.3)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _PhaseBlock(name: 'POWERPLAY', range: '1–$ppEnd', stats: pp)),
+              _PhaseDivider(),
+              Expanded(child: _PhaseBlock(name: 'MIDDLE', range: '${ppEnd + 1}–$midEnd', stats: mid)),
+              _PhaseDivider(),
+              Expanded(child: _PhaseBlock(name: 'DEATH', range: '${midEnd + 1}–$maxOver', stats: death)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  ({int runs, int wkts, double rr}) _phase(
+      List<MatchOverStat> overs, int from, int to) {
+    int r = 0, w = 0, count = 0;
+    for (final o in overs) {
+      if (o.over >= from && o.over <= to) {
+        r += o.runs;
+        w += o.wickets;
+        count++;
+      }
+    }
+    return (runs: r, wkts: w, rr: count > 0 ? r / count : 0);
+  }
+}
+
+class _PhaseDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 1,
+        height: 38,
+        margin: const EdgeInsets.symmetric(horizontal: 6),
+        color: context.stroke.withValues(alpha: 0.7),
+      );
+}
+
+class _PhaseBlock extends StatelessWidget {
+  const _PhaseBlock({required this.name, required this.range, required this.stats});
+  final String name;
+  final String range;
+  final ({int runs, int wkts, double rr}) stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(name,
+            style: TextStyle(
+                color: context.fgSub,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5)),
+        const SizedBox(height: 1),
+        Text(range,
+            style: TextStyle(color: context.fgSub.withValues(alpha: 0.7), fontSize: 9)),
+        const SizedBox(height: 6),
+        RichText(
+          text: TextSpan(children: [
+            TextSpan(
+                text: '${stats.runs}',
+                style: TextStyle(
+                    color: context.accent,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    fontFeatures: const [FontFeature.tabularFigures()])),
+            TextSpan(
+                text: '/${stats.wkts}',
+                style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700)),
+          ]),
+        ),
+        Text('RR ${stats.rr.toStringAsFixed(2)}',
+            style: TextStyle(
+                color: context.fgSub,
+                fontSize: 10,
+                fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+}
+
+class _WormChart extends StatelessWidget {
+  const _WormChart({required this.innings});
+  final List<MatchAnalysisInnings> innings;
+
+  @override
+  Widget build(BuildContext context) {
+    if (innings.length < 2) return const SizedBox.shrink();
+    final maxOver = innings
+        .expand((i) => i.overStats)
+        .map((o) => o.over)
+        .fold(0, (a, b) => a > b ? a : b);
+    final maxRuns = innings
+        .expand((i) => i.overStats)
+        .map((o) => o.cumulativeRuns)
+        .fold(0, (a, b) => a > b ? a : b);
+    if (maxOver == 0 || maxRuns == 0) return const SizedBox.shrink();
+
+    final palette = [context.accent, context.warn];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _analysisHeader(context, 'WORM — RUNS PROGRESSION'),
+        Container(
+          height: 200,
+          decoration: BoxDecoration(
+            color: context.cardBg,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: context.stroke),
+          ),
+          padding: const EdgeInsets.fromLTRB(8, 14, 14, 8),
+          child: LineChart(
+            LineChartData(
+              minX: 0,
+              maxX: maxOver.toDouble(),
+              minY: 0,
+              maxY: (maxRuns * 1.1).ceilToDouble(),
+              gridData: FlGridData(
+                drawVerticalLine: false,
+                getDrawingHorizontalLine: (v) => FlLine(
+                    color: context.stroke.withValues(alpha: 0.4),
+                    strokeWidth: 0.8),
+              ),
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 32,
+                    interval: math.max(20, (maxRuns / 4).floorToDouble()),
+                    getTitlesWidget: (v, _) => Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Text('${v.toInt()}',
+                          style: TextStyle(
+                              color: context.fgSub, fontSize: 10)),
+                    ),
+                  ),
+                ),
+                rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 22,
+                    interval: math.max(1, (maxOver / 5).floorToDouble()),
+                    getTitlesWidget: (v, _) => Text('${v.toInt()}',
+                        style:
+                            TextStyle(color: context.fgSub, fontSize: 10)),
+                  ),
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              lineBarsData: [
+                for (int i = 0; i < innings.length; i++)
+                  LineChartBarData(
+                    isCurved: true,
+                    curveSmoothness: 0.18,
+                    color: palette[i % palette.length],
+                    barWidth: 2.6,
+                    dotData: FlDotData(
+                      show: true,
+                      checkToShowDot: (spot, _) {
+                        // Show dot only at over where wicket fell
+                        final inn = innings[i];
+                        final o = inn.overStats.firstWhere(
+                            (s) => s.over.toDouble() == spot.x,
+                            orElse: () => const MatchOverStat(
+                                over: -1,
+                                runs: 0,
+                                wickets: 0,
+                                runRate: 0,
+                                cumulativeRuns: 0));
+                        return o.wickets > 0;
+                      },
+                      getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
+                        radius: 3,
+                        color: context.danger,
+                        strokeWidth: 0,
+                      ),
+                    ),
+                    spots: [
+                      const FlSpot(0, 0),
+                      ...innings[i].overStats.map((o) => FlSpot(
+                          o.over.toDouble(), o.cumulativeRuns.toDouble())),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 14,
+          children: [
+            for (int i = 0; i < innings.length; i++)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                        color: palette[i % palette.length],
+                        shape: BoxShape.circle)),
+                const SizedBox(width: 5),
+                Text(innings[i].battingTeam,
+                    style: TextStyle(color: context.fgSub, fontSize: 11)),
+              ]),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                      color: context.danger, shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Text('Wicket',
+                  style: TextStyle(color: context.fgSub, fontSize: 11)),
+            ]),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+class _OffLegSplit extends StatelessWidget {
+  const _OffLegSplit({required this.balls});
+  final List<WagonWheelBall> balls;
+
+  static const _legZones = {
+    'fine_leg', 'square_leg', 'mid_wicket', 'long_on',
+  };
+  static const _offZones = {
+    'cover', 'point', 'third_man', 'long_off',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    int legR = 0, offR = 0, midR = 0;
+    int legB = 0, offB = 0, midB = 0;
+    for (final b in balls) {
+      final z = _canonical(b.zone);
+      if (z == null) continue;
+      if (_legZones.contains(z)) {
+        legR += b.runs;
+        legB += 1;
+      } else if (_offZones.contains(z)) {
+        offR += b.runs;
+        offB += 1;
+      } else {
+        midR += b.runs;
+        midB += 1;
+      }
+    }
+    final total = legR + offR + midR;
+    final totalBalls = legB + offB + midB;
+    if (total == 0) return const SizedBox.shrink();
+
+    final legPct = legR / total;
+    final offPct = offR / total;
+    final midPct = midR / total;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.stroke),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text('SCORING SIDES',
+                  style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5)),
+              const Spacer(),
+              Text('$total runs · $totalBalls balls',
+                  style: TextStyle(color: context.fgSub, fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              height: 10,
+              child: Row(children: [
+                if (offPct > 0)
+                  Expanded(
+                      flex: (offPct * 1000).round(),
+                      child: Container(color: context.sky)),
+                if (midPct > 0)
+                  Expanded(
+                      flex: (midPct * 1000).round(),
+                      child:
+                          Container(color: context.fgSub.withValues(alpha: 0.5))),
+                if (legPct > 0)
+                  Expanded(
+                      flex: (legPct * 1000).round(),
+                      child: Container(color: context.warn)),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: _SideStat(label: 'OFF', runs: offR, balls: offB, color: context.sky)),
+              Expanded(child: _SideStat(label: 'STRAIGHT', runs: midR, balls: midB, color: context.fgSub)),
+              Expanded(child: _SideStat(label: 'LEG', runs: legR, balls: legB, color: context.warn)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? _canonical(String? raw) {
+    if (raw == null) return null;
+    var n = raw.trim().toLowerCase();
+    if (n.isEmpty) return null;
+    if (n.endsWith('-in') || n.endsWith('_in')) {
+      n = n.substring(0, n.length - 3);
+    }
+    n = n.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    return n;
+  }
+}
+
+class _SideStat extends StatelessWidget {
+  const _SideStat({
+    required this.label,
+    required this.runs,
+    required this.balls,
+    required this.color,
+  });
+  final String label;
+  final int runs;
+  final int balls;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4)),
+          const SizedBox(height: 4),
+          RichText(
+            text: TextSpan(children: [
+              TextSpan(
+                  text: '$runs',
+                  style: TextStyle(
+                      color: context.fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+              TextSpan(
+                  text: ' (${balls}b)',
+                  style: TextStyle(color: context.fgSub, fontSize: 10)),
+            ]),
+          ),
+        ],
+      );
 }
 
 // ── Manhattan chart (runs per over bars) ──────────────────────────────────────
@@ -3961,18 +4672,31 @@ class _WagonWheelCardState extends State<_WagonWheelCard> {
                     child: Text('No zone data available.',
                         style: TextStyle(color: context.fgSub, fontSize: 13)),
                   )
-                : CustomPaint(
-                    size: const Size(double.infinity, 320),
-                    painter: _WagonWheelPainter(
-                      balls: filtered,
-                      bgColor: context.bg,
-                      lineColor: context.stroke,
-                      fgColor: context.fg,
-                      dangerColor: context.danger,
-                      warnColor: context.warn,
-                      successColor: context.success,
-                      skyColor: context.sky,
-                      subColor: context.fgSub,
+                : Center(
+                    child: SizedBox(
+                      width: 320,
+                      height: 320,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Same structural wheel as scoring page (8 zones,
+                          // dividers, labels, dashed boundary, inner ring),
+                          // but neutral background so trajectories pop.
+                          const ScoringWagonWheel(neutral: true),
+                          // Shot trajectories overlaid on top.
+                          CustomPaint(
+                            size: const Size(320, 320),
+                            painter: _WagonWheelPainter(
+                              balls: filtered,
+                              dangerColor: context.danger,
+                              warnColor: context.warn,
+                              successColor: context.success,
+                              skyColor: context.sky,
+                              subColor: context.fgSub,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
           ),
@@ -4084,9 +4808,6 @@ class _WwLegend extends StatelessWidget {
 class _WagonWheelPainter extends CustomPainter {
   const _WagonWheelPainter({
     required this.balls,
-    required this.bgColor,
-    required this.lineColor,
-    required this.fgColor,
     required this.dangerColor,
     required this.warnColor,
     required this.successColor,
@@ -4095,22 +4816,21 @@ class _WagonWheelPainter extends CustomPainter {
   });
 
   final List<WagonWheelBall> balls;
-  final Color bgColor, lineColor, fgColor;
   final Color dangerColor, warnColor, successColor, skyColor, subColor;
 
   // Canonical wagon-wheel zone id → angle in degrees.
+  // 0° = top, increasing clockwise. Mid-angle of each scoring-wheel wedge
+  // (8 wedges × 45°, clockwise from FINE_LEG at top).
   static const _zoneAngles = <String, double>{
+    'fine_leg': 22.5,
+    'square_leg': 67.5,
+    'mid_wicket': 112.5,
+    'long_on': 157.5,
+    'long_off': 202.5,
+    'cover': 247.5,
+    'point': 292.5,
+    'third_man': 337.5,
     'straight': 0.0,
-    // Orientation tuned to match cricket field expectation in app UI:
-    // long-on (left) ↔ straight (top) ↔ long-off (right).
-    'long_on': 330.0,
-    'long_off': 30.0,
-    'cover': 65.0,
-    'point': 100.0,
-    'third_man': 140.0,
-    'fine_leg': 210.0,
-    'square_leg': 250.0,
-    'mid_wicket': 295.0,
   };
 
   static const _zoneAliases = <String, String>{
@@ -4187,58 +4907,9 @@ class _WagonWheelPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
     final cy = size.height / 2;
-    final fieldR = math.min(cx, cy) * 0.92;
-    final innerR = fieldR * 0.55; // 30-yard circle
-
-    // ── Field background
-    canvas.drawCircle(
-      Offset(cx, cy),
-      fieldR,
-      Paint()..color = const Color(0xFF1A3D1A),
-    );
-
-    // ── 30-yard circle
-    canvas.drawCircle(
-      Offset(cx, cy),
-      innerR,
-      Paint()
-        ..color = Colors.transparent
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0
-        ..color = fgColor.withValues(alpha: 0.15),
-    );
-
-    // ── Boundary
-    canvas.drawCircle(
-      Offset(cx, cy),
-      fieldR,
-      Paint()
-        ..color = fgColor.withValues(alpha: 0.2)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-
-    // ── Pitch rectangle
-    final pitchPaint = Paint()..color = const Color(0xFF8B7355);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(
-            center: Offset(cx, cy),
-            width: fieldR * 0.06,
-            height: fieldR * 0.26),
-        const Radius.circular(2),
-      ),
-      pitchPaint,
-    );
-
-    // ── Crease lines
-    final creasePaint = Paint()
-      ..color = fgColor.withValues(alpha: 0.6)
-      ..strokeWidth = 1.0;
-    canvas.drawLine(Offset(cx - fieldR * 0.04, cy - fieldR * 0.13),
-        Offset(cx + fieldR * 0.04, cy - fieldR * 0.13), creasePaint);
-    canvas.drawLine(Offset(cx - fieldR * 0.04, cy + fieldR * 0.13),
-        Offset(cx + fieldR * 0.04, cy + fieldR * 0.13), creasePaint);
+    // Match the scoring-page wheel's geometry so trajectories land in its
+    // outer zone ring instead of overshooting / undershooting.
+    final fieldR = math.min(size.width, size.height) / 2 - 2;
 
     // ── Ball shots
     for (final ball in balls) {
@@ -4289,13 +4960,7 @@ class _WagonWheelPainter extends CustomPainter {
         Paint()..color = color,
       );
     }
-
-    // ── Center dot (batsman position)
-    canvas.drawCircle(
-      Offset(cx, cy),
-      4.5,
-      Paint()..color = fgColor,
-    );
+    // No center dot — the scoring-wheel base already draws bat + stumps.
   }
 
   @override

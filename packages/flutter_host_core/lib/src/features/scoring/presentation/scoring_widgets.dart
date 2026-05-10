@@ -13,10 +13,15 @@ class ScoringWagonWheel extends StatelessWidget {
     super.key,
     this.selectedZone,
     this.onZoneTap,
+    this.neutral = false,
   });
 
   final String? selectedZone;
   final void Function(String zone)? onZoneTap;
+
+  /// When true, use flat theme background (panel/surf) instead of the
+  /// accent-derived vibrant field — so overlays painted on top read clearly.
+  final bool neutral;
 
   // 8 zones clockwise from Fine Leg (top)
   static const _zones = [
@@ -34,6 +39,39 @@ class ScoringWagonWheel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = context.accent;
+    final Color outerField;
+    final Color innerPitch;
+    if (neutral) {
+      // Flat theme background — uses page bg/surf so the wheel reads as a
+      // recessed area of the card, no grey filler, and colored overlays pop.
+      outerField = context.bg;
+      innerPitch = context.surf;
+    } else {
+      final hsl = HSLColor.fromColor(accent);
+      outerField = hsl
+          .withSaturation(math.max(hsl.saturation, 0.55).clamp(0.0, 1.0))
+          .withLightness(0.32)
+          .toColor();
+      innerPitch = hsl
+          .withSaturation(math.max(hsl.saturation, 0.65).clamp(0.0, 1.0))
+          .withLightness(0.20)
+          .toColor();
+    }
+    final tint = neutral ? context.fg : Colors.white;
+    final colors = _WheelColors(
+      outerField: outerField,
+      innerPitch: innerPitch,
+      accent: accent,
+      divider: tint.withValues(alpha: 0.28),
+      label: tint.withValues(alpha: neutral ? 0.65 : 1.0),
+      labelMuted: tint.withValues(alpha: neutral ? 0.40 : 0.85),
+      watermark: tint.withValues(alpha: neutral ? 0.10 : 0.18),
+      ringDash: tint.withValues(alpha: neutral ? 0.0 : 0.55),
+      innerRing: tint.withValues(alpha: 0.22),
+      solidBoundary:
+          neutral ? tint.withValues(alpha: 0.55) : null,
+    );
     return AspectRatio(
       aspectRatio: 1,
       child: LayoutBuilder(
@@ -54,7 +92,10 @@ class ScoringWagonWheel extends StatelessWidget {
               if (zone != null) onZoneTap!(zone);
             },
             child: CustomPaint(
-              painter: _WheelPainter(selectedZone: selectedZone),
+              painter: _WheelPainter(
+                selectedZone: selectedZone,
+                colors: colors,
+              ),
             ),
           );
         },
@@ -74,10 +115,39 @@ class ScoringWagonWheel extends StatelessWidget {
   }
 }
 
+class _WheelColors {
+  const _WheelColors({
+    required this.outerField,
+    required this.innerPitch,
+    required this.accent,
+    required this.divider,
+    required this.label,
+    required this.labelMuted,
+    required this.watermark,
+    required this.ringDash,
+    required this.innerRing,
+    this.solidBoundary,
+  });
+
+  final Color outerField;
+  final Color innerPitch;
+  final Color accent;
+  final Color divider;
+  final Color label;
+  final Color labelMuted;
+  final Color watermark;
+  final Color ringDash;
+  final Color innerRing;
+  // When non-null, paint a solid stroke at the boundary instead of (or on top
+  // of) dashes — used by neutral mode for a cleaner "proper border" look.
+  final Color? solidBoundary;
+}
+
 class _WheelPainter extends CustomPainter {
-  const _WheelPainter({this.selectedZone});
+  const _WheelPainter({this.selectedZone, required this.colors});
 
   final String? selectedZone;
+  final _WheelColors colors;
 
   static const _zones = ScoringWagonWheel._zones;
   static const _zoneCount = ScoringWagonWheel._zoneCount;
@@ -106,9 +176,9 @@ class _WheelPainter extends CustomPainter {
     final midR = (innerR + r) / 2;
 
     // Outer field
-    canvas.drawCircle(c, r, Paint()..color = const Color(0xFF1A4B5A));
+    canvas.drawCircle(c, r, Paint()..color = colors.outerField);
     // Inner pitch
-    canvas.drawCircle(c, innerR, Paint()..color = const Color(0xFF1D5C38));
+    canvas.drawCircle(c, innerR, Paint()..color = colors.innerPitch);
 
     // Selected zone highlight
     final selIdx = selectedZone != null ? _zones.indexOf(selectedZone!) : -1;
@@ -118,14 +188,14 @@ class _WheelPainter extends CustomPainter {
         _startAngle(selIdx),
         _sweep,
         true,
-        Paint()..color = Colors.white.withValues(alpha: 0.25),
+        Paint()..color = Colors.white.withValues(alpha: 0.32),
       );
-      canvas.drawCircle(c, innerR, Paint()..color = const Color(0xFF1D5C38));
+      canvas.drawCircle(c, innerR, Paint()..color = colors.innerPitch);
     }
 
     // Zone dividers
     final divPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.20)
+      ..color = colors.divider
       ..strokeWidth = 1.2;
     for (int i = 0; i < _zoneCount; i++) {
       final a = _startAngle(i);
@@ -136,13 +206,25 @@ class _WheelPainter extends CustomPainter {
       );
     }
 
-    _drawDashedCircle(canvas, c, r, Colors.white.withValues(alpha: 0.4));
+    if (colors.ringDash.a > 0) {
+      _drawDashedCircle(canvas, c, r, colors.ringDash);
+    }
+    if (colors.solidBoundary != null) {
+      canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..color = colors.solidBoundary!
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6,
+      );
+    }
 
     canvas.drawCircle(
       c,
       innerR,
       Paint()
-        ..color = Colors.white.withValues(alpha: 0.15)
+        ..color = colors.innerRing
         ..strokeWidth = 1.0
         ..style = PaintingStyle.stroke,
     );
@@ -162,7 +244,7 @@ class _WheelPainter extends CustomPainter {
         text: TextSpan(
           text: label,
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.80),
+            color: isSelected ? colors.label : colors.labelMuted,
             fontSize: 11,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
             height: 1.2,
@@ -182,7 +264,7 @@ class _WheelPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.12),
+          color: colors.watermark,
           fontSize: 14,
           fontWeight: FontWeight.w900,
           letterSpacing: 2,
