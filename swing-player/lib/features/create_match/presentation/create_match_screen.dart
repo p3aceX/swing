@@ -12,19 +12,27 @@ import '../../../core/auth/token_storage.dart';
 ///   1. Pulling the current user id from `TokenStorage` so "my squads" can
 ///      be split from "playing for" in the picker.
 ///   2. Wiring `go_router` navigation for back + post-toss routing.
-///   3. Honouring the legacy `?matchId=...` Resume entry — we load the
-///      match's team ids and hand off to [fhc.PlayingElevenScreen] directly.
+///   3. Branching on `?mode=...` — `resume` (default when matchId is
+///      present) hands off to Playing 11; `edit` opens the form
+///      pre-populated with the existing match's values and PATCHes on save.
 class CreateMatchScreen extends ConsumerStatefulWidget {
   const CreateMatchScreen({
     super.key,
     this.existingMatchId,
     this.existingTeamAName,
     this.existingTeamBName,
+    this.editMode = false,
   });
 
   final String? existingMatchId;
   final String? existingTeamAName;
   final String? existingTeamBName;
+
+  /// When true, opens the create-match form pre-populated with the existing
+  /// match's values. Submit PATCHes that match (toss / Playing 11 / scoring
+  /// state preserved). When false (default), follows the legacy resume flow
+  /// that lands on Playing 11.
+  final bool editMode;
 
   @override
   ConsumerState<CreateMatchScreen> createState() => _CreateMatchScreenState();
@@ -38,13 +46,13 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   String? _resumeError;
   bool _resumeLoaded = false;
 
-  bool get _isResume => (widget.existingMatchId ?? '').trim().isNotEmpty;
+  bool get _hasMatchId => (widget.existingMatchId ?? '').trim().isNotEmpty;
 
   @override
   void initState() {
     super.initState();
     _loadUserId();
-    if (_isResume) _loadResumeMatch();
+    if (_hasMatchId) _loadResumeMatch();
   }
 
   Future<void> _loadUserId() async {
@@ -79,15 +87,31 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
 
       if (!mounted) return;
       setState(() {
-        _resumeMatch = teamAId == summary.teamAId && teamBId == summary.teamBId
-            ? summary
-            : fhc.HostMatchSummary(
-                id: summary.id,
-                teamAId: teamAId,
-                teamBId: teamBId,
-                teamAName: summary.teamAName,
-                teamBName: summary.teamBName,
-              );
+        _resumeMatch =
+            teamAId == summary.teamAId && teamBId == summary.teamBId
+                ? summary
+                : fhc.HostMatchSummary(
+                    id: summary.id,
+                    teamAId: teamAId,
+                    teamBId: teamBId,
+                    teamAName: summary.teamAName,
+                    teamBName: summary.teamBName,
+                    teamALogoUrl: summary.teamALogoUrl,
+                    teamBLogoUrl: summary.teamBLogoUrl,
+                    teamACity: summary.teamACity,
+                    teamBCity: summary.teamBCity,
+                    format: summary.format,
+                    matchType: summary.matchType,
+                    category: summary.category,
+                    ageGroup: summary.ageGroup,
+                    ballType: summary.ballType,
+                    venueId: summary.venueId,
+                    venueName: summary.venueName,
+                    venueCity: summary.venueCity,
+                    scheduledAt: summary.scheduledAt,
+                    customOvers: summary.customOvers,
+                    hasImpactPlayer: summary.hasImpactPlayer,
+                  );
         _resumeLoaded = true;
       });
     } catch (error) {
@@ -102,8 +126,9 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   Future<String> _resolveTeamId(Dio dio, String teamName) async {
     if (teamName.trim().isEmpty) return '';
     try {
+      final paths = ref.read(fhc.hostPathConfigProvider);
       final resp = await dio.get<Map<String, dynamic>>(
-        '/player/teams/search',
+        paths.teamSearch,
         queryParameters: {'q': teamName.trim(), 'limit': 10},
       );
       final body = resp.data ?? {};
@@ -125,7 +150,7 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isResume) {
+    if (_hasMatchId) {
       if (!_resumeLoaded) {
         return const Scaffold(
           body: Center(child: CircularProgressIndicator()),
@@ -134,7 +159,7 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
       final summary = _resumeMatch;
       if (summary == null) {
         return Scaffold(
-          appBar: AppBar(title: const Text('Resume match')),
+          appBar: AppBar(title: const Text('Match')),
           body: Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -146,6 +171,47 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
           ),
         );
       }
+
+      // Edit mode: open the create-match form pre-populated. Submit PATCHes
+      // the existing match (toss / Playing 11 / scoring all preserved).
+      if (widget.editMode) {
+        // Wait on user id so the team picker shows the OWNER badge if they
+        // wander back to step 1.
+        if (!_userIdLoaded) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return fhc.CreateMatchScreen(
+          currentUserId: _userId,
+          onTossCompleted: _onTossCompleted,
+          onBack: () => context.pop(),
+          editMatchId: summary.id,
+          onEditSaved: (ctx, _) => ctx.pop(),
+          initialPrefill: fhc.CreateMatchPrefill(
+            teamAId: summary.teamAId,
+            teamAName: summary.teamAName,
+            teamALogoUrl: summary.teamALogoUrl,
+            teamACity: summary.teamACity,
+            teamBId: summary.teamBId,
+            teamBName: summary.teamBName,
+            teamBLogoUrl: summary.teamBLogoUrl,
+            teamBCity: summary.teamBCity,
+            format: summary.format,
+            category: summary.category,
+            ageGroup: summary.ageGroup,
+            ballType: summary.ballType,
+            venueId: summary.venueId,
+            venueName: summary.venueName,
+            venueCity: summary.venueCity,
+            scheduledAt: summary.scheduledAt,
+            customOvers: summary.customOvers,
+            hasImpactPlayer: summary.hasImpactPlayer,
+          ),
+        );
+      }
+
+      // Resume mode: jump to Playing 11.
       return fhc.PlayingElevenScreen(
         matchId: summary.id,
         teamAId: summary.teamAId,

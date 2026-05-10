@@ -226,10 +226,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final matchId = state.uri.queryParameters['matchId'];
           final teamA = state.uri.queryParameters['teamA'];
           final teamB = state.uri.queryParameters['teamB'];
+          final editMode = state.uri.queryParameters['mode'] == 'edit';
           return CreateMatchScreen(
             existingMatchId: matchId,
             existingTeamAName: teamA,
             existingTeamBName: teamB,
+            editMode: editMode,
           );
         },
       ),
@@ -248,7 +250,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             onEditMatch: (ctx, id, teamA, teamB) => ctx.push(
               '/create-match?matchId=${Uri.encodeComponent(id)}'
               '&teamA=${Uri.encodeComponent(teamA)}'
-              '&teamB=${Uri.encodeComponent(teamB)}',
+              '&teamB=${Uri.encodeComponent(teamB)}'
+              '&mode=edit',
             ),
           ),
         ),
@@ -480,16 +483,34 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return ScoringScreen(
             matchId: matchId,
             currentPlayerId: currentPlayerId,
-            onNavigateBack: (context, id) => context.go('/match/$id'),
+            onNavigateBack: (context, id) {
+              // Pop the scoring screen if there's something underneath
+              // (toss / golive / playing-11 stack). When scoring is the only
+              // route left (e.g. resumed from a deep link), open match detail.
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              } else {
+                context.go('/match/$id');
+              }
+            },
             onNavigateToMatchDetail: (context, id) =>
                 context.push('/match/$id'),
             onMatchDeleted: (context, id) => Navigator.of(context).canPop()
                 ? Navigator.of(context).pop()
                 : context.go('/home'),
-            onNavigateToPlaying11: (context, id, teamA, teamB) => context.push(
-              '/create-match?matchId=${Uri.encodeQueryComponent(id)}'
-              '&teamA=${Uri.encodeQueryComponent(teamA)}'
-              '&teamB=${Uri.encodeQueryComponent(teamB)}',
+            onNavigateToPlaying11: (context, id, teamAId, teamAName, teamBId,
+                    teamBName) =>
+                Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => PlayingElevenScreen(
+                  matchId: id,
+                  teamAId: teamAId,
+                  teamAName: teamAName,
+                  teamBId: teamBId,
+                  teamBName: teamBName,
+                  onBack: () => Navigator.of(context).pop(),
+                ),
+              ),
             ),
             onNavigateToToss: (context, id, teamA, teamB) =>
                 Navigator.of(context).push(
@@ -503,6 +524,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   onBack: () => Navigator.of(context).pop(),
                 ),
               ),
+            ),
+            onEditMatch: (ctx, id, teamA, teamB) => ctx.push(
+              '/create-match?matchId=${Uri.encodeComponent(id)}'
+              '&teamA=${Uri.encodeComponent(teamA)}'
+              '&teamB=${Uri.encodeComponent(teamB)}'
+              '&mode=edit',
             ),
           );
         },

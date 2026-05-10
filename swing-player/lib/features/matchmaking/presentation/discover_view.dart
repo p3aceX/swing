@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart' show HostArenaRatingBadge;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -561,13 +562,34 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
     if (_currentTeam == null) return false;
     final repo = ref.read(matchmakingRepositoryProvider);
     final dateApi = DateFormat('yyyy-MM-dd').format(date);
+    // Per-date pre-filter — drop windows whose end-of-bucket is already past
+    // for THIS date so the server never has to return WINDOW_PASSED. Global
+    // prefs.windowsRanked is intentionally untouched so other dates keep
+    // their full preference set.
+    final perDateWindows =
+        _prefs.windowsRanked.where((w) => !w.isPast(date)).toList();
+    if (perDateWindows.isEmpty) {
+      _resultsByDate[dateApi] = const _DateResultCache(
+        primary: [],
+        alternatives: [],
+        alternativeReason: 'all-windows-past',
+      );
+      if (recordResponse && mounted) {
+        setState(() {
+          _primary = const [];
+          _alternatives = const [];
+          _alternativeReason = 'all-windows-past';
+        });
+      }
+      return false;
+    }
     try {
       final res = await repo.discoverLobbies(
         teamId: _currentTeam!.id,
         date: dateApi,
         format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
         ballType: _prefs.ballType,
-        windowsRanked: _prefs.windowsApi,
+        windowsRanked: perDateWindows.map((w) => w.apiValue).toList(),
         groundsRanked: _prefs.preferredArenaIdList,
       );
       if (!mounted) return false;
@@ -626,13 +648,35 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   }) async {
     if (_currentTeam == null) return;
     final repo = ref.read(matchmakingRepositoryProvider);
+    final perDateWindows =
+        _prefs.windowsRanked.where((w) => !w.isPast(_prefs.date)).toList();
+    if (perDateWindows.isEmpty) {
+      // No future window for the active date — no point hitting the server.
+      // Cache empty + flip to results so the contextual empty state shows.
+      _resultsByDate[_prefs.dateApi] = const _DateResultCache(
+        primary: [],
+        alternatives: [],
+        alternativeReason: 'all-windows-past',
+      );
+      if (mounted) {
+        setState(() {
+          _primary = const [];
+          _alternatives = const [];
+          _alternativeReason = 'all-windows-past';
+          if (!skipCelebrate && _stage != _Stage.celebrating) {
+            _stage = _Stage.results;
+          }
+        });
+      }
+      return;
+    }
     try {
       final res = await repo.discoverLobbies(
         teamId: _currentTeam!.id,
         date: _prefs.dateApi,
         format: _prefs.allFormats ? 'ANY' : _prefs.format.apiValue,
         ballType: _prefs.ballType,
-        windowsRanked: _prefs.windowsApi,
+        windowsRanked: perDateWindows.map((w) => w.apiValue).toList(),
         groundsRanked: _prefs.preferredArenaIdList,
       );
       if (!mounted) return;
@@ -671,8 +715,9 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
   }
 
   // Surfaces a discover-flow error to the user. Maps the known backend codes
-  // (SLOT_CONFLICT / TEAM_BANNED / NO_AVAILABLE_SLOT) to a friendly dialog
-  // or banner; everything else falls back to the raw server message.
+  // (SLOT_CONFLICT / TEAM_BANNED / NO_AVAILABLE_SLOT / WINDOW_PASSED) to a
+  // friendly dialog or banner; everything else falls back to the raw server
+  // message.
   void _handleDiscoverError(Object e) {
     if (e is DioException) {
       final data = e.response?.data;
@@ -701,6 +746,19 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
             _submitting = false;
             _error = (err['message'] as String?) ??
                 'No available slot for these grounds. Pick different grounds.';
+            if (_stage == _Stage.celebrating) _stage = _Stage.setup;
+          });
+          return;
+        }
+        if (err['code'] == 'WINDOW_PASSED') {
+          // Defensive — pre-filter in [_runDiscoverForDate]/[_runDiscover]
+          // should preempt this. If it slips through (e.g. server clock
+          // drift), surface a friendly banner without mutating prefs so
+          // other dates' windows stay intact.
+          setState(() {
+            _submitting = false;
+            _error = (err['message'] as String?) ??
+                "That time window has already started. Pick a later window or a future date.";
             if (_stage == _Stage.celebrating) _stage = _Stage.setup;
           });
           return;
@@ -955,9 +1013,48 @@ class _DiscoverViewState extends ConsumerState<DiscoverView> {
             });
             await _runDiscover(skipCelebrate: true);
           },
+          onAddDate: (newDate) async {
+            final api = DateFormat('yyyy-MM-dd').format(newDate);
+            if (_prefs.dates.any((x) => DateUtils.isSameDay(x, newDate))) {
+              // Already searching this date — just switch to it.
+              setState(() => _prefs.date = newDate);
+              await _runDiscover(skipCelebrate: true);
+              return;
+            }
+            setState(() {
+              _prefs.dates = [..._prefs.dates, newDate]
+                ..sort((a, b) => a.compareTo(b));
+              _prefs.date = newDate;
+              _submittedLobbies = [
+                ..._submittedLobbies,
+                (date: api, lobbyId: ''),
+              ]..sort((a, b) => a.date.compareTo(b.date));
+            });
+            await _runDiscover(skipCelebrate: true);
+          },
+          onPrefsChanged: (summary) async {
+            // Capture the messenger before awaiting so we don't reach for
+            // BuildContext after an async gap.
+            final messenger = ScaffoldMessenger.of(context);
+            await _runDiscover(skipCelebrate: true);
+            if (!mounted || summary.isEmpty) return;
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(summary),
+                duration: const Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
           dateMatchCounts: {
             for (final entry in _resultsByDate.entries)
               entry.key: entry.value.primary.length,
+          },
+          dateStatuses: {
+            for (final entry in _resultsByDate.entries)
+              entry.key: entry.value.alternativeReason == 'all-windows-past'
+                  ? 'past'
+                  : (entry.value.primary.isNotEmpty ? 'matched' : 'searching'),
           },
         ),
     };
@@ -1069,29 +1166,41 @@ class _DiscoverIntro extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 36),
-                _TeamDropdown(
-                  team: team,
-                  onTap: allTeams.isEmpty
-                      ? null
-                      : () => _showTeamPicker(
-                            context,
-                            currentTeam: team,
-                            allTeams: allTeams,
-                            teamLobbies: teamLobbies,
-                            onSwitch: onSwitchTeam,
-                          ),
-                ),
+                if (allTeams.isNotEmpty)
+                  _TeamDropdown(
+                    team: team,
+                    onTap: () => _showTeamPicker(
+                      context,
+                      currentTeam: team,
+                      allTeams: allTeams,
+                      teamLobbies: teamLobbies,
+                      onSwitch: onSwitchTeam,
+                    ),
+                  ),
+                if (allTeams.isEmpty)
+                  Text(
+                    'You need a team to find a match-up.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 const Spacer(),
-                // Get Started — full-width, themed; disabled until a team
-                // is chosen.
+                // CTA — Get started when a team is chosen, Create team when
+                // user has none, "Pick a team" if they have teams but none
+                // selected yet.
                 GestureDetector(
-                  onTap: team == null ? null : onStart,
+                  onTap: allTeams.isEmpty
+                      ? () => context.push('/create-team')
+                      : (team == null ? null : onStart),
                   behavior: HitTestBehavior.opaque,
                   child: Container(
                     height: 54,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: team == null
+                      color: (team == null && allTeams.isNotEmpty)
                           ? context.fg.withValues(alpha: 0.12)
                           : context.ctaBg,
                       borderRadius: BorderRadius.circular(12),
@@ -1100,11 +1209,13 @@ class _DiscoverIntro extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          team == null
-                              ? 'Pick a team to start'
-                              : 'Get started',
+                          allTeams.isEmpty
+                              ? 'Create your first team'
+                              : (team == null
+                                  ? 'Pick a team to start'
+                                  : 'Get started'),
                           style: TextStyle(
-                            color: team == null
+                            color: (team == null && allTeams.isNotEmpty)
                                 ? context.fgSub
                                 : context.ctaFg,
                             fontSize: 16,
@@ -1114,9 +1225,12 @@ class _DiscoverIntro extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Icon(
-                          Icons.arrow_forward_rounded,
-                          color:
-                              team == null ? context.fgSub : context.ctaFg,
+                          allTeams.isEmpty
+                              ? Icons.add_rounded
+                              : Icons.arrow_forward_rounded,
+                          color: (team == null && allTeams.isNotEmpty)
+                              ? context.fgSub
+                              : context.ctaFg,
                           size: 18,
                         ),
                       ],
@@ -2618,7 +2732,7 @@ class _DiscoverCelebrateState extends State<_DiscoverCelebrate>
 
 // ─── RESULTS ────────────────────────────────────────────────────────────────
 
-class _DiscoverResults extends StatefulWidget {
+class _DiscoverResults extends ConsumerStatefulWidget {
   const _DiscoverResults({
     required this.prefs,
     required this.team,
@@ -2635,7 +2749,10 @@ class _DiscoverResults extends StatefulWidget {
     required this.onCancel,
     required this.onChallenge,
     required this.onSwitchDate,
+    required this.onAddDate,
+    required this.onPrefsChanged,
     required this.dateMatchCounts,
+    required this.dateStatuses,
   });
 
   final _Prefs prefs;
@@ -2653,14 +2770,23 @@ class _DiscoverResults extends StatefulWidget {
   final VoidCallback onCancel;
   final ValueChanged<MmOpenLobby> onChallenge;
   final ValueChanged<String> onSwitchDate;
+  /// Add a new date to the active search; parent runs discover for it.
+  final ValueChanged<DateTime> onAddDate;
+  /// Called by inline editors (`_PrefsPillsRow`) after they mutate prefs —
+  /// parent re-runs discover and may surface a snackbar describing what
+  /// changed.
+  final void Function(String summary) onPrefsChanged;
   /// dateApi → primary match count. Drives the badge on each date chip.
   final Map<String, int> dateMatchCounts;
+  /// dateApi → search status (searching / matched / past). Drives the chip
+  /// badge alongside [dateMatchCounts].
+  final Map<String, String> dateStatuses;
 
   @override
-  State<_DiscoverResults> createState() => _DiscoverResultsState();
+  ConsumerState<_DiscoverResults> createState() => _DiscoverResultsState();
 }
 
-class _DiscoverResultsState extends State<_DiscoverResults> {
+class _DiscoverResultsState extends ConsumerState<_DiscoverResults> {
   // null = ALL windows visible. Otherwise restrict to one bucket.
   String? _activeWindow;
 
@@ -2682,7 +2808,10 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
     final onCancel = widget.onCancel;
     final onChallenge = widget.onChallenge;
     final onSwitchDate = widget.onSwitchDate;
+    final onAddDate = widget.onAddDate;
+    final onPrefsChanged = widget.onPrefsChanged;
     final dateMatchCounts = widget.dateMatchCounts;
+    final dateStatuses = widget.dateStatuses;
     return Column(
       children: [
         SafeArea(
@@ -2701,6 +2830,7 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
                 _IconPillButton(
                   icon: Icons.tune_rounded,
                   label: 'Modify',
+                  prominent: true,
                   onTap: onModify,
                 ),
                 const SizedBox(width: 8),
@@ -2714,21 +2844,25 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
             ),
           ),
         ),
-        // Active preferences — small pills summarising what we're
-        // searching for. Sits directly above the status banner so the
-        // user always has a quick read of the current criteria.
+        // Active preferences — interactive pills. Tapping any pill opens
+        // the matching picker; the change re-runs discover and surfaces a
+        // snackbar via [onPrefsChanged].
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: _PrefsPillsRow(prefs: prefs),
+          child: _PrefsPillsRow(
+            prefs: prefs,
+            ref: ref,
+            onPrefsChanged: onPrefsChanged,
+          ),
         ),
         // Status banner — "Searching" while live, "Expired" once windows pass
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: _StatusBanner(expired: expired),
         ),
-        // Date strip — only dates the user submitted (multi-date) or the
-        // active date if there was no multi-date submission. Active is
-        // highlighted; tap = re-run discover for that date.
+        // Date strip — submitted dates + an "+ Add" tile for ad-hoc dates.
+        // Per-date status badges (matched / searching / past) come from the
+        // parent's cache.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: _MatchDateStrip(
@@ -2736,6 +2870,8 @@ class _DiscoverResultsState extends State<_DiscoverResults> {
             activeDateApi: prefs.dateApi,
             onSelect: onSwitchDate,
             matchCounts: dateMatchCounts,
+            statuses: dateStatuses,
+            onAddDate: onAddDate,
           ),
         ),
         // Time-of-day filter strip — chips for each bucket that has at
@@ -2783,31 +2919,39 @@ class _MatchDateStrip extends StatelessWidget {
     required this.submitted,
     required this.activeDateApi,
     required this.onSelect,
+    required this.onAddDate,
     this.matchCounts = const {},
+    this.statuses = const {},
   });
 
   final List<({String date, String lobbyId})> submitted;
   final String activeDateApi;
   final ValueChanged<String> onSelect;
+  final ValueChanged<DateTime> onAddDate;
   final Map<String, int> matchCounts;
+  /// dateApi → status: 'matched' | 'searching' | 'past'. Drives the small
+  /// status dot under the day-of-week label.
+  final Map<String, String> statuses;
 
   @override
   Widget build(BuildContext context) {
-    // Strip shows ONLY the dates the user picked in the Setup wizard
-    // (submittedLobbies). The activeDate is included as a fallback for
-    // single-date discovers that don't write to submittedLobbies.
     final range = <String>{
       activeDateApi,
       for (final s in submitted) s.date,
     }.toList()..sort();
     if (range.isEmpty) return const SizedBox.shrink();
+    // +1 for the trailing "+ Add" tile.
+    final itemCount = range.length + 1;
     return SizedBox(
       height: 78,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: range.length,
+        itemCount: itemCount,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
+          if (i == range.length) {
+            return _AddDateTile(onAddDate: onAddDate);
+          }
           final api = range[i];
           DateTime? d;
           try { d = DateTime.parse(api); } catch (_) {}
@@ -2825,6 +2969,13 @@ class _MatchDateStrip extends StatelessWidget {
               'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
           const dowNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
           final count = matchCounts[api] ?? -1;
+          final status = statuses[api];
+          final statusColor = switch (status) {
+            'matched' => context.success,
+            'past' => context.fgSub.withValues(alpha: 0.5),
+            'searching' => context.warn,
+            _ => null,
+          };
           return GestureDetector(
             onTap: isActive ? null : () => onSelect(api),
             behavior: HitTestBehavior.opaque,
@@ -2874,6 +3025,17 @@ class _MatchDateStrip extends StatelessWidget {
                           height: 1.0,
                         ),
                       ),
+                      if (statusColor != null) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: statusColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -2907,6 +3069,108 @@ class _MatchDateStrip extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// Trailing chip on the date strip. Opens a picker for a date in the next
+// 14 days that isn't already on the strip.
+class _AddDateTile extends StatelessWidget {
+  const _AddDateTile({required this.onAddDate});
+  final ValueChanged<DateTime> onAddDate;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        final today = DateTime.now();
+        final picked = await showModalBottomSheet<DateTime>(
+          context: context,
+          backgroundColor: context.bg,
+          builder: (sheetCtx) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                    child: Text(
+                      'Add a date',
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                  ),
+                  Container(height: 1, color: context.stroke.withValues(alpha: 0.18)),
+                  for (int i = 0; i < 14; i++)
+                    Builder(builder: (ctx) {
+                      final d = DateTime(today.year, today.month, today.day + i);
+                      return InkWell(
+                        onTap: () => Navigator.of(sheetCtx).pop(d),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          child: Row(
+                            children: [
+                              Text(
+                                i == 0
+                                    ? 'Today'
+                                    : DateFormat('EEE, d MMM').format(d),
+                                style: TextStyle(
+                                  color: context.fg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+        if (picked != null) onAddDate(picked);
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 56,
+        decoration: BoxDecoration(
+          color: context.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: context.fg.withValues(alpha: 0.18),
+            width: 1,
+            // Dashed-feel via wider gap; Flutter has no native dashed border
+            // without a custom painter — keep it simple with a solid border
+            // and a "+" icon to convey "add".
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_rounded, size: 20, color: context.fgSub),
+            const SizedBox(height: 2),
+            Text(
+              'Add',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2971,22 +3235,43 @@ class _MatchTimeline extends StatelessWidget {
     ]..sort((a, b) => a.hour.compareTo(b.hour));
 
     if (entries.isEmpty) {
-      // Single centered line — no background, no icon, no card. The date
-      // strip already tells the user which date they're on.
+      final allPast = alternativeReason == 'all-windows-past';
+      final headline = allPast
+          ? 'All your windows for this date have already started.'
+          : "We're searching — no match yet.";
+      final hint = allPast
+          ? 'Pick a later window or a future date.'
+          : 'Try a different date, or broaden your time / format / grounds in Modify.';
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(32, 80, 32, 24),
         children: [
           Center(
-            child: Text(
-              "We're searching — no match available right now.",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: context.fgSub,
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                height: 1.4,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  headline,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  hint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    height: 1.45,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -3477,39 +3762,51 @@ class _IconPillButton extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.destructive = false,
+    this.prominent = false,
   });
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool destructive;
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
-    final color = destructive ? context.danger : context.fg;
+    final color = destructive
+        ? context.danger
+        : (prominent ? context.accent : context.fg);
+    final bg = prominent
+        ? context.accent.withValues(alpha: 0.12)
+        : Colors.transparent;
+    final borderColor = destructive
+        ? context.danger.withValues(alpha: 0.4)
+        : (prominent
+            ? context.accent.withValues(alpha: 0.55)
+            : context.stroke.withValues(alpha: 0.6));
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: EdgeInsets.symmetric(
+            horizontal: prominent ? 12 : 10, vertical: 8),
         decoration: BoxDecoration(
+          color: bg,
           border: Border.all(
-            color: destructive
-                ? context.danger.withValues(alpha: 0.4)
-                : context.stroke.withValues(alpha: 0.6),
-            width: 1,
+            color: borderColor,
+            width: prominent ? 1.4 : 1,
           ),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: color),
+            Icon(icon, size: prominent ? 15 : 14, color: color),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
                 color: color,
-                fontSize: 12,
+                fontSize: prominent ? 13 : 12,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -3587,55 +3884,149 @@ class _OtherDatesStrip extends StatelessWidget {
 // windows, grounds). Sits above the status banner so the user can see
 // at a glance what we're searching for.
 class _PrefsPillsRow extends StatelessWidget {
-  const _PrefsPillsRow({required this.prefs});
+  const _PrefsPillsRow({
+    required this.prefs,
+    required this.ref,
+    required this.onPrefsChanged,
+  });
   final _Prefs prefs;
+  final WidgetRef ref;
+  final void Function(String summary) onPrefsChanged;
 
   @override
   Widget build(BuildContext context) {
-    final pills = <_PillSpec>[];
-
-    // Format
-    pills.add(_PillSpec(
-      label: prefs.allFormats ? 'Any format' : prefs.format.label,
-    ));
-
-    // Ball type — only when explicitly chosen.
-    if (prefs.ballType != null) {
-      pills.add(_PillSpec(label: _ballLabel(prefs.ballType!)));
-    }
-
-    // Windows — one pill per window so the rank ordering reads cleanly.
-    for (final w in prefs.windowsRanked) {
-      pills.add(_PillSpec(label: w.label));
-    }
-
-    // Grounds — count summary; "Any ground" when empty.
-    if (prefs.preferredArenas.isEmpty) {
-      pills.add(const _PillSpec(label: 'Any ground'));
-    } else if (prefs.preferredArenas.length == 1) {
-      pills.add(_PillSpec(label: prefs.preferredArenas.first.name));
-    } else {
-      pills.add(_PillSpec(
-          label: '${prefs.preferredArenas.length} grounds'));
-    }
-
+    final dateLabel = DateFormat('EEE d MMM').format(prefs.date);
     return Wrap(
       spacing: 6,
       runSpacing: 6,
       children: [
-        for (final p in pills)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-            decoration: BoxDecoration(
-              color: context.bg,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: context.fg.withValues(alpha: 0.14),
-                width: 1,
-              ),
-            ),
-            child: Text(
-              p.label,
+        // Active date — read-only; the date strip below is the source of
+        // truth for selection. Included here so the criteria summary is
+        // self-contained.
+        _EditPill(
+          icon: Icons.event_rounded,
+          label: dateLabel,
+          interactive: false,
+        ),
+        // Format
+        _EditPill(
+          icon: Icons.sports_cricket_rounded,
+          label: prefs.allFormats ? 'Any format' : prefs.format.label,
+          onTap: () async {
+            final r = await _pickFormat(
+              context,
+              allSelected: prefs.allFormats,
+              current: prefs.format,
+            );
+            if (r == null) return;
+            final before = prefs.allFormats ? 'Any' : prefs.format.label;
+            prefs.allFormats = r.all;
+            if (r.format != null) prefs.format = r.format!;
+            final after = prefs.allFormats ? 'Any' : prefs.format.label;
+            if (before != after) {
+              onPrefsChanged('Format → $after');
+            }
+          },
+        ),
+        // Ball type
+        _EditPill(
+          icon: Icons.circle_outlined,
+          label: prefs.ballLabel,
+          onTap: () async {
+            final r = await _pickBallType(context, prefs.ballType);
+            if (r == null) return;
+            final before = prefs.ballLabel;
+            prefs.ballType = r.all ? null : r.value;
+            final after = prefs.ballLabel;
+            if (before != after) {
+              onPrefsChanged('Ball type → $after');
+            }
+          },
+        ),
+        // Windows — one pill per window, tap to remove. Removing the last
+        // window leaves the search empty until the user picks one again,
+        // so we suppress the call to onPrefsChanged in that case.
+        for (final w in [...prefs.windowsRanked])
+          _EditPill(
+            icon: Icons.access_time_rounded,
+            label: w.label,
+            removable: true,
+            onTap: () {
+              prefs.windowsRanked.remove(w);
+              if (prefs.windowsRanked.isNotEmpty) {
+                onPrefsChanged('Removed ${w.label}');
+              }
+            },
+          ),
+        // Grounds
+        _EditPill(
+          icon: Icons.place_rounded,
+          label: prefs.preferredArenas.isEmpty
+              ? 'Any ground'
+              : (prefs.preferredArenas.length == 1
+                  ? prefs.preferredArenas.first.name
+                  : '${prefs.preferredArenas.length} grounds'),
+          onTap: () async {
+            final picked = await _pickArenas(
+              context,
+              ref,
+              prefs.dateApi,
+              prefs.format.apiValue,
+              prefs.preferredArenas,
+            );
+            if (picked == null) return;
+            prefs.preferredArenas = picked;
+            onPrefsChanged(picked.isEmpty
+                ? 'Grounds → Any'
+                : 'Grounds → ${picked.length} picked');
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact, tappable summary pill. When [interactive] is false, renders as a
+/// flat label (no chevron, no tap). When [removable] is true, shows a small
+/// "x" affordance instead of the chevron.
+class _EditPill extends StatelessWidget {
+  const _EditPill({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.interactive = true,
+    this.removable = false,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool interactive;
+  final bool removable;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: interactive ? onTap : null,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
+        decoration: BoxDecoration(
+          color: interactive
+              ? context.fg.withValues(alpha: 0.04)
+              : context.bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: context.fg.withValues(alpha: 0.18),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: context.fgSub),
+            const SizedBox(width: 5),
+            Text(
+              label,
               style: TextStyle(
                 color: context.fg,
                 fontSize: 11,
@@ -3643,15 +4034,21 @@ class _PrefsPillsRow extends StatelessWidget {
                 letterSpacing: 0.2,
               ),
             ),
-          ),
-      ],
+            if (interactive) ...[
+              const SizedBox(width: 4),
+              Icon(
+                removable
+                    ? Icons.close_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 13,
+                color: context.fgSub,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
-}
-
-class _PillSpec {
-  const _PillSpec({required this.label});
-  final String label;
 }
 
 class _StatusBanner extends StatefulWidget {
