@@ -1,4 +1,4 @@
-package com.swing.swing_biz
+package com.swing.swing_arena
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 
