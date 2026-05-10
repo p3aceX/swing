@@ -44,7 +44,7 @@ class _SwingBizAppState extends ConsumerState<SwingBizApp>
     // Hand the router to OneSignal so tap-to-open works
     OneSignalService.instance.router = router;
     return MaterialApp.router(
-      title: 'Swing Biz',
+      title: 'Swing Arena',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),

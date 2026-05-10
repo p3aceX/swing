@@ -295,7 +295,7 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Create your first business profile to start using Swing Biz.',
+            'Create your first business profile to start using Swing Arena.',
             style: TextStyle(
               color: Color(0xFF64748B),
               height: 1.5,

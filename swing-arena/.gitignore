@@ -1,6 +1,11 @@
 # Local env
 .env
 
+# Release signing
+android/key.properties
+*.keystore
+*.jks
+
 # Miscellaneous
 *.class
 *.log

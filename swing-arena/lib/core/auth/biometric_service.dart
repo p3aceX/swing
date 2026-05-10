@@ -19,7 +19,7 @@ class BiometricService {
 
   Future<bool> authenticate() async {
     return _auth.authenticate(
-      localizedReason: 'Verify your identity to open Swing Biz',
+      localizedReason: 'Verify your identity to open Swing Arena',
       options: const AuthenticationOptions(
         biometricOnly: false,
         stickyAuth: true,

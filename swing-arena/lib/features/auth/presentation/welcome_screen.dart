@@ -99,7 +99,7 @@ class WelcomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 28),
                   Text(
-                    'Swing Biz',
+                    'Swing Arena',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w900,

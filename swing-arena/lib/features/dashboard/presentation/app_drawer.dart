@@ -310,7 +310,7 @@ class _WhatsNewSheet extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 4),
-        Text('Latest updates to Swing Biz',
+        Text('Latest updates to Swing Arena',
             style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(height: 20),
         ..._items.map(
