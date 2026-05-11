@@ -332,17 +332,13 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               }
 
               // Build the flat list: [monthHeader, ticket, ticket, monthHeader, ticket, …]
-              final items = <_TicketItem>[];
-              String? lastMonthKey;
-              for (final dk in dateKeys) {
-                final d = DateFormat('yyyy-MM-dd').parse(dk);
-                final monthKey = DateFormat('yyyy-MM').format(d);
-                if (monthKey != lastMonthKey) {
-                  items.add(_TicketItem.month(d));
-                  lastMonthKey = monthKey;
-                }
-                items.add(_TicketItem.date(d, groups[dk]!));
-              }
+              final items = <_TicketItem>[
+                for (final dk in dateKeys)
+                  _TicketItem.date(
+                    DateFormat('yyyy-MM-dd').parse(dk),
+                    groups[dk]!,
+                  ),
+              ];
 
               return Column(children: [
                 _MonthCalendar(
@@ -377,9 +373,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                             itemCount: items.length,
                             itemBuilder: (context, i) {
                               final item = items[i];
-                              if (item.isMonthHeader) {
-                                return _MonthSectionHeader(date: item.date);
-                              }
                               return _DateTicket(
                                 date: item.date,
                                 today: today,
@@ -2526,17 +2519,8 @@ class _EmptyBookings extends StatelessWidget {
 // ─── Date ticket list (vertical, NBA-ticket style) ──────────────────────────
 
 class _TicketItem {
-  _TicketItem._({
-    required this.isMonthHeader,
-    required this.date,
-    this.bookings = const [],
-  });
-  factory _TicketItem.month(DateTime d) =>
-      _TicketItem._(isMonthHeader: true, date: d);
-  factory _TicketItem.date(DateTime d, List<ArenaReservation> bs) =>
-      _TicketItem._(isMonthHeader: false, date: d, bookings: bs);
+  const _TicketItem.date(this.date, this.bookings);
 
-  final bool isMonthHeader;
   final DateTime date;
   final List<ArenaReservation> bookings;
 }
@@ -2622,39 +2606,6 @@ class _MonthChipBar extends StatelessWidget {
             );
           },
         ),
-      ),
-    );
-  }
-}
-
-class _MonthSectionHeader extends StatelessWidget {
-  const _MonthSectionHeader({required this.date});
-  final DateTime date;
-
-  @override
-  Widget build(BuildContext context) {
-    _c = _C.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 18, 2, 10),
-      child: Row(
-        children: [
-          Text(
-            DateFormat('MMMM yyyy').format(date).toUpperCase(),
-            style: TextStyle(
-              color: _c.muted,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.4,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Container(
-              height: 1,
-              color: _c.border.withValues(alpha: 0.6),
-            ),
-          ),
-        ],
       ),
     );
   }
