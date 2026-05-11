@@ -1220,34 +1220,60 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
     super.dispose();
   }
 
-  bool _validateStep() {
-    if (_step == 0) return true;
+  String? _stepError() {
+    if (_step == 0) return null;
     if (_step == 1) {
+      if (_allDay) return null;
       final open = _openTimeCtrl.text.trim();
       final close = _closeTimeCtrl.text.trim();
-      if (open.isNotEmpty && !RegExp(r'^\d{2}:\d{2}$').hasMatch(open)) return false;
-      if (close.isNotEmpty && !RegExp(r'^\d{2}:\d{2}$').hasMatch(close)) return false;
-      return true;
+      if (open.isEmpty || close.isEmpty) {
+        return 'Pick both open and close times';
+      }
+      final reTime = RegExp(r'^\d{2}:\d{2}$');
+      if (!reTime.hasMatch(open) || !reTime.hasMatch(close)) {
+        return 'Use HH:MM format for open/close times';
+      }
+      int parse(String t) {
+        final p = t.split(':');
+        return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+      }
+
+      final openMins = parse(open);
+      var closeMins = parse(close);
+      if (openMins == closeMins) {
+        return 'Open and close cannot be the same';
+      }
+      if (closeMins < openMins) closeMins += 24 * 60; // overnight
+      final step = _slotMins + (_isGround ? _breatherMins : 0);
+      if (step <= 0) return null;
+      if (closeMins - openMins < _slotMins) {
+        return 'Window must be at least one slot long';
+      }
+      return null;
     }
     if (!_isNetsWithVariants && _step == 2) {
       if (_isGround) {
-        return _price4Ctrl.text.trim().isNotEmpty &&
-            _rupeesToPaise(_price4Ctrl.text) > 0;
+        if (_price4Ctrl.text.trim().isEmpty ||
+            _rupeesToPaise(_price4Ctrl.text) <= 0) {
+          return 'Set a 4 hr price to continue';
+        }
+        return null;
       }
-      return _priceHourCtrl.text.trim().isNotEmpty &&
-          _rupeesToPaise(_priceHourCtrl.text) > 0;
+      if (_priceHourCtrl.text.trim().isEmpty ||
+          _rupeesToPaise(_priceHourCtrl.text) <= 0) {
+        return 'Set a price per hour to continue';
+      }
+      return null;
     }
-    return true;
+    return null;
   }
 
+  bool _validateStep() => _stepError() == null;
+
   void _next() {
-    if (!_validateStep()) {
-      final msg = _step == 1
-          ? 'Use HH:MM format for open/close times'
-          : _isGround
-              ? 'Set a 4 hr price to continue'
-              : 'Set a price per hour to continue';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    final err = _stepError();
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
       return;
     }
     if (_step < _maxStep) setState(() => _step += 1);
@@ -1834,14 +1860,14 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
             ],
             onChanged: (v) => setState(() => _breatherMins = int.parse(v)),
           ),
-          SizedBox(height: 20),
-          _SlotPreview(
-            openCtrl: _openTimeCtrl,
-            closeCtrl: _closeTimeCtrl,
-            slotMins: _slotMins,
-            breatherMins: _breatherMins,
-          ),
         ],
+        SizedBox(height: 20),
+        _SlotPreview(
+          openCtrl: _openTimeCtrl,
+          closeCtrl: _closeTimeCtrl,
+          slotMins: _slotMins,
+          breatherMins: _isGround ? _breatherMins : 0,
+        ),
       ],
     );
   }
@@ -2362,10 +2388,12 @@ class _SlotPreviewState extends State<_SlotPreview> {
 
   void _rebuild() => setState(() {});
 
-  List<String> _computeSlots() {
+  ({List<String> slots, bool overnight}) _computeSlots() {
     final openTime = widget.openCtrl.text.trim();
     final closeTime = widget.closeCtrl.text.trim();
-    if (openTime.isEmpty || closeTime.isEmpty) return const [];
+    if (openTime.isEmpty || closeTime.isEmpty) {
+      return (slots: const [], overnight: false);
+    }
     int parseTime(String t) {
       final parts = t.split(':');
       if (parts.length < 2) return -1;
@@ -2376,50 +2404,84 @@ class _SlotPreviewState extends State<_SlotPreview> {
     }
 
     final openMins = parseTime(openTime);
-    final closeMins = parseTime(closeTime);
-    if (openMins < 0 || closeMins < 0 || closeMins <= openMins) return const [];
+    var closeMins = parseTime(closeTime);
+    if (openMins < 0 || closeMins < 0) {
+      return (slots: const [], overnight: false);
+    }
+    // Same time = no slots; everything else wraps overnight as needed.
+    if (closeMins == openMins) {
+      return (slots: const [], overnight: false);
+    }
+    final overnight = closeMins < openMins;
+    if (overnight) closeMins += 24 * 60;
+
     final step = widget.slotMins + widget.breatherMins;
-    if (step <= 0) return const [];
+    if (step <= 0) return (slots: const [], overnight: overnight);
+
     final slots = <String>[];
     var start = openMins;
     while (start + widget.slotMins <= closeMins) {
-      String fmt(int total) {
-        final h = total ~/ 60;
-        final m = total % 60;
-        final suffix = h < 12 ? 'am' : 'pm';
-        final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
-        return m == 0
-            ? '$h12$suffix'
-            : '$h12:${m.toString().padLeft(2, '0')}$suffix';
-      }
-
-      slots.add('${fmt(start)} – ${fmt(start + widget.slotMins)}');
+      slots.add('${_fmt(start)} – ${_fmt(start + widget.slotMins)}');
       start += step;
     }
-    return slots;
+    return (slots: slots, overnight: overnight);
+  }
+
+  String _fmt(int totalMins) {
+    final wrapped = totalMins % (24 * 60);
+    final h = wrapped ~/ 60;
+    final m = wrapped % 60;
+    final suffix = h < 12 ? 'am' : 'pm';
+    final h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h);
+    return m == 0
+        ? '$h12$suffix'
+        : '$h12:${m.toString().padLeft(2, '0')}$suffix';
   }
 
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
-    final slots = _computeSlots();
-    if (slots.isEmpty) return const SizedBox.shrink();
+    final result = _computeSlots();
+    if (result.slots.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Slot preview · ${slots.length} session${slots.length == 1 ? '' : 's'}',
-          style: TextStyle(
-            color: _c.muted,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          children: [
+            Text(
+              'Slot preview · ${result.slots.length} session${result.slots.length == 1 ? '' : 's'}',
+              style: TextStyle(
+                color: _c.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (result.overnight) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _c.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'OVERNIGHT',
+                  style: TextStyle(
+                    color: _c.accent,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
-        SizedBox(height: 8),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: slots
+          children: result.slots
               .map((s) => Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -2732,19 +2794,17 @@ class _TimePickerField extends StatelessWidget {
         (parts.length == 2 ? (int.tryParse(parts[0]) ?? 9) : 9).clamp(0, 23);
     final initMin =
         (parts.length == 2 ? (int.tryParse(parts[1]) ?? 0) : 0).clamp(0, 59);
-    await showModalBottomSheet(
+    final result = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _TimeWheelSheet(
+      builder: (_) => _AmPmTimeSheet(
+        title: '$label?',
         initialHour: initHour,
         initialMinute: initMin,
-        onPicked: (h, m) {
-          controller.text =
-              '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-        },
       ),
     );
+    if (result != null) controller.text = result;
   }
 
   @override
@@ -2795,6 +2855,292 @@ class _TimePickerField extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ─── AM/PM time bottom sheet ──────────────────────────────────────────────────
+
+/// Picks a time using 12-hour format with explicit AM/PM toggle. Reduces the
+/// 4 AM vs 4 PM confusion that the 24-hour wheel caused for owners typing
+/// "4 PM" but landing on "04:00" (= 4 AM).
+///
+/// Returns a "HH:mm" 24-hour string (or null on cancel) so callers stay
+/// compatible with existing storage.
+class _AmPmTimeSheet extends StatefulWidget {
+  const _AmPmTimeSheet({
+    required this.title,
+    required this.initialHour,
+    required this.initialMinute,
+  });
+
+  final String title;
+  final int initialHour; // 0–23
+  final int initialMinute; // 0–59
+
+  @override
+  State<_AmPmTimeSheet> createState() => _AmPmTimeSheetState();
+}
+
+class _AmPmTimeSheetState extends State<_AmPmTimeSheet> {
+  late int _hour12; // 1–12
+  late int _minute; // 0–55 in 5-min steps
+  late bool _isPm;
+  late FixedExtentScrollController _hourCtrl;
+  late FixedExtentScrollController _minCtrl;
+
+  static final _mins = List.generate(12, (i) => i * 5);
+  static const _hours = <int>[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+  @override
+  void initState() {
+    super.initState();
+    final h = widget.initialHour;
+    _isPm = h >= 12;
+    final h12 = h % 12 == 0 ? 12 : h % 12;
+    _hour12 = h12;
+    _minute = _mins.reduce(
+        (a, b) => (a - widget.initialMinute).abs() <= (b - widget.initialMinute).abs() ? a : b);
+    _hourCtrl = FixedExtentScrollController(initialItem: _hours.indexOf(_hour12));
+    _minCtrl = FixedExtentScrollController(initialItem: _mins.indexOf(_minute));
+  }
+
+  @override
+  void dispose() {
+    _hourCtrl.dispose();
+    _minCtrl.dispose();
+    super.dispose();
+  }
+
+  int get _hour24 {
+    if (_hour12 == 12) return _isPm ? 12 : 0;
+    return _isPm ? _hour12 + 12 : _hour12;
+  }
+
+  String get _result =>
+      '${_hour24.toString().padLeft(2, '0')}:${_minute.toString().padLeft(2, '0')}';
+
+  String get _readable {
+    final mm = _minute.toString().padLeft(2, '0');
+    return '$_hour12:$mm ${_isPm ? 'PM' : 'AM'}';
+  }
+
+  String get _periodHint {
+    // Helps owners sanity-check that the AM/PM matches their intent.
+    final h = _hour24;
+    if (h < 5) return 'Late night';
+    if (h < 12) return 'Morning';
+    if (h == 12) return 'Noon';
+    if (h < 17) return 'Afternoon';
+    if (h < 21) return 'Evening';
+    return 'Night';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: _c.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 4),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: _c.line,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // Title + Done row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: TextStyle(
+                        color: _c.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, _result),
+                    style: TextButton.styleFrom(
+                      foregroundColor: _c.accent,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('Done',
+                        style:
+                            TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+            ),
+            // Readable preview
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    _readable,
+                    style: TextStyle(
+                      color: _c.accent,
+                      fontSize: 32,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.6,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _periodHint,
+                    style: TextStyle(
+                      color: _c.muted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // AM / PM segmented
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Expanded(child: _ampmTile(label: 'AM', selected: !_isPm)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _ampmTile(label: 'PM', selected: _isPm)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Hour & minute wheels
+            SizedBox(
+              height: 180,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    height: 50,
+                    margin: const EdgeInsets.symmetric(horizontal: 60),
+                    decoration: BoxDecoration(
+                      color: _c.deep.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ListWheelScrollView.useDelegate(
+                          controller: _hourCtrl,
+                          itemExtent: 50,
+                          perspective: 0.002,
+                          diameterRatio: 2.0,
+                          physics: const FixedExtentScrollPhysics(),
+                          onSelectedItemChanged: (i) =>
+                              setState(() => _hour12 = _hours[i]),
+                          childDelegate: ListWheelChildBuilderDelegate(
+                            childCount: _hours.length,
+                            builder: (_, i) {
+                              final sel = _hour12 == _hours[i];
+                              return Center(
+                                child: Text(
+                                  _hours[i].toString(),
+                                  style: TextStyle(
+                                    color: sel ? _c.text : _c.muted,
+                                    fontSize: sel ? 26 : 20,
+                                    fontWeight:
+                                        sel ? FontWeight.w900 : FontWeight.w500,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      Text(':',
+                          style: TextStyle(
+                              color: _c.text,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900)),
+                      Expanded(
+                        child: ListWheelScrollView.useDelegate(
+                          controller: _minCtrl,
+                          itemExtent: 50,
+                          perspective: 0.002,
+                          diameterRatio: 2.0,
+                          physics: const FixedExtentScrollPhysics(),
+                          onSelectedItemChanged: (i) =>
+                              setState(() => _minute = _mins[i]),
+                          childDelegate: ListWheelChildBuilderDelegate(
+                            childCount: _mins.length,
+                            builder: (_, i) {
+                              final sel = _minute == _mins[i];
+                              return Center(
+                                child: Text(
+                                  _mins[i].toString().padLeft(2, '0'),
+                                  style: TextStyle(
+                                    color: sel ? _c.text : _c.muted,
+                                    fontSize: sel ? 26 : 20,
+                                    fontWeight:
+                                        sel ? FontWeight.w900 : FontWeight.w500,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _ampmTile({required String label, required bool selected}) {
+    return GestureDetector(
+      onTap: () => setState(() => _isPm = label == 'PM'),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? _c.accent : _c.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: selected ? _c.accent : _c.line, width: 1.4),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? _c.onAccent : _c.text,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.0,
+          ),
+        ),
+      ),
     );
   }
 }

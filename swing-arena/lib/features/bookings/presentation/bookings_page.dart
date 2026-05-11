@@ -261,11 +261,12 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               widget.arenas.expand((a) => a.units).toList(),
           selectedId: _selectedUnitId,
           onSelect: (id) => setState(() => _selectedUnitId = id),
-          activeDate: _selectedDateKey == null
-              ? null
-              : DateFormat('yyyy-MM-dd').parse(_selectedDateKey!),
-          onPickDate: _pickFilterDate,
-          onClearDate: () => setState(() => _selectedDateKey = null),
+          activeFilterLabel: _activeFilterChipLabel(),
+          onPickDate: _openCalendarFilter,
+          onClearDate: () => setState(() {
+            _selectedDateKey = null;
+            _selectedMonthKey = null;
+          }),
         ),
         const SizedBox(height: 8),
         Container(height: 1, color: _c.border),
@@ -403,6 +404,110 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     );
   }
 
+  /// Short label rendered inside the calendar-filter chip when a filter is
+  /// active. Date filter shows "12 May", month filter shows "May 2026".
+  String? _activeFilterChipLabel() {
+    if (_selectedDateKey != null) {
+      return DateFormat('d MMM')
+          .format(DateFormat('yyyy-MM-dd').parse(_selectedDateKey!));
+    }
+    if (_selectedMonthKey != null) {
+      final d = DateTime(
+        int.parse(_selectedMonthKey!.substring(0, 4)),
+        int.parse(_selectedMonthKey!.substring(5, 7)),
+      );
+      return DateFormat('MMM yyyy').format(d);
+    }
+    return null;
+  }
+
+  Future<void> _openCalendarFilter() async {
+    final scheme = Theme.of(context).colorScheme;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: scheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final hasAny = _selectedDateKey != null || _selectedMonthKey != null;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: scheme.outline,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Filter bookings by',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _FilterChoiceTile(
+                  icon: Icons.event_rounded,
+                  label: 'A specific date',
+                  helper: _selectedDateKey == null
+                      ? null
+                      : DateFormat('EEE, d MMM yyyy').format(
+                          DateFormat('yyyy-MM-dd').parse(_selectedDateKey!)),
+                  onTap: () => Navigator.pop(ctx, 'date'),
+                ),
+                const SizedBox(height: 8),
+                _FilterChoiceTile(
+                  icon: Icons.calendar_view_month_rounded,
+                  label: 'A whole month',
+                  helper: _selectedMonthKey == null
+                      ? null
+                      : DateFormat('MMMM yyyy').format(DateTime(
+                          int.parse(_selectedMonthKey!.substring(0, 4)),
+                          int.parse(_selectedMonthKey!.substring(5, 7)),
+                        )),
+                  onTap: () => Navigator.pop(ctx, 'month'),
+                ),
+                if (hasAny) ...[
+                  const SizedBox(height: 8),
+                  _FilterChoiceTile(
+                    icon: Icons.close_rounded,
+                    label: 'Clear filter',
+                    onTap: () => Navigator.pop(ctx, 'clear'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case 'date':
+        await _pickFilterDate();
+      case 'month':
+        await _pickFilterMonth();
+      case 'clear':
+        setState(() {
+          _selectedDateKey = null;
+          _selectedMonthKey = null;
+        });
+    }
+  }
+
   Future<void> _pickFilterDate() async {
     final now = DateTime.now();
     final initial = _selectedDateKey != null
@@ -418,8 +523,29 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     if (picked == null) return;
     setState(() {
       _selectedDateKey = DateFormat('yyyy-MM-dd').format(picked);
-      // Day filter overrides month filter.
       _selectedMonthKey = null;
+    });
+  }
+
+  Future<void> _pickFilterMonth() async {
+    final now = DateTime.now();
+    final initialYear = _selectedMonthKey != null
+        ? int.parse(_selectedMonthKey!.substring(0, 4))
+        : now.year;
+    final initialMonth = _selectedMonthKey != null
+        ? int.parse(_selectedMonthKey!.substring(5, 7))
+        : now.month;
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _MonthPickerDialog(
+        initialYear: initialYear,
+        initialMonth: initialMonth,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selectedMonthKey = picked;
+      _selectedDateKey = null;
     });
   }
 
@@ -1298,7 +1424,7 @@ class _UnitFilterBar extends StatelessWidget {
     required this.units,
     required this.selectedId,
     required this.onSelect,
-    this.activeDate,
+    this.activeFilterLabel,
     this.onPickDate,
     this.onClearDate,
   });
@@ -1306,9 +1432,9 @@ class _UnitFilterBar extends StatelessWidget {
   final String selectedId;
   final ValueChanged<String> onSelect;
 
-  /// When non-null, a date filter is active — the calendar button renders
-  /// in its "applied" state with the date label.
-  final DateTime? activeDate;
+  /// Short label rendered inside the calendar filter chip when a date OR
+  /// month filter is active. `null` → chip stays in icon-only state.
+  final String? activeFilterLabel;
   final VoidCallback? onPickDate;
   final VoidCallback? onClearDate;
 
@@ -1365,7 +1491,7 @@ class _UnitFilterBar extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(0, 0, 12, 0),
               child: _DateFilterChip(
-                activeDate: activeDate,
+                activeLabel: activeFilterLabel,
                 onTap: onPickDate!,
                 onClear: onClearDate,
               ),
@@ -1378,18 +1504,18 @@ class _UnitFilterBar extends StatelessWidget {
 
 class _DateFilterChip extends StatelessWidget {
   const _DateFilterChip({
-    required this.activeDate,
+    required this.activeLabel,
     required this.onTap,
     this.onClear,
   });
-  final DateTime? activeDate;
+  final String? activeLabel;
   final VoidCallback onTap;
   final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
-    final active = activeDate != null;
+    final active = activeLabel != null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1416,7 +1542,7 @@ class _DateFilterChip extends StatelessWidget {
               if (active) ...[
                 const SizedBox(width: 6),
                 Text(
-                  DateFormat('d MMM').format(activeDate!),
+                  activeLabel!,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
@@ -1431,6 +1557,221 @@ class _DateFilterChip extends StatelessWidget {
                       size: 14, color: _c.onAccent),
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterChoiceTile extends StatelessWidget {
+  const _FilterChoiceTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.helper,
+  });
+  final IconData icon;
+  final String label;
+  final String? helper;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: _c.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _c.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _c.accent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: _c.accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: _c.text,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                    if (helper != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        helper!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _c.muted,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 18, color: _c.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MonthPickerDialog extends StatefulWidget {
+  const _MonthPickerDialog({
+    required this.initialYear,
+    required this.initialMonth,
+  });
+  final int initialYear;
+  final int initialMonth;
+
+  @override
+  State<_MonthPickerDialog> createState() => _MonthPickerDialogState();
+}
+
+class _MonthPickerDialogState extends State<_MonthPickerDialog> {
+  late int _year;
+
+  @override
+  void initState() {
+    super.initState();
+    _year = widget.initialYear;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final now = DateTime.now();
+    return Dialog(
+      backgroundColor: _c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Pick a month',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: _c.text,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _year--),
+                    icon: Icon(Icons.chevron_left_rounded, color: _c.text),
+                  ),
+                  Text(
+                    '$_year',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: _c.text,
+                    ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _year++),
+                    icon: Icon(Icons.chevron_right_rounded, color: _c.text),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: 12,
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 2,
+                ),
+                itemBuilder: (_, i) {
+                  final monthNum = i + 1;
+                  final isCurrent =
+                      _year == now.year && monthNum == now.month;
+                  final isSelected = _year == widget.initialYear &&
+                      monthNum == widget.initialMonth;
+                  final monthLabel = DateFormat('MMM')
+                      .format(DateTime(_year, monthNum, 1));
+                  return InkWell(
+                    onTap: () => Navigator.pop(
+                      context,
+                      '$_year-${monthNum.toString().padLeft(2, '0')}',
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? _c.accent
+                            : (isCurrent
+                                ? _c.accent.withValues(alpha: 0.10)
+                                : _c.bg),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected ? _c.accent : _c.border,
+                          width: isSelected ? 1.4 : 1,
+                        ),
+                      ),
+                      child: Text(
+                        monthLabel,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: isSelected
+                              ? _c.onAccent
+                              : (isCurrent ? _c.accent : _c.text),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+              ),
             ],
           ),
         ),
