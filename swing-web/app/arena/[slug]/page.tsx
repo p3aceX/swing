@@ -334,7 +334,7 @@ export default async function ArenaPage({ params }: PageProps) {
           --pass-line:     rgba(10,11,10,0.22);
           --pass-line-2:   rgba(10,11,10,0.10);
           --pass-accent:   #0A0B0A;
-          --pass-live-dot: #C8FF3E;
+          --pass-live-dot: var(--accent);
           /* Inverse tokens — used when bg flips to ink (selected state) */
           --pass-muted-inv: rgba(244,242,235,0.62);
           --pass-line-inv:  rgba(244,242,235,0.30);
@@ -346,7 +346,7 @@ export default async function ArenaPage({ params }: PageProps) {
           --pass-line:     rgba(244,244,241,0.22);
           --pass-line-2:   rgba(244,244,241,0.10);
           --pass-accent:   #F4F4F1;
-          --pass-live-dot: #C8FF3E;
+          --pass-live-dot: var(--accent);
           /* Inverse tokens — when bg flips to ink (=white in dark), inverse=black */
           --pass-muted-inv: rgba(10,11,10,0.62);
           --pass-line-inv:  rgba(10,11,10,0.30);
@@ -965,8 +965,8 @@ export default async function ArenaPage({ params }: PageProps) {
           font-size: 9px;
           font-weight: 700;
           letter-spacing: 0.14em;
-          background: #C8FF3E;
-          color: #0A0B0A;
+          background: var(--accent);
+          color: var(--accent-ink);
           padding: 2px 6px;
           border-radius: 0;
         }
@@ -975,13 +975,13 @@ export default async function ArenaPage({ params }: PageProps) {
           border-style: dashed;
         }
         .opt.opt-highlight .opt-icon {
-          background: #C8FF3E;
-          color: #0A0B0A;
-          border-color: #C8FF3E;
+          background: var(--accent);
+          color: var(--accent-ink);
+          border-color: var(--accent);
         }
         .opt.opt-highlight.selected .opt-icon {
-          background: #C8FF3E;
-          color: #0A0B0A;
+          background: var(--accent);
+          color: var(--accent-ink);
         }
 
         /* ── Bulk booking screen ────────────────────────────────────────── */
@@ -1056,8 +1056,8 @@ export default async function ArenaPage({ params }: PageProps) {
           background: var(--pass-line-2);
         }
         .bulk-cal-cell.selected {
-          background: #C8FF3E;
-          color: #0A0B0A;
+          background: var(--accent);
+          color: var(--accent-ink);
           font-weight: 800;
         }
         .bulk-cal-cell.past {
@@ -1092,8 +1092,8 @@ export default async function ArenaPage({ params }: PageProps) {
         .pass .cta-info { flex: 1; min-width: 0; }
         .pass .cta-btn.cta-primary,
         .pass .cta-btn[type="submit"] {
-          background: #C8FF3E;
-          color: #0A0B0A;
+          background: var(--accent);
+          color: var(--accent-ink);
           padding: 16px 26px;
           font-size: 13px;
           letter-spacing: 0.22em;
@@ -1102,7 +1102,7 @@ export default async function ArenaPage({ params }: PageProps) {
           box-shadow: 3px 3px 0 0 var(--pass-ink);
         }
         .pass .cta-btn.cta-primary::after,
-        .pass .cta-btn[type="submit"]::after { color: #0A0B0A; }
+        .pass .cta-btn[type="submit"]::after { color: var(--accent-ink); }
         .pass .cta-btn.cta-primary:disabled {
           background: var(--pass-line-2);
           color: var(--pass-muted);
@@ -1114,15 +1114,15 @@ export default async function ArenaPage({ params }: PageProps) {
         }
         /* All other submit/CTA buttons (form, pass, bulk) get the same primary treatment */
         .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary) {
-          background: #C8FF3E;
-          color: #0A0B0A;
+          background: var(--accent);
+          color: var(--accent-ink);
           padding: 14px 22px;
           font-size: 12.5px;
           letter-spacing: 0.18em;
           font-weight: 800;
           box-shadow: 3px 3px 0 0 var(--pass-ink);
         }
-        .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary)::after { color: #0A0B0A; }
+        .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary)::after { color: var(--accent-ink); }
         .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary):disabled {
           background: var(--pass-line-2);
           color: var(--pass-muted);
@@ -1173,7 +1173,7 @@ export default async function ArenaPage({ params }: PageProps) {
           height: 5px;
           border-radius: 50%;
         }
-        .pass .cal-day .dot-green { background: #22c55e; }
+        .pass .cal-day .dot-green { background: var(--accent); }
         .pass .cal-day .dot-amber { background: #f59e0b; }
         .pass .cal-day .dot-label {
           font-family: var(--font-geist-mono);
