@@ -98,6 +98,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [step, setStep] = useState<"date" | "slot" | "form" | "done" | "pass" | "bulk">("date");
+  const [selectedTypeCategory, setSelectedTypeCategory] = useState<string | null>(null);
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   // monthly pass state
   const [passDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
@@ -725,143 +726,183 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
 
   // ── Screen 1: Unit + Net type ───────────────────────────────────────────
   if (step === "date") {
-    return (
-      <div style={{ background: "var(--paper)", minHeight: "100%", paddingBottom: 140 }}>
-        <StepBar />
+    // Group units by unitType (treat identical units as one bookable category)
+    const categories = (() => {
+      const groups = new Map<string, typeof units>();
+      for (const u of units) {
+        const key = u.unitType ?? "OTHER";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(u);
+      }
+      return Array.from(groups.entries()).map(([type, items]) => {
+        const isNet = type === "CRICKET_NET" || type === "INDOOR_NET";
+        const isGr = GROUND_TYPES.has(type);
+        const first = items[0];
+        // Aggregate variant counts across all units of this type
+        const variantMap = new Map<string, { type: string; label: string; pricePaise: number; count: number }>();
+        if (isNet) {
+          for (const u of items) {
+            for (const v of u.netVariants ?? []) {
+              const ex = variantMap.get(v.type);
+              if (ex) ex.count += 1;
+              else variantMap.set(v.type, {
+                type: v.type,
+                label: v.label,
+                pricePaise: v.pricePaise ?? 0,
+                count: 1,
+              });
+            }
+          }
+        }
+        const variants = Array.from(variantMap.values());
+        const bundles: { mins: number; label: string; paise: number }[] = [];
+        if (isGr) {
+          if (first.price4HrPaise) bundles.push({ mins: 240, label: "4 HR", paise: first.price4HrPaise });
+          if (first.price8HrPaise) bundles.push({ mins: 480, label: "8 HR", paise: first.price8HrPaise });
+          if (first.priceFullDayPaise) bundles.push({ mins: 720, label: "FULL DAY", paise: first.priceFullDayPaise });
+        }
+        const displayName =
+          type === "CRICKET_NET" ? (items.length > 1 ? "NETS" : "NET") :
+          type === "INDOOR_NET"  ? "INDOOR NETS" :
+          type === "FULL_GROUND" ? "FULL GROUND" :
+          type === "HALF_GROUND" ? "HALF GROUND" :
+          type === "TURF"        ? "TURF GROUND" :
+          type === "MULTI_SPORT" ? "MULTI-SPORT" :
+          type.replace(/_/g, " ");
+        let priceLabel = "";
+        if (isNet && variants.length) {
+          const prices = variants.map(v => v.pricePaise).filter(p => p > 0);
+          if (prices.length) {
+            const lo = Math.round(Math.min(...prices) / 100);
+            const hi = Math.round(Math.max(...prices) / 100);
+            priceLabel = lo === hi ? `₹${lo}/HR` : `₹${lo}–${hi}/HR`;
+          }
+        } else if (isGr && bundles.length) {
+          const lo = Math.round(bundles[0].paise / 100);
+          const hi = Math.round(bundles[bundles.length - 1].paise / 100);
+          priceLabel = lo === hi ? `₹${lo}` : `₹${lo}–${hi}`;
+        } else if (first.pricePerHourPaise) {
+          priceLabel = `₹${Math.round(first.pricePerHourPaise / 100)}/HR`;
+        }
+        const metaLabel = isNet
+          ? `${variants.reduce((s, v) => s + v.count, 0)} SURFACES`
+          : isGr
+            ? (bundles.length ? `${bundles.length} BLOCK${bundles.length !== 1 ? "S" : ""}` : "1 GROUND")
+            : items.length > 1 ? `${items.length} UNITS` : "";
+        return { type, items, isNet, isGr, first, variants, bundles, displayName, priceLabel, metaLabel };
+      });
+    })();
 
-        {/* Unit blocks */}
-        <div style={{ padding: "32px 20px 0" }}>
-          <div className="eyebrow" style={{ marginBottom: 14 }}>Available Units</div>
-          <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0 16px 0" }} className="scrollbar-none">
-            {units.map((u) => {
-              const sel = unitId === u.id;
-              const isGr = GROUND_TYPES.has(u.unitType ?? "");
-              const ubs = [
-                u.price4HrPaise     && { label: "4 hr",     paise: u.price4HrPaise },
-                u.price8HrPaise     && { label: "8 hr",     paise: u.price8HrPaise },
-                u.priceFullDayPaise && { label: "Full day", paise: u.priceFullDayPaise },
-              ].filter(Boolean) as { label: string; paise: number }[];
-              const vp = (u.netVariants ?? []).map(v => v.pricePaise).filter((p): p is number => !!p);
-              const pLabel = isGr
-                ? ubs.length ? `₹${Math.round(ubs[0].paise / 100)} / ${ubs[0].label}` : null
-                : vp.length
-                  ? (() => { const lo = Math.round(Math.min(...vp)/100); const hi = Math.round(Math.max(...vp)/100); return `₹${lo===hi?lo:`${lo}–${hi}`}/hr`; })()
-                  : u.pricePerHourPaise ? `₹${Math.round(u.pricePerHourPaise/100)}/hr` : null;
-              return (
-                <button key={u.id} onClick={() => handleUnitChange(u.id)} style={{
-                  flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "flex-start",
-                  gap: 6, padding: "14px 16px", minWidth: 140, borderRadius: "var(--r-md)",
-                  border: `1.5px solid ${sel ? "#C8FF3E" : "var(--hairline)"}`,
-                  background: sel ? "#0A0B0A" : "var(--paper-2)",
-                  cursor: "pointer", textAlign: "left", transition: "all .15s",
-                }}>
-                  <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 14, color: sel ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 }}>{u.name}</div>
-                  {u.unitType && <div style={{ font: "500 10px var(--font-ui)", color: sel ? "rgba(255,255,255,0.5)" : "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4 }}>{u.unitType.replace(/_/g, " ")}</div>}
-                  {pLabel && <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: sel ? "rgba(255,255,255,0.85)" : "var(--ink)", marginTop: 2 }}>{pLabel}</div>}
-                </button>
-              );
-            })}
+    const selectedCat = selectedTypeCategory
+      ? categories.find(c => c.type === selectedTypeCategory) ?? null
+      : null;
+
+    // ── Pane A: pick TYPE ────────────────────────────────────────────────
+    if (!selectedCat) {
+      return (
+        <div className="pass-pane">
+          <StepBar />
+          <div className="eyebrow" style={{ padding: "16px 0 10px" }}>PICK TYPE</div>
+          <div className="slot-grid">
+            {categories.map(c => (
+              <button key={c.type} className="slot" onClick={() => {
+                setSelectedTypeCategory(c.type);
+                handleUnitChange(c.first.id);
+                if (c.isNet && c.variants.length) setSelectedVariant(c.variants[0].type);
+                if (c.isGr && c.bundles.length) setDurMins(c.bundles[0].mins);
+              }}>
+                <span className="s-time">{c.displayName}</span>
+                <span className="s-meta">{c.metaLabel}</span>
+                <span className="s-price">{c.priceLabel}</span>
+              </button>
+            ))}
           </div>
+          {error && <div style={{ padding: "12px 0", font: "600 11px var(--font-geist-mono)", letterSpacing: "0.1em", textTransform: "uppercase", color: "#cc0000" }}>{error}</div>}
         </div>
+      );
+    }
 
-        {/* Booking mode + net type */}
-        {unit && (
-          <div style={{ padding: "32px 20px 0" }}>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>How to book</div>
-            <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0 14px 0" }} className="scrollbar-none">
-              {/* Book Once — always shown */}
-              {(() => {
-                const active = step === "date";
-                return (
-                  <button onClick={() => setStep("date")} style={{
-                    flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                    padding: "11px 20px", borderRadius: 999,
-                    border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
-                    background: active ? "#0A0B0A" : "var(--paper-2)",
-                    cursor: "pointer", transition: "all .15s",
-                  }}>
-                    <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: active ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap" }}>Book Once</div>
-                    {(() => {
-                      if (isGround) {
-                        const ubs = [unit.price4HrPaise, unit.price8HrPaise, unit.priceFullDayPaise].filter(Boolean) as number[];
-                        if (!ubs.length) return null;
-                        return <div style={{ font: "500 10px var(--font-ui)", color: active ? "rgba(255,255,255,0.5)" : "var(--ink-3)", whiteSpace: "nowrap" }}>from {rupeesInt(Math.min(...ubs))}</div>;
-                      }
-                      const vp = (unit.netVariants ?? []).map(v => v.pricePaise).filter((p): p is number => !!p);
-                      const base = vp.length ? Math.min(...vp) : unit.pricePerHourPaise;
-                      return base ? <div style={{ font: "500 10px var(--font-ui)", color: active ? "rgba(255,255,255,0.5)" : "var(--ink-3)", whiteSpace: "nowrap" }}>{rupeesInt(base)}/hr</div> : null;
-                    })()}
-                  </button>
-                );
-              })()}
+    // ── Pane B: pick SURFACE (nets) or BLOCK (grounds) ───────────────────
+    return (
+      <div className="pass-pane">
+        <StepBar />
+        <button className="pass-back" onClick={() => setSelectedTypeCategory(null)}>
+          ← {selectedCat.displayName}
+        </button>
 
-              {/* Monthly Pass */}
-              {unit.monthlyPassEnabled && unit.monthlyPassRatePaise && (() => {
-                const active = false;
-                return (
-                  <button onClick={() => { setStep("pass"); setGuestName(""); setGuestPhone(""); setError(""); }} style={{
-                    flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                    padding: "11px 20px", borderRadius: 999,
-                    border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
-                    background: active ? "#0A0B0A" : "var(--paper-2)",
-                    cursor: "pointer", transition: "all .15s",
-                  }}>
-                    <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: active ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap" }}>Monthly Pass</div>
-                    <div style={{ font: "500 10px var(--font-ui)", color: active ? "rgba(255,255,255,0.5)" : "var(--ink-3)" }}>{rupeesInt(unit.monthlyPassRatePaise)}/month</div>
-                  </button>
-                );
-              })()}
-
-              {/* Bulk Booking */}
-              {unit.minBulkDays && unit.bulkDayRatePaise && (() => {
-                const active = false;
-                return (
-                  <button onClick={() => { setStep("bulk"); setBulkDays(unit.minBulkDays ?? 1); setGuestName(""); setGuestPhone(""); setError(""); }} style={{
-                    flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 2,
-                    padding: "11px 20px", borderRadius: 999,
-                    border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
-                    background: active ? "#0A0B0A" : "var(--paper-2)",
-                    cursor: "pointer", transition: "all .15s",
-                  }}>
-                    <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: active ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap" }}>Bulk Booking</div>
-                    <div style={{ font: "500 10px var(--font-ui)", color: active ? "rgba(255,255,255,0.5)" : "var(--ink-3)" }}>{unit.minBulkDays}+ days · {rupeesInt(unit.bulkDayRatePaise)}/day</div>
-                  </button>
-                );
-              })()}
+        {selectedCat.isNet && selectedCat.variants.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ padding: "12px 0 10px" }}>SURFACE</div>
+            <div className="slot-grid">
+              {selectedCat.variants.map(v => (
+                <button key={v.type} className={`slot ${selectedVariant === v.type ? "selected" : ""}`}
+                  onClick={() => setSelectedVariant(v.type)}>
+                  <span className="s-time">{v.label.toUpperCase()}</span>
+                  <span className="s-meta">{v.count} AVAIL</span>
+                  <span className="s-price">{rupeesInt(v.pricePaise)}/HR</span>
+                </button>
+              ))}
             </div>
+          </>
+        )}
 
-            {/* Net variants — no label */}
-            {netVariants.length > 0 && step === "date" && (
-              <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "20px 2px 8px" }} className="scrollbar-none">
-                {netVariants.map((v) => {
-                  const active = activeVariant?.type === v.type;
-                  return (
-                    <button key={v.type} onClick={() => setSelectedVariant(v.type)} style={{
-                      flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 4,
-                      padding: "10px 16px", borderRadius: "var(--r-md)",
-                      border: `1.5px solid ${active ? "#C8FF3E" : "var(--hairline)"}`,
-                      background: active ? "#0A0B0A" : "var(--paper-2)",
-                      cursor: "pointer", transition: "all .15s",
-                    }}>
-                      <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 12, color: active ? "#C8FF3E" : "var(--ink)", whiteSpace: "nowrap" }}>{v.label}</div>
-                      {v.pricePaise && <div style={{ font: "500 10px var(--font-ui)", color: active ? "rgba(255,255,255,0.5)" : "var(--ink-3)" }}>{rupeesInt(v.pricePaise)}/hr</div>}
-                    </button>
-                  );
-                })}
-              </div>
+        {selectedCat.isGr && selectedCat.bundles.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ padding: "12px 0 10px" }}>DURATION</div>
+            <div className="slot-grid">
+              {selectedCat.bundles.map(b => (
+                <button key={b.mins} className={`slot ${durMins === b.mins ? "selected" : ""}`}
+                  onClick={() => setDurMins(b.mins)}>
+                  <span className="s-time">{b.label}</span>
+                  <span className="s-meta" />
+                  <span className="s-price">{rupeesInt(b.paise)}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Pass / Bulk shortcuts */}
+        {(selectedCat.first.monthlyPassEnabled || (selectedCat.first.minBulkDays && selectedCat.first.bulkDayRatePaise)) && (
+          <div style={{ padding: "18px 0 0", display: "flex", flexDirection: "column", gap: 6 }}>
+            {selectedCat.first.monthlyPassEnabled && selectedCat.first.monthlyPassRatePaise && (
+              <button className="pass-altlink"
+                onClick={() => { setStep("pass"); setGuestName(""); setGuestPhone(""); setError(""); }}>
+                + MONTHLY PASS · {rupeesInt(selectedCat.first.monthlyPassRatePaise)}/MO
+              </button>
+            )}
+            {selectedCat.first.minBulkDays && selectedCat.first.bulkDayRatePaise && (
+              <button className="pass-altlink"
+                onClick={() => { setStep("bulk"); setBulkDays(selectedCat.first.minBulkDays ?? 1); setGuestName(""); setGuestPhone(""); setError(""); }}>
+                + BULK · {selectedCat.first.minBulkDays}+ DAYS · {rupeesInt(selectedCat.first.bulkDayRatePaise)}/DAY
+              </button>
             )}
           </div>
         )}
 
-        {/* CTA */}
+        {error && <div style={{ padding: "12px 0", font: "600 11px var(--font-geist-mono)", letterSpacing: "0.1em", textTransform: "uppercase", color: "#cc0000" }}>{error}</div>}
+
         <div className="cta-bar">
-          <div style={{ flex: 1 }}>
-            <div className="cta-amt">{unit?.name ?? "Select a unit"}</div>
-            {activeVariant && <div className="cta-sub">{activeVariant.label}{activeVariant.pricePaise ? ` · ${rupeesInt(activeVariant.pricePaise)}/hr` : ""}</div>}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="cta-amt">
+              {selectedCat.isNet && activeVariant
+                ? `${activeVariant.label.toUpperCase()}`
+                : selectedCat.isGr && durMins
+                  ? durLabel(durMins).toUpperCase()
+                  : "—"}
+            </div>
+            <div className="cta-sub">
+              {selectedCat.isNet && activeVariant && activeVariant.pricePaise
+                ? `${selectedCat.displayName} · ${rupeesInt(activeVariant.pricePaise)}/HR`
+                : selectedCat.isGr && durMins && totalPaise
+                  ? `${selectedCat.displayName} · ${rupeesInt(totalPaise)}`
+                  : selectedCat.displayName}
+            </div>
           </div>
-          <button className="cta-btn" onClick={() => setStep("slot")}>
-            Next
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          <button className="cta-btn"
+            disabled={(selectedCat.isNet && !activeVariant) || (selectedCat.isGr && !durMins)}
+            onClick={() => setStep("slot")}>
+            Continue
           </button>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

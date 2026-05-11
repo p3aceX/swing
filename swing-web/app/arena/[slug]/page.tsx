@@ -765,14 +765,57 @@ export default async function ArenaPage({ params }: PageProps) {
           font-size: 13px;
           letter-spacing: 0.04em;
           font-weight: 600;
+          flex: 0 0 auto;
+        }
+        .pass .slot .s-meta {
+          flex: 1;
+          text-align: center;
+          font-family: var(--font-geist-mono);
+          font-size: 10.5px;
+          font-weight: 600;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          padding: 0 12px;
         }
         .pass .slot .s-price {
           font-family: var(--font-geist-mono);
           font-size: 12px;
           font-weight: 600;
           color: var(--pass-muted);
+          flex: 0 0 auto;
         }
         .pass .slot.selected .s-price { color: var(--pass-ink); }
+
+        .pass-back {
+          all: unset;
+          cursor: pointer;
+          font-family: var(--font-geist-mono);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          padding: 12px 0 4px;
+          display: inline-flex;
+          align-items: center;
+        }
+        .pass-back:hover { color: var(--pass-ink); }
+
+        .pass-altlink {
+          all: unset;
+          cursor: pointer;
+          font-family: var(--font-geist-mono);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          padding: 8px 0;
+          border-bottom: 1px dashed var(--pass-line-2);
+        }
+        .pass-altlink:hover { color: var(--pass-ink); }
+        .pass-altlink:last-child { border-bottom: none; }
 
         /* Calendar strip → mono pill-row */
         .pass .cal-strip {
