@@ -5153,8 +5153,10 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       // Multi-day toggle
       if (unit != null && bulkAvailable) ...[
         const SizedBox(height: 20),
-        InkWell(
-          borderRadius: BorderRadius.circular(12),
+        _MultiDayToggle(
+          isActive: _isMultiDay,
+          pricePerDayRupees: unit.bulkDayRatePaise! ~/ 100,
+          minDays: unit.minBulkDays ?? 0,
           onTap: () => setState(() {
             _isMultiDay = !_isMultiDay;
             _totalEdited = false;
@@ -5166,35 +5168,6 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               _customDates.clear();
             }
           }),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(children: [
-              Icon(Icons.date_range_rounded,
-                  color: _isMultiDay ? _c.accent : _c.muted, size: 18),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: Text(
-                      'Multi-Day · ₹${unit.bulkDayRatePaise! ~/ 100}/day for ${unit.minBulkDays}+ days',
-                      style: TextStyle(
-                          color: _isMultiDay ? _c.accent : _c.text,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13))),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                    color: _isMultiDay ? _c.accent : Colors.transparent,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: _isMultiDay ? _c.accent : _c.border,
-                        width: 2)),
-                child: _isMultiDay
-                    ? Icon(Icons.check_rounded, color: _c.onAccent, size: 12)
-                    : null,
-              ),
-            ]),
-          ),
         ),
       ],
 
@@ -6246,6 +6219,173 @@ class _BookingStepBar extends StatelessWidget {
                 color: _c.muted, fontSize: 11, fontWeight: FontWeight.w600)),
       ]),
     ]);
+  }
+}
+
+// ── Multi-day bulk-discount toggle ────────────────────────────────────────────
+
+class _MultiDayToggle extends StatelessWidget {
+  const _MultiDayToggle({
+    required this.isActive,
+    required this.pricePerDayRupees,
+    required this.minDays,
+    required this.onTap,
+  });
+
+  final bool isActive;
+  final int pricePerDayRupees;
+  final int minDays;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final accent = _c.accent;
+    final onAccent = _c.onAccent;
+    final tile = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        color: isActive
+            ? accent.withValues(alpha: 0.10)
+            : _c.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isActive ? accent : _c.border,
+          width: isActive ? 1.4 : 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Lead icon — primary tint when active
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: isActive
+                  ? accent
+                  : accent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.calendar_month_rounded,
+              size: 20,
+              color: isActive ? onAccent : accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Text
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Bulk rental',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.1,
+                        color: _c.text,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isActive ? accent : _c.border,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        isActive ? 'ACTIVE' : 'SAVE',
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8,
+                          color: isActive ? onAccent : _c.muted,
+                          height: 1.1,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                RichText(
+                  text: TextSpan(
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _c.muted,
+                      letterSpacing: -0.1,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: '₹$pricePerDayRupees',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: isActive ? accent : _c.text,
+                        ),
+                      ),
+                      const TextSpan(text: '/day  ·  '),
+                      TextSpan(text: 'min $minDays days'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Switch indicator
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            width: 36,
+            height: 22,
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: isActive ? accent : _c.border,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Stack(
+              children: [
+                AnimatedAlign(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  alignment: isActive
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: _c.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: isActive
+                        ? Center(
+                            child: Icon(Icons.check_rounded,
+                                size: 12, color: accent),
+                          )
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: tile,
+    );
   }
 }
 
