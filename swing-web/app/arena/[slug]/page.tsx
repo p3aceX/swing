@@ -360,6 +360,41 @@ export default async function ArenaPage({ params }: PageProps) {
           isolation: isolate;
         }
 
+        /* Desktop split: arena identity left, booking right */
+        @media (min-width: 960px) {
+          .pass-shell {
+            max-width: 1080px;
+            display: grid;
+            grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+            column-gap: 56px;
+            padding: 32px 40px 0;
+          }
+          .pass-shell > .pass-strip { grid-column: 1 / -1; }
+          .pass-shell > .pass-photo,
+          .pass-shell > .pass-id,
+          .pass-shell > .pass-meta,
+          .pass-shell > .pass-amen { grid-column: 1; }
+          .pass-shell > .pass-tear,
+          .pass-shell > .pass-body { grid-column: 2; }
+          .pass-shell > .pass-foot { grid-column: 1 / -1; }
+          /* Vertical tear divider on desktop */
+          .pass-shell .pass-tear {
+            position: absolute;
+            top: 110px;
+            bottom: 70px;
+            left: calc(50% - 4px);
+            right: auto;
+            width: 1px;
+            height: auto;
+            margin: 0;
+            background-image: repeating-linear-gradient(to bottom, var(--pass-line) 0 7px, transparent 7px 14px);
+          }
+          .pass-shell .pass-tear .pass-notch.left  { left: 50%; top: -10px; transform: translateX(-50%); }
+          .pass-shell .pass-tear .pass-notch.right { left: 50%; right: auto; top: auto; bottom: -10px; transform: translateX(-50%); }
+          .pass-photo-frame { aspect-ratio: 4 / 3; }
+          .pass-body { padding-top: 0; }
+        }
+
         /* Side perforations */
         .pass-shell::before,
         .pass-shell::after {
@@ -811,20 +846,150 @@ export default async function ArenaPage({ params }: PageProps) {
           color: var(--pass-ink);
         }
 
-        .pass-altlink {
+        /* ── Step-1 option rows ─────────────────────────────────────────── */
+        .pass-h1 {
+          font-family: var(--font-geist-sans);
+          font-size: 22px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          line-height: 1.1;
+          margin: 10px 0 4px;
+          color: var(--pass-ink);
+        }
+        .pass-sub {
+          font-family: var(--font-geist-sans);
+          font-size: 13px;
+          color: var(--pass-muted);
+          margin-bottom: 16px;
+          line-height: 1.4;
+        }
+
+        .opt-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin: 4px 0 0;
+        }
+
+        .opt {
           all: unset;
           cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          padding: 14px 16px;
+          border: 1px solid var(--pass-line);
+          background: var(--pass-paper);
+          color: var(--pass-ink);
+          transition: background 0.12s ease, border-color 0.12s ease;
+        }
+        .opt:hover { background: var(--pass-line-2); }
+        .opt.selected {
+          background: var(--pass-ink);
+          color: var(--pass-paper);
+          border-color: var(--pass-ink);
+        }
+        .opt.selected .opt-sub { color: rgba(244,244,241,0.6); }
+        .opt.selected .opt-price { color: var(--pass-paper); }
+
+        .opt-icon {
+          flex: 0 0 auto;
+          width: 38px;
+          height: 38px;
+          display: inline-grid;
+          place-items: center;
+          border: 1px dashed var(--pass-line);
+          color: var(--pass-ink);
+        }
+        .opt.selected .opt-icon {
+          border-color: rgba(244,244,241,0.4);
+          color: var(--pass-paper);
+        }
+
+        .opt-body {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+        .opt-name {
+          font-family: var(--font-geist-sans);
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .opt-sub {
+          font-family: var(--font-geist-sans);
+          font-size: 12px;
+          color: var(--pass-muted);
+          line-height: 1.3;
+        }
+        .opt-price {
+          flex: 0 0 auto;
+          font-family: var(--font-geist-mono);
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          color: var(--pass-ink);
+          white-space: nowrap;
+        }
+        .opt-badge {
+          font-family: var(--font-geist-mono);
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          background: #C8FF3E;
+          color: #0A0B0A;
+          padding: 2px 6px;
+          border-radius: 0;
+        }
+        .opt.opt-highlight {
+          border-color: var(--pass-ink);
+          border-style: dashed;
+        }
+        .opt.opt-highlight .opt-icon {
+          background: #C8FF3E;
+          color: #0A0B0A;
+          border-color: #C8FF3E;
+        }
+        .opt.opt-highlight.selected .opt-icon {
+          background: #C8FF3E;
+          color: #0A0B0A;
+        }
+
+        .opt-err {
+          margin-top: 12px;
+          padding: 10px 12px;
           font-family: var(--font-geist-mono);
           font-size: 11px;
-          font-weight: 600;
-          letter-spacing: 0.14em;
+          font-weight: 700;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
-          color: var(--pass-muted);
-          padding: 8px 0;
-          border-bottom: 1px dashed var(--pass-line-2);
+          color: #cc0000;
+          border: 1px solid rgba(204,0,0,0.4);
         }
-        .pass-altlink:hover { color: var(--pass-ink); }
-        .pass-altlink:last-child { border-bottom: none; }
+
+        /* ── Strong filled CTA button (next-step highlight) ─────────────── */
+        .pass .cta-info { flex: 1; min-width: 0; }
+        .pass .cta-btn.cta-primary {
+          background: var(--pass-ink);
+          color: var(--pass-paper);
+          padding: 14px 22px;
+          font-size: 12.5px;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          font-weight: 800;
+        }
+        .pass .cta-btn.cta-primary::after { color: var(--pass-paper); }
+        .pass .cta-btn.cta-primary:disabled {
+          background: var(--pass-line-2);
+          color: var(--pass-muted);
+        }
 
         /* Calendar strip → mono pill-row */
         .pass .cal-strip {

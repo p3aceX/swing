@@ -83,6 +83,44 @@ function shortDate(s: string) {
   return { day: String(d.getDate()), wd: ["SUN","MON","TUE","WED","THU","FRI","SAT"][d.getDay()] };
 }
 
+// ── Inline icon glyphs (Lucide-ish, stroke=currentColor) ──────────────────
+const sv = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+const IconNet     = (<svg {...sv}><path d="M4 4v16M9 4v16M14 4v16M19 4v16M4 9h16M4 14h16M4 19h16"/></svg>);
+const IconGround  = (<svg {...sv}><ellipse cx="12" cy="12" rx="9" ry="6"/><circle cx="12" cy="12" r="2.2"/></svg>);
+const IconTurf    = (<svg {...sv}><path d="M3 18l3-4M7 18l3-4M11 18l3-4M15 18l3-4M19 18l2-3"/><path d="M3 14l3-4M7 14l3-4M11 14l3-4M15 14l3-4M19 14l2-3"/></svg>);
+const IconCement  = (<svg {...sv}><rect x="3" y="4" width="8" height="6"/><rect x="13" y="4" width="8" height="6"/><rect x="3" y="14" width="8" height="6"/><rect x="13" y="14" width="8" height="6"/></svg>);
+const IconMat     = (<svg {...sv}><rect x="3" y="9" width="18" height="6" rx="1"/><path d="M6 12h12"/></svg>);
+const IconClock4  = (<svg {...sv}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>);
+const IconClock8  = (<svg {...sv}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l-3.5 4"/></svg>);
+const IconSun     = (<svg {...sv}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>);
+const IconMonthly = (<svg {...sv}><rect x="3" y="5" width="18" height="16" rx="1.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>);
+const IconBulk    = (<svg {...sv}><rect x="3" y="3" width="14" height="6"/><rect x="5" y="9.5" width="14" height="6"/><rect x="7" y="16" width="14" height="6"/></svg>);
+
+function variantIcon(type: string) {
+  const t = type.toUpperCase();
+  if (t === "TURF") return IconTurf;
+  if (t === "CEMENT") return IconCement;
+  if (t === "MAT") return IconMat;
+  return IconNet;
+}
+function variantSub(type: string) {
+  const t = type.toUpperCase();
+  if (t === "TURF") return "Premium playing surface";
+  if (t === "CEMENT") return "Standard practice surface";
+  if (t === "MAT") return "Soft mat · spinner friendly";
+  return "Standard surface";
+}
+function bundleIcon(mins: number) {
+  if (mins <= 240) return IconClock4;
+  if (mins <= 480) return IconClock8;
+  return IconSun;
+}
+function bundleSub(mins: number) {
+  if (mins <= 240) return "Half a session · perfect for friendlies";
+  if (mins <= 480) return "Longer session · double-header";
+  return "All-day rental · 12+ hours";
+}
+
 export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, arenaName = "", address, latitude, longitude, phone, openTime, closeTime }: Props) {
   const today = getToday();
   const [unitId, setUnitId] = useState(units[0]?.id ?? "");
@@ -802,85 +840,113 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
       return (
         <div className="pass-pane">
           <StepBar />
-          <div className="eyebrow" style={{ padding: "16px 0 10px" }}>PICK TYPE</div>
-          <div className="slot-grid">
+          <div className="pass-h1">Choose your court</div>
+          <div className="pass-sub">Pick a type to see available surfaces and pricing.</div>
+          <div className="opt-list">
             {categories.map(c => (
-              <button key={c.type} className="slot" onClick={() => {
+              <button key={c.type} className="opt" onClick={() => {
                 setSelectedTypeCategory(c.type);
                 handleUnitChange(c.first.id);
                 if (c.isNet && c.variants.length) setSelectedVariant(c.variants[0].type);
                 if (c.isGr && c.bundles.length) setDurMins(c.bundles[0].mins);
               }}>
-                <span className="s-time">{c.displayName}</span>
-                <span className="s-price">{c.priceLabel}</span>
+                <span className="opt-icon">{c.isNet ? IconNet : c.isGr ? IconGround : IconNet}</span>
+                <span className="opt-body">
+                  <span className="opt-name">{c.displayName}</span>
+                  <span className="opt-sub">
+                    {c.isNet ? "Cricket nets · book by the hour" :
+                     c.isGr  ? "Full ground · book by the block" :
+                     "Court · book by the hour"}
+                  </span>
+                </span>
+                <span className="opt-price">{c.priceLabel}</span>
               </button>
             ))}
           </div>
-          {error && <div style={{ padding: "12px 0", font: "600 11px var(--font-geist-mono)", letterSpacing: "0.1em", textTransform: "uppercase", color: "#cc0000" }}>{error}</div>}
+          {error && <div className="opt-err">{error}</div>}
         </div>
       );
     }
 
     // ── Pane B: pick SURFACE (nets) or BLOCK (grounds) ───────────────────
+    const passEnabled = selectedCat.first.monthlyPassEnabled && (selectedCat.first.monthlyPassRatePaise ?? 0) > 0;
+    const bulkEnabled = (selectedCat.first.minBulkDays ?? 0) > 0 && (selectedCat.first.bulkDayRatePaise ?? 0) > 0;
+
     return (
       <div className="pass-pane">
         <StepBar />
-        <button className="pass-back" onClick={() => setSelectedTypeCategory(null)}>
-          ← {selectedCat.displayName}
-        </button>
+        <button className="pass-back" onClick={() => setSelectedTypeCategory(null)}>← BACK</button>
+        <div className="pass-h1">{selectedCat.isNet ? "Pick surface" : "Pick duration"}</div>
+        <div className="pass-sub">{selectedCat.displayName} · choose how you'd like to play.</div>
 
-        {selectedCat.isNet && selectedCat.variants.length > 0 && (
-          <>
-            <div className="eyebrow" style={{ padding: "12px 0 10px" }}>SURFACE</div>
-            <div className="slot-grid">
-              {selectedCat.variants.map(v => (
-                <button key={v.type} className={`slot ${selectedVariant === v.type ? "selected" : ""}`}
-                  onClick={() => setSelectedVariant(v.type)}>
-                  <span className="s-time">{v.label.toUpperCase()}</span>
-                  <span className="s-price">{rupeesInt(v.pricePaise)}/HR</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        <div className="opt-list">
+          {/* Net variants */}
+          {selectedCat.isNet && selectedCat.variants.map(v => (
+            <button key={v.type} className={`opt ${selectedVariant === v.type ? "selected" : ""}`}
+              onClick={() => setSelectedVariant(v.type)}>
+              <span className="opt-icon">{variantIcon(v.type)}</span>
+              <span className="opt-body">
+                <span className="opt-name">{v.label.toUpperCase()}</span>
+                <span className="opt-sub">{variantSub(v.type)}</span>
+              </span>
+              <span className="opt-price">{rupeesInt(v.pricePaise)}/HR</span>
+            </button>
+          ))}
 
-        {selectedCat.isGr && selectedCat.bundles.length > 0 && (
-          <>
-            <div className="eyebrow" style={{ padding: "12px 0 10px" }}>DURATION</div>
-            <div className="slot-grid">
-              {selectedCat.bundles.map(b => (
-                <button key={b.mins} className={`slot ${durMins === b.mins ? "selected" : ""}`}
-                  onClick={() => setDurMins(b.mins)}>
-                  <span className="s-time">{b.label}</span>
-                  <span className="s-price">{rupeesInt(b.paise)}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+          {/* Ground bundles */}
+          {selectedCat.isGr && selectedCat.bundles.map(b => (
+            <button key={b.mins} className={`opt ${durMins === b.mins ? "selected" : ""}`}
+              onClick={() => setDurMins(b.mins)}>
+              <span className="opt-icon">{bundleIcon(b.mins)}</span>
+              <span className="opt-body">
+                <span className="opt-name">{b.label}</span>
+                <span className="opt-sub">{bundleSub(b.mins)}</span>
+              </span>
+              <span className="opt-price">{rupeesInt(b.paise)}</span>
+            </button>
+          ))}
 
-        {/* Pass / Bulk shortcuts */}
-        {(selectedCat.first.monthlyPassEnabled || (selectedCat.first.minBulkDays && selectedCat.first.bulkDayRatePaise)) && (
-          <div style={{ padding: "18px 0 0", display: "flex", flexDirection: "column", gap: 6 }}>
-            {selectedCat.first.monthlyPassEnabled && selectedCat.first.monthlyPassRatePaise && (
-              <button className="pass-altlink"
-                onClick={() => { setStep("pass"); setGuestName(""); setGuestPhone(""); setError(""); }}>
-                + MONTHLY PASS · {rupeesInt(selectedCat.first.monthlyPassRatePaise)}/MO
-              </button>
-            )}
-            {selectedCat.first.minBulkDays && selectedCat.first.bulkDayRatePaise && (
-              <button className="pass-altlink"
-                onClick={() => { setStep("bulk"); setBulkDays(selectedCat.first.minBulkDays ?? 1); setGuestName(""); setGuestPhone(""); setError(""); }}>
-                + BULK · {selectedCat.first.minBulkDays}+ DAYS · {rupeesInt(selectedCat.first.bulkDayRatePaise)}/DAY
-              </button>
-            )}
-          </div>
-        )}
+          {/* Monthly Pass — for nets, inline as a row */}
+          {selectedCat.isNet && passEnabled && (
+            <button className="opt opt-highlight" onClick={() => {
+              setStep("pass"); setGuestName(""); setGuestPhone(""); setError("");
+            }}>
+              <span className="opt-icon">{IconMonthly}</span>
+              <span className="opt-body">
+                <span className="opt-name">
+                  MONTHLY PASS
+                  <span className="opt-badge">SAVE</span>
+                </span>
+                <span className="opt-sub">Fixed daily slot · ideal for regulars</span>
+              </span>
+              <span className="opt-price">{rupeesInt(selectedCat.first.monthlyPassRatePaise!)}/MO</span>
+            </button>
+          )}
 
-        {error && <div style={{ padding: "12px 0", font: "600 11px var(--font-geist-mono)", letterSpacing: "0.1em", textTransform: "uppercase", color: "#cc0000" }}>{error}</div>}
+          {/* Bulk Booking — for grounds, inline as a row */}
+          {selectedCat.isGr && bulkEnabled && (
+            <button className="opt opt-highlight" onClick={() => {
+              setStep("bulk");
+              setBulkDays(selectedCat.first.minBulkDays ?? 1);
+              setGuestName(""); setGuestPhone(""); setError("");
+            }}>
+              <span className="opt-icon">{IconBulk}</span>
+              <span className="opt-body">
+                <span className="opt-name">
+                  BULK BOOKING
+                  <span className="opt-badge">TOURNAMENT</span>
+                </span>
+                <span className="opt-sub">{selectedCat.first.minBulkDays}+ days · best for camps & events</span>
+              </span>
+              <span className="opt-price">{rupeesInt(selectedCat.first.bulkDayRatePaise!)}/DAY</span>
+            </button>
+          )}
+        </div>
+
+        {error && <div className="opt-err">{error}</div>}
 
         <div className="cta-bar">
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="cta-info">
             <div className="cta-amt">
               {selectedCat.isNet && activeVariant
                 ? `${activeVariant.label.toUpperCase()}`
@@ -890,16 +956,16 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
             </div>
             <div className="cta-sub">
               {selectedCat.isNet && activeVariant && activeVariant.pricePaise
-                ? `${selectedCat.displayName} · ${rupeesInt(activeVariant.pricePaise)}/HR`
+                ? `${rupeesInt(activeVariant.pricePaise)}/HR · payment at venue`
                 : selectedCat.isGr && durMins && totalPaise
-                  ? `${selectedCat.displayName} · ${rupeesInt(totalPaise)}`
+                  ? `${rupeesInt(totalPaise)} · payment at venue`
                   : selectedCat.displayName}
             </div>
           </div>
-          <button className="cta-btn"
+          <button className="cta-btn cta-primary"
             disabled={(selectedCat.isNet && !activeVariant) || (selectedCat.isGr && !durMins)}
             onClick={() => setStep("slot")}>
-            Continue
+            CONTINUE
           </button>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
