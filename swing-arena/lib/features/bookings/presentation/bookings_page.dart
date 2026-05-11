@@ -3698,6 +3698,7 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final arena = widget.arena;
     if (unit == null) {
       _allDaySlots = [];
+      if (kDebugMode) debugPrint('[slots] no unit selected → empty slots');
       return;
     }
 
@@ -3710,6 +3711,14 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     final increment = unit.isGround
         ? durMins
         : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
+    if (kDebugMode) {
+      debugPrint('[slots] _rebuildTimes unit=${unit.name} (${unit.id}) '
+          'isGround=${unit.isGround} '
+          'open=$openStr close=$closeStr '
+          'durMins=$durMins increment=$increment '
+          'slotIncrementMins=${unit.slotIncrementMins} '
+          'date=${_fmtDate(_selectedDate)}');
+    }
 
     List<String> _slotsForDate(DateTime date) {
       final isToday = DateUtils.isSameDay(date, DateTime.now());
@@ -3744,6 +3753,10 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     _totalEdited = false;
     _totalCtrl.clear();
     _advanceCtrl.clear();
+    if (kDebugMode) {
+      debugPrint('[slots] _rebuildTimes → ${slots.length} slots: '
+          '${slots.take(8).join(", ")}${slots.length > 8 ? ", …" : ""}');
+    }
   }
 
   String _fromMins(int mins) {
@@ -3755,7 +3768,12 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   Future<void> _loadAvailability() async {
     if (_unitId == null) {
       setState(() => _loadingAvail = false);
+      if (kDebugMode) debugPrint('[avail] no _unitId → skipping load');
       return;
+    }
+    if (kDebugMode) {
+      debugPrint('[avail] loading for arena=${widget.arena.id} '
+          'unit=$_unitId date=${_fmtDate(_selectedDate)}');
     }
     setState(() => _loadingAvail = true);
     try {
@@ -3767,6 +3785,20 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         date: _selectedDate,
         allUnits: widget.arena.units,
       );
+      if (kDebugMode) {
+        debugPrint('[avail] loaded bookings=${avail.bookings.length} '
+            'blocks=${avail.timeBlocks.length}');
+        for (final b in avail.bookings) {
+          debugPrint('[avail]   booking ${b.id}: '
+              '${b.startTime}–${b.endTime} unit=${b.unitId} '
+              'date=${b.bookingDate} status=${b.status}');
+        }
+        for (final tb in avail.timeBlocks) {
+          debugPrint('[avail]   block: ${tb.startTime}–${tb.endTime} '
+              'date=${tb.date} recurring=${tb.isRecurring} '
+              'weekdays=${tb.weekdays}');
+        }
+      }
       if (mounted)
         setState(() {
           _existingBookings = avail.bookings;
@@ -3984,6 +4016,19 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         }
         return;
       } else {
+        if (kDebugMode) {
+          debugPrint('[booking] POST createManualBooking');
+          debugPrint('[booking]   arena=${widget.arena.id} unit=$_unitId');
+          debugPrint('[booking]   date=${_fmtDate(_selectedDate)} '
+              'startTime=$_startTime endTime=$_endTime');
+          debugPrint('[booking]   durationMins=$_currentDurationMins '
+              'isFullDay=$_isFullDay isMultiDay=$_isMultiDay');
+          debugPrint('[booking]   amountPaise=$_totalPaise '
+              'advancePaise=$_advancePaise discountPaise=$_discountPaise');
+          debugPrint('[booking]   selectedSlots=$_selectedSlots');
+          debugPrint('[booking]   existingBookings on this date='
+              '${_existingBookings.length} timeBlocks=${_activeTimeBlocks.length}');
+        }
         await repo.createManualBooking(
           widget.arena.id,
           unitId: _unitId!,
