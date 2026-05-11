@@ -2666,23 +2666,34 @@ class _Perforation extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: SizedBox(
         width: 1,
-        child: LayoutBuilder(
-          builder: (context, c) {
-            const dashH = 3.0;
-            const gapH = 3.0;
-            final dashCount = (c.maxHeight / (dashH + gapH)).floor();
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                for (var i = 0; i < dashCount; i++)
-                  Container(width: 1, height: dashH, color: color),
-              ],
-            );
-          },
-        ),
+        child: CustomPaint(painter: _DashedLinePainter(color: color)),
       ),
     );
   }
+}
+
+class _DashedLinePainter extends CustomPainter {
+  const _DashedLinePainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dashH = 3.0;
+    const gapH = 3.0;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    var y = 0.0;
+    while (y < size.height) {
+      final endY = (y + dashH).clamp(0.0, size.height);
+      canvas.drawLine(Offset(0.5, y), Offset(0.5, endY), paint);
+      y += dashH + gapH;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedLinePainter old) => old.color != color;
 }
 
 // ─── Date group card ──────────────────────────────────────────────────────────
