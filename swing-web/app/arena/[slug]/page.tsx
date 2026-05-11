@@ -797,13 +797,21 @@ export default async function ArenaPage({ params }: PageProps) {
         .pass .slot::before {
           content: "○";
           position: absolute;
-          left: 0;
+          left: 8px;
           top: 50%;
           transform: translateY(-50%);
           font-size: 11px;
           color: var(--pass-muted);
         }
-        .pass .slot.selected::before { content: "●"; color: var(--pass-ink); }
+        .pass .slot.selected {
+          background: var(--accent) !important;
+          color: var(--accent-ink) !important;
+          padding-left: 30px !important;
+          padding-right: 12px !important;
+        }
+        .pass .slot.selected::before { content: "●"; color: var(--accent-ink); }
+        .pass .slot.selected .s-time,
+        .pass .slot.selected .s-price { color: var(--accent-ink) !important; }
         .pass .slot.unavailable {
           color: var(--pass-muted);
           cursor: not-allowed;
