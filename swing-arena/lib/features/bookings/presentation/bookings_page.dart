@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
@@ -129,11 +133,47 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   late DateTime _calendarMonth;
   bool _calendarExpanded = false;
 
+  // Snapshot of booking IDs seen the last time the list rendered.
+  // Anything new on the next render → "NEW" badge for ~30s.
+  Set<String> _seenIds = const <String>{};
+  final Set<String> _recentlyAddedIds = <String>{};
+  final Map<String, Timer> _badgeTimers = <String, Timer>{};
+
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _calendarMonth = DateTime(now.year, now.month);
+  }
+
+  @override
+  void dispose() {
+    for (final t in _badgeTimers.values) {
+      t.cancel();
+    }
+    _badgeTimers.clear();
+    super.dispose();
+  }
+
+  void _markNewIfNeeded(List<ArenaReservation> bookings) {
+    if (_seenIds.isEmpty) {
+      _seenIds = bookings.map((b) => b.id).toSet();
+      return;
+    }
+    final currentIds = bookings.map((b) => b.id).toSet();
+    final added = currentIds.difference(_seenIds);
+    for (final id in added) {
+      _recentlyAddedIds.add(id);
+      _badgeTimers[id]?.cancel();
+      _badgeTimers[id] = Timer(const Duration(seconds: 30), () {
+        if (!mounted) return;
+        setState(() {
+          _recentlyAddedIds.remove(id);
+          _badgeTimers.remove(id);
+        });
+      });
+    }
+    _seenIds = currentIds;
   }
 
   @override
@@ -241,12 +281,10 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                 return true;
               }).toList();
 
-              filtered.sort((a, b) {
-                final da = a.bookingDate ?? today;
-                final db = b.bookingDate ?? today;
-                final dateCmp = da.compareTo(db);
-                if (dateCmp != 0) return db.compareTo(da);
-                return b.startTime.compareTo(a.startTime);
+              // Track newly-arrived booking IDs across rebuilds so we can
+              // flash a "NEW" badge for ~30s after creation.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _markNewIfNeeded(rawBookings);
               });
 
               final groups = <String, List<ArenaReservation>>{};
@@ -256,15 +294,13 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                     : DateFormat('yyyy-MM-dd').format(b.bookingDate!);
                 groups.putIfAbsent(key, () => []).add(b);
               }
-              final todayKey = DateFormat('yyyy-MM-dd').format(today);
+              // Pure descending: latest date first → today → past, then within
+              // each date, latest start time first.
               final dateKeys = groups.keys.toList()
-                ..sort((a, b) {
-                  final isPastA = a.compareTo(todayKey) < 0;
-                  final isPastB = b.compareTo(todayKey) < 0;
-                  if (!isPastA && !isPastB) return a.compareTo(b);
-                  if (isPastA && isPastB) return b.compareTo(a);
-                  return isPastA ? 1 : -1;
-                });
+                ..sort((a, b) => b.compareTo(a));
+              for (final dk in dateKeys) {
+                groups[dk]!.sort((a, b) => b.startTime.compareTo(a.startTime));
+              }
 
               // Build the flat list: [monthHeader, ticket, ticket, monthHeader, ticket, …]
               final items = <_TicketItem>[];
@@ -313,6 +349,7 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                                 today: today,
                                 bookings: item.bookings,
                                 arenas: widget.arenas,
+                                newIds: _recentlyAddedIds,
                                 onAdd: () =>
                                     _showAddBookingSheet(context, item.date),
                                 onBookingTap: (b) => _showBookingDetail(
@@ -2399,6 +2436,7 @@ class _DateTicket extends StatelessWidget {
     required this.arenas,
     required this.onBookingTap,
     required this.onAdd,
+    this.newIds = const <String>{},
   });
 
   final DateTime date;
@@ -2407,6 +2445,7 @@ class _DateTicket extends StatelessWidget {
   final List<ArenaListing> arenas;
   final ValueChanged<ArenaReservation> onBookingTap;
   final VoidCallback onAdd;
+  final Set<String> newIds;
 
   static int _timeToMins(String t) {
     final p = t.split(':');
@@ -2504,6 +2543,7 @@ class _DateTicket extends StatelessWidget {
                       _TicketBookingRow(
                         booking: sorted[i],
                         arenas: arenas,
+                        isNew: newIds.contains(sorted[i].id),
                         onTap: () => onBookingTap(sorted[i]),
                       ),
                       if (i < sorted.length - 1)
@@ -2568,10 +2608,12 @@ class _TicketBookingRow extends StatelessWidget {
     required this.booking,
     required this.arenas,
     required this.onTap,
+    this.isNew = false,
   });
   final ArenaReservation booking;
   final List<ArenaListing> arenas;
   final VoidCallback onTap;
+  final bool isNew;
 
   @override
   Widget build(BuildContext context) {
@@ -2608,21 +2650,49 @@ class _TicketBookingRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      booking.displayName.isEmpty
-                          ? 'Guest'
-                          : booking.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        height: 1.2,
-                        color: isCancelled ? _c.muted : _c.text,
-                        decoration: isCancelled
-                            ? TextDecoration.lineThrough
-                            : null,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            booking.displayName.isEmpty
+                                ? 'Guest'
+                                : booking.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                              color: isCancelled ? _c.muted : _c.text,
+                              decoration: isCancelled
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        if (isNew) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: _c.accent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'NEW',
+                              style: TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                                color: _c.onAccent,
+                                height: 1.1,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -3938,11 +4008,46 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         );
       }
       if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) _snack('$e', err: true);
+    } catch (e, st) {
+      final msg = _humanizeBookingError(e);
+      if (kDebugMode) {
+        debugPrint('[booking] createManualBooking ERROR: $e');
+        if (e is DioException) {
+          debugPrint('[booking]   status=${e.response?.statusCode}');
+          debugPrint('[booking]   body=${e.response?.data}');
+          debugPrint('[booking]   path=${e.requestOptions.path}');
+          debugPrint('[booking]   payload=${e.requestOptions.data}');
+        }
+        debugPrint('[booking]   stack: $st');
+      }
+      if (mounted) _snack(msg, err: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _humanizeBookingError(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      final data = e.response?.data;
+      // Try to surface the backend's `{ error: { code, message } }` payload.
+      String? serverMsg;
+      if (data is Map) {
+        final nested = data['error'];
+        if (nested is Map && nested['message'] is String) {
+          serverMsg = nested['message'] as String;
+        } else if (data['message'] is String) {
+          serverMsg = data['message'] as String;
+        }
+      }
+      if (code == 409) {
+        return serverMsg ??
+            'This slot conflicts with an existing booking or block.';
+      }
+      if (serverMsg != null) return serverMsg;
+      if (code != null) return 'Request failed ($code). Try again.';
+    }
+    return '$e';
   }
 
   void _snack(String m, {bool err = false}) =>
