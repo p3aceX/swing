@@ -39,13 +39,7 @@ class RoleSelectionScreen extends ConsumerWidget {
       ),
       body: SafeArea(
         child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFEFF8F5), Colors.white],
-            ),
-          ),
+          color: theme.colorScheme.surface,
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -53,8 +47,13 @@ class RoleSelectionScreen extends ConsumerWidget {
                 padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(28),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF0F172A), Color(0xFF134E4A)],
+                  gradient: LinearGradient(
+                    colors: theme.colorScheme.brightness == Brightness.dark
+                        ? [const Color(0xFF1A0A10), theme.colorScheme.primary]
+                        : [
+                            const Color(0xFF0F172A),
+                            const Color(0xFF134E4A),
+                          ],
                   ),
                 ),
                 child: Column(
@@ -85,8 +84,8 @@ class RoleSelectionScreen extends ConsumerWidget {
                       availableProfiles.isEmpty
                           ? 'No active business profiles found yet.'
                           : 'One user can use multiple business profiles. Pick the workspace you want right now.',
-                      style: const TextStyle(
-                        color: Color(0xFFD7E1DE),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
                         height: 1.45,
                       ),
                     ),
@@ -200,10 +199,11 @@ class _RoleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(22),
         child: InkWell(
           borderRadius: BorderRadius.circular(22),
@@ -213,16 +213,9 @@ class _RoleCard extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                color: selected ? color : const Color(0xFFD8E3E0),
+                color: selected ? color : scheme.outline,
                 width: selected ? 1.4 : 1,
               ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0F0F172A),
-                  blurRadius: 12,
-                  offset: Offset(0, 6),
-                ),
-              ],
             ),
             child: Row(
               children: [
@@ -242,22 +235,25 @@ class _RoleCard extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF0F172A),
+                          color: scheme.onSurface,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         subtitle,
-                        style: const TextStyle(color: Color(0xFF64748B)),
+                        style: TextStyle(
+                            color: scheme.onSurface.withValues(alpha: 0.6)),
                       ),
                     ],
                   ),
                 ),
                 Icon(
                   selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
-                  color: selected ? color : const Color(0xFF94A3B8),
+                  color: selected
+                      ? color
+                      : scheme.onSurface.withValues(alpha: 0.5),
                 ),
               ],
             ),
@@ -275,29 +271,30 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFD8E3E0)),
+        border: Border.all(color: scheme.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'No profiles available yet',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
+              color: scheme.onSurface,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Create your first business profile to start using Swing Arena.',
             style: TextStyle(
-              color: Color(0xFF64748B),
+              color: scheme.onSurface.withValues(alpha: 0.6),
               height: 1.5,
             ),
           ),

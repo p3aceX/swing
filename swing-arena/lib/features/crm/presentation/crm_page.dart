@@ -76,24 +76,28 @@ class _CrmBodyState extends ConsumerState<_CrmBody> {
   Widget build(BuildContext context) {
     final search = ref.watch(_crmSearchProvider);
     final guestsAsync = ref.watch(_guestsProvider(_GuestsKey(widget.arena.id, search)));
+    final scheme = Theme.of(context).colorScheme;
+    final text = scheme.onSurface;
+    final muted = scheme.onSurface.withValues(alpha: 0.6);
+    final faint = scheme.onSurface.withValues(alpha: 0.45);
 
     return Container(
-      color: const Color(0xFFF3F4F6),
+      color: scheme.surfaceContainerHighest,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Header ──
           Container(
-            color: Colors.white,
+            color: scheme.surface,
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Customers',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF101828))),
+                Text('Customers',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: text)),
                 const SizedBox(height: 4),
                 Text('Walk-in & offline booking guests',
-                    style: const TextStyle(fontSize: 13, color: Color(0xFF667085), fontWeight: FontWeight.w500)),
+                    style: TextStyle(fontSize: 13, color: muted, fontWeight: FontWeight.w500)),
                 const SizedBox(height: 14),
 
                 // Arena picker (if multiple)
@@ -113,13 +117,13 @@ class _CrmBodyState extends ConsumerState<_CrmBody> {
                             duration: const Duration(milliseconds: 150),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                             decoration: BoxDecoration(
-                              color: sel ? const Color(0xFF101828) : const Color(0xFFF9FAFB),
+                              color: sel ? scheme.primary : scheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: sel ? const Color(0xFF101828) : const Color(0xFFE5E7EB)),
+                              border: Border.all(color: sel ? scheme.primary : scheme.outline),
                             ),
                             child: Text(a.name,
                                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                                    color: sel ? Colors.white : const Color(0xFF344054))),
+                                    color: sel ? scheme.onPrimary : text)),
                           ),
                         );
                       },
@@ -132,28 +136,28 @@ class _CrmBodyState extends ConsumerState<_CrmBody> {
                 TextField(
                   controller: _searchCtrl,
                   onChanged: (v) => ref.read(_crmSearchProvider.notifier).state = v,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Color(0xFF101828)),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: text),
                   decoration: InputDecoration(
                     hintText: 'Search by name or phone...',
-                    hintStyle: const TextStyle(color: Color(0xFF98A2B3), fontWeight: FontWeight.w400),
-                    prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF98A2B3), size: 20),
+                    hintStyle: TextStyle(color: faint, fontWeight: FontWeight.w400),
+                    prefixIcon: Icon(Icons.search_rounded, color: faint, size: 20),
                     suffixIcon: search.isNotEmpty
                         ? GestureDetector(
                             onTap: () {
                               _searchCtrl.clear();
                               ref.read(_crmSearchProvider.notifier).state = '';
                             },
-                            child: const Icon(Icons.close_rounded, color: Color(0xFF98A2B3), size: 18))
+                            child: Icon(Icons.close_rounded, color: faint, size: 18))
                         : null,
                     filled: true,
-                    fillColor: const Color(0xFFF9FAFB),
+                    fillColor: scheme.surfaceContainerHighest,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                        borderSide: BorderSide(color: scheme.outline)),
                     enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                        borderSide: BorderSide(color: scheme.outline)),
                     focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFF101828), width: 1.5)),
+                        borderSide: BorderSide(color: scheme.primary, width: 1.5)),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -165,7 +169,7 @@ class _CrmBodyState extends ConsumerState<_CrmBody> {
           Expanded(
             child: guestsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: Color(0xFF667085)))),
+              error: (e, _) => Center(child: Text('$e', style: TextStyle(color: muted))),
               data: (guests) {
                 if (guests.isEmpty) {
                   return _Empty(
@@ -200,7 +204,7 @@ class _CrmBodyState extends ConsumerState<_CrmBody> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _GuestDetailSheet(guest: guest, arena: widget.arena),
     );
@@ -217,14 +221,19 @@ class _GuestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = scheme.onSurface;
+    final muted = scheme.onSurface.withValues(alpha: 0.6);
+    final faint = scheme.onSurface.withValues(alpha: 0.45);
     final hasBalance = guest.balanceDuePaise > 0;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: scheme.outline),
         ),
         child: Row(
           children: [
@@ -233,13 +242,13 @@ class _GuestCard extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: const Color(0xFF101828),
+                color: scheme.primary,
                 borderRadius: BorderRadius.circular(22),
               ),
               alignment: Alignment.center,
               child: Text(
                 (guest.name.isNotEmpty ? guest.name[0] : '?').toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+                style: TextStyle(color: scheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 18),
               ),
             ),
             const SizedBox(width: 12),
@@ -250,10 +259,10 @@ class _GuestCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(guest.name,
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF101828))),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: text)),
                   const SizedBox(height: 2),
                   Text(guest.phone,
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF667085), fontWeight: FontWeight.w500)),
+                      style: TextStyle(fontSize: 12, color: muted, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 4),
                   Row(children: [
                     _Chip('${guest.totalBookings} booking${guest.totalBookings == 1 ? '' : 's'}'),
@@ -262,7 +271,8 @@ class _GuestCard extends StatelessWidget {
                     if (hasBalance) ...[
                       const SizedBox(width: 6),
                       _Chip('₹${(guest.balanceDuePaise / 100).toStringAsFixed(0)} due',
-                          color: const Color(0xFFFEF2F2), textColor: const Color(0xFFDC2626)),
+                          color: scheme.error.withValues(alpha: 0.12),
+                          textColor: scheme.error),
                     ],
                   ]),
                 ],
@@ -276,10 +286,10 @@ class _GuestCard extends StatelessWidget {
                 if (guest.lastDate != null)
                   Text(
                     DateFormat('d MMM').format(guest.lastDate!),
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF98A2B3), fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 11, color: faint, fontWeight: FontWeight.w600),
                   ),
                 const SizedBox(height: 4),
-                const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 20),
+                Icon(Icons.chevron_right_rounded, color: faint, size: 20),
               ],
             ),
           ],
@@ -297,14 +307,15 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: color ?? const Color(0xFFF3F4F6),
+        color: color ?? scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(label,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF344054))),
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textColor ?? scheme.onSurface)),
     );
   }
 }
@@ -329,6 +340,9 @@ class _GuestDetailSheetState extends ConsumerState<_GuestDetailSheet> {
     final guest = widget.guest;
     final totalRs = (guest.totalSpentPaise / 100).toStringAsFixed(0);
     final balanceRs = (guest.balanceDuePaise / 100).toStringAsFixed(0);
+    final scheme = Theme.of(context).colorScheme;
+    final text = scheme.onSurface;
+    final muted = scheme.onSurface.withValues(alpha: 0.6);
 
     return DraggableScrollableSheet(
       expand: false,
@@ -344,7 +358,7 @@ class _GuestDetailSheetState extends ConsumerState<_GuestDetailSheet> {
             child: Container(
               width: 36, height: 4,
               margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(color: const Color(0xFFE5E7EB), borderRadius: BorderRadius.circular(2)),
+              decoration: BoxDecoration(color: scheme.outline, borderRadius: BorderRadius.circular(2)),
             ),
           ),
 
@@ -352,21 +366,21 @@ class _GuestDetailSheetState extends ConsumerState<_GuestDetailSheet> {
           Row(children: [
             Container(
               width: 52, height: 52,
-              decoration: BoxDecoration(color: const Color(0xFF101828), borderRadius: BorderRadius.circular(26)),
+              decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(26)),
               alignment: Alignment.center,
               child: Text(
                 (guest.name.isNotEmpty ? guest.name[0] : '?').toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22),
+                style: TextStyle(color: scheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 22),
               ),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(guest.name,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF101828))),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: text)),
                 const SizedBox(height: 2),
                 Text(guest.phone,
-                    style: const TextStyle(fontSize: 14, color: Color(0xFF667085), fontWeight: FontWeight.w500)),
+                    style: TextStyle(fontSize: 14, color: muted, fontWeight: FontWeight.w500)),
               ]),
             ),
           ]),
@@ -384,12 +398,20 @@ class _GuestDetailSheetState extends ConsumerState<_GuestDetailSheet> {
           const SizedBox(height: 20),
 
           // ── Booking history ──
-          const Text('Booking history',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF344054))),
+          Text('Booking history',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface)),
           const SizedBox(height: 10),
           if (guest.recentBookings.isEmpty)
-            const Text('No bookings found.',
-                style: TextStyle(color: Color(0xFF98A2B3), fontSize: 13))
+            Text('No bookings found.',
+                style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.5),
+                    fontSize: 13))
           else
             ...guest.recentBookings.map((b) => _HistoryRow(booking: b, arena: widget.arena, onRefresh: _refresh)),
         ],
@@ -414,23 +436,33 @@ class _StatBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
         decoration: BoxDecoration(
-          color: highlight ? const Color(0xFFFEF2F2) : const Color(0xFFF9FAFB),
+          color: highlight
+              ? scheme.error.withValues(alpha: 0.1)
+              : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: highlight ? const Color(0xFFFCA5A5) : const Color(0xFFE5E7EB)),
+          border: Border.all(
+              color: highlight
+                  ? scheme.error.withValues(alpha: 0.4)
+                  : scheme.outline),
         ),
         child: Column(children: [
           Text(value,
               style: TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.w800,
-                  color: highlight ? const Color(0xFFDC2626) : const Color(0xFF101828))),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: highlight ? scheme.error : scheme.onSurface)),
           const SizedBox(height: 2),
           Text(label,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF667085))),
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface.withValues(alpha: 0.6))),
         ]),
       ),
     );
@@ -451,6 +483,9 @@ class _HistoryRow extends StatelessWidget {
     final balancePaise = booking.balancePaise;
     final hasBalance = balancePaise > 0;
 
+    final scheme = Theme.of(context).colorScheme;
+    final text = scheme.onSurface;
+    final muted = scheme.onSurface.withValues(alpha: 0.6);
     return GestureDetector(
       onTap: () => context
           .push(AppRoutes.bookingDetailPath(booking.id))
@@ -459,9 +494,9 @@ class _HistoryRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: scheme.outline),
         ),
         child: Row(children: [
           // Date column
@@ -470,9 +505,9 @@ class _HistoryRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(date, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF101828))),
+                Text(date, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: text)),
                 Text('${booking.startTime} – ${booking.endTime}',
-                    style: const TextStyle(fontSize: 10, color: Color(0xFF667085))),
+                    style: TextStyle(fontSize: 10, color: muted)),
               ],
             ),
           ),
@@ -480,18 +515,18 @@ class _HistoryRow extends StatelessWidget {
           // Unit
           Expanded(
             child: Text(booking.unitName ?? '—',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF344054))),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: text)),
           ),
           // Amount + balance
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text('₹${(booking.totalAmountPaise / 100).toStringAsFixed(0)}',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF101828))),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: text)),
             if (hasBalance)
               Text('₹${(balancePaise / 100).toStringAsFixed(0)} due',
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFFDC2626))),
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: scheme.error)),
           ]),
           const SizedBox(width: 6),
-          const Icon(Icons.chevron_right_rounded, color: Color(0xFFD1D5DB), size: 18),
+          Icon(Icons.chevron_right_rounded, color: scheme.onSurface.withValues(alpha: 0.4), size: 18),
         ]),
       ),
     );
@@ -507,15 +542,19 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 48, color: const Color(0xFFD0D5DD)),
+          Icon(icon, size: 48, color: scheme.onSurface.withValues(alpha: 0.3)),
           const SizedBox(height: 16),
           Text(message,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14, color: Color(0xFF667085), fontWeight: FontWeight.w500)),
+              style: TextStyle(
+                  fontSize: 14,
+                  color: scheme.onSurface.withValues(alpha: 0.6),
+                  fontWeight: FontWeight.w500)),
         ]),
       ),
     );

@@ -75,25 +75,27 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       }
     });
 
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     final pinTheme = PinTheme(
       width: 48,
       height: 56,
-      textStyle: const TextStyle(
+      textStyle: TextStyle(
         fontSize: 20,
         fontWeight: FontWeight.w900,
-        color: Color(0xFF101828),
+        color: scheme.onSurface,
       ),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFD8E2D8)),
+        border: Border.all(color: scheme.outline),
       ),
     );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: scheme.surface,
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -111,7 +113,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                           : 'Verify OTP',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineMedium?.copyWith(
-                        color: const Color(0xFF101828),
+                        color: scheme.onSurface,
                         height: 1,
                         letterSpacing: -0.8,
                         fontWeight: FontWeight.w900,
@@ -120,14 +122,15 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                     const SizedBox(height: 28),
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: scheme.surface,
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFE5E7EB)),
-                        boxShadow: const [
+                        border: Border.all(color: scheme.outline),
+                        boxShadow: [
                           BoxShadow(
-                            color: Color(0x12000000),
+                            color: Colors.black
+                                .withValues(alpha: isDark ? 0.3 : 0.07),
                             blurRadius: 28,
-                            offset: Offset(0, 14),
+                            offset: const Offset(0, 14),
                           ),
                         ],
                       ),
@@ -140,13 +143,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                                 children: [
                                   Row(
                                     children: [
-                                      const Icon(Icons.timer_outlined,
-                                          color: Color(0xFF067647), size: 18),
+                                      Icon(Icons.timer_outlined,
+                                          color: scheme.primary, size: 18),
                                       const SizedBox(width: 8),
                                       Text(
                                         'Code expires in ${_timeLabel(_secondsLeft)}',
-                                        style: const TextStyle(
-                                          color: Color(0xFF067647),
+                                        style: TextStyle(
+                                          color: scheme.primary,
                                           fontWeight: FontWeight.w900,
                                         ),
                                       ),
@@ -161,16 +164,16 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                                     focusedPinTheme: pinTheme.copyWith(
                                       decoration: pinTheme.decoration?.copyWith(
                                         border: Border.all(
-                                          color: const Color(0xFF101828),
+                                          color: scheme.primary,
                                           width: 1.5,
                                         ),
                                       ),
                                     ),
                                     submittedPinTheme: pinTheme.copyWith(
                                       decoration: pinTheme.decoration?.copyWith(
-                                        color: const Color(0xFFEAF8EE),
-                                        border: Border.all(
-                                            color: const Color(0xFF12B76A)),
+                                        color: scheme.primary
+                                            .withValues(alpha: 0.12),
+                                        border: Border.all(color: scheme.primary),
                                       ),
                                     ),
                                     onCompleted: ctl.verifyOtp,
@@ -178,8 +181,8 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                                   const SizedBox(height: 22),
                                   FilledButton(
                                     style: FilledButton.styleFrom(
-                                      backgroundColor: const Color(0xFF101828),
-                                      foregroundColor: Colors.white,
+                                      backgroundColor: scheme.primary,
+                                      foregroundColor: scheme.onPrimary,
                                       minimumSize: const Size.fromHeight(54),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(14),
@@ -193,12 +196,12 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                                         ? null
                                         : () => ctl.verifyOtp(_otpCtrl.text),
                                     child: auth.loading
-                                        ? const SizedBox(
+                                        ? SizedBox(
                                             height: 22,
                                             width: 22,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
-                                              color: Colors.white,
+                                              color: scheme.onPrimary,
                                             ),
                                           )
                                         : const Text('Verify OTP'),
@@ -251,6 +254,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
 
   Widget _nameFallback(AuthFlowState auth, AuthController ctl) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -275,20 +279,20 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
         const SizedBox(height: 16),
         FilledButton(
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF101828),
-            foregroundColor: Colors.white,
+            backgroundColor: scheme.primary,
+            foregroundColor: scheme.onPrimary,
             minimumSize: const Size.fromHeight(54),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
           onPressed: auth.loading ? null : () => ctl.submitName(_nameCtrl.text),
           child: auth.loading
-              ? const SizedBox(
+              ? SizedBox(
                   height: 22,
                   width: 22,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: scheme.onPrimary,
                   ),
                 )
               : const Text('Continue'),
@@ -309,45 +313,45 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     showDialog(
       context: screenContext,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Enable Biometric?',
-            style: TextStyle(fontWeight: FontWeight.w900)),
-        content: const Text(
-            'Use your fingerprint or face to login faster next time without waiting for OTP.'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              // skipBiometrics sets needsBiometricEnrollment=false →
-              // RouterRefreshStream fires → router redirects to dashboard.
-              ref.read(authControllerProvider.notifier).skipBiometrics();
-            },
-            child: const Text('Maybe later',
-                style: TextStyle(color: Color(0xFF667085))),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              final enabled = await ref
-                  .read(authControllerProvider.notifier)
-                  .enableBiometrics();
-              // enableBiometrics sets needsBiometricEnrollment=false on success →
-              // RouterRefreshStream fires → router redirects to dashboard.
-              if (!enabled && screenContext.mounted) {
-                ScaffoldMessenger.of(screenContext).showSnackBar(
-                  const SnackBar(
-                      content: Text('Biometric setup failed. Try again.')),
-                );
-                _showBiometricDialog(screenContext, ref);
-              }
-            },
-            child: const Text('Enable',
-                style: TextStyle(
-                    color: Color(0xFF101828), fontWeight: FontWeight.w900)),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Enable Biometric?',
+              style: TextStyle(fontWeight: FontWeight.w900)),
+          content: const Text(
+              'Use your fingerprint or face to login faster next time without waiting for OTP.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                ref.read(authControllerProvider.notifier).skipBiometrics();
+              },
+              child: Text('Maybe later',
+                  style: TextStyle(
+                      color: scheme.onSurface.withValues(alpha: 0.55))),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                final enabled = await ref
+                    .read(authControllerProvider.notifier)
+                    .enableBiometrics();
+                if (!enabled && screenContext.mounted) {
+                  ScaffoldMessenger.of(screenContext).showSnackBar(
+                    const SnackBar(
+                        content: Text('Biometric setup failed. Try again.')),
+                  );
+                  _showBiometricDialog(screenContext, ref);
+                }
+              },
+              child: Text('Enable',
+                  style: TextStyle(
+                      color: scheme.primary, fontWeight: FontWeight.w900)),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -357,11 +361,12 @@ class _TermsNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Text(
+    final scheme = Theme.of(context).colorScheme;
+    return Text(
       'By continuing, you accept the Terms & Conditions.',
       textAlign: TextAlign.center,
       style: TextStyle(
-        color: Color(0xFF667085),
+        color: scheme.onSurface.withValues(alpha: 0.55),
         fontSize: 12,
         height: 1.4,
         fontWeight: FontWeight.w600,

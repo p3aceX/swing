@@ -77,10 +77,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     });
 
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: scheme.surface,
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -96,7 +98,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       'Login',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineMedium?.copyWith(
-                        color: const Color(0xFF101828),
+                        color: scheme.onSurface,
                         height: 1,
                         letterSpacing: -0.8,
                         fontWeight: FontWeight.w900,
@@ -105,14 +107,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 28),
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: scheme.surface,
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFE5E7EB)),
-                        boxShadow: const [
+                        border: Border.all(color: scheme.outline),
+                        boxShadow: [
                           BoxShadow(
-                            color: Color(0x12000000),
+                            color: Colors.black
+                                .withValues(alpha: isDark ? 0.3 : 0.07),
                             blurRadius: 28,
-                            offset: Offset(0, 14),
+                            offset: const Offset(0, 14),
                           ),
                         ],
                       ),
@@ -121,10 +124,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
+                            Text(
                               'Mobile number',
                               style: TextStyle(
-                                color: Color(0xFF101828),
+                                color: scheme.onSurface,
                                 fontSize: 18,
                                 height: 1.2,
                                 fontWeight: FontWeight.w900,
@@ -140,22 +143,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 FilteringTextInputFormatter.digitsOnly,
                                 LengthLimitingTextInputFormatter(10),
                               ],
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 0.6,
+                                color: scheme.onSurface,
                               ),
                               decoration: InputDecoration(
                                 labelText: 'Mobile number',
                                 hintText: '98765 43210',
-                                prefixIcon: const Padding(
-                                  padding: EdgeInsets.only(left: 16, right: 10),
+                                prefixIcon: Padding(
+                                  padding: const EdgeInsets.only(
+                                      left: 16, right: 10),
                                   child: Center(
                                     widthFactor: 1,
                                     child: Text(
                                       '+91',
                                       style: TextStyle(
-                                        color: Color(0xFF101828),
+                                        color: scheme.onSurface,
                                         fontWeight: FontWeight.w900,
                                       ),
                                     ),
@@ -174,8 +179,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(height: 18),
                             FilledButton(
                               style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF101828),
-                                foregroundColor: Colors.white,
+                                backgroundColor: scheme.primary,
+                                foregroundColor: scheme.onPrimary,
                                 minimumSize: const Size.fromHeight(54),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
@@ -188,12 +193,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               onPressed:
                                   !isValid || auth.loading ? null : _onContinue,
                               child: auth.loading
-                                  ? const SizedBox(
+                                  ? SizedBox(
                                       height: 22,
                                       width: 22,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: Colors.white,
+                                        color: scheme.onPrimary,
                                       ),
                                   )
                                   : const Text('Send OTP'),
@@ -241,11 +246,12 @@ class _TermsNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Text(
+    final scheme = Theme.of(context).colorScheme;
+    return Text(
       'By continuing, you accept the Terms & Conditions.',
       textAlign: TextAlign.center,
       style: TextStyle(
-        color: Color(0xFF667085),
+        color: scheme.onSurface.withValues(alpha: 0.55),
         fontSize: 12,
         height: 1.4,
         fontWeight: FontWeight.w600,

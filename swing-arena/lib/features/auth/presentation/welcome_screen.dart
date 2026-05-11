@@ -9,17 +9,29 @@ class WelcomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final heroStart =
+        isDark ? const Color(0xFF1F1F26) : const Color(0xFFEAF7F3);
+    final heroMid =
+        isDark ? const Color(0xFF15151B) : const Color(0xFFF9FBFA);
+    // Hero card uses primary tone in both themes
+    final cardStart = isDark
+        ? const Color(0xFF1A0A10)
+        : const Color(0xFF0F172A);
+    final cardEnd = isDark ? scheme.primary : const Color(0xFF134E4A);
+    final muted = scheme.onSurface.withValues(alpha: 0.65);
 
     return PopScope(
       canPop: false,
       child: Scaffold(
         body: SafeArea(
           child: Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0xFFEAF7F3), Color(0xFFF9FBFA), Colors.white],
+                colors: [heroStart, heroMid, scheme.surface],
               ),
             ),
             child: Padding(
@@ -33,16 +45,16 @@ class WelcomeScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(36),
-                      gradient: const LinearGradient(
+                      gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [Color(0xFF0F172A), Color(0xFF134E4A)],
+                        colors: [cardStart, cardEnd],
                       ),
-                      boxShadow: const [
+                      boxShadow: [
                         BoxShadow(
-                          color: Color(0x220F172A),
+                          color: Colors.black.withValues(alpha: 0.16),
                           blurRadius: 30,
-                          offset: Offset(0, 20),
+                          offset: const Offset(0, 20),
                         ),
                       ],
                     ),
@@ -103,6 +115,7 @@ class WelcomeScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w900,
+                      color: scheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -110,7 +123,7 @@ class WelcomeScreen extends StatelessWidget {
                     'Bookings, coaching operations, staff workflows and business setup designed for academies, coaches and arenas.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: const Color(0xFF52606D),
+                      color: muted,
                     ),
                   ),
                   const SizedBox(height: 28),

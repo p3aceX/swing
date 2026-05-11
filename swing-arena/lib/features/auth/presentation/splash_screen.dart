@@ -22,8 +22,10 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = scheme.onSurface;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: scheme.surface,
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
@@ -50,11 +52,11 @@ class _SplashScreenState extends State<SplashScreen>
                               ),
                             ),
                             const SizedBox(height: 22),
-                            const Text(
+                            Text(
                               'Welcome to Arena',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: Color(0xFF101828),
+                                color: text,
                                 fontSize: 32,
                                 height: 1,
                                 letterSpacing: -0.8,
@@ -64,12 +66,12 @@ class _SplashScreenState extends State<SplashScreen>
                             const SizedBox(height: 8),
                             RichText(
                               textAlign: TextAlign.center,
-                              text: const TextSpan(
+                              text: TextSpan(
                                 children: [
                                   TextSpan(
                                     text: 'by ',
                                     style: TextStyle(
-                                      color: Color(0xFF101828),
+                                      color: text,
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -77,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   TextSpan(
                                     text: 'swing',
                                     style: TextStyle(
-                                      color: Color(0x66101828),
+                                      color: text.withValues(alpha: 0.4),
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600,
                                       letterSpacing: 0.2,
@@ -100,4 +102,3 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 }
-

@@ -9,13 +9,6 @@ import '../../../core/api/api_client.dart';
 import '../../../core/auth/session_controller.dart';
 import '../../../core/router/app_router.dart';
 
-const _bg = Color(0xFFFFFFFF);
-const _border = Color(0xFFE2E8F0);
-const _accent = Color(0xFF059669);
-const _accentDim = Color(0xFFD1FAE5);
-const _text = Color(0xFF0F172A);
-const _textSub = Color(0xFF64748B);
-
 class BiometricScreen extends ConsumerStatefulWidget {
   const BiometricScreen({super.key});
 
@@ -109,10 +102,17 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final text = scheme.onSurface;
+    final textSub = scheme.onSurface.withValues(alpha: 0.6);
+    final accent = scheme.primary;
+    final accentDim = scheme.primary.withValues(alpha: 0.12);
+    final border = scheme.outline;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: _bg,
+        backgroundColor: scheme.surface,
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -139,7 +139,7 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
                         fontFamily: 'SwingLogoFont',
                         fontSize: 28,
                         fontWeight: FontWeight.w800,
-                        color: _text,
+                        color: text,
                         letterSpacing: -1,
                         height: 1,
                       ),
@@ -152,27 +152,27 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
                   width: 100,
                   height: 100,
                   decoration: BoxDecoration(
-                    color: _accentDim,
+                    color: accentDim,
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: _accent.withValues(alpha: 0.1), width: 1),
+                        color: accent.withValues(alpha: 0.1), width: 1),
                   ),
                   child: _loading
-                      ? const Padding(
-                          padding: EdgeInsets.all(32),
+                      ? Padding(
+                          padding: const EdgeInsets.all(32),
                           child: CircularProgressIndicator(
                             strokeWidth: 2.5,
-                            color: _accent,
+                            color: accent,
                           ),
                         )
-                      : const Icon(Icons.fingerprint_rounded,
-                          color: _accent, size: 52),
+                      : Icon(Icons.fingerprint_rounded,
+                          color: accent, size: 52),
                 ),
                 const SizedBox(height: 32),
-                const Text(
+                Text(
                   'Welcome back',
                   style: TextStyle(
-                    color: _text,
+                    color: text,
                     fontSize: 24,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
@@ -183,8 +183,8 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
                   _phone != null
                       ? 'Verify identity for $_phone'
                       : 'Verify your identity to continue',
-                  style: const TextStyle(
-                      color: _textSub,
+                  style: TextStyle(
+                      color: textSub,
                       fontSize: 14.5,
                       fontWeight: FontWeight.w500),
                 ),
@@ -192,8 +192,8 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
                   const SizedBox(height: 20),
                   Text(
                     _error!,
-                    style: const TextStyle(
-                        color: Color(0xFFDC2626),
+                    style: TextStyle(
+                        color: scheme.error,
                         fontSize: 13,
                         fontWeight: FontWeight.w600),
                     textAlign: TextAlign.center,
@@ -207,9 +207,9 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
                   child: FilledButton(
                     onPressed: _loading ? null : _authenticate,
                     style: FilledButton.styleFrom(
-                      backgroundColor: _accent,
-                      disabledBackgroundColor: _border,
-                      foregroundColor: Colors.white,
+                      backgroundColor: accent,
+                      disabledBackgroundColor: border,
+                      foregroundColor: scheme.onPrimary,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -231,11 +231,11 @@ class _BiometricScreenState extends ConsumerState<BiometricScreen> {
                     child: Text(
                       'Use phone number instead',
                       style: TextStyle(
-                        color: _textSub,
+                        color: textSub,
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         decoration: TextDecoration.underline,
-                        decorationColor: _border,
+                        decorationColor: border,
                       ),
                     ),
                   ),

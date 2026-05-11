@@ -160,7 +160,7 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
                   constraints: const BoxConstraints(maxWidth: 560),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(28),
                       border: Border.all(color: scheme.outline),
                       boxShadow: const [
@@ -329,22 +329,26 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
                             FilledButton(
                               onPressed: _saving ? null : _submit,
                               child: _saving
-                                  ? const SizedBox(
+                                  ? SizedBox(
                                       height: 22,
                                       width: 22,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: Colors.white,
+                                        color:
+                                            Theme.of(context).colorScheme.onPrimary,
                                       ),
                                     )
                                   : const Text('Save and continue'),
                             ),
                             const SizedBox(height: 12),
-                            const Text(
+                            Text(
                               'By continuing, you accept the Terms & Conditions.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: Color(0xFF6B7280),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.55),
                                 fontSize: 12,
                                 height: 1.4,
                                 fontWeight: FontWeight.w600,

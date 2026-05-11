@@ -209,12 +209,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       child: FilledButton(
                         onPressed: auth.loading ? null : _goNext,
                         child: auth.loading
-                            ? const SizedBox(
+                            ? SizedBox(
                                 height: 22,
                                 width: 22,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: scheme.onPrimary,
                                 ),
                               )
                             : Text(_step == _stepCount - 1
@@ -523,14 +523,15 @@ class _StepCard extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 560),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: scheme.surface,
               borderRadius: BorderRadius.circular(28),
               border: Border.all(color: scheme.outline),
-              boxShadow: const [
+              boxShadow: [
                 BoxShadow(
-                  color: Color(0x0D0B0B0F),
+                  color: Colors.black.withValues(
+                      alpha: scheme.brightness == Brightness.dark ? 0.3 : 0.05),
                   blurRadius: 26,
-                  offset: Offset(0, 12),
+                  offset: const Offset(0, 12),
                 ),
               ],
             ),
