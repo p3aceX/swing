@@ -66,7 +66,7 @@ const API = (
 async function fetchArena(slug: string): Promise<Arena | null> {
   try {
     const res = await fetch(`${API}/public/arena/p/${encodeURIComponent(slug)}`, {
-      cache: "no-store",
+      next: { revalidate: 60 },
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { data?: Arena };
@@ -81,45 +81,6 @@ function sportLabel(s: string) {
   return t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : "Other";
 }
 
-function unitTypeLabel(type?: string) {
-  const map: Record<string, string> = {
-    FULL_GROUND: "Full ground",
-    HALF_GROUND: "Half ground",
-    CRICKET_NET: "Cricket net",
-    INDOOR_NET: "Indoor net",
-    TURF: "Turf",
-    MULTI_SPORT: "Multi-sport",
-  };
-  return map[type ?? ""] ?? "Unit";
-}
-
-function unitSurface(type?: string) {
-  const map: Record<string, string> = {
-    FULL_GROUND:
-      "repeating-linear-gradient(135deg, oklch(0.42 0.12 145) 0 10px, oklch(0.36 0.12 145) 10px 20px)",
-    HALF_GROUND:
-      "repeating-linear-gradient(135deg, oklch(0.42 0.12 145) 0 10px, oklch(0.36 0.12 145) 10px 20px)",
-    CRICKET_NET:
-      "repeating-linear-gradient(90deg, oklch(0.55 0.10 130) 0 6px, oklch(0.47 0.10 130) 6px 12px)",
-    INDOOR_NET:
-      "repeating-linear-gradient(90deg, oklch(0.48 0.08 230) 0 6px, oklch(0.40 0.08 230) 6px 12px)",
-    TURF:
-      "repeating-linear-gradient(90deg, oklch(0.62 0.14 30) 0 6px, oklch(0.53 0.14 30) 6px 12px)",
-    MULTI_SPORT:
-      "repeating-linear-gradient(90deg, oklch(0.55 0.10 260) 0 6px, oklch(0.47 0.10 260) 6px 12px)",
-  };
-
-  return (
-    map[type ?? ""] ??
-    "repeating-linear-gradient(90deg, oklch(0.55 0.10 130) 0 6px, oklch(0.48 0.10 130) 6px 12px)"
-  );
-}
-
-function rupeesPerHr(paise?: number) {
-  if (!paise) return null;
-  return `₹${Math.round(paise / 100)}/hr`;
-}
-
 function marketingDescription(arena: Arena) {
   const location = [arena.city, arena.state].filter(Boolean).join(", ");
   const sports = (arena.sports ?? []).map(sportLabel).join(", ");
@@ -127,25 +88,19 @@ function marketingDescription(arena: Arena) {
   const unitLabel = units.length
     ? `${units.length} ${units.length === 1 ? "play area" : "play areas"}`
     : "sports venue";
-  const details = [
-    "Best prices",
-    "Book arena instantly",
-    unitLabel,
-    sports,
-    location,
-  ].filter(Boolean);
-
+  const details = ["Best prices", "Book arena instantly", unitLabel, sports, location].filter(Boolean);
   return `${details.join(" · ")}. Reserve your slot instantly with live availability. Powered by Swing.`;
 }
 
-function formatTime(time?: string | null) {
+function fmt12Short(time?: string | null) {
   if (!time) return null;
   const [hourRaw, minuteRaw = "00"] = time.split(":");
   const hour = Number(hourRaw);
   if (Number.isNaN(hour)) return time;
-  const suffix = hour >= 12 ? "PM" : "AM";
+  const suffix = hour >= 12 ? "P" : "A";
   const displayHour = hour % 12 || 12;
-  return `${displayHour}:${minuteRaw.padStart(2, "0")} ${suffix}`;
+  const min = minuteRaw === "00" ? "" : `:${minuteRaw.padStart(2, "0")}`;
+  return `${displayHour}${min}${suffix}`;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -156,7 +111,6 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const location = [arena.city, arena.state].filter(Boolean).join(", ");
   const sports = (arena.sports ?? []).map(sportLabel).join(", ");
-  const units = arena.units ?? [];
   const photo = arena.photoUrls?.find(Boolean);
   const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
   const title = `Book ${arena.name}${location ? ` in ${location}` : ""} instantly`;
@@ -177,33 +131,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       "Swing arena booking",
       "sports venue booking",
     ].filter(Boolean) as string[],
-    alternates: {
-      canonical: `/arena/${canonicalSlug}`,
-    },
+    alternates: { canonical: `/arena/${canonicalSlug}` },
     robots: {
       index: true,
       follow: true,
-      googleBot: {
-        index: true,
-        follow: true,
-        "max-image-preview": "large",
-        "max-snippet": -1,
-      },
+      googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
     },
-    openGraph: {
-      title,
-      description,
-      url: `/arena/${canonicalSlug}`,
-      siteName: "Swing",
-      images: image,
-      type: "website",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: image.map((item) => item.url),
-    },
+    openGraph: { title, description, url: `/arena/${canonicalSlug}`, siteName: "Swing", images: image, type: "website" },
+    twitter: { card: "summary_large_image", title, description, images: image.map((item) => item.url) },
   };
 }
 
@@ -216,16 +151,8 @@ export default async function ArenaPage({ params }: PageProps) {
   const units = arena.units ?? [];
   const photos = arena.photoUrls?.filter(Boolean) ?? [];
   const sports = (arena.sports ?? []).filter(Boolean);
-  const city = [arena.city, arena.state].filter(Boolean).join(", ");
-  const fullAddress = [arena.address, arena.city, arena.state]
-    .filter(Boolean)
-    .join(", ");
-  const nets = units.filter(
-    (u) => u.unitType === "CRICKET_NET" || u.unitType === "INDOOR_NET"
-  ).length;
-  const grounds = units.filter(
-    (u) => u.unitType !== "CRICKET_NET" && u.unitType !== "INDOOR_NET"
-  ).length;
+  const fullAddress = [arena.address, arena.city, arena.state].filter(Boolean).join(", ");
+  const locationLine = [arena.city, arena.state].filter(Boolean).join(" · ").toUpperCase() || "INDIA";
 
   const amenities = [
     arena.hasLights    && "Floodlights",
@@ -235,8 +162,6 @@ export default async function ArenaPage({ params }: PageProps) {
     arena.hasCCTV      && "CCTV",
     arena.hasScorer    && "Scorer",
   ].filter(Boolean) as string[];
-
-  const chips = [...sports.map(sportLabel), ...amenities];
 
   // Derive opening/closing from all units (earliest open, latest close)
   const toMins = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + (m || 0); };
@@ -248,7 +173,16 @@ export default async function ArenaPage({ params }: PageProps) {
   const arenaCloseTime = unitCloseTimes.length
     ? unitCloseTimes.reduce((a, b) => toMins(a) >= toMins(b) ? a : b)
     : arena.closeTime ?? null;
-  const openText = arenaCloseTime ? `Open till ${formatTime(arenaCloseTime)}` : "Open today";
+
+  const hoursDisplay = arenaOpenTime && arenaCloseTime
+    ? `${fmt12Short(arenaOpenTime)}–${fmt12Short(arenaCloseTime)}`
+    : arenaOpenTime
+    ? `OPENS ${fmt12Short(arenaOpenTime)}`
+    : "OPEN";
+
+  const sportTop = (sports[0] ?? "SPORTS").toUpperCase();
+  const sportExtra = sports.length > 1 ? `+${sports.length - 1}` : "";
+
   const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
   const publicUrl = `https://www.swingcricketapp.com/arena/${canonicalSlug}`;
   const jsonLd = {
@@ -267,14 +201,9 @@ export default async function ArenaPage({ params }: PageProps) {
           addressRegion: arena.state || undefined,
         }
       : undefined,
-    geo:
-      arena.latitude && arena.longitude
-        ? {
-            "@type": "GeoCoordinates",
-            latitude: arena.latitude,
-            longitude: arena.longitude,
-          }
-        : undefined,
+    geo: arena.latitude && arena.longitude
+      ? { "@type": "GeoCoordinates", latitude: arena.latitude, longitude: arena.longitude }
+      : undefined,
     amenityFeature: amenities.map((name) => ({
       "@type": "LocationFeatureSpecification",
       name,
@@ -282,779 +211,658 @@ export default async function ArenaPage({ params }: PageProps) {
     })),
   };
 
-  const visibleUnits = units.slice(0, 4);
-  const extraUnits = Math.max(units.length - visibleUnits.length, 0);
-
   return (
-    <main className="arena-page">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+    <main className="pass">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <SiteNav />
 
-      <section className="arena-stage">
-        <aside className="arena-hero-card">
-          <div className="arena-photo-wrap">
-            <PhotoCarousel photos={photos} alt={arena.name} />
-          </div>
-          <div className="arena-photo-vignette" />
-          <div className="arena-photo-glow" />
+      <article className="pass-shell">
+        {/* Top barcode strip */}
+        <div className="pass-strip">
+          <span className="pass-brand">SWING / ARENA PASS</span>
+          <span className="pass-live"><i />{hoursDisplay}</span>
+        </div>
 
-          <div className="arena-top-row">
-            {(arenaOpenTime || arenaCloseTime) && (
-              <div className="arena-live-pill">
-                <span />
-                {arenaOpenTime && arenaCloseTime
-                  ? `${formatTime(arenaOpenTime)} – ${formatTime(arenaCloseTime)}`
-                  : arenaOpenTime
-                  ? `Opens ${formatTime(arenaOpenTime)}`
-                  : `Closes ${formatTime(arenaCloseTime)}`}
-              </div>
-            )}
+        {/* Venue photo panel */}
+        {photos.length > 0 && (
+          <div className="pass-photo">
+            <div className="pass-photo-cap">
+              <span>VENUE</span>
+              <span>{String(photos.length).padStart(2, "0")} FRAME{photos.length !== 1 ? "S" : ""}</span>
+            </div>
+            <div className="pass-photo-frame">
+              <PhotoCarousel photos={photos} alt={arena.name} />
+            </div>
+          </div>
+        )}
+
+        {/* Arena identity */}
+        <header className="pass-id">
+          <h1 className="pass-name">{arena.name}</h1>
+          <div className="pass-rule" />
+          <div className="pass-loc">
+            <span>{locationLine}</span>
             {arena.latitude && arena.longitude && (
               <DirectionsModal
                 name={arena.name}
-                address={fullAddress || city}
+                address={fullAddress || locationLine}
                 latitude={arena.latitude}
                 longitude={arena.longitude}
               />
             )}
           </div>
+        </header>
 
-          <div className="arena-hero-content">
-            <div className="arena-title-block">
-              <h1>{arena.name}</h1>
-              {arena.description && (
-                <p className="arena-description">{arena.description}</p>
-              )}
-            </div>
+        {/* Meta grid */}
+        <div className="pass-meta">
+          <div>
+            <span className="pass-meta-label">UNITS</span>
+            <span className="pass-meta-val">{String(units.length).padStart(2, "0")}</span>
+          </div>
+          <div>
+            <span className="pass-meta-label">SPORT</span>
+            <span className="pass-meta-val">{sportTop}{sportExtra && <em>{sportExtra}</em>}</span>
+          </div>
+          <div>
+            <span className="pass-meta-label">HOURS</span>
+            <span className="pass-meta-val">{hoursDisplay}</span>
+          </div>
+        </div>
 
-            <div className="arena-info-rows">
-              {sports.length > 0 && (
-                <div className="arena-info-row">
-                  <span className="arena-info-label">Sports Available</span>
-                  <div className="arena-chip-row">
-                    {sports.map(sportLabel).map((s) => <span key={s}>{s}</span>)}
-                  </div>
-                </div>
-              )}
-              {amenities.length > 0 && (
-                <div className="arena-info-row">
-                  <span className="arena-info-label">Facilities</span>
-                  <div className="arena-chip-row">
-                    {amenities.map((a) => <span key={a}>{a}</span>)}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="arena-bottom-grid">
-              {visibleUnits.length > 0 && (
-                <div className="arena-unit-strip">
-                  {visibleUnits.map((unit) => (
-                    <div key={unit.id} className="arena-unit-card">
-                      <i style={{ background: unitSurface(unit.unitType) }} />
-                      <span>
-                        <b>{unit.name}</b>
-                        <small>
-                          {unitTypeLabel(unit.unitType)}
-                          {(() => {
-                            const vs = (unit.netVariants ?? []).map(v => v.pricePaise).filter((p): p is number => !!p);
-                            if (vs.length) {
-                              const lo = Math.round(Math.min(...vs) / 100);
-                              const hi = Math.round(Math.max(...vs) / 100);
-                              return ` · ₹${lo === hi ? lo : `${lo}–${hi}`}/hr`;
-                            }
-                            const isGr = ["FULL_GROUND","HALF_GROUND"].includes(unit.unitType ?? "");
-                            if (isGr) {
-                              const bulk = [unit.price4HrPaise, unit.price8HrPaise, unit.priceFullDayPaise].filter(Boolean) as number[];
-                              return bulk.length ? ` · from ₹${Math.round(Math.min(...bulk) / 100)}` : "";
-                            }
-                            return rupeesPerHr(unit.pricePerHourPaise) ? ` · ${rupeesPerHr(unit.pricePerHourPaise)}` : "";
-                          })()}
-                        </small>
-                      </span>
-                    </div>
-                  ))}
-                  {extraUnits > 0 && (
-                    <div className="arena-more-units">+{extraUnits} more</div>
-                  )}
-                </div>
-              )}
+        {amenities.length > 0 && (
+          <div className="pass-amen">
+            <span className="pass-meta-label">FACILITIES</span>
+            <div className="pass-amen-row">
+              {amenities.map((a) => <span key={a}>{a.toUpperCase()}</span>)}
             </div>
           </div>
-        </aside>
+        )}
 
-        <aside className="arena-booking-card" id="book">
-          <div className="arena-booking-head">
-            <div>
-              <p>Powered by Swing</p>
-              <h2>{units.length > 0 ? "Pick your slot" : "Reserve your slot"}</h2>
+        {/* Tear-line */}
+        <div className="pass-tear" aria-hidden="true">
+          <i className="pass-notch left" />
+          <i className="pass-notch right" />
+        </div>
+
+        {/* Booking body */}
+        <section className="pass-body">
+          {units.length > 0 ? (
+            <BookingFlow
+              units={units}
+              arenaId={arena.id}
+              arenaSlug={slug}
+              apiBaseUrl={API}
+              arenaName={arena.name}
+              address={fullAddress || locationLine || undefined}
+              latitude={arena.latitude}
+              longitude={arena.longitude}
+              phone={arena.phone}
+              openTime={arenaOpenTime}
+              closeTime={arenaCloseTime}
+            />
+          ) : (
+            <div className="pass-empty">
+              <div className="pass-meta-label">STATUS</div>
+              <div className="pass-empty-head">ONLINE BOOKING NOT LIVE</div>
+              <div className="pass-empty-sub">Call the arena directly to reserve a slot.</div>
+              {arena.phone && (
+                <a href={`tel:${arena.phone}`} className="pass-empty-call">
+                  CALL {arena.phone} ▸
+                </a>
+              )}
             </div>
-            <span>{openText}</span>
-          </div>
-          <div className="arena-share-copy">
-            Best prices · Book arena instantly · Powered by Swing
-          </div>
+          )}
+        </section>
 
-          <div className="arena-booking-body">
-            {units.length > 0 ? (
-              <BookingFlow
-                units={units}
-                arenaId={arena.id}
-                arenaSlug={slug}
-                apiBaseUrl={API}
-                arenaName={arena.name}
-                address={fullAddress || city || undefined}
-                latitude={arena.latitude}
-                longitude={arena.longitude}
-                phone={arena.phone}
-                openTime={arenaOpenTime}
-                closeTime={arenaCloseTime}
-              />
-            ) : (
-              <div className="arena-empty-booking">
-                <h3>Online booking is not live yet</h3>
-                <p>Call the arena directly to reserve your preferred slot.</p>
-                {arena.phone && (
-                  <a href={`tel:${arena.phone}`} className="arena-empty-call">
-                    Call {arena.phone}
-                  </a>
-                )}
-              </div>
-            )}
-          </div>
-        </aside>
-      </section>
+        {/* Bottom barcode strip */}
+        <div className="pass-foot">
+          <span>BOOK · PLAY · SWING</span>
+          <span>{arena.phone ? `T ${arena.phone}` : "SWINGCRICKETAPP.COM"}</span>
+        </div>
+      </article>
 
       <style precedence="default">{`
-        /* Light */
         :root, [data-theme="light"] {
-          --arena-bg:              #F4F2EB;
-          --arena-ink:             #0A0B0A;
-          --arena-muted:           rgba(10,11,10,0.55);
-          --arena-line:            rgba(10,11,10,0.10);
-          --arena-accent:          #C8FF3E;
-          --arena-card:            rgba(255,255,255,0.70);
-          --arena-shadow:          0 24px 90px rgba(10,11,10,0.16);
-          --arena-booking-bg:      #FFFFFF;
-          --arena-booking-border:  rgba(10,11,10,0.12);
-          --arena-price-bg:        rgba(10,11,10,0.045);
-          --arena-price-border:    rgba(10,11,10,0.06);
-          --arena-empty-bg:        rgba(255,255,255,0.55);
-          --arena-empty-border:    rgba(10,11,10,0.15);
-          --arena-mobile-nav-bg:   rgba(244,242,235,0.85);
+          --pass-paper:    #F4F2EB;
+          --pass-ink:      #0A0B0A;
+          --pass-muted:    rgba(10,11,10,0.42);
+          --pass-line:     rgba(10,11,10,0.22);
+          --pass-line-2:   rgba(10,11,10,0.10);
+          --pass-accent:   #0A0B0A;
+          --pass-live-dot: #C8FF3E;
         }
-        /* Dark */
         [data-theme="dark"] {
-          --arena-bg:              #0A0B0A;
-          --arena-ink:             #F4F4F1;
-          --arena-muted:           rgba(244,244,241,0.55);
-          --arena-line:            rgba(244,244,241,0.10);
-          --arena-accent:          #C8FF3E;
-          --arena-card:            rgba(255,255,255,0.06);
-          --arena-shadow:          0 24px 90px rgba(0,0,0,0.55);
-          --arena-booking-bg:      #111211;
-          --arena-booking-border:  rgba(255,255,255,0.10);
-          --arena-price-bg:        rgba(255,255,255,0.05);
-          --arena-price-border:    rgba(255,255,255,0.07);
-          --arena-empty-bg:        rgba(255,255,255,0.04);
-          --arena-empty-border:    rgba(255,255,255,0.12);
-          --arena-mobile-nav-bg:   rgba(10,11,10,0.88);
+          --pass-paper:    #0A0B0A;
+          --pass-ink:      #F4F4F1;
+          --pass-muted:    rgba(244,244,241,0.42);
+          --pass-line:     rgba(244,244,241,0.22);
+          --pass-line-2:   rgba(244,244,241,0.10);
+          --pass-accent:   #F4F4F1;
+          --pass-live-dot: #C8FF3E;
         }
 
-        :root {
-          --arena-radius-lg: 34px;
-          --arena-radius-md: 22px;
+        html, body { background: var(--pass-paper); }
+
+        .pass {
+          min-height: 100svh;
+          background: var(--pass-paper);
+          color: var(--pass-ink);
+          font-family: var(--font-geist-sans, "Inter Tight", system-ui, sans-serif);
+          padding-bottom: 24px;
         }
 
-        html, body {
-          overflow: hidden;
-          background: var(--arena-bg);
-          transition: background 0.35s ease, color 0.35s ease;
-        }
-
-        .arena-page {
-          height: 100svh;
-          overflow: hidden;
-          color: var(--arena-ink);
-          background:
-            radial-gradient(circle at 12% 0%, rgba(200,255,62,0.12), transparent 26rem),
-            radial-gradient(circle at 90% 10%, rgba(200,255,62,0.06), transparent 24rem),
-            var(--arena-bg);
-          font-family: var(--font-ui, Inter, ui-sans-serif, system-ui, -apple-system, sans-serif);
-          transition: background 0.35s ease, color 0.35s ease;
-        }
-
-
-        .arena-stage {
-          height: calc(100svh - 52px);
-          min-height: 0;
-          display: grid;
-          grid-template-columns: minmax(0, 1.18fr) minmax(390px, 0.82fr);
-          gap: 14px;
-          padding: 10px clamp(12px, 1.6vw, 24px) clamp(12px, 1.6vw, 24px);
-        }
-
-        .arena-hero-card,
-        .arena-booking-card {
+        .pass-shell {
           position: relative;
-          min-height: 0;
-          overflow: hidden;
-          border-radius: var(--arena-radius-lg);
-          box-shadow: var(--arena-shadow);
-        }
-
-        .arena-hero-card {
+          max-width: 540px;
+          margin: 8px auto 0;
+          padding: 22px 24px 0;
+          background: var(--pass-paper);
           isolation: isolate;
-          background: #09110a;
         }
 
-        .arena-photo-wrap,
-        .arena-photo-vignette,
-        .arena-photo-glow {
+        /* Side perforations */
+        .pass-shell::before,
+        .pass-shell::after {
+          content: "";
           position: absolute;
-          inset: 0;
-        }
-
-        .arena-photo-wrap > * {
-          height: 100%;
-        }
-
-        .arena-photo-vignette {
+          top: 12px;
+          bottom: 12px;
+          width: 0;
+          border-left: 1px dashed var(--pass-line);
           pointer-events: none;
-          background:
-            linear-gradient(180deg, rgba(0, 0, 0, 0.16) 0%, transparent 26%, rgba(0, 0, 0, 0.58) 64%, rgba(0, 0, 0, 0.92) 100%),
-            linear-gradient(90deg, rgba(0, 0, 0, 0.38) 0%, transparent 62%);
-          z-index: 1;
         }
+        .pass-shell::before { left: 14px; }
+        .pass-shell::after  { right: 14px; }
 
-        .arena-photo-glow {
-          pointer-events: none;
-          z-index: 2;
-          background: radial-gradient(circle at 20% 80%, rgba(182, 255, 69, 0.24), transparent 22rem);
-          mix-blend-mode: screen;
-        }
-
-        .arena-top-row {
-          position: absolute;
-          top: 22px;
-          left: 22px;
-          right: 22px;
-          z-index: 3;
+        /* Top barcode strip */
+        .pass-strip {
           display: flex;
-          align-items: center;
           justify-content: space-between;
-          gap: 12px;
+          align-items: center;
+          padding-bottom: 18px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 10px;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
         }
-
-        .arena-live-pill,
-        .arena-city-pill {
+        .pass-brand {
+          font-weight: 600;
+          color: var(--pass-ink);
+        }
+        .pass-live {
           display: inline-flex;
           align-items: center;
-          min-height: 34px;
-          border-radius: 999px;
-          backdrop-filter: blur(18px);
-          border: 1px solid rgba(255, 255, 255, 0.16);
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
+          gap: 7px;
+          color: var(--pass-ink);
+          font-weight: 600;
         }
-
-        .arena-live-pill {
-          gap: 8px;
-          padding: 0 13px;
-          color: #10210f;
-          background: var(--arena-accent);
-        }
-
-        .arena-live-pill span {
-          width: 7px;
-          height: 7px;
+        .pass-live i {
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
-          background: #10210f;
-          box-shadow: 0 0 0 0 rgba(16, 33, 15, 0.42);
-          animation: arenaPulse 1.35s ease-in-out infinite;
+          background: var(--pass-live-dot);
+          animation: passPulse 1.6s ease-in-out infinite;
+        }
+        @keyframes passPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.5; transform: scale(0.86); }
         }
 
-        .arena-hero-content {
+        /* Venue photo panel */
+        .pass-photo {
+          margin-bottom: 18px;
+        }
+        .pass-photo-cap {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          padding: 0 0 8px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 9.5px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+        }
+        .pass-photo-frame {
+          position: relative;
+          aspect-ratio: 16 / 9;
+          width: 100%;
+          overflow: hidden;
+          border: 1px dashed var(--pass-line);
+          background: var(--pass-line-2);
+        }
+        .pass-photo-frame > * { height: 100%; }
+        /* Corner ticks — subtle "registration marks" on the photo frame */
+        .pass-photo-frame::before,
+        .pass-photo-frame::after {
+          content: "";
           position: absolute;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          z-index: 3;
-          padding: 22px;
-          display: grid;
-          gap: 16px;
+          width: 10px;
+          height: 10px;
+          border: 1px solid var(--pass-ink);
+          z-index: 4;
+          pointer-events: none;
+        }
+        .pass-photo-frame::before {
+          top: -1px; left: -1px;
+          border-right: none; border-bottom: none;
+        }
+        .pass-photo-frame::after {
+          bottom: -1px; right: -1px;
+          border-left: none; border-top: none;
         }
 
-        .arena-metrics {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 1px;
-          overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.13);
-          border-radius: 22px;
-          background: rgba(255, 255, 255, 0.09);
-          backdrop-filter: blur(20px);
+        /* Arena identity */
+        .pass-id {
+          padding-top: 4px;
         }
-
-        .arena-metrics div {
-          min-width: 0;
-          padding: 13px 14px;
-          background: rgba(255, 255, 255, 0.045);
-        }
-
-        .arena-metrics strong,
-        .arena-metrics span {
-          display: block;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .arena-metrics strong {
-          color: white;
-          font-family: var(--font-display, ui-sans-serif);
-          font-size: clamp(18px, 2vw, 26px);
-          line-height: 0.95;
-          letter-spacing: -0.04em;
-        }
-
-        .arena-metrics span {
-          margin-top: 5px;
-          color: rgba(255, 255, 255, 0.55);
-          font-size: 9px;
+        .pass-name {
+          margin: 0;
+          font-family: var(--font-geist-sans, system-ui, sans-serif);
           font-weight: 800;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-        }
-
-        .arena-title-block p {
-          margin: 0 0 7px;
-          color: var(--arena-accent);
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.15em;
-          text-transform: uppercase;
-        }
-
-        .arena-title-block {
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
-
-        .arena-title-block h1 {
-          max-width: 900px;
-          margin: 0;
-          color: white;
-          font-family: var(--font-display, ui-sans-serif);
-          font-size: clamp(44px, 6vw, 86px);
+          font-size: clamp(44px, 11vw, 78px);
           line-height: 0.86;
-          letter-spacing: -0.065em;
-        }
-
-        .arena-location {
-          width: min(100%, 880px);
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 13px;
-          color: rgba(255, 255, 255, 0.68);
-          font-size: 13px;
-          font-weight: 650;
-          line-height: 1.35;
-        }
-
-        .arena-location span {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .arena-info-rows {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .arena-info-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .arena-info-label {
-          font-size: 9px;
-          font-weight: 900;
-          letter-spacing: 0.14em;
+          letter-spacing: -0.05em;
           text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.45);
-          white-space: nowrap;
-          flex-shrink: 0;
+          word-break: break-word;
+          hyphens: auto;
         }
-
-        .arena-chip-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
+        .pass-rule {
+          margin-top: 18px;
+          height: 1px;
+          background-image: repeating-linear-gradient(to right, var(--pass-line) 0 6px, transparent 6px 12px);
         }
-
-        .arena-chip-row span {
-          padding: 5px 11px;
-          border-radius: 999px;
-          color: rgba(255, 255, 255, 0.84);
-          background: rgba(255, 255, 255, 0.11);
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          backdrop-filter: blur(14px);
-          font-size: 11px;
-          font-weight: 700;
-        }
-
-        .arena-bottom-grid {
-          display: grid;
-          grid-template-columns: 0.76fr 1fr;
-          align-items: end;
-          gap: 16px;
-        }
-
-        .arena-description {
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-          margin: 0;
-          color: rgba(255, 255, 255, 0.66);
-          font-size: 13px;
-          line-height: 1.55;
-          font-weight: 500;
-        }
-
-        .arena-unit-strip {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 8px;
-        }
-
-        .arena-unit-card,
-        .arena-more-units {
-          min-width: 0;
-          min-height: 54px;
-          display: flex;
-          align-items: center;
-          border-radius: 18px;
-          border: 1px solid rgba(255, 255, 255, 0.13);
-          background: rgba(255, 255, 255, 0.09);
-          backdrop-filter: blur(18px);
-        }
-
-        .arena-unit-card {
-          gap: 10px;
-          padding: 9px;
-        }
-
-        .arena-unit-card i {
-          width: 38px;
-          height: 30px;
-          flex: 0 0 auto;
-          border-radius: 10px;
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-        }
-
-        .arena-unit-card span {
-          min-width: 0;
-          display: block;
-        }
-
-        .arena-unit-card b,
-        .arena-unit-card small {
-          display: block;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .arena-unit-card b {
-          color: white;
-          font-size: 12px;
-          line-height: 1.15;
-        }
-
-        .arena-unit-card small {
-          margin-top: 3px;
-          color: rgba(255, 255, 255, 0.58);
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .arena-more-units {
-          justify-content: center;
-          padding: 0 12px;
-          color: var(--arena-accent);
-          font-size: 12px;
-          font-weight: 900;
-        }
-
-        .arena-booking-card {
-          display: flex;
-          flex-direction: column;
-          border: 1px solid var(--arena-booking-border);
-          background: var(--arena-booking-bg);
-        }
-
-        .arena-booking-head {
-          flex: 0 0 auto;
+        .pass-loc {
+          margin-top: 14px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          padding: 14px 16px 12px;
-          border-bottom: 1px solid var(--arena-line);
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
         }
 
-        .arena-booking-head p {
-          display: none;
+        /* Meta grid */
+        .pass-meta {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 14px;
+          margin-top: 22px;
         }
-
-        .arena-booking-head h2 {
-          margin: 0;
-          color: var(--arena-ink);
-          font-family: var(--font-ui, ui-sans-serif);
+        .pass-meta > div {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          min-width: 0;
+        }
+        .pass-meta-label {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 9.5px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+        }
+        .pass-meta-val {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
           font-size: 16px;
           font-weight: 700;
-          line-height: 1;
-          letter-spacing: -0.02em;
-        }
-
-        .arena-booking-head > span {
-          flex: 0 0 auto;
-          padding: 5px 10px;
-          border-radius: 999px;
-          color: #14310e;
-          background: rgba(182, 255, 69, 0.64);
-          font-size: 10px;
-          font-weight: 700;
-          font-family: var(--font-ui, ui-sans-serif);
+          letter-spacing: 0.02em;
+          color: var(--pass-ink);
           white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: inline-flex;
+          align-items: baseline;
+          gap: 6px;
+        }
+        .pass-meta-val em {
+          font-style: normal;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--pass-muted);
         }
 
-        .arena-share-copy {
-          margin: 12px 16px 0;
-          padding: 10px 12px;
-          border-radius: 14px;
-          color: var(--arena-muted);
-          background: var(--arena-price-bg);
-          border: 1px solid var(--arena-price-border);
-          font: 800 10px/1.35 var(--font-ui, ui-sans-serif);
-          letter-spacing: 0.08em;
+        .pass-amen {
+          margin-top: 16px;
+        }
+        .pass-amen-row {
+          margin-top: 7px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px 14px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 10.5px;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--pass-ink);
+        }
+        .pass-amen-row span {
+          position: relative;
+        }
+        .pass-amen-row span + span::before {
+          content: "·";
+          position: absolute;
+          left: -10px;
+          color: var(--pass-muted);
+        }
+
+        /* Tear-line */
+        .pass-tear {
+          position: relative;
+          height: 1px;
+          margin: 24px -10px 18px;
+          background-image: repeating-linear-gradient(to right, var(--pass-line) 0 7px, transparent 7px 14px);
+        }
+        .pass-notch {
+          position: absolute;
+          top: 50%;
+          width: 20px;
+          height: 20px;
+          background: var(--pass-paper);
+          border: 1px dashed var(--pass-line);
+          border-radius: 50%;
+          transform: translateY(-50%);
+        }
+        .pass-notch.left  { left: -10px; }
+        .pass-notch.right { right: -10px; }
+
+        /* Body where BookingFlow mounts */
+        .pass-body {
+          min-height: 360px;
+        }
+
+        /* Empty state */
+        .pass-empty {
+          padding: 24px 0 0;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .pass-empty-head {
+          font-family: var(--font-geist-sans);
+          font-size: 22px;
+          font-weight: 800;
+          letter-spacing: -0.025em;
+          line-height: 1.15;
           text-transform: uppercase;
         }
-
-        .arena-booking-body {
-          flex: 1 1 auto;
-          min-height: 0;
-          overflow-x: hidden;
-          overflow-y: auto;
-          padding: 0;
+        .pass-empty-sub {
+          font-family: var(--font-geist-mono);
+          font-size: 12px;
+          letter-spacing: 0.04em;
+          color: var(--pass-muted);
+          max-width: 320px;
         }
-
-        .arena-booking-body > * {
-          min-height: 100%;
-        }
-
-        .arena-booking-body :global(.cta-btn),
-        .arena-booking-body :global(button) {
-          border-radius: 12px;
-        }
-
-        .arena-empty-booking {
-          height: 100%;
-          display: grid;
-          place-content: center;
-          text-align: center;
-          padding: 28px;
-          border-radius: 24px;
-          border: 1px dashed var(--arena-empty-border);
-          background: var(--arena-empty-bg);
-        }
-
-        .arena-empty-booking h3 {
-          margin: 0;
-          color: var(--arena-ink);
-          font-size: 22px;
-          letter-spacing: -0.04em;
-        }
-
-        .arena-empty-booking p {
-          max-width: 280px;
-          margin: 9px auto 18px;
-          color: var(--arena-muted);
-          font-size: 14px;
-          line-height: 1.45;
-        }
-
-        .arena-empty-call {
-          display: inline-flex;
-          justify-content: center;
-          align-items: center;
-          min-height: 46px;
-          padding: 0 18px;
-          border-radius: 999px;
-          color: #10210f;
-          background: var(--arena-accent);
+        .pass-empty-call {
+          margin-top: 14px;
+          align-self: flex-start;
+          font-family: var(--font-geist-mono);
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--pass-ink);
           text-decoration: none;
-          font-weight: 900;
+          border-bottom: 1px solid var(--pass-ink);
+          padding-bottom: 4px;
         }
 
-        @keyframes arenaPulse {
-          0% { box-shadow: 0 0 0 0 rgba(16, 33, 15, 0.42); }
-          70% { box-shadow: 0 0 0 9px rgba(16, 33, 15, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(16, 33, 15, 0); }
+        /* Bottom strip */
+        .pass-foot {
+          margin-top: 28px;
+          padding-top: 14px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-family: var(--font-geist-mono);
+          font-size: 9.5px;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          background-image: repeating-linear-gradient(to right, var(--pass-line) 0 6px, transparent 6px 12px);
+          background-size: 100% 1px;
+          background-repeat: no-repeat;
+          background-position: top;
         }
 
-        @media (max-width: 1120px) {
-          .arena-stage {
-            grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr);
-          }
-
-          .arena-bottom-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .arena-description {
-            -webkit-line-clamp: 2;
-          }
+        /* ──────────────────────────────────────────────────────────
+           Re-skin the embedded BookingFlow to match boarding-pass
+           ────────────────────────────────────────────────────────── */
+        .pass .eyebrow {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 9.5px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
         }
 
-        @media (max-width: 900px) {
-          html,
-          body,
-          .arena-page {
-            overflow: auto;
-          }
+        .pass .form-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+        .pass .form-label {
+          font-family: var(--font-geist-mono);
+          font-size: 9.5px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+        }
+        .pass .form-input {
+          border-radius: 0;
+          border: none;
+          border-bottom: 1px dashed var(--pass-line);
+          background: transparent;
+          padding: 8px 0 10px;
+          font-family: var(--font-geist-mono);
+          font-size: 14px;
+          letter-spacing: 0.02em;
+          color: var(--pass-ink);
+          width: 100%;
+          appearance: none;
+        }
+        .pass .form-input::placeholder { color: var(--pass-muted); }
+        .pass .form-input:focus { outline: none; border-bottom-color: var(--pass-ink); }
 
-          .arena-page {
-            height: auto;
-            min-height: 100svh;
-          }
+        .pass .cta-bar {
+          position: static;
+          background: transparent;
+          padding: 16px 0 6px;
+          margin-top: 18px;
+          border-top: 1px dashed var(--pass-line);
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 14px;
+        }
+        .pass .cta-amt {
+          font-family: var(--font-geist-mono);
+          font-size: 20px;
+          font-weight: 700;
+          letter-spacing: 0.01em;
+          color: var(--pass-ink);
+          line-height: 1.1;
+        }
+        .pass .cta-sub {
+          font-family: var(--font-geist-mono);
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          margin-top: 3px;
+        }
+        .pass .cta-btn {
+          all: unset;
+          cursor: pointer;
+          font-family: var(--font-geist-mono);
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--pass-ink);
+          padding: 6px 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          white-space: nowrap;
+        }
+        .pass .cta-btn::after { content: "▸"; font-size: 14px; transition: transform 0.15s ease; }
+        .pass .cta-btn:hover::after { transform: translateX(2px); }
+        .pass .cta-btn:disabled { color: var(--pass-muted); cursor: not-allowed; }
+        .pass .cta-btn:disabled::after { color: var(--pass-muted); }
+        .pass .cta-btn svg { display: none; }
 
-          .arena-nav {
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            height: 64px;
-            background: var(--arena-mobile-nav-bg);
-            backdrop-filter: blur(18px);
-          }
+        /* Slot grid → vertical mono list */
+        .pass .slot-grid {
+          display: flex !important;
+          flex-direction: column;
+          padding: 0 !important;
+          gap: 0 !important;
+          margin-top: 10px;
+        }
+        .pass .slot {
+          all: unset;
+          display: flex !important;
+          align-items: center;
+          justify-content: space-between;
+          padding: 13px 0 13px 22px !important;
+          border: none !important;
+          border-bottom: 1px dashed var(--pass-line-2) !important;
+          border-radius: 0 !important;
+          background: transparent !important;
+          font-family: var(--font-geist-mono);
+          font-size: 13px;
+          color: var(--pass-ink);
+          cursor: pointer;
+          position: relative;
+        }
+        .pass .slot::before {
+          content: "○";
+          position: absolute;
+          left: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 11px;
+          color: var(--pass-muted);
+        }
+        .pass .slot.selected::before { content: "●"; color: var(--pass-ink); }
+        .pass .slot.unavailable {
+          color: var(--pass-muted);
+          cursor: not-allowed;
+          text-decoration: line-through;
+          text-decoration-color: var(--pass-muted);
+        }
+        .pass .slot.peak::after { content: "PEAK"; font-size: 9px; letter-spacing: 0.14em; color: var(--pass-muted); margin-left: 10px; }
+        .pass .slot .badge { display: none; }
+        .pass .slot .s-time {
+          font-family: var(--font-geist-mono);
+          font-size: 13px;
+          letter-spacing: 0.04em;
+          font-weight: 600;
+        }
+        .pass .slot .s-price {
+          font-family: var(--font-geist-mono);
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--pass-muted);
+        }
+        .pass .slot.selected .s-price { color: var(--pass-ink); }
 
-          .arena-nav-links {
-            display: none;
-          }
+        /* Calendar strip → mono pill-row */
+        .pass .cal-strip {
+          display: flex;
+          gap: 0;
+          overflow-x: auto;
+          padding: 12px 0 4px;
+          scrollbar-width: none;
+          border-bottom: 1px dashed var(--pass-line-2);
+        }
+        .pass .cal-strip::-webkit-scrollbar { display: none; }
+        .pass .cal-day {
+          flex: 0 0 56px;
+          padding: 8px 0 10px;
+          text-align: center;
+          background: transparent !important;
+          border: none !important;
+          border-right: 1px dashed var(--pass-line-2) !important;
+          border-radius: 0 !important;
+          cursor: pointer;
+        }
+        .pass .cal-day:last-child { border-right: none !important; }
+        .pass .cal-day .dow {
+          font-family: var(--font-geist-mono);
+          font-size: 9px;
+          letter-spacing: 0.16em;
+          color: var(--pass-muted);
+        }
+        .pass .cal-day .dom {
+          font-family: var(--font-geist-mono);
+          font-size: 18px;
+          font-weight: 700;
+          letter-spacing: 0;
+          margin-top: 3px;
+          color: var(--pass-ink);
+        }
+        .pass .cal-day .avail { margin-top: 4px; }
+        .pass .cal-day.selected {
+          background: var(--pass-ink) !important;
+        }
+        .pass .cal-day.selected .dow,
+        .pass .cal-day.selected .dom { color: var(--pass-paper) !important; }
 
-          .arena-stage {
-            height: auto;
-            display: grid;
-            grid-template-columns: 1fr;
-            padding: 0 12px 12px;
-          }
+        /* Duration stepper → mono ± */
+        .pass .dur-stepper {
+          display: inline-flex;
+          align-items: center;
+          gap: 16px;
+          padding: 10px 0;
+          font-family: var(--font-geist-mono);
+        }
+        .pass .dur-btn {
+          all: unset;
+          width: 28px;
+          height: 28px;
+          display: inline-grid;
+          place-items: center;
+          border: 1px dashed var(--pass-line);
+          border-radius: 0;
+          font-size: 16px;
+          font-weight: 700;
+          cursor: pointer;
+          color: var(--pass-ink);
+        }
+        .pass .dur-btn:disabled { color: var(--pass-muted); cursor: not-allowed; }
+        .pass .dur-val { font-family: var(--font-geist-mono); font-size: 18px; font-weight: 700; letter-spacing: 0.02em; color: var(--pass-ink); }
+        .pass .dur-price { font-family: var(--font-geist-mono); font-size: 11px; letter-spacing: 0.12em; color: var(--pass-muted); margin-top: 2px; text-transform: uppercase; }
 
-          .arena-hero-card {
-            min-height: 590px;
-          }
-
-          .arena-booking-card {
-            min-height: 650px;
-          }
-
-          .arena-booking-body {
-            overflow: auto;
-          }
+        .pass .pay-note {
+          font-family: var(--font-geist-mono);
+          font-size: 10px;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          padding: 14px 0 6px;
         }
 
-        @media (max-width: 560px) {
-          .arena-brand span,
-          .arena-call-btn {
-            display: none;
+        /* Mobile responsiveness */
+        @media (max-width: 540px) {
+          .pass-shell {
+            padding: 18px 18px 0;
+            margin-top: 4px;
           }
-
-          .arena-nav {
-            padding-inline: 12px;
-          }
-
-          .arena-book-btn {
-            height: 38px;
-            padding: 0 15px;
-          }
-
-          .arena-hero-card {
-            min-height: 600px;
-            border-radius: 26px;
-          }
-
-          .arena-top-row {
-            top: 16px;
-            left: 16px;
-            right: 16px;
-          }
-
-          .arena-hero-content {
-            padding: 16px;
-            gap: 13px;
-          }
-
-          .arena-metrics {
-            grid-template-columns: repeat(2, 1fr);
-            border-radius: 18px;
-          }
-
-          .arena-title-block h1 {
-            font-size: 42px;
-          }
-
-          .arena-location span {
-            white-space: normal;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-          }
-
-          .arena-chip-row span:nth-child(n + 6) {
-            display: none;
-          }
-
-          .arena-unit-strip {
-            grid-template-columns: 1fr;
-          }
-
-          .arena-booking-card {
-            border-radius: 26px;
-          }
-
-          .arena-booking-head,
-          .arena-booking-price-row {
-            padding-inline: 16px;
-          }
-
-          .arena-share-copy {
-            margin-inline: 16px;
-          }
-
-          .arena-booking-head {
-            display: block;
-          }
-
-          .arena-booking-head > span {
-            display: inline-flex;
-            margin-top: 12px;
-          }
-
-          .arena-booking-body {
-            padding: 12px;
-          }
+          .pass-shell::before { left: 9px; }
+          .pass-shell::after  { right: 9px; }
+          .pass-tear { margin: 22px -7px 16px; }
+          .pass-notch.left  { left: -10px; }
+          .pass-notch.right { right: -10px; }
+          .pass-meta { gap: 8px; }
+          .pass-meta-val { font-size: 14px; }
         }
       `}</style>
     </main>
