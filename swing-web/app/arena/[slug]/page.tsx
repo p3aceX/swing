@@ -97,10 +97,10 @@ function fmt12Short(time?: string | null) {
   const [hourRaw, minuteRaw = "00"] = time.split(":");
   const hour = Number(hourRaw);
   if (Number.isNaN(hour)) return time;
-  const suffix = hour >= 12 ? "P" : "A";
+  const suffix = hour >= 12 ? "PM" : "AM";
   const displayHour = hour % 12 || 12;
   const min = minuteRaw === "00" ? "" : `:${minuteRaw.padStart(2, "0")}`;
-  return `${displayHour}${min}${suffix}`;
+  return `${displayHour}${min} ${suffix}`;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
