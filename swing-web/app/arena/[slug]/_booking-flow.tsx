@@ -812,7 +812,6 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
                 if (c.isGr && c.bundles.length) setDurMins(c.bundles[0].mins);
               }}>
                 <span className="s-time">{c.displayName}</span>
-                <span className="s-meta">{c.metaLabel}</span>
                 <span className="s-price">{c.priceLabel}</span>
               </button>
             ))}
@@ -838,7 +837,6 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
                 <button key={v.type} className={`slot ${selectedVariant === v.type ? "selected" : ""}`}
                   onClick={() => setSelectedVariant(v.type)}>
                   <span className="s-time">{v.label.toUpperCase()}</span>
-                  <span className="s-meta">{v.count} AVAIL</span>
                   <span className="s-price">{rupeesInt(v.pricePaise)}/HR</span>
                 </button>
               ))}
@@ -854,7 +852,6 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
                 <button key={b.mins} className={`slot ${durMins === b.mins ? "selected" : ""}`}
                   onClick={() => setDurMins(b.mins)}>
                   <span className="s-time">{b.label}</span>
-                  <span className="s-meta" />
                   <span className="s-price">{rupeesInt(b.paise)}</span>
                 </button>
               ))}
