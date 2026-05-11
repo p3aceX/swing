@@ -802,6 +802,15 @@ export default async function ArenaPage({ params }: PageProps) {
         }
         .pass-back:hover { color: var(--pass-ink); }
 
+        .pass-context {
+          margin-top: 6px;
+          font-family: var(--font-geist-mono);
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          color: var(--pass-ink);
+        }
+
         .pass-altlink {
           all: unset;
           cursor: pointer;

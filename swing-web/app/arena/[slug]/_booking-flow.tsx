@@ -1055,62 +1055,59 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
       <StepBar />
 
       {/* Back row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px 0" }}>
-        <button onClick={() => {
-          if (step === "form") setStep("slot");
-          else { setStep("date"); setDate(""); setSelectedStart(""); setSlotUnits([]); }
-        }}
-          style={{ width: 28, height: 28, borderRadius: "50%", border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-        </button>
-        <div style={{ fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: 13, color: "var(--ink-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {unit?.name}{activeVariant ? ` · ${activeVariant.label}` : ""}
-        </div>
-      </div>
+      {(() => {
+        const catLabel =
+          selectedTypeCategory === "CRICKET_NET" || selectedTypeCategory === "INDOOR_NET" ? "NETS" :
+          selectedTypeCategory === "FULL_GROUND" ? "FULL GROUND" :
+          selectedTypeCategory === "HALF_GROUND" ? "HALF GROUND" :
+          selectedTypeCategory === "TURF" ? "TURF GROUND" :
+          selectedTypeCategory === "MULTI_SPORT" ? "MULTI-SPORT" :
+          unit?.name?.toUpperCase() ?? "";
+        const contextParts = [
+          catLabel,
+          activeVariant?.label?.toUpperCase(),
+          isGround && durMins ? durLabel(durMins).toUpperCase() : null,
+          step === "form" && date ? fmtDateShort(date).toUpperCase() : null,
+          step === "form" && selectedStart ? `${fmt12(selectedStart)}–${fmt12(toTime(toMins(selectedStart) + durMins))}` : null,
+        ].filter(Boolean) as string[];
+        return (
+          <div style={{ padding: "10px 0 6px" }}>
+            <button className="pass-back" onClick={() => {
+              if (step === "form") setStep("slot");
+              else { setStep("date"); setDate(""); setSelectedStart(""); setSlotUnits([]); }
+            }}>← BACK</button>
+            {contextParts.length > 0 && (
+              <div className="pass-context">{contextParts.join(" · ")}</div>
+            )}
+          </div>
+        );
+      })()}
 
-      {/* ── DURATION (step 2 only) ───────────────────────────────────────────── */}
-      {step === "slot" && unit && (
-        <div style={{ padding: "16px 20px 0" }}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Duration</div>
-          {useGroundBundles ? (
-            <div style={{ display: "flex", gap: 8 }}>
-              {bundles.map((b) => (
-                <button key={b.mins} onClick={() => { setDurMins(b.mins); setSelectedStart(""); }} style={{
-                  padding: "10px 16px", borderRadius: "var(--r-md)",
-                  border: `1.5px solid ${durMins === b.mins ? "#C8FF3E" : "var(--hairline)"}`,
-                  background: durMins === b.mins ? "#0A0B0A" : "var(--paper-2)",
-                  color: durMins === b.mins ? "#C8FF3E" : "var(--ink)",
-                  cursor: "pointer", textAlign: "left", transition: "all .15s",
-                }}>
-                  <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13 }}>{b.label}</div>
-                  <div style={{ font: "500 11px var(--font-ui)", marginTop: 2, opacity: 0.65 }}>{rupeesInt(b.paise)}</div>
-                </button>
-              ))}
+      {/* ── DURATION (step 2, nets only — grounds already picked block in step 1) ── */}
+      {step === "slot" && unit && !isGround && (() => {
+        const minM = slotUnit?.minSlotMins || unit.minSlotMins || 60;
+        const rawMax = slotUnit?.maxSlotMins || unit.maxSlotMins || 0;
+        const maxM = rawMax > minM ? rawMax : 480;
+        const inc = slotUnit?.slotIncrementMins || minM;
+        if (maxM <= minM) return null; // single fixed duration — don't show stepper
+        return (
+          <div style={{ padding: "12px 0 0" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>DURATION</div>
+            <div className="dur-stepper">
+              <button className="dur-btn"
+                disabled={durMins <= minM}
+                onClick={() => { setDurMins(d => d - inc); setSelectedStart(""); }}>−</button>
+              <div>
+                <div className="dur-val">{durLabel(durMins)}</div>
+                {totalPaise > 0 && <div className="dur-price">{rupeesInt(totalPaise)}</div>}
+              </div>
+              <button className="dur-btn"
+                disabled={durMins >= maxM}
+                onClick={() => { setDurMins(d => d + inc); setSelectedStart(""); }}>+</button>
             </div>
-          ) : (
-            (() => {
-              const minM = slotUnit?.minSlotMins || unit.minSlotMins || 60;
-              const rawMax = slotUnit?.maxSlotMins || unit.maxSlotMins || 0;
-              const maxM = rawMax > minM ? rawMax : 480;
-              const inc = slotUnit?.slotIncrementMins || minM;
-              return (
-                <div className="dur-stepper">
-                  <button className="dur-btn"
-                    disabled={durMins <= minM}
-                    onClick={() => { setDurMins(d => d - inc); setSelectedStart(""); }}>−</button>
-                  <div>
-                    <div className="dur-val">{durLabel(durMins)}</div>
-                    {totalPaise > 0 && <div className="dur-price">{rupeesInt(totalPaise)}</div>}
-                  </div>
-                  <button className="dur-btn"
-                    disabled={durMins >= maxM}
-                    onClick={() => { setDurMins(d => d + inc); setSelectedStart(""); }}>+</button>
-                </div>
-              );
-            })()
-          )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* ── CONFIRM (add-ons + cancellation + summary + guest details) ─────── */}
       {step === "form" && (() => {
