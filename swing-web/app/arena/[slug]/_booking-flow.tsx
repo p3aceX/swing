@@ -2,15 +2,6 @@
 
 import { useState, useCallback, useTransition, useRef, useEffect } from "react";
 
-declare global {
-  interface Window {
-    PhonePeCheckout?: {
-      transact: (opts: { tokenUrl: string; callback?: (response: string) => void; type?: "IFRAME" | "REDIRECT" }) => void;
-      closePage?: () => void;
-    };
-  }
-}
-
 type BookedSlot = { startTime: string; endTime: string };
 type SlotUnit = {
   id: string; name: string; unitType?: string;
@@ -106,7 +97,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
   const [selectedStart, setSelectedStart] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [step, setStep] = useState<"date" | "slot" | "extras" | "form" | "done" | "pass" | "bulk">("date");
+  const [step, setStep] = useState<"date" | "slot" | "form" | "done" | "pass" | "bulk">("date");
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   // monthly pass state
   const [passDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
@@ -330,95 +321,6 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           guestPhone: guestPhone.trim(),
         };
 
-        const isPhonePeFlow = totalPaise > 0;
-        if (isPhonePeFlow) {
-          const initRes = await fetch("/api/bookings/phonepe/initiate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(bookingPayload),
-          });
-          const initData = (await initRes.json()) as {
-            success?: boolean;
-            error?: string;
-            data?: { merchantOrderId?: string; redirectUrl?: string };
-          };
-          if (!initRes.ok || !initData.success || !initData.data?.merchantOrderId || !initData.data?.redirectUrl) {
-            setError(initData.error ?? "Could not start PhonePe checkout.");
-            return;
-          }
-
-          const ensureCheckoutScript = async () => {
-            if (window.PhonePeCheckout?.transact) return true;
-            await new Promise<void>((resolve, reject) => {
-              const existing = document.querySelector('script[data-phonepe-checkout="1"]') as HTMLScriptElement | null;
-              if (existing) {
-                existing.addEventListener("load", () => resolve(), { once: true });
-                existing.addEventListener("error", () => reject(new Error("script")), { once: true });
-                return;
-              }
-              const s = document.createElement("script");
-              s.src = "https://mercury.phonepe.com/web/bundle/checkout.js";
-              s.async = true;
-              s.dataset.phonepeCheckout = "1";
-              s.onload = () => resolve();
-              s.onerror = () => reject(new Error("script"));
-              document.head.appendChild(s);
-            });
-            return !!window.PhonePeCheckout?.transact;
-          };
-
-          const scriptReady = await ensureCheckoutScript().catch(() => false);
-          if (!scriptReady) {
-            setError("PhonePe checkout failed to load. Please try again.");
-            return;
-          }
-
-          const finalizeBooking = async () => {
-            try {
-              const confirmRes = await fetch("/api/bookings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  ...bookingPayload,
-                  paymentGateway: "PHONEPE",
-                  phonePeOrderId: initData.data?.merchantOrderId,
-                }),
-              });
-              const confirmData = (await confirmRes.json()) as { success?: boolean; error?: string; data?: { id?: string } };
-              if (!confirmRes.ok || !confirmData.success) {
-                setError(confirmData.error ?? "Payment captured but booking failed. Please contact support.");
-                return;
-              }
-              setBookingRef(confirmData.data?.id?.slice(-8).toUpperCase() ?? "OK");
-              refreshDateAvail(date);
-              setShowSaveModal(true);
-              setStep("done");
-            } catch {
-              setError("Payment completed, but booking confirmation failed.");
-            }
-          };
-
-          try {
-            window.PhonePeCheckout!.transact({
-              tokenUrl: initData.data.redirectUrl,
-              callback: async (response: string) => {
-                if (response === "USER_CANCEL") {
-                  setError("Payment was cancelled.");
-                  return;
-                }
-                if (response !== "CONCLUDED") {
-                  setError("Payment did not complete. Please retry.");
-                  return;
-                }
-                await finalizeBooking();
-              },
-            });
-          } catch {
-            window.location.href = initData.data.redirectUrl;
-          }
-          return;
-        }
-
         const res = await fetch("/api/bookings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -574,14 +476,11 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
     const gaY = bidY + 94;
     label("GUEST", 36, gaY);
     ctx.fillStyle = "white"; ctx.font = "600 15px system-ui,sans-serif"; ctx.fillText(guestName || "—", 36, gaY + 20);
-    if (totalPaise > 0) {
-      ctx.textAlign = "right";
-      label("AMOUNT DUE", W - 36, gaY); // label resets textAlign? No — set after
-      ctx.textAlign = "right";
-      ctx.fillStyle = "white"; ctx.font = "700 15px system-ui,sans-serif"; ctx.fillText(rupeesInt(totalPaise), W - 36, gaY + 20);
-      ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "500 10px system-ui,sans-serif"; ctx.fillText("Pay at venue", W - 36, gaY + 36);
-      ctx.textAlign = "left";
-    }
+    ctx.textAlign = "right";
+    label("PAYMENT", W - 36, gaY);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "white"; ctx.font = "700 15px system-ui,sans-serif"; ctx.fillText("At venue", W - 36, gaY + 20);
+    ctx.textAlign = "left";
 
     // ── Location
     const locY = gaY + 58;
@@ -736,7 +635,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
               ["Date", fmtDateShort(date)],
               ["Time", `${fmt12(selectedStart)} → ${fmt12(endTime)}`],
               ["Duration", durLabel(durMins)],
-              totalPaise > 0 ? ["Amount", `${rupeesInt(totalPaise)} · Pay at venue`] : null,
+              ["Payment", "Collected at venue"],
               ["Guest", guestName],
             ].filter(Boolean) as [string, string][]).map(([label, val], i, arr) => (
               <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px", borderBottom: i < arr.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none", font: "500 12px var(--font-ui)", color: "rgba(255,255,255,0.5)" }}>
@@ -791,10 +690,11 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
   }
 
   // ── Step indicator ──────────────────────────────────────────────────────
-  const hasExtrasStep = unitAddons.length > 0 || (unit?.minAdvancePaise ?? 0) > 0 || (unit?.cancellationHours ?? 0) > 0;
-  const totalSteps = hasExtrasStep ? 4 : 3;
-  const stepNum = step === "date" ? 1 : step === "slot" ? 2 : step === "extras" ? 3 : step === "form" ? (hasExtrasStep ? 4 : 3) : (hasExtrasStep ? 4 : 3);
-  const stepLabels: Record<number, string> = { 1: "Choose unit", 2: "Pick time", 3: hasExtrasStep ? "Add-ons" : "Your details", 4: "Your details" };
+  const totalSteps = 3;
+  const stepNum = step === "date" ? 1 : step === "slot" ? 2 : 3;
+  const stepLabels: Record<number, string> = isGround
+    ? { 1: "Court", 2: "Slot", 3: "Confirm" }
+    : { 1: "Add-ons", 2: "Date & Time", 3: "Confirm" };
   const StepBar = () => (
     <div style={{ display: "flex", alignItems: "center", gap: 0, padding: "22px 20px 0" }}>
       {Array.from({ length: totalSteps }, (_, i) => i + 1).map((n) => {
@@ -1110,126 +1010,8 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
     );
   }
 
-  // ── Screen 3: Extras (addons + advance + cancellation) ────────────────
-  if (step === "extras") {
-    const advance = unit?.minAdvancePaise ?? 0;
-    const cancHours = unit?.cancellationHours ?? 0;
-    return (
-      <div style={{ background: "var(--paper)", minHeight: "100%", paddingBottom: 96 }}>
-        <StepBar />
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px 0" }}>
-          <button onClick={() => setStep("slot")} style={{ width: 28, height: 28, borderRadius: "50%", border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-          </button>
-          <div style={{ fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: 13, color: "var(--ink-2)" }}>
-            {fmtDateShort(date)} · {fmt12(selectedStart)} · {durLabel(durMins)}
-          </div>
-        </div>
-
-        <div style={{ padding: "20px 14px 10px", display: "flex", flexDirection: "column", gap: 16 }}>
-
-          {/* Addons */}
-          {unitAddons.length > 0 && (
-            <div>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>Add-ons</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {unitAddons.map((a) => {
-                  const on = selectedAddons.has(a.id);
-                  return (
-                    <button key={a.id} onClick={() => setSelectedAddons(prev => {
-                      const next = new Set(prev);
-                      on ? next.delete(a.id) : next.add(a.id);
-                      return next;
-                    })} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", border: `1.5px solid ${on ? "#C8FF3E" : "var(--hairline)"}`, background: on ? "#0A0B0A" : "var(--paper-2)", cursor: "pointer", textAlign: "left", transition: "all .15s" }}>
-                      <div>
-                        <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: on ? "#C8FF3E" : "var(--ink)" }}>{a.name}</div>
-                        {a.description && <div style={{ font: "500 11px var(--font-ui)", color: on ? "rgba(255,255,255,0.5)" : "var(--ink-3)", marginTop: 2 }}>{a.description}</div>}
-                      </div>
-                      <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: on ? "#C8FF3E" : "var(--ink)", flexShrink: 0, marginLeft: 12 }}>
-                        {on ? "✓ " : ""}{rupeesInt(a.pricePaise)}<span style={{ fontWeight: 500, fontSize: 11, opacity: 0.7 }}>/{(a.unit ?? "session").replace(/^per_/i, "")}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Advance payment — marketing card */}
-          {advance > 0 && (
-            <div style={{ borderRadius: "var(--r-lg)", background: "#0A0B0A", padding: "18px 18px 16px", position: "relative", overflow: "hidden" }}>
-              <div style={{ position: "absolute", top: -30, right: -30, width: 120, height: 120, borderRadius: "50%", background: "#C8FF3E", filter: "blur(60px)", opacity: 0.25, pointerEvents: "none" }} />
-              <div style={{ position: "relative" }}>
-                <div style={{ font: "600 10px var(--font-ui)", color: "#C8FF3E", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Advance Required</div>
-                <div style={{ fontFamily: "var(--font-ui)", fontWeight: 800, fontSize: 18, color: "white", lineHeight: 1.3, marginBottom: 6 }}>
-                  Pay {rupeesInt(advance)} now,<br />secure your slot instantly.
-                </div>
-                <div style={{ font: "500 12px var(--font-ui)", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
-                  Advance is collected at the venue. Remaining {rupeesInt(totalPaise - advance)} due on the day.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Cancellation policy */}
-          {cancHours > 0 && (
-            <div style={{ padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--paper-2)", border: "1.5px solid var(--hairline)" }}>
-              <div style={{ font: "600 10px var(--font-ui)", color: "var(--ink-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Cancellation Policy</div>
-              <div style={{ fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: 13, color: "var(--ink)", marginBottom: 4 }}>
-                Free cancellation up to {cancHours}h before
-              </div>
-              <div style={{ font: "500 11px var(--font-ui)", color: "var(--ink-3)", lineHeight: 1.5 }}>
-                Cancel before {cancHours} hours of your slot start time at no charge. Late cancellations may be non-refundable.
-              </div>
-            </div>
-          )}
-
-          {/* Price summary */}
-          <div style={{ padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--paper-2)", border: "1.5px solid var(--hairline)" }}>
-            <div style={{ font: "600 10px var(--font-ui)", color: "var(--ink-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Summary</div>
-            <div style={{ display: "flex", justifyContent: "space-between", font: "500 12px var(--font-ui)", color: "var(--ink-2)", marginBottom: 6 }}>
-              <span>{unit?.name}{activeVariant ? ` · ${activeVariant.label}` : ""} · {durLabel(durMins)}</span>
-              <span style={{ fontWeight: 700 }}>{rupeesInt(basePaise)}</span>
-            </div>
-            {[...selectedAddons].map(id => {
-              const a = unitAddons.find(a => a.id === id);
-              if (!a) return null;
-              return (
-                <div key={id} style={{ display: "flex", justifyContent: "space-between", font: "500 12px var(--font-ui)", color: "var(--ink-2)", marginBottom: 6 }}>
-                  <span>{a.name}</span>
-                  <span style={{ fontWeight: 700 }}>{rupeesInt(a.pricePaise)}</span>
-                </div>
-              );
-            })}
-            <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--font-ui)", fontWeight: 800, fontSize: 15, color: "var(--ink)", borderTop: "1.5px solid var(--hairline)", paddingTop: 10, marginTop: 4 }}>
-              <span>Total</span>
-              <span>{rupeesInt(totalPaise)}</span>
-            </div>
-            {advance > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", font: "600 11px var(--font-ui)", color: "var(--ink-3)", marginTop: 6 }}>
-                <span>Pay at venue today</span>
-                <span>{rupeesInt(advance)}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="cta-bar">
-          <div style={{ flex: 1 }}>
-            <div className="cta-amt">{rupeesInt(totalPaise)}</div>
-            <div className="cta-sub">{advance > 0 ? `₹${Math.round(advance / 100)} advance · rest at venue` : "Pay at venue"}</div>
-          </div>
-          <button className="cta-btn" onClick={() => setStep("form")}>
-            Continue
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // ── Screen 2: Duration + Date + Slots ──────────────────────────────────
-  // ── Screen 3/4: Form ───────────────────────────────────────────────────
+  // ── Screen 3: Confirm (addons + cancellation + summary + guest details) ─
   return (
     <div style={{ background: "var(--paper)", minHeight: "100%", paddingBottom: 96 }}>
       <StepBar />
@@ -1237,7 +1019,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
       {/* Back row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px 0" }}>
         <button onClick={() => {
-          if (step === "form") setStep(hasExtrasStep ? "extras" : "slot");
+          if (step === "form") setStep("slot");
           else { setStep("date"); setDate(""); setSelectedStart(""); setSlotUnits([]); }
         }}
           style={{ width: 28, height: 28, borderRadius: "50%", border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 }}>
@@ -1292,8 +1074,10 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         </div>
       )}
 
-      {/* ── FORM ────────────────────────────────────────────────────────────── */}
-      {step === "form" && (
+      {/* ── CONFIRM (add-ons + cancellation + summary + guest details) ─────── */}
+      {step === "form" && (() => {
+        const cancHours = unit?.cancellationHours ?? 0;
+        return (
         <div style={{ padding: "14px 14px 0", display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ padding: "12px 14px", background: "#0A0B0A", borderRadius: "var(--r-md)", color: "white" }}>
             <div style={{ font: "600 10px var(--font-ui)", color: "#C8FF3E", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
@@ -1304,6 +1088,69 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
               {totalPaise > 0 && <span style={{ color: "#C8FF3E" }}> · {rupeesInt(totalPaise)}</span>}
             </div>
           </div>
+
+          {unitAddons.length > 0 && (
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Add-ons</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {unitAddons.map((a) => {
+                  const on = selectedAddons.has(a.id);
+                  return (
+                    <button key={a.id} onClick={() => setSelectedAddons(prev => {
+                      const next = new Set(prev);
+                      on ? next.delete(a.id) : next.add(a.id);
+                      return next;
+                    })} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", border: `1.5px solid ${on ? "#C8FF3E" : "var(--hairline)"}`, background: on ? "#0A0B0A" : "var(--paper-2)", cursor: "pointer", textAlign: "left", transition: "all .15s" }}>
+                      <div>
+                        <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: on ? "#C8FF3E" : "var(--ink)" }}>{a.name}</div>
+                        {a.description && <div style={{ font: "500 11px var(--font-ui)", color: on ? "rgba(255,255,255,0.5)" : "var(--ink-3)", marginTop: 2 }}>{a.description}</div>}
+                      </div>
+                      <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 13, color: on ? "#C8FF3E" : "var(--ink)", flexShrink: 0, marginLeft: 12 }}>
+                        {on ? "✓ " : ""}{rupeesInt(a.pricePaise)}<span style={{ fontWeight: 500, fontSize: 11, opacity: 0.7 }}>/{(a.unit ?? "session").replace(/^per_/i, "")}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {cancHours > 0 && (
+            <div style={{ padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--paper-2)", border: "1.5px solid var(--hairline)" }}>
+              <div style={{ font: "600 10px var(--font-ui)", color: "var(--ink-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Cancellation Policy</div>
+              <div style={{ fontFamily: "var(--font-ui)", fontWeight: 600, fontSize: 13, color: "var(--ink)", marginBottom: 4 }}>
+                Free cancellation up to {cancHours}h before
+              </div>
+              <div style={{ font: "500 11px var(--font-ui)", color: "var(--ink-3)", lineHeight: 1.5 }}>
+                Cancel before {cancHours} hours of your slot start time at no charge. Late cancellations may be non-refundable.
+              </div>
+            </div>
+          )}
+
+          {totalPaise > 0 && (
+            <div style={{ padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--paper-2)", border: "1.5px solid var(--hairline)" }}>
+              <div style={{ font: "600 10px var(--font-ui)", color: "var(--ink-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Summary</div>
+              <div style={{ display: "flex", justifyContent: "space-between", font: "500 12px var(--font-ui)", color: "var(--ink-2)", marginBottom: 6 }}>
+                <span>{unit?.name}{activeVariant ? ` · ${activeVariant.label}` : ""} · {durLabel(durMins)}</span>
+                <span style={{ fontWeight: 700 }}>{rupeesInt(basePaise)}</span>
+              </div>
+              {[...selectedAddons].map(id => {
+                const a = unitAddons.find(a => a.id === id);
+                if (!a) return null;
+                return (
+                  <div key={id} style={{ display: "flex", justifyContent: "space-between", font: "500 12px var(--font-ui)", color: "var(--ink-2)", marginBottom: 6 }}>
+                    <span>{a.name}</span>
+                    <span style={{ fontWeight: 700 }}>{rupeesInt(a.pricePaise)}</span>
+                  </div>
+                );
+              })}
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--font-ui)", fontWeight: 800, fontSize: 15, color: "var(--ink)", borderTop: "1.5px solid var(--hairline)", paddingTop: 10, marginTop: 4 }}>
+                <span>Total</span>
+                <span>{rupeesInt(totalPaise)}</span>
+              </div>
+            </div>
+          )}
+
           <div className="form-field">
             <label className="form-label">Your name</label>
             <input className="form-input" type="text" placeholder="Full name" value={guestName} onChange={(e) => setGuestName(e.target.value)} autoFocus />
@@ -1314,10 +1161,11 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
           <div className="pay-note" style={{ padding: "0 0 10px" }}>
-            {totalPaise > 0 ? "Secure checkout with PhonePe" : "Payment at the venue · booking is free to reserve"}
+            Payment collected at venue
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── DATE + SLOT ─────────────────────────────────────────────────────── */}
       {step === "slot" && (
@@ -1406,7 +1254,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           ) : step === "form" ? (
             <>
               <div className="cta-amt">{totalPaise > 0 ? rupeesInt(totalPaise) : "Book"}</div>
-              <div className="cta-sub">{totalPaise > 0 ? "Secure checkout with PhonePe" : "Pay at venue"}</div>
+              <div className="cta-sub">Payment collected at venue</div>
             </>
           ) : (
             <>
@@ -1417,7 +1265,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         </div>
 
         {step === "slot" && selectedStart && (
-          <button className="cta-btn" onClick={() => setStep(hasExtrasStep ? "extras" : "form")}>
+          <button className="cta-btn" onClick={() => setStep("form")}>
             Continue
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
           </button>
@@ -1430,11 +1278,11 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         {step === "form" && (
           <>
             <button style={{ background: "transparent", border: "none", color: "var(--ink-3)", font: "600 13px var(--font-ui)", cursor: "pointer", padding: "0 4px" }}
-              onClick={() => setStep(hasExtrasStep ? "extras" : "slot")}>← Back</button>
+              onClick={() => setStep("slot")}>← Back</button>
             <button className="cta-btn"
               disabled={submitting || !guestName.trim() || !guestPhone.trim()}
               onClick={handleSubmit}>
-              {submitting ? "Processing…" : totalPaise > 0 ? "Pay with PhonePe" : "Confirm"}
+              {submitting ? "Processing…" : "Confirm Booking"}
               {!submitting && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>}
             </button>
           </>
