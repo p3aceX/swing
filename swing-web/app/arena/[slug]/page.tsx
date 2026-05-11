@@ -1140,16 +1140,15 @@ export default async function ArenaPage({ params }: PageProps) {
         }
         .pass .cal-strip::-webkit-scrollbar { display: none; }
         .pass .cal-day {
+          all: unset;
           flex: 0 0 56px;
-          padding: 8px 0 10px;
+          padding: 10px 0 10px;
           text-align: center;
-          background: transparent !important;
-          border: none !important;
-          border-right: 1px dashed var(--pass-line-2) !important;
-          border-radius: 0 !important;
+          border-right: 1px dashed var(--pass-line-2);
           cursor: pointer;
+          color: var(--pass-ink);
         }
-        .pass .cal-day:last-child { border-right: none !important; }
+        .pass .cal-day:last-child { border-right: none; }
         .pass .cal-day .dow {
           font-family: var(--font-geist-mono);
           font-size: 9px;
@@ -1160,16 +1159,49 @@ export default async function ArenaPage({ params }: PageProps) {
           font-family: var(--font-geist-mono);
           font-size: 18px;
           font-weight: 700;
-          letter-spacing: 0;
           margin-top: 3px;
-          color: var(--pass-ink);
         }
-        .pass .cal-day .avail { margin-top: 4px; }
+        .pass .cal-day .avail {
+          margin-top: 4px;
+          min-height: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .pass .cal-day .dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+        }
+        .pass .cal-day .dot-green { background: #22c55e; }
+        .pass .cal-day .dot-amber { background: #f59e0b; }
+        .pass .cal-day .dot-label {
+          font-family: var(--font-geist-mono);
+          font-size: 8px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          color: #ffffff;
+        }
+        /* PARTIAL — soft amber tint */
+        .pass .cal-day.cal-partial {
+          background: rgba(245, 158, 11, 0.10);
+        }
+        /* FULL — red filled block */
+        .pass .cal-day.cal-full {
+          background: #dc2626;
+          color: #ffffff;
+          cursor: not-allowed;
+        }
+        .pass .cal-day.cal-full .dow,
+        .pass .cal-day.cal-full .dom { color: #ffffff; }
+        /* SELECTED — ink fill */
         .pass .cal-day.selected {
-          background: var(--pass-ink) !important;
+          background: var(--pass-ink);
         }
         .pass .cal-day.selected .dow,
-        .pass .cal-day.selected .dom { color: var(--pass-paper) !important; }
+        .pass .cal-day.selected .dom { color: var(--pass-paper); }
+        .pass .cal-day.selected .dot-green,
+        .pass .cal-day.selected .dot-amber { box-shadow: 0 0 0 2px var(--pass-paper); }
 
         /* Duration stepper → mono ± */
         .pass .dur-stepper {

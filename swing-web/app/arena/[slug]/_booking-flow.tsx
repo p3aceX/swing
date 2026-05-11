@@ -216,9 +216,12 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         const res = await fetch(`/api/arena/${arenaId}/booking-context?date=${d}&durationMins=${dm}&includeAvailability=true`);
         if (!res.ok || cancelled) return;
         const body = await res.json() as { data?: { availability?: Array<{ unit?: SlotUnit; slots?: Array<{ start: string; end: string; available: boolean }> }> } };
-        const su = (body.data?.availability ?? []).find((entry) => entry.unit?.id === unitId)?.unit;
-        if (!su || cancelled) return;
-        const result = computeAvail(su, dm, d);
+        const entry = (body.data?.availability ?? []).find((e) => e.unit?.id === unitId);
+        if (!entry?.unit || cancelled) return;
+        const bookedSlots = (entry.slots ?? [])
+          .filter((slot) => !slot.available)
+          .map((slot) => ({ startTime: slot.start, endTime: slot.end }));
+        const result = computeAvail({ ...entry.unit, bookedSlots } as SlotUnit, dm, d);
         if (!cancelled) setDateAvail(prev => ({ ...prev, [d]: result }));
       } catch {}
     });
@@ -230,10 +233,13 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
     try {
       const res = await fetch(`/api/arena/${arenaId}/booking-context?date=${d}&durationMins=${durMins || 60}&includeAvailability=true`);
       if (!res.ok) return;
-      const body = await res.json() as { data?: { availability?: Array<{ unit?: SlotUnit }> } };
-      const su = (body.data?.availability ?? []).find((entry) => entry.unit?.id === unitId)?.unit;
-      if (!su) return;
-      const result = computeAvail(su, durMins || 60, d);
+      const body = await res.json() as { data?: { availability?: Array<{ unit?: SlotUnit; slots?: Array<{ start: string; end: string; available: boolean }> }> } };
+      const entry = (body.data?.availability ?? []).find((e) => e.unit?.id === unitId);
+      if (!entry?.unit) return;
+      const bookedSlots = (entry.slots ?? [])
+        .filter((slot) => !slot.available)
+        .map((slot) => ({ startTime: slot.start, endTime: slot.end }));
+      const result = computeAvail({ ...entry.unit, bookedSlots } as SlotUnit, durMins || 60, d);
       setDateAvail(prev => ({ ...prev, [d]: result }));
     } catch {}
   }, [arenaId, unitId, durMins, computeAvail]);
@@ -1359,31 +1365,26 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
               const { day, wd } = shortDate(d);
               const a = dateAvail[d];
               const isSelected = date === d;
-              const dotColor = !a || a.total === 0 ? null
-                : a.avail === 0 ? "#FF4444"
-                : a.avail < a.total / 2 ? "#FF9500"
-                : "#C8FF3E";
-              const bgColor = !dotColor || isSelected ? undefined
-                : a!.avail === 0 ? "rgba(255,68,68,0.12)"
-                : a!.avail < a!.total / 2 ? "rgba(255,149,0,0.10)"
-                : "rgba(200,255,62,0.08)";
-              const borderColor = !dotColor || isSelected ? undefined
-                : a!.avail === 0 ? "rgba(255,68,68,0.35)"
-                : a!.avail < a!.total / 2 ? "rgba(255,149,0,0.30)"
-                : "rgba(200,255,62,0.25)";
+              const avState =
+                !a || a.total === 0 ? "unknown" :
+                a.avail === 0 ? "full" :
+                a.avail < a.total / 2 ? "partial" :
+                "available";
               return (
-                <div
+                <button
                   key={d}
-                  className={`cal-day${isSelected ? " selected" : ""}`}
-                  style={bgColor ? { background: bgColor, borderColor } : undefined}
-                  onClick={() => handleDateSelect(d)}
+                  className={`cal-day cal-${avState}${isSelected ? " selected" : ""}`}
+                  disabled={avState === "full"}
+                  onClick={() => avState !== "full" && handleDateSelect(d)}
                 >
                   <div className="dow">{wd}</div>
                   <div className="dom">{day}</div>
-                  <div className="avail" style={{ minHeight: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {dotColor && <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor }} />}
+                  <div className="avail">
+                    {avState === "available" && <i className="dot dot-green" />}
+                    {avState === "partial"   && <i className="dot dot-amber" />}
+                    {avState === "full"      && <span className="dot-label">FULL</span>}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
