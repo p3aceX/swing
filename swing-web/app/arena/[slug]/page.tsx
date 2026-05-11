@@ -154,14 +154,15 @@ export default async function ArenaPage({ params }: PageProps) {
   const fullAddress = [arena.address, arena.city, arena.state].filter(Boolean).join(", ");
   const locationLine = [arena.city, arena.state].filter(Boolean).join(" · ").toUpperCase() || "INDIA";
 
+  const sv = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   const amenities = [
-    arena.hasLights    && "Floodlights",
-    arena.hasParking   && "Parking",
-    arena.hasWashrooms && "Washrooms",
-    arena.hasCanteen   && "Canteen",
-    arena.hasCCTV      && "CCTV",
-    arena.hasScorer    && "Scorer",
-  ].filter(Boolean) as string[];
+    arena.hasLights    && { label: "LIGHTS",   icon: <svg {...sv}><path d="M12 2v3M5 5l2 2M19 5l-2 2M3 12h3M18 12h3M9 18h6M10 21h4"/><circle cx="12" cy="12" r="4"/></svg> },
+    arena.hasParking   && { label: "PARKING",  icon: <svg {...sv}><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 17V8h4a3 3 0 0 1 0 6H9"/></svg> },
+    arena.hasWashrooms && { label: "WASHROOM", icon: <svg {...sv}><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><path d="M6 22V12l-2-3 4-2h0l2 3v6m6 6V12l2-3-4-2h0l-2 3v6"/></svg> },
+    arena.hasCanteen   && { label: "CANTEEN",  icon: <svg {...sv}><path d="M3 2v9a2 2 0 0 0 4 0V2M5 12v10M17 2c-2 0-4 2-4 5v5h3v10"/></svg> },
+    arena.hasCCTV      && { label: "CCTV",     icon: <svg {...sv}><rect x="2" y="6" width="14" height="12" rx="1"/><path d="M16 10l6-2v8l-6-2"/></svg> },
+    arena.hasScorer    && { label: "SCORER",   icon: <svg {...sv}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 8v8M15 8v8M3 12h18"/></svg> },
+  ].filter(Boolean) as { label: string; icon: React.ReactElement }[];
 
   // Derive opening/closing from all units (earliest open, latest close)
   const toMins = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + (m || 0); };
@@ -271,9 +272,13 @@ export default async function ArenaPage({ params }: PageProps) {
 
         {amenities.length > 0 && (
           <div className="pass-amen">
-            <span className="pass-meta-label">FACILITIES</span>
-            <div className="pass-amen-row">
-              {amenities.map((a) => <span key={a}>{a.toUpperCase()}</span>)}
+            <div className="pass-amen-grid">
+              {amenities.map((a) => (
+                <div key={a.label} className="amen-tile">
+                  <span className="amen-icon">{a.icon}</span>
+                  <span className="amen-label">{a.label}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -363,36 +368,34 @@ export default async function ArenaPage({ params }: PageProps) {
         /* Desktop split: arena identity left, booking right */
         @media (min-width: 960px) {
           .pass-shell {
-            max-width: 1080px;
+            max-width: 1120px;
             display: grid;
-            grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-            column-gap: 56px;
-            padding: 32px 40px 0;
+            grid-template-columns: minmax(0, 0.92fr) 1px minmax(0, 1.08fr);
+            column-gap: 48px;
+            padding: 32px 40px 24px;
+            align-items: start;
           }
-          .pass-shell > .pass-strip { grid-column: 1 / -1; }
-          .pass-shell > .pass-photo,
-          .pass-shell > .pass-id,
-          .pass-shell > .pass-meta,
-          .pass-shell > .pass-amen { grid-column: 1; }
-          .pass-shell > .pass-tear,
-          .pass-shell > .pass-body { grid-column: 2; }
-          .pass-shell > .pass-foot { grid-column: 1 / -1; }
-          /* Vertical tear divider on desktop */
-          .pass-shell .pass-tear {
-            position: absolute;
-            top: 110px;
-            bottom: 70px;
-            left: calc(50% - 4px);
-            right: auto;
+          .pass-shell > .pass-strip { grid-column: 1 / -1; grid-row: 1; }
+          .pass-shell > .pass-photo  { grid-column: 1; grid-row: 2; }
+          .pass-shell > .pass-id     { grid-column: 1; grid-row: 3; }
+          .pass-shell > .pass-meta   { grid-column: 1; grid-row: 4; }
+          .pass-shell > .pass-amen   { grid-column: 1; grid-row: 5; margin-bottom: 8px; }
+          .pass-shell > .pass-tear {
+            grid-column: 2;
+            grid-row: 2 / span 4;
             width: 1px;
             height: auto;
             margin: 0;
-            background-image: repeating-linear-gradient(to bottom, var(--pass-line) 0 7px, transparent 7px 14px);
+            background: var(--pass-line-2);
+            background-image: repeating-linear-gradient(to bottom, var(--pass-line) 0 6px, transparent 6px 12px);
           }
-          .pass-shell .pass-tear .pass-notch.left  { left: 50%; top: -10px; transform: translateX(-50%); }
-          .pass-shell .pass-tear .pass-notch.right { left: 50%; right: auto; top: auto; bottom: -10px; transform: translateX(-50%); }
+          .pass-shell > .pass-tear .pass-notch { display: none; }
+          .pass-shell > .pass-body   { grid-column: 3; grid-row: 2 / span 4; min-height: 0; }
+          .pass-shell > .pass-foot   { grid-column: 1 / -1; grid-row: 6; margin-top: 32px; }
+          .pass-shell::before { left: 16px; }
+          .pass-shell::after  { right: 16px; }
           .pass-photo-frame { aspect-ratio: 4 / 3; }
-          .pass-body { padding-top: 0; }
+          .pass-amen-grid { grid-template-columns: repeat(3, 1fr); }
         }
 
         /* Side perforations */
@@ -563,29 +566,37 @@ export default async function ArenaPage({ params }: PageProps) {
           color: var(--pass-muted);
         }
 
-        .pass-amen {
-          margin-top: 16px;
+        .pass-amen { margin-top: 18px; }
+        .pass-amen-grid {
+          display: grid;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 8px;
         }
-        .pass-amen-row {
-          margin-top: 7px;
+        .amen-tile {
           display: flex;
-          flex-wrap: wrap;
-          gap: 6px 14px;
-          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
-          font-size: 10.5px;
-          font-weight: 600;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          padding: 10px 4px;
+          border: 1px dashed var(--pass-line-2);
+        }
+        .amen-icon {
+          width: 24px;
+          height: 24px;
+          display: inline-grid;
+          place-items: center;
           color: var(--pass-ink);
         }
-        .pass-amen-row span {
-          position: relative;
-        }
-        .pass-amen-row span + span::before {
-          content: "·";
-          position: absolute;
-          left: -10px;
+        .amen-label {
+          font-family: var(--font-geist-mono);
+          font-size: 9px;
+          font-weight: 600;
+          letter-spacing: 0.12em;
           color: var(--pass-muted);
+          white-space: nowrap;
+        }
+        @media (max-width: 540px) {
+          .pass-amen-grid { grid-template-columns: repeat(3, 1fr); }
         }
 
         /* Tear-line */
@@ -827,15 +838,19 @@ export default async function ArenaPage({ params }: PageProps) {
           cursor: pointer;
           font-family: var(--font-geist-mono);
           font-size: 11px;
-          font-weight: 600;
+          font-weight: 700;
           letter-spacing: 0.18em;
           text-transform: uppercase;
-          color: var(--pass-muted);
-          padding: 12px 0 4px;
+          color: var(--pass-ink);
+          padding: 8px 14px;
           display: inline-flex;
           align-items: center;
+          gap: 6px;
+          border: 1px solid var(--pass-line);
+          background: var(--pass-paper);
+          margin: 10px 0 6px;
         }
-        .pass-back:hover { color: var(--pass-ink); }
+        .pass-back:hover { background: var(--pass-line-2); }
 
         .pass-context {
           margin-top: 6px;
@@ -976,19 +991,43 @@ export default async function ArenaPage({ params }: PageProps) {
 
         /* ── Strong filled CTA button (next-step highlight) ─────────────── */
         .pass .cta-info { flex: 1; min-width: 0; }
-        .pass .cta-btn.cta-primary {
-          background: var(--pass-ink);
-          color: var(--pass-paper);
-          padding: 14px 22px;
-          font-size: 12.5px;
-          letter-spacing: 0.2em;
+        .pass .cta-btn.cta-primary,
+        .pass .cta-btn[type="submit"] {
+          background: #C8FF3E;
+          color: #0A0B0A;
+          padding: 16px 26px;
+          font-size: 13px;
+          letter-spacing: 0.22em;
           text-transform: uppercase;
           font-weight: 800;
+          box-shadow: 3px 3px 0 0 var(--pass-ink);
         }
-        .pass .cta-btn.cta-primary::after { color: var(--pass-paper); }
+        .pass .cta-btn.cta-primary::after,
+        .pass .cta-btn[type="submit"]::after { color: #0A0B0A; }
         .pass .cta-btn.cta-primary:disabled {
           background: var(--pass-line-2);
           color: var(--pass-muted);
+          box-shadow: none;
+        }
+        .pass .cta-btn.cta-primary:hover:not(:disabled) {
+          transform: translate(1px, 1px);
+          box-shadow: 2px 2px 0 0 var(--pass-ink);
+        }
+        /* All other submit/CTA buttons (form, pass, bulk) get the same primary treatment */
+        .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary) {
+          background: #C8FF3E;
+          color: #0A0B0A;
+          padding: 14px 22px;
+          font-size: 12.5px;
+          letter-spacing: 0.18em;
+          font-weight: 800;
+          box-shadow: 3px 3px 0 0 var(--pass-ink);
+        }
+        .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary)::after { color: #0A0B0A; }
+        .pass .cta-bar > button.cta-btn:last-child:not(.cta-primary):disabled {
+          background: var(--pass-line-2);
+          color: var(--pass-muted);
+          box-shadow: none;
         }
 
         /* Calendar strip → mono pill-row */
