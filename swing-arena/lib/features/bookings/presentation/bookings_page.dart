@@ -266,6 +266,19 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   return isPastA ? 1 : -1;
                 });
 
+              // Build the flat list: [monthHeader, ticket, ticket, monthHeader, ticket, …]
+              final items = <_TicketItem>[];
+              String? lastMonthKey;
+              for (final dk in dateKeys) {
+                final d = DateFormat('yyyy-MM-dd').parse(dk);
+                final monthKey = DateFormat('yyyy-MM').format(d);
+                if (monthKey != lastMonthKey) {
+                  items.add(_TicketItem.month(d));
+                  lastMonthKey = monthKey;
+                }
+                items.add(_TicketItem.date(d, groups[dk]!));
+              }
+
               return Column(children: [
                 _MonthCalendar(
                   bookings: rawBookings,
@@ -286,30 +299,31 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                           backgroundColor: _c.surface,
                           onRefresh: () =>
                               ref.refresh(_bookingsProvider.future),
-                          child: GridView.builder(
+                          child: ListView.builder(
                             padding:
-                                const EdgeInsets.fromLTRB(12, 8, 12, 16),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
-                              crossAxisSpacing: 8,
-                              mainAxisSpacing: 8,
-                              childAspectRatio: 0.85,
-                            ),
-                            itemCount: dateKeys.length,
+                                const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            itemCount: items.length,
                             itemBuilder: (context, i) {
-                              final dk = dateKeys[i];
-                              final dayBookings = groups[dk]!;
-                              final d =
-                                  DateFormat('yyyy-MM-dd').parse(dk);
-                              return _DateGroupCard(
-                                date: d,
+                              final item = items[i];
+                              if (item.isMonthHeader) {
+                                return _MonthSectionHeader(date: item.date);
+                              }
+                              return _DateTicket(
+                                date: item.date,
                                 today: today,
-                                bookings: dayBookings,
-                                onTap: () => _showDateBookings(
-                                    context, d, dayBookings),
+                                bookings: item.bookings,
+                                arenas: widget.arenas,
                                 onAdd: () =>
-                                    _showAddBookingSheet(context, d),
+                                    _showAddBookingSheet(context, item.date),
+                                onBookingTap: (b) => _showBookingDetail(
+                                  context,
+                                  b,
+                                  widget.arenas
+                                      .firstWhere((a) => a.id == b.arenaId,
+                                          orElse: () => widget.arenas.first)
+                                      .name,
+                                  b.arenaId,
+                                ),
                               );
                             },
                           ),
@@ -340,31 +354,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
     });
   }
 
-  void _showDateBookings(
-      BuildContext context, DateTime date, List<ArenaReservation> bookings) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: _c.surface,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _DateBookingsSheet(
-        date: date,
-        bookings: bookings,
-        arenas: widget.arenas,
-        onBookingTap: (b) => _showBookingDetail(
-          context,
-          b,
-          widget.arenas
-              .firstWhere((a) => a.id == b.arenaId,
-                  orElse: () => widget.arenas.first)
-              .name,
-          b.arenaId,
-        ),
-      ),
-    );
-  }
 }
 
 // ─── Tab bar ─────────────────────────────────────────────────────────────────
@@ -2345,6 +2334,351 @@ class _EmptyBookings extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Date ticket list (vertical, NBA-ticket style) ──────────────────────────
+
+class _TicketItem {
+  _TicketItem._({
+    required this.isMonthHeader,
+    required this.date,
+    this.bookings = const [],
+  });
+  factory _TicketItem.month(DateTime d) =>
+      _TicketItem._(isMonthHeader: true, date: d);
+  factory _TicketItem.date(DateTime d, List<ArenaReservation> bs) =>
+      _TicketItem._(isMonthHeader: false, date: d, bookings: bs);
+
+  final bool isMonthHeader;
+  final DateTime date;
+  final List<ArenaReservation> bookings;
+}
+
+class _MonthSectionHeader extends StatelessWidget {
+  const _MonthSectionHeader({required this.date});
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 18, 2, 10),
+      child: Row(
+        children: [
+          Text(
+            DateFormat('MMMM yyyy').format(date).toUpperCase(),
+            style: TextStyle(
+              color: _c.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              height: 1,
+              color: _c.border.withValues(alpha: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DateTicket extends StatelessWidget {
+  const _DateTicket({
+    required this.date,
+    required this.today,
+    required this.bookings,
+    required this.arenas,
+    required this.onBookingTap,
+    required this.onAdd,
+  });
+
+  final DateTime date;
+  final DateTime today;
+  final List<ArenaReservation> bookings;
+  final List<ArenaListing> arenas;
+  final ValueChanged<ArenaReservation> onBookingTap;
+  final VoidCallback onAdd;
+
+  static int _timeToMins(String t) {
+    final p = t.split(':');
+    if (p.length < 2) return 0;
+    return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final isToday = DateUtils.isSameDay(date, today);
+    final isPast = date.isBefore(DateTime(today.year, today.month, today.day));
+    final accent = isToday ? _c.accent : _c.text;
+    final stubBg = isToday
+        ? _c.accent
+        : (isPast
+            ? _c.surface
+            : _c.bg);
+    final stubText = isToday
+        ? _c.onAccent
+        : (isPast ? _c.muted : _c.text);
+
+    final sorted = [...bookings]
+      ..sort((a, b) => _timeToMins(a.startTime).compareTo(_timeToMins(b.startTime)));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: _c.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: isToday ? _c.accent.withValues(alpha: 0.5) : _c.border),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Left stub: day number + weekday ─────────────
+            Container(
+              width: 64,
+              decoration: BoxDecoration(
+                color: stubBg,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(13),
+                  bottomLeft: Radius.circular(13),
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    DateFormat('d').format(date),
+                    style: TextStyle(
+                      color: stubText,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.8,
+                      height: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    DateFormat('EEE').format(date).toUpperCase(),
+                    style: TextStyle(
+                      color: stubText.withValues(alpha: 0.75),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  if (isToday) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      width: 14,
+                      height: 2,
+                      decoration: BoxDecoration(
+                        color: _c.onAccent.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // ── Perforation (dashed vertical line) ───────
+            _Perforation(color: _c.border),
+            // ── Right content: booking rows ──────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < sorted.length; i++) ...[
+                      _TicketBookingRow(
+                        booking: sorted[i],
+                        arenas: arenas,
+                        onTap: () => onBookingTap(sorted[i]),
+                      ),
+                      if (i < sorted.length - 1)
+                        Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          child: Container(
+                              height: 1,
+                              color: _c.border.withValues(alpha: 0.5)),
+                        ),
+                    ],
+                    // + Add booking footer
+                    Material(
+                      color: Colors.transparent,
+                      borderRadius: const BorderRadius.only(
+                        topRight: Radius.circular(13),
+                        bottomRight: Radius.circular(13),
+                      ),
+                      child: InkWell(
+                        onTap: onAdd,
+                        borderRadius: const BorderRadius.only(
+                          topRight: Radius.circular(13),
+                          bottomRight: Radius.circular(13),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.add_rounded,
+                                  size: 14, color: accent),
+                              const SizedBox(width: 4),
+                              Text(
+                                sorted.isEmpty
+                                    ? 'Add booking'
+                                    : 'Add another',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: accent,
+                                  letterSpacing: -0.1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TicketBookingRow extends StatelessWidget {
+  const _TicketBookingRow({
+    required this.booking,
+    required this.arenas,
+    required this.onTap,
+  });
+  final ArenaReservation booking;
+  final List<ArenaListing> arenas;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final isCancelled = booking.status == 'CANCELLED';
+    final isPaid = booking.balancePaise == 0;
+    final amount = (booking.totalAmountPaise / 100).round();
+    final unitName = booking.unitName ?? '—';
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              // status dot
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: isCancelled
+                      ? _c.muted
+                      : (isPaid
+                          ? _c.accent
+                          : const Color(0xFFD97706)),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 10),
+              // guest + time + court
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      booking.displayName.isEmpty
+                          ? 'Guest'
+                          : booking.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        height: 1.2,
+                        color: isCancelled ? _c.muted : _c.text,
+                        decoration: isCancelled
+                            ? TextDecoration.lineThrough
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${booking.startTime} · $unitName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.2,
+                        color: _c.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '₹$amount',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  color: isCancelled ? _c.muted : _c.text,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Perforation extends StatelessWidget {
+  const _Perforation({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SizedBox(
+        width: 1,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            const dashH = 3.0;
+            const gapH = 3.0;
+            final dashCount = (c.maxHeight / (dashH + gapH)).floor();
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                for (var i = 0; i < dashCount; i++)
+                  Container(width: 1, height: dashH, color: color),
+              ],
+            );
+          },
         ),
       ),
     );
