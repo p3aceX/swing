@@ -2006,10 +2006,24 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
     final unitCount = arena.units.length;
     final photoUrl = arena.photoUrls.isNotEmpty ? arena.photoUrls.first : null;
 
+    final isDark = scheme.brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            scheme.surfaceContainerHighest,
+            Color.alphaBlend(
+              scheme.primary.withValues(alpha: isDark ? 0.10 : 0.06),
+              scheme.surfaceContainerHighest,
+            ),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: scheme.primary.withValues(alpha: isDark ? 0.18 : 0.10),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2213,22 +2227,20 @@ class _ArenaInitialBox extends StatelessWidget {
   final String initial;
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [scheme.primary, scheme.primary.withValues(alpha: 0.7)],
+          colors: [Color(0xFF0B0B0F), Color(0xFF1F1F26)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
       ),
       alignment: Alignment.center,
-      child: Text(
-        initial,
-        style: TextStyle(
-          color: scheme.onPrimary,
-          fontSize: 20,
-          fontWeight: FontWeight.w900,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Image.asset(
+          'assets/logo/logo.png',
+          fit: BoxFit.contain,
         ),
       ),
     );
