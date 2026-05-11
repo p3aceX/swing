@@ -1054,7 +1054,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
             </div>
             <div className="form-field" style={{ flex: 1 }}>
               <label className="form-label">Mobile number</label>
-              <input className="form-input" type="tel" placeholder="+91 98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value)} />
+              <input className="form-input" type="tel" placeholder="98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
             </div>
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
@@ -1170,7 +1170,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           </div>
           <div className="form-field">
             <label className="form-label">MOBILE</label>
-            <input className="form-input" type="tel" placeholder="+91 98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value)} />
+            <input className="form-input" type="tel" placeholder="98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
           </div>
         </div>
 
@@ -1338,7 +1338,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           </div>
           <div className="form-field">
             <label className="form-label">Mobile number</label>
-            <input className="form-input" type="tel" placeholder="+91 98765 43210" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} />
+            <input className="form-input" type="tel" placeholder="98765 43210" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
           <div className="pay-note" style={{ padding: "0 0 10px" }}>

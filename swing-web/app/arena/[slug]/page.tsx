@@ -335,6 +335,9 @@ export default async function ArenaPage({ params }: PageProps) {
           --pass-line-2:   rgba(10,11,10,0.10);
           --pass-accent:   #0A0B0A;
           --pass-live-dot: #C8FF3E;
+          /* Inverse tokens — used when bg flips to ink (selected state) */
+          --pass-muted-inv: rgba(244,242,235,0.62);
+          --pass-line-inv:  rgba(244,242,235,0.30);
         }
         [data-theme="dark"] {
           --pass-paper:    #0A0B0A;
@@ -344,6 +347,9 @@ export default async function ArenaPage({ params }: PageProps) {
           --pass-line-2:   rgba(244,244,241,0.10);
           --pass-accent:   #F4F4F1;
           --pass-live-dot: #C8FF3E;
+          /* Inverse tokens — when bg flips to ink (=white in dark), inverse=black */
+          --pass-muted-inv: rgba(10,11,10,0.62);
+          --pass-line-inv:  rgba(10,11,10,0.30);
         }
 
         html, body { background: var(--pass-paper); }
@@ -904,7 +910,8 @@ export default async function ArenaPage({ params }: PageProps) {
           color: var(--pass-paper);
           border-color: var(--pass-ink);
         }
-        .opt.selected .opt-sub { color: rgba(244,244,241,0.6); }
+        .opt.selected .opt-name  { color: var(--pass-paper); }
+        .opt.selected .opt-sub   { color: var(--pass-muted-inv); }
         .opt.selected .opt-price { color: var(--pass-paper); }
 
         .opt-icon {
@@ -917,7 +924,7 @@ export default async function ArenaPage({ params }: PageProps) {
           color: var(--pass-ink);
         }
         .opt.selected .opt-icon {
-          border-color: rgba(244,244,241,0.4);
+          border-color: var(--pass-line-inv);
           color: var(--pass-paper);
         }
 
