@@ -6,6 +6,10 @@ android/key.properties
 *.keystore
 *.jks
 
+# Dev screenshots (do not commit)
+/flutter_*.png
+/flutter_*.jpg
+
 # Miscellaneous
 *.class
 *.log
