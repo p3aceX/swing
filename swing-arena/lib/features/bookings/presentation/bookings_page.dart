@@ -131,6 +131,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   String _selectedUnitId = 'All';
   late DateTime _calendarMonth;
   bool _calendarExpanded = false;
+  // null = "All" (no month filter). Otherwise "yyyy-MM".
+  String? _selectedMonthKey;
 
   // Snapshot of booking IDs seen the last time the list rendered.
   // Anything new on the next render → "NEW" badge for ~30s.
@@ -295,11 +297,26 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               }
               // Pure descending: latest date first → today → past, then within
               // each date, latest start time first.
-              final dateKeys = groups.keys.toList()
+              final allDateKeys = groups.keys.toList()
                 ..sort((a, b) => b.compareTo(a));
-              for (final dk in dateKeys) {
+              for (final dk in allDateKeys) {
                 groups[dk]!.sort((a, b) => b.startTime.compareTo(a.startTime));
               }
+
+              // Collect unique months present in the data, descending.
+              final availableMonths = <String>{};
+              for (final dk in allDateKeys) {
+                availableMonths.add(dk.substring(0, 7)); // yyyy-MM
+              }
+              final monthOptions = availableMonths.toList()
+                ..sort((a, b) => b.compareTo(a));
+
+              // Apply month filter.
+              final dateKeys = _selectedMonthKey == null
+                  ? allDateKeys
+                  : allDateKeys
+                      .where((dk) => dk.startsWith(_selectedMonthKey!))
+                      .toList();
 
               // Build the flat list: [monthHeader, ticket, ticket, monthHeader, ticket, …]
               final items = <_TicketItem>[];
@@ -321,8 +338,15 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                   expanded: _calendarExpanded,
                   onMonthChanged: (m) => setState(() => _calendarMonth = m),
                 ),
+                if (monthOptions.isNotEmpty)
+                  _MonthChipBar(
+                    options: monthOptions,
+                    selected: _selectedMonthKey,
+                    onSelect: (k) =>
+                        setState(() => _selectedMonthKey = k),
+                  ),
                 Expanded(
-                  child: filtered.isEmpty
+                  child: dateKeys.isEmpty
                       ? _EmptyBookings(
                           onAdd: widget.arenas.isEmpty
                               ? null
@@ -2392,6 +2416,92 @@ class _TicketItem {
   final bool isMonthHeader;
   final DateTime date;
   final List<ArenaReservation> bookings;
+}
+
+/// Horizontal chip strip above the date-ticket list that lets the owner
+/// jump to a specific month's bookings (or "All").
+class _MonthChipBar extends StatelessWidget {
+  const _MonthChipBar({
+    required this.options,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  /// Available months, formatted as "yyyy-MM", sorted descending.
+  final List<String> options;
+
+  /// `null` means "All"; otherwise must be one of [options].
+  final String? selected;
+  final ValueChanged<String?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final items = <({String? key, String label})>[
+      (key: null, label: 'All'),
+      ...options.map((k) {
+        final d = DateTime(
+          int.parse(k.substring(0, 4)),
+          int.parse(k.substring(5, 7)),
+          1,
+        );
+        return (key: k, label: DateFormat('MMM yyyy').format(d));
+      }),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _c.bg,
+        border: Border(
+          bottom: BorderSide(color: scheme.outline.withValues(alpha: 0.5)),
+        ),
+      ),
+      child: SizedBox(
+        height: 38,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+          itemCount: items.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 16),
+          itemBuilder: (_, i) {
+            final item = items[i];
+            final active = item.key == selected;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onSelect(item.key),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                      letterSpacing: -0.1,
+                      color: active ? _c.accent : _c.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    height: 2,
+                    width: active ? 18 : 0,
+                    decoration: BoxDecoration(
+                      color: _c.accent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _MonthSectionHeader extends StatelessWidget {
