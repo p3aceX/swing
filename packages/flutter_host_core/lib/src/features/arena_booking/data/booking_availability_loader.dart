@@ -4,10 +4,19 @@ import '../domain/arena_booking_models.dart';
 import '../domain/booking_pricing_engine.dart';
 import '../../../repositories/host_arena_repository.dart';
 
-/// Fetches bookings + time blocks for a unit on a date, returning a
-/// [BookingAvailability] ready to pass into [BookingPricingEngine.isSlotBusy].
+/// Fetches the authoritative slot availability for a unit on a given date.
 ///
-/// Handles related-unit loading (parent/child units) the same way biz does.
+/// When [durationMins] is provided (preferred path), it queries the backend's
+/// `GET /arenas/:id/booking-context?date=…&durationMins=…` — the same
+/// endpoint the player wizard uses. That endpoint already accounts for held
+/// slots, monthly passes, turnaround buffers, and parent/child unit
+/// conflicts, so its `availableStartTimes` match exactly what the booking
+/// POST will accept. This eliminates the "I picked a free slot but got a
+/// 409" mismatch.
+///
+/// The loader also fetches raw bookings + time blocks for [bookings] /
+/// [timeBlocks] in [BookingAvailability] — useful for UI that wants to
+/// render who/why a slot is busy.
 class BookingAvailabilityLoader {
   static Future<BookingAvailability> load({
     required HostArenaBookingRepository repo,
@@ -15,6 +24,7 @@ class BookingAvailabilityLoader {
     required String unitId,
     required DateTime date,
     List<ArenaUnitOption> allUnits = const [],
+    int? durationMins,
   }) async {
     final dateStr = _fmt(date);
     final weekday = date.weekday;
@@ -28,34 +38,113 @@ class BookingAvailabilityLoader {
       if (u.parentUnitId == unitId) relatedIds.add(u.id);
     }
 
-    final bookingResults = await Future.wait(
-      relatedIds.map((id) =>
-          repo.listArenaBookings(arenaId, date: dateStr, unitId: id)),
-    );
-    final bookings = bookingResults.expand((b) => b).toList();
-    debugPrint(
-        '[BookingAvailabilityLoader] bookings=${bookings.length} for $unitId on $dateStr');
+    final futures = <Future<dynamic>>[
+      Future.wait(
+        relatedIds.map((id) =>
+            repo.listArenaBookings(arenaId, date: dateStr, unitId: id)),
+      ),
+      repo
+          .listUnitTimeBlocks(arenaId, unitId: unitId)
+          .catchError((e) {
+        debugPrint('[BookingAvailabilityLoader] timeBlocks error: $e');
+        return <ArenaTimeBlock>[];
+      }),
+      if (durationMins != null && durationMins > 0)
+        repo
+            .fetchPlayerSlots(
+                arenaId: arenaId, date: date, durationMins: durationMins)
+            .then<Object?>((v) => v)
+            .catchError((e) {
+          debugPrint(
+              '[BookingAvailabilityLoader] booking-context error: $e');
+          return null;
+        }),
+    ];
+    final results = await Future.wait(futures);
 
-    List<ArenaTimeBlock> blocks = [];
-    try {
-      final all = await repo.listUnitTimeBlocks(arenaId, unitId: unitId);
-      blocks = all.where((b) {
-        if (b.isRecurring && b.weekdays.contains(weekday)) return true;
-        if (b.isHoliday && b.date != null && b.date!.startsWith(dateStr))
-          return true;
-        if (!b.isRecurring &&
-            !b.isHoliday &&
-            b.date != null &&
-            b.date!.startsWith(dateStr)) return true;
-        return false;
-      }).toList();
-    } catch (e) {
-      debugPrint('[BookingAvailabilityLoader] timeBlocks error: $e');
+    final bookings = (results[0] as List<List<ArenaReservation>>)
+        .expand((b) => b)
+        .toList();
+    final allBlocks = results[1] as List<ArenaTimeBlock>;
+    final blocks = allBlocks.where((b) {
+      if (b.isRecurring && b.weekdays.contains(weekday)) return true;
+      if (b.isHoliday && b.date != null && b.date!.startsWith(dateStr)) {
+        return true;
+      }
+      if (!b.isRecurring &&
+          !b.isHoliday &&
+          b.date != null &&
+          b.date!.startsWith(dateStr)) {
+        return true;
+      }
+      return false;
+    }).toList();
+
+    Set<String>? availableStartTimes;
+    if (durationMins != null && durationMins > 0) {
+      final ctx = results.length >= 3 ? results[2] : null;
+      if (ctx is PlayerSlotsData) {
+        availableStartTimes = _extractAvailableStartTimes(
+          ctx,
+          unitId: unitId,
+          allUnits: allUnits,
+        );
+      }
     }
-    debugPrint(
-        '[BookingAvailabilityLoader] timeBlocks=${blocks.length} for $unitId on $dateStr');
 
-    return BookingAvailability(bookings: bookings, timeBlocks: blocks);
+    debugPrint('[BookingAvailabilityLoader] bookings=${bookings.length} '
+        'blocks=${blocks.length} '
+        'available=${availableStartTimes?.length} '
+        'for $unitId on $dateStr (dur=$durationMins)');
+
+    return BookingAvailability(
+      bookings: bookings,
+      timeBlocks: blocks,
+      availableStartTimes: availableStartTimes,
+      durationMins: durationMins,
+    );
+  }
+
+  /// Find the unit group in [ctx] that matches [unitId] (directly or via the
+  /// shared NETS group when the unit is a net) and return the set of
+  /// bookable start times.
+  static Set<String>? _extractAvailableStartTimes(
+    PlayerSlotsData ctx,
+    {required String unitId, List<ArenaUnitOption> allUnits = const []}) {
+    // 1) Direct unitId match — works for grounds and named units.
+    final direct = ctx.unitGroups
+        .where((g) => g.unitId == unitId)
+        .firstOrNull;
+    if (direct != null) {
+      return direct.availableSlots.map((s) => s.startTime).toSet();
+    }
+
+    // 2) NETS rollup: slot-level assignedUnitId matches our unit.
+    for (final g in ctx.unitGroups) {
+      final matching = g.availableSlots
+          .where((s) => s.assignedUnitId == unitId)
+          .toList();
+      if (matching.isNotEmpty) {
+        return matching.map((s) => s.startTime).toSet();
+      }
+    }
+
+    // 3) NETS rollup: same netType as our unit.
+    final mine = allUnits.where((u) => u.id == unitId).firstOrNull;
+    if (mine != null && mine.isNet) {
+      for (final g in ctx.unitGroups) {
+        if (!g.isNetsGroup) continue;
+        if (g.netTypes != null &&
+            mine.netType != null &&
+            g.netTypes!.contains(mine.netType)) {
+          return g.availableSlots.map((s) => s.startTime).toSet();
+        }
+      }
+    }
+
+    // No clear match — return null so caller can fall back to legacy overlap
+    // checking (avoids accidentally locking the picker for unknown units).
+    return null;
   }
 
   static String _fmt(DateTime d) =>

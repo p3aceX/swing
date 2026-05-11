@@ -3272,6 +3272,13 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
   List<String> _allDaySlots = [];
   List<ArenaReservation> _existingBookings = [];
   List<ArenaTimeBlock> _activeTimeBlocks = [];
+
+  /// Authoritative bookable start times from `booking-context`. When this is
+  /// non-null, the slot picker uses it directly (matching what the booking
+  /// POST will accept). When null we fall back to client-side overlap math
+  /// against [_existingBookings] + [_activeTimeBlocks].
+  Set<String>? _availableStartTimes;
+  int? _availableForDurationMins;
   bool _loadingAvail = true;
   List<ArenaAddon> _addons = [];
   final Set<ArenaAddon> _selectedAddons = {};
@@ -3771,9 +3778,11 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
       if (kDebugMode) debugPrint('[avail] no _unitId → skipping load');
       return;
     }
+    final durForLoad = _currentDurationMins;
     if (kDebugMode) {
       debugPrint('[avail] loading for arena=${widget.arena.id} '
-          'unit=$_unitId date=${_fmtDate(_selectedDate)}');
+          'unit=$_unitId date=${_fmtDate(_selectedDate)} '
+          'duration=$durForLoad');
     }
     setState(() => _loadingAvail = true);
     try {
@@ -3784,10 +3793,12 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
         unitId: _unitId!,
         date: _selectedDate,
         allUnits: widget.arena.units,
+        durationMins: durForLoad,
       );
       if (kDebugMode) {
         debugPrint('[avail] loaded bookings=${avail.bookings.length} '
-            'blocks=${avail.timeBlocks.length}');
+            'blocks=${avail.timeBlocks.length} '
+            'availableStartTimes=${avail.availableStartTimes?.length}');
         for (final b in avail.bookings) {
           debugPrint('[avail]   booking ${b.id}: '
               '${b.startTime}–${b.endTime} unit=${b.unitId} '
@@ -3798,17 +3809,26 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
               'date=${tb.date} recurring=${tb.isRecurring} '
               'weekdays=${tb.weekdays}');
         }
+        if (avail.availableStartTimes != null) {
+          final list = avail.availableStartTimes!.toList()..sort();
+          debugPrint('[avail]   available@${avail.durationMins}m: '
+              '${list.take(10).join(", ")}${list.length > 10 ? "…" : ""}');
+        }
       }
       if (mounted)
         setState(() {
           _existingBookings = avail.bookings;
           _activeTimeBlocks = avail.timeBlocks;
+          _availableStartTimes = avail.availableStartTimes;
+          _availableForDurationMins = avail.durationMins;
         });
     } catch (_) {
       if (mounted)
         setState(() {
           _existingBookings = [];
           _activeTimeBlocks = [];
+          _availableStartTimes = null;
+          _availableForDurationMins = null;
         });
     } finally {
       if (mounted) setState(() => _loadingAvail = false);
@@ -3857,22 +3877,31 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
     }
   }
 
-  // A start time is busy if any part of [time, time + selectedDuration) overlaps an existing booking or a time block.
+  // A slot is busy when the backend's booking-context didn't list it as
+  // bookable for the currently-selected duration. This matches the rules
+  // POST /bookings/arena/:id/manual enforces — held slots, monthly passes,
+  // turnaround buffers, and parent/child unit conflicts are all baked in.
+  //
+  // Falls back to client-side overlap math when the server-side check is
+  // unavailable (offline / load error / unknown unit grouping).
   bool _isBusy(String time) {
-    final tMins = _toMins(time);
     final durMins = _currentDurationMins;
+    final serverSet = _availableStartTimes;
+    if (serverSet != null && _availableForDurationMins == durMins) {
+      return !serverSet.contains(time);
+    }
 
+    // Legacy overlap fallback.
+    final tMins = _toMins(time);
     final hasBooking = _existingBookings.any((b) {
       if (b.status == 'CANCELLED') return false;
       return _toMins(b.startTime) < tMins + durMins &&
           _toMins(b.endTime) > tMins;
     });
-
     final hasBlock = _activeTimeBlocks.any((b) {
       return _toMins(b.startTime) < tMins + durMins &&
           _toMins(b.endTime) > tMins;
     });
-
     return hasBooking || hasBlock;
   }
 

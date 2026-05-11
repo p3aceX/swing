@@ -19,10 +19,28 @@ class BookingAvailability {
   const BookingAvailability({
     this.bookings = const [],
     this.timeBlocks = const [],
+    this.availableStartTimes,
+    this.durationMins,
   });
 
   final List<ArenaReservation> bookings;
   final List<ArenaTimeBlock> timeBlocks;
+
+  /// Authoritative bookable start times for [durationMins] on the loaded
+  /// date+unit, sourced from the backend's `booking-context` endpoint. When
+  /// populated, this is what the slot picker should trust — it already
+  /// accounts for held slots, monthly passes, parent/child unit conflicts,
+  /// and turnaround buffers that the raw `bookings` + `timeBlocks` lists
+  /// don't expose.
+  ///
+  /// `null` means the caller didn't request a server-side check (legacy
+  /// mode) — use [BookingPricingEngine.isSlotBusy] against [bookings] +
+  /// [timeBlocks] instead.
+  final Set<String>? availableStartTimes;
+
+  /// The duration the server resolved [availableStartTimes] for. Re-fetch
+  /// if the UI's selected duration changes.
+  final int? durationMins;
 
   static const empty = BookingAvailability();
 }
