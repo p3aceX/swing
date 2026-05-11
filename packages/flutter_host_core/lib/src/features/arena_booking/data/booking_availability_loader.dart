@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 import '../domain/arena_booking_models.dart';
 import '../domain/booking_pricing_engine.dart';
 import '../../../repositories/host_arena_repository.dart';
@@ -45,20 +43,13 @@ class BookingAvailabilityLoader {
       ),
       repo
           .listUnitTimeBlocks(arenaId, unitId: unitId)
-          .catchError((e) {
-        debugPrint('[BookingAvailabilityLoader] timeBlocks error: $e');
-        return <ArenaTimeBlock>[];
-      }),
+          .catchError((_) => <ArenaTimeBlock>[]),
       if (durationMins != null && durationMins > 0)
         repo
             .fetchPlayerSlots(
                 arenaId: arenaId, date: date, durationMins: durationMins)
             .then<Object?>((v) => v)
-            .catchError((e) {
-          debugPrint(
-              '[BookingAvailabilityLoader] booking-context error: $e');
-          return null;
-        }),
+            .catchError((_) => null),
     ];
     final results = await Future.wait(futures);
 
@@ -91,11 +82,6 @@ class BookingAvailabilityLoader {
         );
       }
     }
-
-    debugPrint('[BookingAvailabilityLoader] bookings=${bookings.length} '
-        'blocks=${blocks.length} '
-        'available=${availableStartTimes?.length} '
-        'for $unitId on $dateStr (dur=$durationMins)');
 
     return BookingAvailability(
       bookings: bookings,

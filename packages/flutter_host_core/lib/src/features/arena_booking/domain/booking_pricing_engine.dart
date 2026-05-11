@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'arena_booking_models.dart';
 
 // ── Value types ───────────────────────────────────────────────────────────────
@@ -77,11 +76,6 @@ class BookingPricingEngine {
         ? minMins
         : (unit.slotIncrementMins > 0 ? unit.slotIncrementMins : 60);
 
-    debugPrint('🟡 [durationOptions] unitType=${unit.unitType} isGround=${unit.isGround} '
-        'pricePerHourPaise=${unit.pricePerHourPaise} variantPricePaise=$variantPricePaise '
-        'price4Hr=${unit.price4HrPaise} price8Hr=${unit.price8HrPaise} priceFullDay=${unit.priceFullDayPaise} '
-        'minMins=$minMins increment=$increment maxSlotMins=${unit.maxSlotMins}');
-
     // Grounds: show only explicit bundle prices when any are configured and
     // no variant override is active.
     if (unit.isGround &&
@@ -98,8 +92,6 @@ class BookingPricingEngine {
             durationMins: 720,
             label: 'Full day',
             pricePaise: unit.priceFullDayPaise!));
-      debugPrint('🟡 [durationOptions] bundles=${bundles.map((b) => '${b.durationMins}m').toList()} '
-          'pricePerHourPaise=${unit.pricePerHourPaise} → earlyReturn=${bundles.isNotEmpty && unit.pricePerHourPaise == 0}');
       // Only return bundles-only when no hourly rate — if pricePerHourPaise > 0
       // fall through so the loop generates all hourly slots (bundle prices are
       // substituted at their specific durations inside the loop below).
@@ -156,10 +148,8 @@ class BookingPricingEngine {
           pricePaise: ((pricePerHour * minMins) / 60).round(),
         )
       ];
-      debugPrint('🟡 [durationOptions] → fallback: ${fallback.map((o) => '${o.durationMins}m').toList()}');
       return _applyWeekend(fallback, unit, date);
     }
-    debugPrint('🟡 [durationOptions] → opts: ${opts.map((o) => '${o.durationMins}m').toList()}');
     return _applyWeekend(opts, unit, date);
   }
 
