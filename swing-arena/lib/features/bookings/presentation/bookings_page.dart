@@ -133,6 +133,8 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
   bool _calendarExpanded = false;
   // null = "All" (no month filter). Otherwise "yyyy-MM".
   String? _selectedMonthKey;
+  // null = no single-day filter. Otherwise "yyyy-MM-dd".
+  String? _selectedDateKey;
 
   // Snapshot of booking IDs seen the last time the list rendered.
   // Anything new on the next render → "NEW" badge for ~30s.
@@ -259,6 +261,11 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               widget.arenas.expand((a) => a.units).toList(),
           selectedId: _selectedUnitId,
           onSelect: (id) => setState(() => _selectedUnitId = id),
+          activeDate: _selectedDateKey == null
+              ? null
+              : DateFormat('yyyy-MM-dd').parse(_selectedDateKey!),
+          onPickDate: _pickFilterDate,
+          onClearDate: () => setState(() => _selectedDateKey = null),
         ),
         const SizedBox(height: 8),
         Container(height: 1, color: _c.border),
@@ -311,12 +318,18 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
               final monthOptions = availableMonths.toList()
                 ..sort((a, b) => b.compareTo(a));
 
-              // Apply month filter.
-              final dateKeys = _selectedMonthKey == null
-                  ? allDateKeys
-                  : allDateKeys
-                      .where((dk) => dk.startsWith(_selectedMonthKey!))
-                      .toList();
+              // Apply day filter first (takes precedence), then month filter.
+              List<String> dateKeys;
+              if (_selectedDateKey != null) {
+                dateKeys =
+                    allDateKeys.where((dk) => dk == _selectedDateKey).toList();
+              } else if (_selectedMonthKey != null) {
+                dateKeys = allDateKeys
+                    .where((dk) => dk.startsWith(_selectedMonthKey!))
+                    .toList();
+              } else {
+                dateKeys = allDateKeys;
+              }
 
               // Build the flat list: [monthHeader, ticket, ticket, monthHeader, ticket, …]
               final items = <_TicketItem>[];
@@ -395,6 +408,26 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
         ),
       ],
     );
+  }
+
+  Future<void> _pickFilterDate() async {
+    final now = DateTime.now();
+    final initial = _selectedDateKey != null
+        ? DateFormat('yyyy-MM-dd').parse(_selectedDateKey!)
+        : now;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year - 2),
+      lastDate: DateTime(now.year + 2),
+      helpText: 'Filter bookings by date',
+    );
+    if (picked == null) return;
+    setState(() {
+      _selectedDateKey = DateFormat('yyyy-MM-dd').format(picked);
+      // Day filter overrides month filter.
+      _selectedMonthKey = null;
+    });
   }
 
   void _showAddBookingSheet(BuildContext context, DateTime date) {
@@ -1268,56 +1301,146 @@ class _FilterBar extends ConsumerWidget {
 }
 
 class _UnitFilterBar extends StatelessWidget {
-  const _UnitFilterBar(
-      {required this.units, required this.selectedId, required this.onSelect});
+  const _UnitFilterBar({
+    required this.units,
+    required this.selectedId,
+    required this.onSelect,
+    this.activeDate,
+    this.onPickDate,
+    this.onClearDate,
+  });
   final List<ArenaUnitOption> units;
   final String selectedId;
   final ValueChanged<String> onSelect;
+
+  /// When non-null, a date filter is active — the calendar button renders
+  /// in its "applied" state with the date label.
+  final DateTime? activeDate;
+  final VoidCallback? onPickDate;
+  final VoidCallback? onClearDate;
 
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
     return SizedBox(
       height: 36,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        scrollDirection: Axis.horizontal,
-        itemCount: units.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final String id;
-          final String label;
-          if (i == 0) {
-            id = 'All';
-            label = 'All Nets';
-          } else {
-            final u = units[i - 1];
-            id = u.id;
-            label = u.name;
-          }
-          final sel = id == selectedId;
-          return GestureDetector(
-            onTap: () => onSelect(id),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: sel ? _c.accent : _c.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: sel ? _c.accent : _c.border),
-              ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: sel ? _c.onAccent : _c.muted,
-                ),
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+              scrollDirection: Axis.horizontal,
+              itemCount: units.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final String id;
+                final String label;
+                if (i == 0) {
+                  id = 'All';
+                  label = 'All Nets';
+                } else {
+                  final u = units[i - 1];
+                  id = u.id;
+                  label = u.name;
+                }
+                final sel = id == selectedId;
+                return GestureDetector(
+                  onTap: () => onSelect(id),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: sel ? _c.accent : _c.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: sel ? _c.accent : _c.border),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: sel ? _c.onAccent : _c.muted,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (onPickDate != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 0, 12, 0),
+              child: _DateFilterChip(
+                activeDate: activeDate,
+                onTap: onPickDate!,
+                onClear: onClearDate,
               ),
             ),
-          );
-        },
+        ],
+      ),
+    );
+  }
+}
+
+class _DateFilterChip extends StatelessWidget {
+  const _DateFilterChip({
+    required this.activeDate,
+    required this.onTap,
+    this.onClear,
+  });
+  final DateTime? activeDate;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final active = activeDate != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          height: 32,
+          padding: EdgeInsets.symmetric(
+              horizontal: active ? 10 : 8, vertical: 0),
+          decoration: BoxDecoration(
+            color: active ? _c.accent : _c.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: active ? _c.accent : _c.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.event_rounded,
+                size: 15,
+                color: active ? _c.onAccent : _c.muted,
+              ),
+              if (active) ...[
+                const SizedBox(width: 6),
+                Text(
+                  DateFormat('d MMM').format(activeDate!),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: _c.onAccent,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: onClear,
+                  behavior: HitTestBehavior.opaque,
+                  child: Icon(Icons.close_rounded,
+                      size: 14, color: _c.onAccent),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
