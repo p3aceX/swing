@@ -977,6 +977,98 @@ export default async function ArenaPage({ params }: PageProps) {
           color: #0A0B0A;
         }
 
+        /* ── Bulk booking screen ────────────────────────────────────────── */
+        .bulk-modes {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 0;
+          margin: 8px 0 14px;
+          border: 1px solid var(--pass-line);
+        }
+        .bulk-mode {
+          all: unset;
+          cursor: pointer;
+          text-align: center;
+          padding: 12px 10px;
+          font-family: var(--font-geist-mono);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pass-muted);
+          background: var(--pass-paper);
+        }
+        .bulk-mode + .bulk-mode { border-left: 1px solid var(--pass-line); }
+        .bulk-mode.active {
+          background: var(--pass-ink);
+          color: var(--pass-paper);
+        }
+
+        .bulk-fields {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+          margin-bottom: 14px;
+        }
+
+        .bulk-cal {
+          margin: 0 0 14px;
+          padding: 12px 0 4px;
+          border-top: 1px dashed var(--pass-line-2);
+          border-bottom: 1px dashed var(--pass-line-2);
+        }
+        .bulk-cal-dow {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+          font-family: var(--font-geist-mono);
+          font-size: 9.5px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          color: var(--pass-muted);
+          margin-bottom: 8px;
+        }
+        .bulk-cal-dow span { text-align: center; }
+        .bulk-cal-grid {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+          gap: 2px;
+        }
+        .bulk-cal-cell {
+          all: unset;
+          cursor: pointer;
+          aspect-ratio: 1;
+          display: grid;
+          place-items: center;
+          font-family: var(--font-geist-mono);
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--pass-ink);
+          border: 1px solid transparent;
+        }
+        .bulk-cal-cell:hover:not(:disabled):not(.selected) {
+          background: var(--pass-line-2);
+        }
+        .bulk-cal-cell.selected {
+          background: #C8FF3E;
+          color: #0A0B0A;
+          font-weight: 800;
+        }
+        .bulk-cal-cell.past {
+          color: var(--pass-line);
+          cursor: not-allowed;
+        }
+        .bulk-cal-cell.dim { color: var(--pass-muted); }
+
+        .bulk-guest {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+          margin-bottom: 8px;
+        }
+        @media (max-width: 540px) {
+          .bulk-guest, .bulk-fields { grid-template-columns: 1fr; }
+        }
+
         .opt-err {
           margin-top: 12px;
           padding: 10px 12px;

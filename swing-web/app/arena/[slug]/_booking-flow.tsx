@@ -145,10 +145,10 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
   const [passStartDate, setPassStartDate] = useState(getToday());
   const [passMonths, setPassMonths] = useState(1);
   // bulk booking state
-  const [bulkDays, setBulkDays] = useState(1);
-  const [bulkStartTime, setBulkStartTime] = useState("06:00");
-  const [bulkEndTime, setBulkEndTime] = useState("07:00");
+  const [bulkMode, setBulkMode] = useState<"range" | "custom">("range");
   const [bulkStartDate, setBulkStartDate] = useState(getToday());
+  const [bulkEndDate, setBulkEndDate] = useState(getToday());
+  const [bulkCustomDates, setBulkCustomDates] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [submitting, startSubmit] = useTransition();
   const [error, setError] = useState("");
@@ -393,18 +393,40 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
     });
   }
 
+  // Compute the dates the user has chosen for bulk booking
+  function getBulkDates(): string[] {
+    if (bulkMode === "custom") return Array.from(bulkCustomDates).sort();
+    // range mode: every date between start and end (inclusive)
+    const out: string[] = [];
+    let d = bulkStartDate;
+    while (d <= bulkEndDate) { out.push(d); d = addDays(d, 1); }
+    return out;
+  }
+
   function handleBulkSubmit() {
     if (!guestName.trim() || !guestPhone.trim()) { setError("Enter your name and phone number."); return; }
+    const bulkSelectedDates = getBulkDates();
+    if (bulkSelectedDates.length === 0) { setError("Pick at least one date."); return; }
     setError("");
     startSubmit(async () => {
       try {
         const res = await fetch("/api/bulk-bookings", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ arenaUnitId: unitId, startTime: bulkStartTime, endTime: bulkEndTime, startDate: bulkStartDate, numDays: bulkDays, guestName: guestName.trim(), guestPhone: guestPhone.trim() }),
+          body: JSON.stringify({
+            arenaUnitId: unitId,
+            startTime: openTime ?? "00:00",
+            endTime: closeTime ?? "23:59",
+            startDate: bulkSelectedDates[0],
+            numDays: bulkSelectedDates.length,
+            dates: bulkSelectedDates,
+            isFullDay: true,
+            guestName: guestName.trim(),
+            guestPhone: guestPhone.trim(),
+          }),
         });
         const data = (await res.json()) as { success?: boolean; error?: string; data?: { numDays?: number; totalAmountPaise?: number } };
         if (!res.ok || !data.success) { setError(data.error ?? "Failed. Try again."); return; }
-        setBookingRef(`${data.data?.numDays ?? bulkDays}D`);
+        setBookingRef(`${data.data?.numDays ?? bulkSelectedDates.length}D`);
         setShowSaveModal(true);
         setStep("done");
       } catch { setError("Network error. Try again."); }
@@ -927,7 +949,13 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           {selectedCat.isGr && bulkEnabled && (
             <button className="opt opt-highlight" onClick={() => {
               setStep("bulk");
-              setBulkDays(selectedCat.first.minBulkDays ?? 1);
+              {
+                const min = selectedCat.first.minBulkDays ?? 1;
+                setBulkMode("range");
+                setBulkStartDate(getToday());
+                setBulkEndDate(addDays(getToday(), Math.max(0, min - 1)));
+                setBulkCustomDates(new Set());
+              }
               setGuestName(""); setGuestPhone(""); setError("");
             }}>
               <span className="opt-icon">{IconBulk}</span>
@@ -1049,65 +1077,117 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
   if (step === "bulk") {
     const minDays = unit?.minBulkDays ?? 1;
     const dayRate = unit?.bulkDayRatePaise ?? 0;
-    const total = dayRate * bulkDays;
+    const picked = getBulkDates();
+    const total = dayRate * picked.length;
+    const meetsMin = picked.length >= minDays;
+
+    // Build a 6-week calendar grid starting from this Monday
+    const gridStart = (() => {
+      const d = new Date(today + "T00:00:00");
+      const dow = (d.getDay() + 6) % 7; // 0 = Mon
+      d.setDate(d.getDate() - dow);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    })();
+    const gridDates = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+
+    const toggleCustomDate = (d: string) => {
+      if (d < today) return;
+      setBulkCustomDates(prev => {
+        const next = new Set(prev);
+        if (next.has(d)) next.delete(d); else next.add(d);
+        return next;
+      });
+    };
+
     return (
-      <div style={{ background: "var(--paper)", minHeight: "100%", paddingBottom: 96 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 14px 0" }}>
-          <button onClick={() => setStep("date")} style={{ width: 28, height: 28, borderRadius: "50%", border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      <div className="pass-pane">
+        <button className="pass-back" onClick={() => setStep("date")}>← BACK</button>
+        <div className="pass-h1">Full day · multi-day</div>
+        <div className="pass-sub">Book the ground for {minDays}+ full days. Pick a date range or hand-pick dates.</div>
+
+        {/* Mode toggle */}
+        <div className="bulk-modes">
+          <button className={`bulk-mode ${bulkMode === "range" ? "active" : ""}`} onClick={() => setBulkMode("range")}>
+            DATE RANGE
           </button>
-          <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>Bulk Booking · {unit?.name}</div>
+          <button className={`bulk-mode ${bulkMode === "custom" ? "active" : ""}`} onClick={() => setBulkMode("custom")}>
+            PICK DATES
+          </button>
         </div>
-        <div style={{ padding: "20px 14px 10px", display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Number of days <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>· min {minDays}</span></div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <button onClick={() => setBulkDays(d => Math.max(minDays, d - 1))} style={{ width: 36, height: 36, borderRadius: "var(--r-sm)", border: "1.5px solid var(--hairline)", background: "var(--paper-2)", color: "var(--ink)", cursor: "pointer", fontWeight: 700, fontSize: 18 }}>−</button>
-              <span style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 22, color: "var(--ink)", minWidth: 32, textAlign: "center" }}>{bulkDays}</span>
-              <button onClick={() => setBulkDays(d => d + 1)} style={{ width: 36, height: 36, borderRadius: "var(--r-sm)", border: "1.5px solid var(--hairline)", background: "var(--paper-2)", color: "var(--ink)", cursor: "pointer", fontWeight: 700, fontSize: 18 }}>+</button>
-              {dayRate > 0 && <span style={{ font: "600 12px var(--font-ui)", color: "var(--ink-3)" }}>{rupeesInt(dayRate)}/day</span>}
+
+        {/* Range mode */}
+        {bulkMode === "range" && (
+          <div className="bulk-fields">
+            <div className="form-field">
+              <label className="form-label">FROM</label>
+              <input className="form-input" type="date" min={today} value={bulkStartDate}
+                onChange={e => {
+                  const v = e.target.value;
+                  setBulkStartDate(v);
+                  if (bulkEndDate < v) setBulkEndDate(v);
+                }} />
+            </div>
+            <div className="form-field">
+              <label className="form-label">TO</label>
+              <input className="form-input" type="date" min={bulkStartDate} value={bulkEndDate}
+                onChange={e => setBulkEndDate(e.target.value)} />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <div className="form-field" style={{ flex: 1 }}>
-              <label className="form-label">Daily start time</label>
-              <input className="form-input" type="time" value={bulkStartTime} onChange={e => {
-                const t = e.target.value;
-                setBulkStartTime(t);
-                const [h, m] = t.split(":").map(Number);
-                const endH = (h + 1) % 24;
-                setBulkEndTime(`${String(endH).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-              }} />
+        )}
+
+        {/* Custom dates mode */}
+        {bulkMode === "custom" && (
+          <div className="bulk-cal">
+            <div className="bulk-cal-dow">
+              {["M","T","W","T","F","S","S"].map((d, i) => <span key={i}>{d}</span>)}
             </div>
-            <div className="form-field" style={{ flex: 1 }}>
-              <label className="form-label">Daily end time</label>
-              <input className="form-input" type="time" value={bulkEndTime} min={bulkStartTime} onChange={e => {
-                if (e.target.value > bulkStartTime) setBulkEndTime(e.target.value);
-              }} />
+            <div className="bulk-cal-grid">
+              {gridDates.map(d => {
+                const inPast = d < today;
+                const selected = bulkCustomDates.has(d);
+                const monthNum = Number(d.split("-")[1]);
+                const dayNum = Number(d.split("-")[2]);
+                const todayMonth = Number(today.split("-")[1]);
+                const dim = !inPast && monthNum !== todayMonth && monthNum !== (todayMonth % 12) + 1;
+                return (
+                  <button key={d}
+                    className={`bulk-cal-cell ${selected ? "selected" : ""} ${inPast ? "past" : ""} ${dim ? "dim" : ""}`}
+                    disabled={inPast}
+                    onClick={() => toggleCustomDate(d)}>
+                    {dayNum}
+                  </button>
+                );
+              })}
             </div>
           </div>
+        )}
+
+        {/* Guest info */}
+        <div className="bulk-guest">
           <div className="form-field">
-            <label className="form-label">Start date</label>
-            <input className="form-input" type="date" min={today} value={bulkStartDate} onChange={e => setBulkStartDate(e.target.value)} />
-          </div>
-          <div className="form-field">
-            <label className="form-label">Your name</label>
+            <label className="form-label">YOUR NAME</label>
             <input className="form-input" type="text" placeholder="Full name" value={guestName} onChange={e => setGuestName(e.target.value)} />
           </div>
           <div className="form-field">
-            <label className="form-label">Mobile number</label>
+            <label className="form-label">MOBILE</label>
             <input className="form-input" type="tel" placeholder="+91 98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value)} />
           </div>
-          {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
         </div>
+
+        {error && <div className="opt-err">{error}</div>}
+
         <div className="cta-bar">
-          <div style={{ flex: 1 }}>
-            <div className="cta-amt">{total > 0 ? rupeesInt(total) : `${bulkDays} days`}</div>
-            <div className="cta-sub">{bulkDays} day{bulkDays > 1 ? "s" : ""} · pay at venue</div>
+          <div className="cta-info">
+            <div className="cta-amt">{picked.length > 0 ? rupeesInt(total) : "—"}</div>
+            <div className="cta-sub">
+              {picked.length} day{picked.length !== 1 ? "s" : ""}
+              {!meetsMin && minDays > 1 ? ` · min ${minDays}` : " · payment at venue"}
+            </div>
           </div>
-          <button className="cta-btn" disabled={submitting || !guestName.trim() || !guestPhone.trim()} onClick={handleBulkSubmit}>
-            {submitting ? "Confirming…" : "Confirm"}
-            {!submitting && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>}
+          <button className="cta-btn cta-primary"
+            disabled={submitting || !guestName.trim() || !guestPhone.trim() || !meetsMin}
+            onClick={handleBulkSubmit}>
+            {submitting ? "BOOKING…" : "CONFIRM BOOKING"}
           </button>
         </div>
       </div>
