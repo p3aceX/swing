@@ -3821,6 +3821,20 @@ class _AddBookingSheetState extends ConsumerState<AddBookingSheet> {
           _activeTimeBlocks = avail.timeBlocks;
           _availableStartTimes = avail.availableStartTimes;
           _availableForDurationMins = avail.durationMins;
+          // When the server gave us an authoritative list, use it as the
+          // visible slot grid. The local _rebuildTimes generator uses a
+          // fixed increment that misses turnaround-shifted starts (e.g.
+          // 06:00 + 4h + 1h turnaround → 11:00, not 10:00).
+          if (avail.availableStartTimes != null &&
+              avail.durationMins == durForLoad) {
+            final list = avail.availableStartTimes!.toList()
+              ..sort((a, b) => _toMins(a).compareTo(_toMins(b)));
+            // If the previously-selected slot is no longer available
+            // (e.g. duration change), drop the selection.
+            _selectedSlots
+                .removeWhere((s) => !avail.availableStartTimes!.contains(s));
+            _allDaySlots = list;
+          }
         });
     } catch (_) {
       if (mounted)
