@@ -1,9 +1,11 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/auth/me_providers.dart';
 import '../../../core/router/app_router.dart';
@@ -1914,6 +1916,44 @@ class _ArenaCard extends ConsumerStatefulWidget {
 class _ArenaCardState extends ConsumerState<_ArenaCard> {
   bool _deleting = false;
 
+  static String _normaliseSlug(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+
+  String _publicUrl() {
+    final a = widget.arena;
+    final customSlug = a.customSlug?.trim();
+    final citySlug = a.citySlug?.trim();
+    final arenaSlug = a.arenaSlug?.trim();
+    if (customSlug != null && customSlug.isNotEmpty) {
+      return 'swingcricketapp.com/$customSlug';
+    }
+    if (citySlug != null &&
+        citySlug.isNotEmpty &&
+        arenaSlug != null &&
+        arenaSlug.isNotEmpty) {
+      return 'swingcricketapp.com/$citySlug/$arenaSlug';
+    }
+    return 'swingcricketapp.com/${_normaliseSlug(a.name)}';
+  }
+
+  void _copyLink() {
+    Clipboard.setData(ClipboardData(text: 'https://${_publicUrl()}'));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Link copied'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _shareLink() {
+    Share.share('https://${_publicUrl()}', subject: widget.arena.name);
+  }
+
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -2070,7 +2110,7 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
           ),
           // Stat pills
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -2082,6 +2122,48 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
                 if (arena.sports.isNotEmpty)
                   _StatPill(Icons.sports_cricket_outlined,
                       arena.sports.take(2).join(', ')),
+              ],
+            ),
+          ),
+          // Share link row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 6, 12),
+            child: Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(Icons.link_rounded,
+                      size: 14,
+                      color: scheme.onSurface.withValues(alpha: 0.5)),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _copyLink,
+                    child: Text(
+                      _publicUrl(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: scheme.onSurface.withValues(alpha: 0.75),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                  ),
+                ),
+                _LinkAction(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copy link',
+                  onTap: _copyLink,
+                ),
+                _LinkAction(
+                  icon: Icons.share_rounded,
+                  tooltip: 'Share',
+                  onTap: _shareLink,
+                ),
               ],
             ),
           ),
@@ -2182,6 +2264,31 @@ class _StatPill extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LinkAction extends StatelessWidget {
+  const _LinkAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      onPressed: onTap,
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      iconSize: 16,
+      padding: const EdgeInsets.all(6),
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      icon: Icon(icon, color: scheme.onSurface.withValues(alpha: 0.7)),
     );
   }
 }
