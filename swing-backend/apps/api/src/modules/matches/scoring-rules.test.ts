@@ -15,6 +15,7 @@ import {
   validateBallShape,
   nextBallIsFreeHit,
   validateBallAgainstInningsState,
+  validateImpactPlayerSwap,
 } from './scoring-rules'
 import { buildInningsPlayerStats } from './match-stats'
 
@@ -471,4 +472,285 @@ test('wagon wheel zone normalization enforces 8 canonical segments', () => {
   assert.equal(normalizeWagonZone('mid off'), 'long_off')
   assert.equal(normalizeWagonZone('straight'), 'long_on')
   assert.equal(normalizeWagonZone('unknown-zone'), null)
+})
+
+// ─── Super Over caps ────────────────────────────────────────────────────────
+
+test('super over caps wickets at 2 instead of 10', () => {
+  assert.throws(
+    () =>
+      validateBallAgainstInningsState({
+        currentLegalBalls: 3,
+        maxLegalBalls: 6,
+        currentWickets: 2,
+        maxWickets: 2,
+        currentRuns: 14,
+        ball: ball({ outcome: 'DOT' }),
+      }),
+    /all out/,
+  )
+
+  // 1 wicket and 5 legal balls should still allow one more delivery.
+  assert.doesNotThrow(() =>
+    validateBallAgainstInningsState({
+      currentLegalBalls: 5,
+      maxLegalBalls: 6,
+      currentWickets: 1,
+      maxWickets: 2,
+      currentRuns: 12,
+      ball: ball({ outcome: 'SINGLE', runs: 1 }),
+    }),
+  )
+})
+
+test('super over caps legal deliveries at 6 (one over per side)', () => {
+  assert.throws(
+    () =>
+      validateBallAgainstInningsState({
+        currentLegalBalls: 6,
+        maxLegalBalls: 6,
+        currentWickets: 0,
+        maxWickets: 2,
+        currentRuns: 8,
+        ball: ball({ outcome: 'DOT' }),
+      }),
+    /legal-ball limit/,
+  )
+})
+
+test('super over allows wides mid-over without increasing the legal-ball count', () => {
+  // 5 legal balls bowled, 6 max. A WIDE is not a legal delivery, so it
+  // should not be rejected as "would exceed the legal-ball limit".
+  assert.doesNotThrow(() =>
+    validateBallAgainstInningsState({
+      currentLegalBalls: 5,
+      maxLegalBalls: 6,
+      currentWickets: 0,
+      maxWickets: 2,
+      currentRuns: 7,
+      ball: ball({ outcome: 'WIDE', extras: 1 }),
+    }),
+  )
+})
+
+test('super over chase ends the moment the target is reached', () => {
+  assert.throws(
+    () =>
+      validateBallAgainstInningsState({
+        currentLegalBalls: 3,
+        maxLegalBalls: 6,
+        currentWickets: 0,
+        maxWickets: 2,
+        currentRuns: 15,
+        targetRuns: 15,
+        ball: ball({ outcome: 'SINGLE', runs: 1 }),
+      }),
+    /chase is already complete/,
+  )
+})
+
+// ─── Extras breakdown ──────────────────────────────────────────────────────
+
+test('innings snapshot tracks wides, no-balls, byes, and leg-byes separately', () => {
+  const service = new MatchService()
+  const snapshot = service.buildInningsSnapshot([
+    ball({ id: 'w1', outcome: 'WIDE', extras: 2 }),
+    ball({ id: 'n1', outcome: 'NO_BALL', runs: 0, extras: 1 }),
+    ball({ id: 'b1', outcome: 'BYE', extras: 4 }),
+    ball({ id: 'lb1', outcome: 'LEG_BYE', extras: 1 }),
+  ])
+
+  assert.equal(snapshot.extras, 8)
+  assert.deepEqual(snapshot.extrasBreakdown, {
+    wides: 2,
+    noBalls: 1,
+    byes: 4,
+    legByes: 1,
+    penalty: 0,
+  })
+})
+
+// ─── Impact Player swap validation ─────────────────────────────────────────
+
+type _SwapArgs = Parameters<typeof validateImpactPlayerSwap>[0]
+const baseSwap = (overrides: Partial<_SwapArgs> = {}): _SwapArgs => ({
+  hasImpactPlayer: true,
+  matchStatus: 'IN_PROGRESS',
+  maxOversPerSide: 20,
+  alreadyUsed: false,
+  namedSubs: ['sub-1', 'sub-2', 'sub-3', 'sub-4'],
+  xi: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11'],
+  outgoingPlayerId: 'p11',
+  incomingPlayerId: 'sub-1',
+  liveInnings: {
+    legalBalls: 6, // start of new over
+    lastBallWasWicket: false,
+    strikerId: 'p1',
+    nonStrikerId: 'p2',
+  },
+  ...overrides,
+})
+
+test('impact player swap is rejected when the rule is off', () => {
+  assert.throws(
+    () => validateImpactPlayerSwap(baseSwap({ hasImpactPlayer: false })),
+    /IMPACT_PLAYER_DISABLED/,
+  )
+})
+
+test('impact player swap is rejected when match is not in progress', () => {
+  assert.throws(
+    () => validateImpactPlayerSwap(baseSwap({ matchStatus: 'SCHEDULED' })),
+    /MATCH_NOT_IN_PROGRESS/,
+  )
+  assert.throws(
+    () => validateImpactPlayerSwap(baseSwap({ matchStatus: 'COMPLETED' })),
+    /MATCH_NOT_IN_PROGRESS/,
+  )
+})
+
+test('impact player swap is suspended under 10 overs per side', () => {
+  assert.throws(
+    () => validateImpactPlayerSwap(baseSwap({ maxOversPerSide: 6 })),
+    /IMPACT_PLAYER_NOT_ALLOWED_UNDER_10_OVERS/,
+  )
+  // Exactly 10 overs is allowed.
+  assert.doesNotThrow(() =>
+    validateImpactPlayerSwap(baseSwap({ maxOversPerSide: 10 })),
+  )
+})
+
+test('each team can only use the Impact Player substitution once', () => {
+  assert.throws(
+    () => validateImpactPlayerSwap(baseSwap({ alreadyUsed: true })),
+    /IMPACT_PLAYER_ALREADY_USED/,
+  )
+})
+
+test('incoming player must be in the pre-declared named-4 list', () => {
+  assert.throws(
+    () =>
+      validateImpactPlayerSwap(
+        baseSwap({ incomingPlayerId: 'random-not-named' }),
+      ),
+    /IMPACT_PLAYER_NOT_NAMED/,
+  )
+})
+
+test('outgoing player must be in the current XI', () => {
+  assert.throws(
+    () =>
+      validateImpactPlayerSwap(
+        baseSwap({ outgoingPlayerId: 'someone-else' }),
+      ),
+    /IMPACT_PLAYER_OUTGOING_INVALID/,
+  )
+})
+
+test('incoming player cannot already be in the XI', () => {
+  assert.throws(
+    () =>
+      validateImpactPlayerSwap(
+        baseSwap({
+          namedSubs: ['p3'],
+          incomingPlayerId: 'p3',
+        }),
+      ),
+    /IMPACT_PLAYER_DUPLICATE/,
+  )
+})
+
+test('swap window is start-of-over OR fall-of-wicket', () => {
+  // Mid-over, no wicket — rejected.
+  assert.throws(
+    () =>
+      validateImpactPlayerSwap(
+        baseSwap({
+          liveInnings: {
+            legalBalls: 3,
+            lastBallWasWicket: false,
+            strikerId: 'p1',
+            nonStrikerId: 'p2',
+          },
+        }),
+      ),
+    /IMPACT_PLAYER_WINDOW/,
+  )
+
+  // Mid-over, BUT last ball was a wicket — allowed.
+  assert.doesNotThrow(() =>
+    validateImpactPlayerSwap(
+      baseSwap({
+        liveInnings: {
+          legalBalls: 3,
+          lastBallWasWicket: true,
+          strikerId: 'p1',
+          nonStrikerId: 'p2',
+        },
+      }),
+    ),
+  )
+
+  // Start of over (legalBalls multiple of 6) — allowed.
+  assert.doesNotThrow(() =>
+    validateImpactPlayerSwap(
+      baseSwap({
+        liveInnings: {
+          legalBalls: 12,
+          lastBallWasWicket: false,
+          strikerId: 'p1',
+          nonStrikerId: 'p2',
+        },
+      }),
+    ),
+  )
+})
+
+test('outgoing player cannot be at the crease', () => {
+  assert.throws(
+    () =>
+      validateImpactPlayerSwap(
+        baseSwap({
+          outgoingPlayerId: 'p1', // currently striking
+        }),
+      ),
+    /IMPACT_PLAYER_OUTGOING_ACTIVE/,
+  )
+  assert.throws(
+    () =>
+      validateImpactPlayerSwap(
+        baseSwap({
+          outgoingPlayerId: 'p2', // currently non-striker
+        }),
+      ),
+    /IMPACT_PLAYER_OUTGOING_ACTIVE/,
+  )
+})
+
+test('no live innings (between innings) treats the swap as start-of-over', () => {
+  // Mid-over check is skipped when there's no live innings.
+  assert.doesNotThrow(() =>
+    validateImpactPlayerSwap(
+      baseSwap({
+        liveInnings: null,
+      }),
+    ),
+  )
+})
+
+test('no-ball with a bye tag splits the extras between NB and B', () => {
+  const service = new MatchService()
+  const snapshot = service.buildInningsSnapshot([
+    ball({
+      id: 'nb-bye',
+      outcome: 'NO_BALL',
+      runs: 0,
+      extras: 3, // 1 no-ball + 2 byes
+      tags: ['no_ball_extra:bye:2'],
+    }),
+  ])
+
+  assert.equal(snapshot.extrasBreakdown.noBalls, 1)
+  assert.equal(snapshot.extrasBreakdown.byes, 2)
+  assert.equal(snapshot.extrasBreakdown.legByes, 0)
 })

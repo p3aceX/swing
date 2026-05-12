@@ -20,6 +20,7 @@ import {
   validateBallAgainstInningsState,
   validateBallShape,
   validateDismissalForDelivery,
+  validateImpactPlayerSwap,
 } from './scoring-rules'
 
 const studioService = new StudioService()
@@ -38,6 +39,7 @@ export class MatchService {
     currentLegalBalls: number
     maxLegalBalls: number
     currentWickets: number
+    maxWickets?: number
     currentRuns: number
     targetRuns?: number | null
     ball: any
@@ -49,6 +51,7 @@ export class MatchService {
         currentLegalBalls: params.currentLegalBalls,
         maxLegalBalls: params.maxLegalBalls,
         currentWickets: params.currentWickets,
+        maxWickets: params.maxWickets,
         currentRuns: params.currentRuns,
         targetRuns: params.targetRuns ?? null,
         ball: params.ball,
@@ -128,6 +131,57 @@ export class MatchService {
     const opponentTotal = opponentInnings.reduce((s, i) => s + i.totalRuns, 0)
     const ownTotal = ownPreviousInnings.reduce((s, i) => s + i.totalRuns, 0)
     return opponentTotal - ownTotal + 1
+  }
+
+  /**
+   * Super-over target: each SO pair is bowler1 vs bowler2. If we're recording
+   * for the second SO innings (the chaser), target = first SO innings + 1.
+   * Repeat super overs (when the first SO also ties) start a new pair —
+   * earlier SO totals don't carry forward.
+   */
+  private async resolveSuperOverTarget(
+    matchId: string,
+    inningsNum: number,
+    battingTeam: string,
+  ): Promise<number | null> {
+    const superOvers = await prisma.innings.findMany({
+      where: { matchId, isSuperOver: true },
+      orderBy: { inningsNumber: 'asc' },
+      select: { inningsNumber: true, totalRuns: true, isCompleted: true, battingTeam: true },
+    })
+    // Match the current innings to its SO pair (each pair is two consecutive innings).
+    const index = superOvers.findIndex((s) => s.inningsNumber === inningsNum)
+    if (index < 0 || index % 2 !== 1) return null
+    const paired = superOvers[index - 1]
+    if (!paired || !paired.isCompleted) return null
+    if (paired.battingTeam === battingTeam) return null
+    return paired.totalRuns + 1
+  }
+
+  /**
+   * Named Impact Player substitutes. Dedup, cap at 4, and reject anyone
+   * already in the playing XI (a player can't be both a starter and a sub).
+   */
+  private normalizeNamedImpactSubs(rawSubs: unknown, xi: string[]): string[] {
+    if (!Array.isArray(rawSubs)) return []
+    const seen = new Set<string>()
+    const xiSet = new Set(xi)
+    const out: string[] = []
+    for (const v of rawSubs) {
+      const id = `${v}`.trim()
+      if (!id || seen.has(id)) continue
+      if (xiSet.has(id)) {
+        throw new AppError(
+          'INVALID_IMPACT_SUB',
+          `Player ${id} is in the playing XI — cannot also be a named substitute`,
+          400,
+        )
+      }
+      seen.add(id)
+      out.push(id)
+      if (out.length >= 4) break
+    }
+    return out
   }
 
   private normalizePlayingXI(playerIds: string[]) {
@@ -341,6 +395,11 @@ export class MatchService {
     let totalRuns = 0
     let totalWickets = 0
     let extras = 0
+    let wides = 0
+    let noBalls = 0
+    let byes = 0
+    let legByes = 0
+    let penalty = 0
     let legalBalls = 0
     let strikerId: string | null = null
     let nonStrikerId: string | null = null
@@ -353,6 +412,44 @@ export class MatchService {
     for (const ball of orderedBalls) {
       totalRuns += (ball.runs || 0) + (ball.extras || 0)
       extras += ball.extras || 0
+      const extrasVal = ball.extras || 0
+      switch (ball.outcome) {
+        case 'WIDE':
+          wides += extrasVal
+          break
+        case 'NO_BALL':
+          // Tagged byes / leg-byes on a no-ball still count as the corresponding
+          // category for the scorecard breakdown, while the 1-run NB penalty
+          // stays under noBalls.
+          {
+            const noBallExtraTag = (ball.tags ?? []).find(
+              (t: string) => typeof t === 'string' && t.startsWith('no_ball_extra:'),
+            )
+            if (noBallExtraTag) {
+              const parts = `${noBallExtraTag}`.split(':')
+              const kind = parts[1]
+              const amount = Number(parts[2] ?? 0) || 0
+              noBalls += 1
+              if (kind === 'bye') byes += amount
+              else if (kind === 'leg_bye') legByes += amount
+              else noBalls += Math.max(0, extrasVal - 1)
+            } else {
+              noBalls += extrasVal
+            }
+          }
+          break
+        case 'BYE':
+          byes += extrasVal
+          break
+        case 'LEG_BYE':
+          legByes += extrasVal
+          break
+        default:
+          // Extras tagged as overthrow are counted in totalRuns/extras but not
+          // attributed to a specific category — leave them out of the
+          // breakdown so Wd+NB+B+LB+Pen <= totalExtras.
+          break
+      }
       if (isInningsWicket(ball)) totalWickets++
       runningRuns += (ball.runs || 0) + (ball.extras || 0)
       if (isInningsWicket(ball)) runningWickets++
@@ -419,6 +516,13 @@ export class MatchService {
       totalRuns,
       totalWickets,
       extras,
+      extrasBreakdown: {
+        wides,
+        noBalls,
+        byes,
+        legByes,
+        penalty,
+      },
       totalOvers: Math.floor(legalBalls / 6) + (legalBalls % 6) / 10,
       legalBalls,
       currentStrikerId: strikerId,
@@ -696,6 +800,8 @@ export class MatchService {
         teamAWicketKeeperId: data.teamAWicketKeeperId,
         teamBWicketKeeperId: data.teamBWicketKeeperId,
         hasImpactPlayer: data.hasImpactPlayer ?? false,
+        namedImpactSubsTeamA: this.normalizeNamedImpactSubs(data.namedImpactSubsTeamA, teamAPlayerIds),
+        namedImpactSubsTeamB: this.normalizeNamedImpactSubs(data.namedImpactSubsTeamB, teamBPlayerIds),
         customOvers: resolvedCustomOvers,
         ballType: data.ballType, scheduledAt: new Date(data.scheduledAt), venueName: resolvedVenueName,
         facilityId: resolvedFacilityId, academyId: data.academyId,
@@ -1196,9 +1302,14 @@ export class MatchService {
       ],
     })
     const snapshot = this.buildInningsSnapshot(existingBalls)
-    const maxOvers = this.resolveMaxOvers(match)
+    // Super overs are capped at 1 over / 2 wickets per side regardless of
+    // match format. Resolve target from the paired SO innings (if any).
+    const maxOvers = innings.isSuperOver ? 1 : this.resolveMaxOvers(match)
+    const maxWickets = innings.isSuperOver ? 2 : 10
     const isMultiInnings = ['TWO_INNINGS', 'TEST'].includes(match.format)
-    const targetRuns = await this.resolveTargetRuns(matchId, innings.battingTeam, inningsNum, isMultiInnings)
+    const targetRuns = innings.isSuperOver
+      ? await this.resolveSuperOverTarget(matchId, inningsNum, innings.battingTeam)
+      : await this.resolveTargetRuns(matchId, innings.battingTeam, inningsNum, isMultiInnings)
     const effectiveState = {
       currentStrikerId: innings.currentStrikerId ?? snapshot.currentStrikerId,
       currentNonStrikerId: innings.currentNonStrikerId ?? snapshot.currentNonStrikerId,
@@ -1234,6 +1345,7 @@ export class MatchService {
       currentLegalBalls: snapshot.legalBalls,
       maxLegalBalls: maxOvers * 6,
       currentWickets: snapshot.totalWickets,
+      maxWickets,
       currentRuns: snapshot.totalRuns,
       targetRuns,
       ball: candidateBall,
@@ -1537,12 +1649,48 @@ export class MatchService {
     const match = await prisma.match.findUnique({ where: { id: matchId }, include: { innings: { orderBy: { inningsNumber: 'asc' } } } })
     if (!match) throw Errors.notFound('Match')
     if (match.status !== 'IN_PROGRESS') throw new AppError('INVALID_STATE', 'Match must be in progress', 400)
+
     const regularInnings = match.innings.filter(i => !i.isSuperOver)
-    const lastInn = regularInnings[regularInnings.length - 1]
-    if (!lastInn?.isCompleted) throw new AppError('INVALID_STATE', 'All regular innings must be completed first', 400)
     const superOverInnings = match.innings.filter(i => i.isSuperOver)
+    const isMultiInnings = ['TWO_INNINGS', 'TEST'].includes(match.format)
+
+    // Both regular innings must be completed AND tied — super over is the
+    // ICC tie-break for limited-overs matches. Test/two-innings ties are
+    // a draw, not a super over.
+    if (isMultiInnings) {
+      throw new AppError('INVALID_STATE', 'Super over does not apply to multi-innings formats', 400)
+    }
+    if (regularInnings.length < 2 || !regularInnings[0].isCompleted || !regularInnings[1].isCompleted) {
+      throw new AppError('INVALID_STATE', 'Both regular innings must be completed before a super over', 400)
+    }
+
+    // Compute live totals so a stale DB row never gates the precondition.
+    const liveTotals = await Promise.all(regularInnings.map(async (inn) => {
+      const balls = await prisma.ballEvent.findMany({ where: { inningsId: inn.id } })
+      return this.buildInningsSnapshot(balls).totalRuns
+    }))
+
+    // If there are already SO innings: they must also be completed and tied
+    // before another pair is allowed.
+    if (superOverInnings.length > 0) {
+      const lastPair = superOverInnings.slice(-2)
+      if (lastPair.length !== 2 || lastPair.some((i) => !i.isCompleted)) {
+        throw new AppError('INVALID_STATE', 'Finish the active super over first', 400)
+      }
+      const pairTotals = await Promise.all(lastPair.map(async (inn) => {
+        const balls = await prisma.ballEvent.findMany({ where: { inningsId: inn.id } })
+        return this.buildInningsSnapshot(balls).totalRuns
+      }))
+      if (pairTotals[0] !== pairTotals[1]) {
+        throw new AppError('INVALID_STATE', 'Previous super over already produced a winner', 400)
+      }
+    } else if (liveTotals[0] !== liveTotals[1]) {
+      throw new AppError('INVALID_STATE', 'Super over only applies when the regular innings are tied', 400)
+    }
+
+    const lastInn = (superOverInnings.length > 0 ? superOverInnings : regularInnings).at(-1)!
     const nextSuperNum = match.innings.length + 1
-    // Team that batted second in regular innings bats first in super over
+    // Team that batted second in the prior pair bats first this time.
     const soTeam1 = lastInn.battingTeam
     const soTeam2 = soTeam1 === 'A' ? 'B' : 'A'
     const [so1, so2] = await Promise.all([
@@ -1550,6 +1698,124 @@ export class MatchService {
       prisma.innings.create({ data: { matchId, inningsNumber: nextSuperNum + 1, battingTeam: soTeam2, isSuperOver: true } }),
     ])
     return { message: 'Super over innings created', superOverInnings: [so1, so2] }
+  }
+
+  /**
+   * Impact Player substitution per ICC playing condition:
+   *   1. Each team may use it at most once per match.
+   *   2. Window: start-of-over OR fall-of-wicket — i.e. either the
+   *      innings is between overs (no balls into the current over) or
+   *      the last ball was a wicket.
+   *   3. Match must be ≥ 10 overs per side (rule is suspended below that).
+   *   4. Incoming player must be in the team's pre-declared named-4 list.
+   *   5. Outgoing player is replaced in the playing XI (and captain /
+   *      vice-captain / wicket-keeper slot if they held one).
+   */
+  async impactPlayerSwap(
+    matchId: string,
+    userId: string,
+    args: { team: 'A' | 'B'; outgoingPlayerId: string; incomingPlayerId: string },
+    options: MutationOptions = {},
+  ) {
+    const match = await this.authorizeMutation(matchId, userId, {
+      ...options,
+      access: options.access ?? 'SCORER',
+    }) as any
+
+    const namedSubs: string[] = args.team === 'A'
+      ? (match.namedImpactSubsTeamA ?? [])
+      : (match.namedImpactSubsTeamB ?? [])
+    const xi: string[] = args.team === 'A'
+      ? [...(match.teamAPlayerIds ?? [])]
+      : [...(match.teamBPlayerIds ?? [])]
+    const already = args.team === 'A'
+      ? match.impactPlayerUsedTeamA
+      : match.impactPlayerUsedTeamB
+
+    // Pull live innings state up-front so the pure validator can decide
+    // the eligibility window (start-of-over / fall-of-wicket) without
+    // touching the DB itself.
+    const innings = await prisma.innings.findMany({
+      where: { matchId },
+      orderBy: { inningsNumber: 'asc' },
+      include: { ballEvents: { orderBy: [{ overNumber: 'asc' }, { ballNumber: 'asc' }] } },
+    })
+    const liveInn = innings.find((i) => !i.isCompleted)
+    let liveInningsForValidator: Parameters<typeof validateImpactPlayerSwap>[0]['liveInnings'] = null
+    if (liveInn) {
+      const lastBall = liveInn.ballEvents.at(-1)
+      const snapshot = this.buildInningsSnapshot(liveInn.ballEvents)
+      liveInningsForValidator = {
+        legalBalls: snapshot.legalBalls,
+        lastBallWasWicket: lastBall ? isInningsWicket(lastBall) : false,
+        strikerId: snapshot.currentStrikerId,
+        nonStrikerId: snapshot.currentNonStrikerId,
+      }
+    }
+
+    try {
+      validateImpactPlayerSwap({
+        hasImpactPlayer: !!match.hasImpactPlayer,
+        matchStatus: match.status,
+        maxOversPerSide: this.resolveMaxOvers(match),
+        alreadyUsed: !!already,
+        namedSubs,
+        xi,
+        outgoingPlayerId: args.outgoingPlayerId,
+        incomingPlayerId: args.incomingPlayerId,
+        liveInnings: liveInningsForValidator,
+      })
+    } catch (e) {
+      const code = e instanceof Error ? e.message : 'IMPACT_PLAYER_INVALID'
+      throw new AppError(code, this._impactPlayerErrorMessage(code), 400)
+    }
+
+    const outIndex = xi.indexOf(args.outgoingPlayerId)
+    xi[outIndex] = args.incomingPlayerId
+
+    const teamData: Record<string, unknown> = args.team === 'A'
+      ? { teamAPlayerIds: xi, impactPlayerUsedTeamA: true }
+      : { teamBPlayerIds: xi, impactPlayerUsedTeamB: true }
+
+    // Re-point captain / VC / WK slots if the outgoing player held them, so
+    // the rest of the system stays consistent.
+    const slotFields: string[] = args.team === 'A'
+      ? ['teamACaptainId', 'teamAViceCaptainId', 'teamAWicketKeeperId']
+      : ['teamBCaptainId', 'teamBViceCaptainId', 'teamBWicketKeeperId']
+    const matchAny = match as Record<string, unknown>
+    for (const field of slotFields) {
+      if (matchAny[field] === args.outgoingPlayerId) {
+        teamData[field] = args.incomingPlayerId
+      }
+    }
+
+    await prisma.match.update({ where: { id: matchId }, data: teamData })
+    return this.getMatch(matchId)
+  }
+
+  private _impactPlayerErrorMessage(code: string): string {
+    switch (code) {
+      case 'IMPACT_PLAYER_DISABLED':
+        return 'Impact Player rule is not enabled for this match'
+      case 'MATCH_NOT_IN_PROGRESS':
+        return 'Match must be in progress'
+      case 'IMPACT_PLAYER_NOT_ALLOWED_UNDER_10_OVERS':
+        return 'Impact Player rule is suspended for matches under 10 overs per side'
+      case 'IMPACT_PLAYER_ALREADY_USED':
+        return 'This team has already used their Impact Player substitution'
+      case 'IMPACT_PLAYER_NOT_NAMED':
+        return 'Incoming player must be in the pre-declared substitute list'
+      case 'IMPACT_PLAYER_OUTGOING_INVALID':
+        return 'Outgoing player must currently be in the playing XI'
+      case 'IMPACT_PLAYER_DUPLICATE':
+        return 'Incoming player is already in the playing XI'
+      case 'IMPACT_PLAYER_WINDOW':
+        return 'Impact Player can only enter at the start of an over or after a wicket'
+      case 'IMPACT_PLAYER_OUTGOING_ACTIVE':
+        return 'Outgoing player is currently batting — pick a different player'
+      default:
+        return 'Impact Player substitution is not valid right now'
+    }
   }
 
   async changeWicketKeeper(matchId: string, userId: string, team: 'A' | 'B', wicketKeeperId: string, options: MutationOptions = {}) {
@@ -1852,6 +2118,7 @@ export class MatchService {
           totalRuns: liveSnapshot.totalRuns,
           totalWickets: liveSnapshot.totalWickets,
           extras: liveSnapshot.extras,
+          extrasBreakdown: liveSnapshot.extrasBreakdown,
           currentStrikerId: innsStats.strikerId,
           currentNonStrikerId: innsStats.nonStrikerId,
           currentBowlerId: innsStats.currentBowlerId,
@@ -2575,6 +2842,8 @@ export class MatchService {
         teamAWicketKeeperId: data.teamA?.wicketKeeperId || null,
         teamBWicketKeeperId: data.teamB?.wicketKeeperId || null,
         hasImpactPlayer: data.hasImpactPlayer ?? false,
+        namedImpactSubsTeamA: this.normalizeNamedImpactSubs(data.teamA?.namedImpactSubs, teamAPlayerIds),
+        namedImpactSubsTeamB: this.normalizeNamedImpactSubs(data.teamB?.namedImpactSubs, teamBPlayerIds),
         customOvers: resolvedCustomOvers,
         ballType: data.ballType,
         scheduledAt,
@@ -2646,6 +2915,12 @@ export class MatchService {
         teamBViceCaptainId: data.teamB?.viceCaptainId || null,
         teamAWicketKeeperId: data.teamA?.wicketKeeperId || null,
         teamBWicketKeeperId: data.teamB?.wicketKeeperId || null,
+        ...(data.teamA?.namedImpactSubs !== undefined
+          ? { namedImpactSubsTeamA: this.normalizeNamedImpactSubs(data.teamA?.namedImpactSubs, teamAPlayerIds) }
+          : {}),
+        ...(data.teamB?.namedImpactSubs !== undefined
+          ? { namedImpactSubsTeamB: this.normalizeNamedImpactSubs(data.teamB?.namedImpactSubs, teamBPlayerIds) }
+          : {}),
       },
     })
 

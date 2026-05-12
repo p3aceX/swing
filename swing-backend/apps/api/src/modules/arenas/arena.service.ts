@@ -267,6 +267,12 @@ export class ArenaService {
     }
     if (data.customSlug !== undefined) allowed.customSlug = data.customSlug || null
     if (data.isPublicPage !== undefined) allowed.isPublicPage = data.isPublicPage
+    // Microsite fields — owner-managed public landing page.
+    if (data.brandColor !== undefined) allowed.brandColor = data.brandColor || null
+    if (data.logoUrl !== undefined) allowed.logoUrl = data.logoUrl || null
+    if (data.tagline !== undefined) allowed.tagline = data.tagline || null
+    if (data.coverPhotoIndex !== undefined) allowed.coverPhotoIndex = data.coverPhotoIndex
+    if (data.micrositeLinks !== undefined) allowed.micrositeLinks = data.micrositeLinks
     return prisma.arena.update({ where: { id: arenaId }, data: allowed })
   }
 

@@ -189,6 +189,22 @@ export async function matchRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.createSuperOver(id, user.userId) })
   })
 
+  app.post('/:id/impact-player/swap', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = z
+      .object({
+        team: z.enum(['A', 'B']),
+        outgoingPlayerId: z.string().min(1),
+        incomingPlayerId: z.string().min(1),
+      })
+      .parse(request.body)
+    return reply.send({
+      success: true,
+      data: await svc.impactPlayerSwap(id, user.userId, body),
+    })
+  })
+
   app.get('/:id', async (request, reply) => {
     const { id } = request.params as { id: string }
     const user = (request as any).user as { userId: string } | undefined
@@ -279,6 +295,9 @@ export async function matchRoutes(app: FastifyInstance) {
       viceCaptainId: z.string().nullable().optional(),
       wicketKeeperId: z.string().nullable().optional(),
       impactPlayerId: z.string().nullable().optional(),
+      // Up to 4 named substitutes from which the Impact Player swap may
+      // pick. Order is preserved purely for display.
+      namedImpactSubs: z.array(z.string()).max(4).optional(),
     })
 
     const body = z
@@ -324,6 +343,9 @@ export async function matchRoutes(app: FastifyInstance) {
       viceCaptainId: z.string().nullable().optional(),
       wicketKeeperId: z.string().nullable().optional(),
       impactPlayerId: z.string().nullable().optional(),
+      // Up to 4 named substitutes from which the Impact Player swap may
+      // pick. Order is preserved purely for display.
+      namedImpactSubs: z.array(z.string()).max(4).optional(),
     })
 
     const body = z

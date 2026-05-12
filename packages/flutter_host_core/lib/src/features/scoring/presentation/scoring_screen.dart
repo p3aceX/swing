@@ -22,6 +22,7 @@ enum _ScoringMenuAction {
   changeBowler,
   changeWicketKeeper,
   manageScorer,
+  impactPlayer,
   matchDetail,
   endInnings,
   refresh,
@@ -105,21 +106,30 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     required List<ScoringMatchPlayer> players,
     required void Function(ScoringMatchPlayer) onPicked,
     String? wicketKeeperId,
+    bool mandatory = false,
   }) async {
     if (players.isEmpty) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => PlayerPickerSheet(
-        title: title,
-        players: players,
-        wicketKeeperId: wicketKeeperId,
-        onSearchExternal: _ctrl.searchPlayers,
-        onSelected: (player) {
-          Navigator.pop(context);
-          onPicked(player);
-        },
+      // After a wicket the new batter MUST be picked before scoring can
+      // resume — otherwise runs leak onto the dismissed batter. Block
+      // dismissal in that path.
+      isDismissible: !mandatory,
+      enableDrag: !mandatory,
+      builder: (_) => PopScope(
+        canPop: !mandatory,
+        child: PlayerPickerSheet(
+          title: title,
+          players: players,
+          wicketKeeperId: wicketKeeperId,
+          onSearchExternal: _ctrl.searchPlayers,
+          onSelected: (player) {
+            Navigator.pop(context);
+            onPicked(player);
+          },
+        ),
       ),
     );
   }
@@ -184,7 +194,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
         .toSet();
   }
 
-  Future<void> _pickStriker(HostScoringState state) async {
+  Future<void> _pickStriker(HostScoringState state, {bool mandatory = false}) async {
     final players = state.players;
     final innings = state.activeInnings;
     if (players == null || innings == null) return;
@@ -200,11 +210,12 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       title: 'Select New Batter',
       players: eligible,
       wicketKeeperId: _wicketKeeperIdForSide(state, innings.battingTeam),
+      mandatory: mandatory,
       onPicked: (p) => _ctrl.setNewBatter(p.profileId),
     );
   }
 
-  Future<void> _pickNonStriker(HostScoringState state) async {
+  Future<void> _pickNonStriker(HostScoringState state, {bool mandatory = false}) async {
     final players = state.players;
     final innings = state.activeInnings;
     if (players == null || innings == null) return;
@@ -219,6 +230,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       title: 'Select Non-Striker',
       players: eligible,
       wicketKeeperId: _wicketKeeperIdForSide(state, innings.battingTeam),
+      mandatory: mandatory,
       onPicked: (p) => _ctrl.setNonStriker(p.profileId),
     );
   }
@@ -355,11 +367,23 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     }
     // Pick the player that was actually dismissed.
     // After _init(), the dismissed player's slot will be empty in server state.
+    // Selection is MANDATORY here — without it, the next ball's runs get
+    // credited to whoever the controller resolves as striker (often the
+    // out batter). Re-prompt until both slots are filled.
     if (inn.totalWickets < 10) {
-      if (s.effectiveStrikerId.isEmpty) {
-        await _pickStriker(s);
-      } else if (s.effectiveNonStrikerId.isEmpty) {
-        await _pickNonStriker(s);
+      var guard = 0;
+      while (guard < 6 && mounted) {
+        guard += 1;
+        final current = ref.read(hostScoringControllerProvider(widget.matchId));
+        if (current.effectiveStrikerId.isEmpty) {
+          await _pickStriker(current, mandatory: true);
+          continue;
+        }
+        if (current.effectiveNonStrikerId.isEmpty) {
+          await _pickNonStriker(current, mandatory: true);
+          continue;
+        }
+        break;
       }
     }
     if (!mounted) return;
@@ -392,10 +416,29 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
 
   // Returns (winnerSide, winMargin). winnerSide is 'A', 'B', or '' for a tie.
   (String, String?) _calcWinner(ScoringMatch match) {
-    final sorted = [...match.innings]..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
+    final sorted = [...match.innings]
+      ..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
     if (sorted.length < 2) return ('', null);
-    final inn1 = sorted[0];
-    final inn2 = sorted[1];
+
+    // If any super-over pair has completed, the latest completed pair
+    // decides the winner — earlier pairs only matter when they also tied.
+    final superOvers = sorted.where((i) => i.isSuperOver).toList();
+    for (int i = superOvers.length - 1; i >= 1; i -= 2) {
+      final pairB = superOvers[i];
+      final pairA = superOvers[i - 1];
+      if (!pairA.isCompleted || !pairB.isCompleted) continue;
+      final diff = pairB.totalRuns - pairA.totalRuns;
+      if (diff > 0) return (pairB.battingTeam, '${diff} run${diff != 1 ? "s" : ""} (Super Over)');
+      if (diff < 0) {
+        final d = -diff;
+        return (pairA.battingTeam, '$d run${d != 1 ? "s" : ""} (Super Over)');
+      }
+      // tied pair — keep walking earlier pairs
+    }
+
+    final inn1 = sorted.firstWhere((i) => !i.isSuperOver);
+    final inn2 = sorted.lastWhere((i) => !i.isSuperOver);
+    if (identical(inn1, inn2)) return ('', null);
     final diff = inn2.totalRuns - inn1.totalRuns;
     if (diff > 0) {
       final wickets = 10 - inn2.totalWickets;
@@ -407,19 +450,62 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     return ('', null); // tie
   }
 
+  /// Did all completed regular innings end level, and is the latest super
+  /// over pair (if any) also tied? Used to gate the "Start Super Over"
+  /// action on the end-of-match sheet.
+  bool _shouldOfferSuperOver(ScoringMatch match) {
+    if (match.isMultiInnings) return false;
+    final regular = match.innings.where((i) => !i.isSuperOver).toList();
+    if (regular.length < 2) return false;
+    if (regular.any((i) => !i.isCompleted)) return false;
+    if (regular[0].totalRuns != regular[1].totalRuns) return false;
+    final superOvers = match.innings.where((i) => i.isSuperOver).toList()
+      ..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
+    if (superOvers.isEmpty) return true;
+    final lastPair = superOvers.skip(superOvers.length - 2).toList();
+    if (lastPair.length < 2) return false;
+    if (lastPair.any((i) => !i.isCompleted)) return false;
+    return lastPair[0].totalRuns == lastPair[1].totalRuns;
+  }
+
   String _resolveWinnerId(ScoringMatch match, String winnerSide) {
-    if (winnerSide == 'A') {
-      final id = (match.teamAId ?? '').trim();
-      return id.isNotEmpty ? id : 'A';
-    }
-    if (winnerSide == 'B') {
-      final id = (match.teamBId ?? '').trim();
-      return id.isNotEmpty ? id : 'B';
-    }
-    return winnerSide;
+    // Backend `completeMatchRequestSchema.winnerId` is an enum of
+    // "A" | "B" | "DRAW" | "TIE" | "ABANDONED" — never a UUID. Earlier
+    // versions sent match.teamAId/teamBId which always failed Zod parsing
+    // and surfaced as a generic "invalid request" on End Match.
+    if (winnerSide == 'A' || winnerSide == 'B') return winnerSide;
+    return 'TIE';
+  }
+
+  Future<void> _showMatchResultSheet({
+    required ScoringMatch match,
+    required String winnerSide,
+    required String? winMargin,
+  }) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _MatchResultSheet(
+        match: match,
+        winnerSide: winnerSide,
+        winMargin: winMargin,
+        onClose: () => Navigator.pop(ctx),
+      ),
+    );
   }
 
   bool _canStartNextInnings(ScoringMatch match, ScoringInnings inn) {
+    if (inn.isSuperOver) {
+      // The "next innings" within a Super Over is the chaser. Allowed only
+      // while the pair is incomplete.
+      final soInnings = match.innings.where((i) => i.isSuperOver).toList()
+        ..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
+      final index = soInnings.indexWhere((i) => i.inningsNumber == inn.inningsNumber);
+      return index >= 0 && index % 2 == 0;
+    }
     if (match.isMultiInnings) return match.innings.length < 4;
     return inn.inningsNumber < 2;
   }
@@ -431,6 +517,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     if (match == null || inn == null) return;
 
     final canStartNext = _canStartNextInnings(match, inn);
+    final canStartSO = !canStartNext && _shouldOfferSuperOver(match);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -441,6 +528,19 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
         match: match,
         innings: inn,
         canStartNextInnings: canStartNext,
+        canStartSuperOver: canStartSO,
+        onStartSuperOver: () async {
+          Navigator.pop(ctx);
+          final before = ref.read(hostScoringControllerProvider(widget.matchId));
+          if (before.activeInnings?.isCompleted == false) {
+            final ok = await _ctrl.completeInnings();
+            if (!ok || !mounted) return;
+          }
+          final ok = await _ctrl.startSuperOver();
+          if (!ok || !mounted) return;
+          // The super-over pair is now created; pick the openers.
+          await _autoSetupNewInnings();
+        },
         onManageScorer: () {
           Navigator.pop(ctx);
           final s = ref.read(hostScoringControllerProvider(widget.matchId));
@@ -473,6 +573,12 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
           );
           final ok = await _ctrl.completeMatch(winnerId, winMargin);
           if (!mounted || !ok) return;
+          await _showMatchResultSheet(
+            match: freshMatch,
+            winnerSide: winnerSide,
+            winMargin: winMargin,
+          );
+          if (!mounted) return;
           if (widget.onNavigateBack != null) {
             widget.onNavigateBack!(context, widget.matchId);
           } else {
@@ -620,6 +726,266 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     );
   }
 
+  // ─── Impact Player ─────────────────────────────────────────────────────────
+
+  Future<void> _openImpactPlayerSheet(HostScoringState state) async {
+    final match = state.match;
+    final players = state.players;
+    if (match == null || players == null) return;
+    if (!match.hasImpactPlayer) return;
+
+    final inn = state.activeInnings;
+    final battingTeam = inn?.battingTeam ?? 'A';
+    final battingSubsRaw = battingTeam == 'A'
+        ? match.namedImpactSubsTeamA
+        : match.namedImpactSubsTeamB;
+    final bowlingSide = battingTeam == 'A' ? 'B' : 'A';
+    final bowlingSubsRaw = bowlingSide == 'A'
+        ? match.namedImpactSubsTeamA
+        : match.namedImpactSubsTeamB;
+    final battingUsed = battingTeam == 'A'
+        ? match.impactPlayerUsedTeamA
+        : match.impactPlayerUsedTeamB;
+    final bowlingUsed = bowlingSide == 'A'
+        ? match.impactPlayerUsedTeamA
+        : match.impactPlayerUsedTeamB;
+
+    String? sideForUser;
+    if (!battingUsed && battingSubsRaw.isNotEmpty) sideForUser = battingTeam;
+    if (sideForUser == null && !bowlingUsed && bowlingSubsRaw.isNotEmpty) {
+      sideForUser = bowlingSide;
+    }
+    if (sideForUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Impact Player not available — both teams either used it or have no named substitutes.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => _ImpactPlayerSheet(
+        match: match,
+        players: players,
+        side: sideForUser!,
+        onSwap: (outgoingId, incomingId) async {
+          Navigator.pop(sheetCtx);
+          final ok = await _ctrl.impactPlayerSwap(
+            team: sideForUser!,
+            outgoingPlayerId: outgoingId,
+            incomingPlayerId: incomingId,
+          );
+          if (!mounted) return;
+          if (!ok) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Impact Player substitution done.')),
+          );
+        },
+      ),
+    );
+  }
+
+  // ─── Wide selector ─────────────────────────────────────────────────────────
+
+  Future<void> _showWideSelector() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SafeArea(
+        child: Container(
+          color: ctx.cardBg,
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.swap_horiz_rounded,
+                      color: Color(0xFFF59E0B), size: 22),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Wide',
+                    style: TextStyle(
+                      color: ctx.fg,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Wide always adds 1 run to the team. Pick any extras the '
+                'batsmen ran on top of it.',
+                style: TextStyle(color: ctx.fgSub, fontSize: 12, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              // Each option: +N runs taken → extras = N + 1.
+              for (final n in const [0, 1, 2, 3, 4])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SizedBox(
+                    height: 48,
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        _snapshotOver();
+                        final ok = await _ctrl.recordBall(
+                          outcome: 'WIDE',
+                          runs: 0,
+                          extras: n + 1,
+                        );
+                        if (ok && mounted) await _afterBall();
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor:
+                            const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                        foregroundColor: ctx.fg,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            n == 0 ? 'Wide only' : 'Wide + $n run${n == 1 ? "" : "s"}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '= ${n + 1} total',
+                            style: TextStyle(
+                              color: ctx.fgSub,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── No-ball selector ──────────────────────────────────────────────────────
+
+  Future<void> _showNoBallSelector() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SafeArea(
+        child: Container(
+          color: ctx.cardBg,
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.sports_cricket_rounded,
+                        color: Color(0xFFEF4444), size: 22),
+                    const SizedBox(width: 8),
+                    Text(
+                      'No Ball',
+                      style: TextStyle(
+                        color: ctx.fg,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'No ball adds 1 run + free hit. Pick what else happened.',
+                  style: TextStyle(color: ctx.fgSub, fontSize: 12, height: 1.4),
+                ),
+                const SizedBox(height: 14),
+                _NoBallGroup(
+                  label: 'OFF THE BAT',
+                  options: const [0, 1, 2, 3, 4, 5, 6],
+                  buildLabel: (n) => n == 0
+                      ? 'No ball only'
+                      : 'No ball + $n bat run${n == 1 ? "" : "s"}',
+                  totalLabel: (n) => '${n + 1} total',
+                  color: const Color(0xFFEF4444),
+                  onPick: (n) async {
+                    Navigator.pop(ctx);
+                    _snapshotOver();
+                    final ok = await _ctrl.recordBall(
+                      outcome: 'NO_BALL',
+                      runs: n,
+                      extras: 1,
+                    );
+                    if (ok && mounted) await _afterBall();
+                  },
+                ),
+                const SizedBox(height: 10),
+                _NoBallGroup(
+                  label: 'BYES (KEEPER LET IT THROUGH)',
+                  options: const [1, 2, 3, 4],
+                  buildLabel: (n) => 'No ball + $n bye${n == 1 ? "" : "s"}',
+                  totalLabel: (n) => '${n + 1} total',
+                  color: const Color(0xFF6366F1),
+                  onPick: (n) async {
+                    Navigator.pop(ctx);
+                    _snapshotOver();
+                    final ok = await _ctrl.recordBall(
+                      outcome: 'NO_BALL',
+                      runs: 0,
+                      extras: 1 + n,
+                      tags: ['no_ball_extra:bye:$n'],
+                    );
+                    if (ok && mounted) await _afterBall();
+                  },
+                ),
+                const SizedBox(height: 10),
+                _NoBallGroup(
+                  label: 'LEG BYES (DEFLECTION OFF PAD)',
+                  options: const [1, 2, 3, 4],
+                  buildLabel: (n) => 'No ball + $n leg bye${n == 1 ? "" : "s"}',
+                  totalLabel: (n) => '${n + 1} total',
+                  color: const Color(0xFF0EA5E9),
+                  onPick: (n) async {
+                    Navigator.pop(ctx);
+                    _snapshotOver();
+                    final ok = await _ctrl.recordBall(
+                      outcome: 'NO_BALL',
+                      runs: 0,
+                      extras: 1 + n,
+                      tags: ['no_ball_extra:leg_bye:$n'],
+                    );
+                    if (ok && mounted) await _afterBall();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ─── Wicket sheet ──────────────────────────────────────────────────────────
 
   Future<void> _showWicketSheet(HostScoringState state) async {
@@ -637,6 +1003,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       String dismissalType,
       String deliveryType,
       String? fielderId,
+      String? substituteFielderName,
       bool dismissedIsStriker,
       int completedRuns,
     })? result;
@@ -658,6 +1025,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
           required String dismissalType,
           required String deliveryType,
           String? fielderId,
+          String? substituteFielderName,
           required bool dismissedIsStriker,
           required int completedRuns,
           bool crossed = false,
@@ -667,6 +1035,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
             dismissalType: dismissalType,
             deliveryType: deliveryType,
             fielderId: fielderId,
+            substituteFielderName: substituteFielderName,
             dismissedIsStriker: dismissedIsStriker,
             completedRuns: completedRuns,
           );
@@ -695,6 +1064,10 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
           ? state.effectiveStrikerId
           : state.effectiveNonStrikerId,
       fielderId: r.fielderId,
+      tags: [
+        if ((r.substituteFielderName ?? '').isNotEmpty)
+          'substitute_fielder:${r.substituteFielderName}',
+      ],
     );
 
     if (ok && mounted) await _afterWicket();
@@ -751,7 +1124,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       int legal = 0;
       for (final ball in balls.reversed) {
         result.insert(0, ball);
-        if (scoringDeliveryIsLegal(ball.outcome)) legal++;
+        if (scoringDeliveryIsLegal(ball.outcome, dismissalType: ball.dismissalType)) legal++;
         if (legal >= 6) break;
         if (result.length > 12) break;
       }
@@ -763,7 +1136,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     int legal = 0;
     for (final ball in balls.reversed) {
       result.insert(0, ball);
-      if (scoringDeliveryIsLegal(ball.outcome)) legal++;
+      if (scoringDeliveryIsLegal(ball.outcome, dismissalType: ball.dismissalType)) legal++;
       if (legal >= ballInOver) break;
       if (result.length > 12) break;
     }
@@ -1087,6 +1460,9 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                 case _ScoringMenuAction.manageScorer:
                   if (match != null) _openScorerSheetFromScreen(state);
                   break;
+                case _ScoringMenuAction.impactPlayer:
+                  if (match != null) _openImpactPlayerSheet(state);
+                  break;
                 case _ScoringMenuAction.matchDetail:
                   if (match == null) break;
                   if (widget.onNavigateToMatchDetail != null) {
@@ -1165,6 +1541,16 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                   title: Text('Manage scorer'),
                 ),
               ),
+              if (match?.hasImpactPlayer ?? false)
+                const PopupMenuItem(
+                  value: _ScoringMenuAction.impactPlayer,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.bolt_rounded, size: 20),
+                    title: Text('Impact Player'),
+                  ),
+                ),
               const PopupMenuItem(
                 value: _ScoringMenuAction.matchDetail,
                 child: ListTile(
@@ -1288,23 +1674,8 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     final s = ref.read(hostScoringControllerProvider(widget.matchId));
                     _showWicketSheet(s);
                   },
-                  onWide: () => _showExtraSelector(
-                    title: 'Wides',
-                    onConfirm: (v) async {
-                      _snapshotOver();
-                      final ok = await _ctrl.recordBall(outcome: 'WIDE', runs: 0, extras: v);
-                      if (ok && mounted) await _afterBall();
-                    },
-                  ),
-                  onNoBall: () => _showExtraSelector(
-                    title: 'Runs off bat (No Ball)',
-                    options: const [0, 1, 2, 3, 4, 5, 6],
-                    onConfirm: (v) async {
-                      _snapshotOver();
-                      final ok = await _ctrl.recordBall(outcome: 'NO_BALL', runs: v, extras: 1);
-                      if (ok && mounted) await _afterBall();
-                    },
-                  ),
+                  onWide: () => _showWideSelector(),
+                  onNoBall: () => _showNoBallSelector(),
                   onBye: () => _showExtraSelector(
                     title: 'Bye runs',
                     onConfirm: (v) async {
@@ -2326,8 +2697,10 @@ class _EndOfInningsSheet extends StatelessWidget {
     required this.match,
     required this.innings,
     required this.canStartNextInnings,
+    required this.canStartSuperOver,
     required this.onStartNextInnings,
     required this.onEndMatch,
+    required this.onStartSuperOver,
     required this.onUndo,
     this.onManageScorer,
   });
@@ -2335,8 +2708,10 @@ class _EndOfInningsSheet extends StatelessWidget {
   final ScoringMatch match;
   final ScoringInnings innings;
   final bool canStartNextInnings;
+  final bool canStartSuperOver;
   final VoidCallback onStartNextInnings;
   final VoidCallback onEndMatch;
+  final VoidCallback onStartSuperOver;
   final VoidCallback onUndo;
   /// When set, renders a "Manage scorer" entry. Used so the owner can hand
   /// the gloves over (or take them back) before starting the next innings
@@ -2391,15 +2766,44 @@ class _EndOfInningsSheet extends StatelessWidget {
                 height: 52,
                 child: FilledButton(
                   onPressed: onStartNextInnings,
-                  child: const Text(
-                    'Start 2nd Innings',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  child: Text(
+                    innings.isSuperOver
+                        ? 'Start Chase Super Over'
+                        : 'Start 2nd Innings',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800),
                   ),
                 ),
               ),
             ] else ...[
+              if (canStartSuperOver) ...[
+                Text(
+                  'Scores are level — start a Super Over to decide the winner.',
+                  style: TextStyle(color: context.fgSub, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: onStartSuperOver,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.accent,
+                      foregroundColor: context.ctaFg,
+                    ),
+                    icon: const Icon(Icons.bolt_rounded, size: 18),
+                    label: const Text(
+                      'Start Super Over',
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               Text(
-                'You cannot change the score once you end the match.',
+                canStartSuperOver
+                    ? 'Or declare the match a tie.'
+                    : 'You cannot change the score once you end the match.',
                 style: TextStyle(
                   color: context.fgSub,
                   fontSize: 12,
@@ -2414,7 +2818,7 @@ class _EndOfInningsSheet extends StatelessWidget {
                     backgroundColor: context.danger,
                   ),
                   child: const Text(
-                    'End Match',
+                    'Complete Match',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -2455,6 +2859,137 @@ class _EndOfInningsSheet extends StatelessWidget {
                 ),
               ),
             ],
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Match result sheet ───────────────────────────────────────────────────────
+
+class _MatchResultSheet extends StatelessWidget {
+  const _MatchResultSheet({
+    required this.match,
+    required this.winnerSide,
+    required this.winMargin,
+    required this.onClose,
+  });
+
+  final ScoringMatch match;
+  /// 'A', 'B', or '' for a tie.
+  final String winnerSide;
+  final String? winMargin;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final isTie = winnerSide.isEmpty;
+    final winnerName = winnerSide == 'A'
+        ? match.teamAName
+        : winnerSide == 'B'
+            ? match.teamBName
+            : null;
+    final headline =
+        isTie ? 'Match Tied' : (winnerName != null ? '$winnerName won' : 'Match Complete');
+    final subtitle = isTie
+        ? 'Both sides finished level.'
+        : (winMargin == null || winMargin!.isEmpty
+            ? 'Final result locked.'
+            : 'by $winMargin');
+
+    final innings = [...match.innings]
+      ..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
+
+    return Container(
+      color: context.bg,
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Icon(
+              isTie ? Icons.balance_rounded : Icons.emoji_events_rounded,
+              size: 40,
+              color: context.accent,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              headline,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.4,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 20),
+            for (final inn in innings)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        inn.battingTeam == 'A'
+                            ? match.teamAName
+                            : match.teamBName,
+                        style: TextStyle(
+                          color: context.fg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${inn.totalRuns}/${inn.totalWickets}  '
+                      '(${inn.overNumber}.${inn.ballInOver} ov)',
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 52,
+              child: FilledButton(
+                onPressed: onClose,
+                child: const Text(
+                  'Done',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -4950,6 +5485,247 @@ class _ScoreBlock extends StatelessWidget {
           OverDotsRow(overBalls: currentOverBalls),
         ],
       ),
+    );
+  }
+}
+
+class _ImpactPlayerSheet extends StatefulWidget {
+  const _ImpactPlayerSheet({
+    required this.match,
+    required this.players,
+    required this.side,
+    required this.onSwap,
+  });
+
+  final ScoringMatch match;
+  final ScoringPlayersData players;
+  /// 'A' or 'B' — the team performing the swap.
+  final String side;
+  final void Function(String outgoingId, String incomingId) onSwap;
+
+  @override
+  State<_ImpactPlayerSheet> createState() => _ImpactPlayerSheetState();
+}
+
+class _ImpactPlayerSheetState extends State<_ImpactPlayerSheet> {
+  String? _outgoingId;
+  String? _incomingId;
+
+  @override
+  Widget build(BuildContext context) {
+    final teamName =
+        widget.side == 'A' ? widget.match.teamAName : widget.match.teamBName;
+    final xiIds = widget.side == 'A'
+        ? widget.match.teamAPlayerIds
+        : widget.match.teamBPlayerIds;
+    final subsIds = widget.side == 'A'
+        ? widget.match.namedImpactSubsTeamA
+        : widget.match.namedImpactSubsTeamB;
+    final xi = xiIds
+        .map((id) => widget.players.findById(id))
+        .whereType<ScoringMatchPlayer>()
+        .toList();
+    final subs = subsIds
+        .map((id) => widget.players.findById(id))
+        .whereType<ScoringMatchPlayer>()
+        .toList();
+
+    final canConfirm = _outgoingId != null && _incomingId != null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        20 + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.bolt_rounded, color: Color(0xFFF59E0B), size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  'Impact Player — $teamName',
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Swap one player from the XI for a named substitute. '
+              'One use per team. Only allowed at start of over or after a wicket.',
+              style: TextStyle(color: context.fgSub, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            Text('GOING OFF (from XI)',
+                style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8)),
+            const SizedBox(height: 6),
+            DropdownButtonFormField<String>(
+              initialValue: _outgoingId,
+              isExpanded: true,
+              decoration: InputDecoration(
+                hintText: 'Select outgoing player',
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              items: xi
+                  .map((p) => DropdownMenuItem<String>(
+                        value: p.profileId,
+                        child: Text(p.name, overflow: TextOverflow.ellipsis),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _outgoingId = v),
+            ),
+            const SizedBox(height: 16),
+            Text('COMING ON (named sub)',
+                style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8)),
+            const SizedBox(height: 6),
+            if (subs.isEmpty)
+              Text(
+                'No named substitutes were declared for this team.',
+                style: TextStyle(color: context.danger, fontSize: 12),
+              )
+            else
+              DropdownButtonFormField<String>(
+                initialValue: _incomingId,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  hintText: 'Select incoming substitute',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                items: subs
+                    .map((p) => DropdownMenuItem<String>(
+                          value: p.profileId,
+                          child: Text(p.name, overflow: TextOverflow.ellipsis),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => _incomingId = v),
+              ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 50,
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: canConfirm
+                    ? () => widget.onSwap(_outgoingId!, _incomingId!)
+                    : null,
+                child: const Text(
+                  'Confirm Substitution',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoBallGroup extends StatelessWidget {
+  const _NoBallGroup({
+    required this.label,
+    required this.options,
+    required this.buildLabel,
+    required this.totalLabel,
+    required this.color,
+    required this.onPick,
+  });
+
+  final String label;
+  final List<int> options;
+  final String Function(int n) buildLabel;
+  final String Function(int n) totalLabel;
+  final Color color;
+  final void Function(int n) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: context.fgSub,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: options.map((n) {
+            return SizedBox(
+              height: 42,
+              child: OutlinedButton(
+                onPressed: () => onPick(n),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: context.fg,
+                  side: BorderSide(color: color.withValues(alpha: 0.5)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      buildLabel(n),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '= ${totalLabel(n)}',
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 }

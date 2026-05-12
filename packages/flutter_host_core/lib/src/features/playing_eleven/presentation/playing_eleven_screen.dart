@@ -200,7 +200,29 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
         }
         if (picked.length >= _squadSize) return loaded;
         picked.add(profileId);
-        return loaded.rebuild(selected: picked);
+        // A player can be in the XI OR in the named-subs list, not both.
+        final subs = {...loaded.namedSubs}..remove(profileId);
+        return loaded.rebuild(selected: picked, namedSubs: subs);
+      },
+    );
+  }
+
+  /// Toggle a player as a named Impact Player substitute. Capped at 4 per
+  /// team; players in the XI cannot also be subs.
+  void _toggleNamedSub(bool isA, String profileId) {
+    _updateLoaded(
+      isA: isA,
+      transform: (loaded) {
+        if (loaded.selected.contains(profileId)) return loaded;
+        final subs = {...loaded.namedSubs};
+        if (subs.contains(profileId)) {
+          subs.remove(profileId);
+        } else if (subs.length < 4) {
+          subs.add(profileId);
+        } else {
+          return loaded;
+        }
+        return loaded.rebuild(namedSubs: subs);
       },
     );
   }
@@ -383,12 +405,16 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
               captainId: a.captainId,
               viceCaptainId: a.viceCaptainId,
               wicketKeeperId: a.wicketKeeperId,
+              namedImpactSubs:
+                  widget.hasImpactPlayer ? a.namedSubs.toList() : const [],
             ),
             teamB: HostTeamEleven(
               playerIds: b.selected.toList(),
               captainId: b.captainId,
               viceCaptainId: b.viceCaptainId,
               wicketKeeperId: b.wicketKeeperId,
+              namedImpactSubs:
+                  widget.hasImpactPlayer ? b.namedSubs.toList() : const [],
             ),
           );
       if (!mounted) return;
@@ -522,6 +548,8 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
             onSetRole: (id, role) => _setRole(true, id, role),
             onRemovePlayer: (p) => _removePlayer(true, p),
             onAddPlayer: () => _addPlayer(true),
+            showNamedSubs: widget.hasImpactPlayer,
+            onToggleNamedSub: (id) => _toggleNamedSub(true, id),
           ),
           _RosterPane(
             state: _teamB,
@@ -530,6 +558,8 @@ class _PlayingElevenScreenState extends ConsumerState<PlayingElevenScreen>
             onSetRole: (id, role) => _setRole(false, id, role),
             onRemovePlayer: (p) => _removePlayer(false, p),
             onAddPlayer: () => _addPlayer(false),
+            showNamedSubs: widget.hasImpactPlayer,
+            onToggleNamedSub: (id) => _toggleNamedSub(false, id),
           ),
         ],
       ),
@@ -591,6 +621,8 @@ class _RosterPane extends StatelessWidget {
     required this.onSetRole,
     required this.onRemovePlayer,
     this.onAddPlayer,
+    this.showNamedSubs = false,
+    this.onToggleNamedSub,
   });
 
   final _RosterState state;
@@ -599,6 +631,10 @@ class _RosterPane extends StatelessWidget {
   final void Function(String profileId, _Role role) onSetRole;
   final ValueChanged<_RosterPlayer> onRemovePlayer;
   final VoidCallback? onAddPlayer;
+  /// When true, render the "Named Impact Player subs" picker below the
+  /// player list. Hidden entirely when the match isn't using the rule.
+  final bool showNamedSubs;
+  final ValueChanged<String>? onToggleNamedSub;
 
   @override
   Widget build(BuildContext context) {
@@ -613,13 +649,15 @@ class _RosterPane extends StatelessWidget {
       return _EmptyState(onRetry: onRetry, onAddPlayer: onAddPlayer);
     }
 
-    // rows: [0] = status strip, [1] = add player button, [2..] = players.
-    // Captain → VC → WK → rest, so the role players are always at the top.
+    // rows: [0] = status strip, [1] = add player button, [2..] = players,
+    // [last] = named-subs picker (when Impact Player rule is on).
     final orderedPlayers = loaded.displayPlayers;
     final playerCount = orderedPlayers.length;
+    final hasSubsRow = showNamedSubs && onToggleNamedSub != null;
+    final extraRows = hasSubsRow ? 1 : 0;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
-      itemCount: playerCount + 2,
+      itemCount: playerCount + 2 + extraRows,
       separatorBuilder: (_, i) =>
           i == 0 ? const SizedBox(height: 14) : const SizedBox(height: 10),
       itemBuilder: (_, i) {
@@ -640,8 +678,8 @@ class _RosterPane extends StatelessWidget {
             ),
           );
         }
-        final player = orderedPlayers[i - 2];
-        if (i >= 2) {
+        if (i >= 2 && i < 2 + playerCount) {
+          final player = orderedPlayers[i - 2];
           final isSelected = loaded.selected.contains(player.profileId);
           return _PlayerRow(
             player: player,
@@ -651,6 +689,12 @@ class _RosterPane extends StatelessWidget {
             onToggleSelect: () => onToggleSelect(player.profileId),
             onSetRole: (role) => onSetRole(player.profileId, role),
             onRemove: () => onRemovePlayer(player),
+          );
+        }
+        if (hasSubsRow) {
+          return _NamedSubsSection(
+            loaded: loaded,
+            onToggle: onToggleNamedSub!,
           );
         }
         return const SizedBox.shrink();
@@ -730,6 +774,142 @@ class _StatusStrip extends StatelessWidget {
           icon: Icons.sports_handball_rounded,
         ),
       ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NAMED IMPACT-PLAYER SUBS
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _NamedSubsSection extends StatelessWidget {
+  const _NamedSubsSection({required this.loaded, required this.onToggle});
+
+  final _LoadedRoster loaded;
+  final ValueChanged<String> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    // Only players NOT in the XI are eligible to be named subs.
+    final eligible = loaded.players
+        .where((p) => !loaded.selected.contains(p.profileId))
+        .toList();
+    final canAddMore = loaded.namedSubs.length < 4;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: context.surf,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: context.fgSub.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bolt_rounded,
+                  color: Color(0xFFF59E0B), size: 18),
+              const SizedBox(width: 6),
+              Text(
+                'Impact Player subs',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${loaded.namedSubs.length}/4',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Pick up to 4 named substitutes. Only these players can come in '
+            'as the Impact Player during the match.',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (eligible.isEmpty)
+            Text(
+              'Add more players to the roster (or unpick from the XI) to '
+              'declare named substitutes.',
+              style: TextStyle(
+                color: context.fgSub,
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: eligible.map((p) {
+                final picked = loaded.namedSubs.contains(p.profileId);
+                final disabled = !picked && !canAddMore;
+                return InkWell(
+                  onTap: disabled ? null : () => onToggle(p.profileId),
+                  borderRadius: BorderRadius.circular(999),
+                  child: Opacity(
+                    opacity: disabled ? 0.4 : 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: picked
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: picked
+                              ? const Color(0xFFF59E0B)
+                              : context.fgSub.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            picked
+                                ? Icons.check_circle_rounded
+                                : Icons.add_circle_outline_rounded,
+                            size: 14,
+                            color: picked
+                                ? const Color(0xFFF59E0B)
+                                : context.fgSub,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            p.name,
+                            style: TextStyle(
+                              color: picked
+                                  ? const Color(0xFFF59E0B)
+                                  : context.fg,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1676,6 +1856,7 @@ class _RosterState {
     String? captainId,
     String? viceCaptainId,
     String? wicketKeeperId,
+    Set<String> namedSubs = const {},
   }) {
     return _RosterState._(
       isLoading: false,
@@ -1686,6 +1867,7 @@ class _RosterState {
         captainId: captainId,
         viceCaptainId: viceCaptainId,
         wicketKeeperId: wicketKeeperId,
+        namedSubs: namedSubs,
       ),
     );
   }
@@ -1704,6 +1886,7 @@ class _LoadedRoster {
     this.captainId,
     this.viceCaptainId,
     this.wicketKeeperId,
+    this.namedSubs = const {},
   });
 
   final List<_RosterPlayer> players;
@@ -1711,6 +1894,10 @@ class _LoadedRoster {
   final String? captainId;
   final String? viceCaptainId;
   final String? wicketKeeperId;
+  /// Pre-declared Impact Player substitutes (max 4). Pulled from players
+  /// in the roster who are NOT in `selected` (you can't be both in the XI
+  /// and a sub).
+  final Set<String> namedSubs;
 
   /// Sentinel used to distinguish "keep the existing value" (default) from
   /// "explicitly set to null" in [rebuild].
@@ -1722,6 +1909,7 @@ class _LoadedRoster {
     Object? captainId = _unset,
     Object? viceCaptainId = _unset,
     Object? wicketKeeperId = _unset,
+    Set<String>? namedSubs,
   }) {
     return _LoadedRoster(
       players: players ?? this.players,
@@ -1734,6 +1922,7 @@ class _LoadedRoster {
       wicketKeeperId: identical(wicketKeeperId, _unset)
           ? this.wicketKeeperId
           : wicketKeeperId as String?,
+      namedSubs: namedSubs ?? this.namedSubs,
     );
   }
 
