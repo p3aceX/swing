@@ -1193,7 +1193,7 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
   // ── Screen 2: Duration + Date + Slots ──────────────────────────────────
   // ── Screen 3: Confirm (addons + cancellation + summary + guest details) ─
   return (
-    <div style={{ background: "var(--paper)", minHeight: "100%", paddingBottom: 96 }}>
+    <div style={{ background: "var(--paper)", minHeight: "100%", paddingBottom: 140 }}>
       <StepBar />
 
       {/* Back row */}
@@ -1256,13 +1256,13 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         const cancHours = unit?.cancellationHours ?? 0;
         return (
         <div style={{ padding: "14px 14px 0", display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ padding: "12px 14px", background: "#0A0B0A", borderRadius: "var(--r-md)", color: "white" }}>
-            <div style={{ font: "600 10px var(--font-ui)", color: "#C8FF3E", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
+          <div style={{ padding: "12px 14px", background: "var(--ms-ink)", borderRadius: "var(--r-md)", color: "var(--ms-bg)" }}>
+            <div style={{ font: "600 10px var(--font-ui)", color: "var(--ms-brand)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
               {fmtDateShort(date)} · {fmt12(selectedStart)} → {fmt12(toTime(toMins(selectedStart) + durMins))}
             </div>
             <div style={{ fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em", lineHeight: 1.3 }}>
               {unit?.name}{activeVariant ? ` · ${activeVariant.label}` : ""} · {durLabel(durMins)}
-              {totalPaise > 0 && <span style={{ color: "#C8FF3E" }}> · {rupeesInt(totalPaise)}</span>}
+              {totalPaise > 0 && <span style={{ color: "var(--ms-brand)" }}> · {rupeesInt(totalPaise)}</span>}
             </div>
           </div>
 
@@ -1430,14 +1430,14 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
             </>
           ) : (
             <>
-              <div className="cta-amt">{date ? fmtDateShort(date) : "Pick a date"}</div>
-              <div className="cta-sub">{durMins > 0 ? `${durLabel(durMins)} · Pick a time` : "Select duration above"}</div>
+              <div className="cta-amt">{date ? fmtDateShort(date) : "—"}</div>
+              <div className="cta-sub">{durMins > 0 ? `${durLabel(durMins)} · ${date ? "Pick a time" : "Pick a date"}` : "Select duration above"}</div>
             </>
           )}
         </div>
 
         {step === "slot" && selectedStart && (
-          <button className="cta-btn" onClick={() => setStep("form")}>
+          <button className="cta-btn cta-primary" onClick={() => setStep("form")}>
             Continue
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
           </button>

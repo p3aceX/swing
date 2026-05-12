@@ -292,6 +292,26 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
            microsite design tokens so the form/options/slot grid/CTA
            all read consistently in light + dark.
            ─────────────────────────────────────────────────────────── */
+
+        /* Legacy-token aliases — the booking flow has dozens of inline
+           styles referencing --paper / --hairline / --ink / --font-ui /
+           --r-md / --bad / --paper-2. Map them to microsite tokens so
+           every inline-styled element picks up the theme + brand color. */
+        .pass {
+          --paper:      var(--ms-bg);
+          --paper-2:    var(--ms-surface);
+          --ink:        var(--ms-ink);
+          --ink-2:      var(--ms-ink);
+          --ink-3:      var(--ms-muted);
+          --hairline:   var(--ms-line);
+          --bad:        #DC2626;
+          --font-ui:    var(--font-bricolage), var(--font-geist-sans), system-ui, sans-serif;
+          --r-sm:       4px;
+          --r-md:       6px;
+          --r-lg:       6px;
+          --accent:     var(--ms-brand);
+          --accent-ink: var(--ms-brand-ink);
+        }
         .pass .pass-h1 {
           margin: 4px 0 8px;
           font-family: var(--font-bricolage), "Bricolage Grotesque", var(--font-geist-sans), system-ui, sans-serif;
@@ -445,65 +465,88 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           font-weight: 600;
         }
 
-        /* ── Calendar / date strip ── */
+        /* ── Calendar / date strip (cal-day buttons) ── */
         .pass .cal-strip {
-          display: flex; gap: 8px; overflow-x: auto;
-          margin: 4px -4px 16px;
-          padding: 2px 4px 10px;
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          margin: 4px 0 18px;
+          padding: 2px 0 10px;
           scroll-snap-type: x mandatory;
           -webkit-overflow-scrolling: touch;
         }
         .pass .cal-strip::-webkit-scrollbar { display: none; }
-        .pass .avail {
-          all: unset; cursor: pointer;
+        .pass .cal-day {
+          all: unset;
+          cursor: pointer;
           flex: 0 0 auto;
-          min-width: 56px;
-          padding: 10px 8px;
+          min-width: 64px;
+          padding: 10px 10px 12px;
           background: var(--ms-bg);
-          border: 1px solid var(--ms-line-strong);
+          border: 1px solid var(--ms-line);
           border-radius: 6px;
-          text-align: center;
           color: var(--ms-ink);
+          text-align: center;
           scroll-snap-align: start;
-          transition: background 0.12s ease, border-color 0.12s ease;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+          position: relative;
         }
-        .pass .avail:hover { background: var(--ms-line); }
-        .pass .avail.selected {
+        .pass .cal-day:hover { border-color: var(--ms-line-strong); }
+        .pass .cal-day.selected {
           background: var(--ms-brand);
           color: var(--ms-brand-ink);
           border-color: var(--ms-brand);
         }
+        .pass .cal-day[disabled],
+        .pass .cal-day.cal-full {
+          cursor: not-allowed;
+          color: var(--ms-soft);
+          background: transparent;
+          border-style: dashed;
+        }
+        .pass .cal-day.cal-full .dom { text-decoration: line-through; }
+
         .pass .dow {
-          font-family: var(--font-geist-mono);
-          font-size: 10px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 9.5px;
           font-weight: 700;
-          letter-spacing: 0.18em;
+          letter-spacing: 0.16em;
           color: var(--ms-muted);
           text-transform: uppercase;
-          margin-bottom: 4px;
         }
-        .pass .avail.selected .dow { color: color-mix(in srgb, var(--ms-brand-ink) 72%, transparent); }
+        .pass .cal-day.selected .dow { color: color-mix(in srgb, var(--ms-brand-ink) 78%, transparent); }
         .pass .dom {
-          font-size: 19px;
-          font-weight: 800;
-          letter-spacing: -0.025em;
+          font-family: var(--font-bricolage), var(--font-geist-sans), system-ui, sans-serif;
+          font-size: 18px;
+          font-weight: 700;
+          letter-spacing: -0.02em;
           line-height: 1;
+        }
+        /* Inner availability indicator inside each cal-day */
+        .pass .cal-day .avail {
+          display: inline-flex;
+          align-items: center;
+          min-height: 8px;
         }
         .pass .dot {
           display: inline-block;
           width: 6px; height: 6px;
           border-radius: 50%;
-          margin-top: 6px;
         }
-        .pass .dot-green { background: #16A34A; }
+        .pass .dot-green { background: var(--ms-brand); }
         .pass .dot-amber { background: #F59E0B; }
+        .pass .cal-day.selected .dot-green,
+        .pass .cal-day.selected .dot-amber { background: var(--ms-brand-ink); opacity: 0.85; }
         .pass .dot-label {
-          display: inline-flex; align-items: center; gap: 6px;
           font-family: var(--font-geist-mono);
-          font-size: 10.5px;
-          font-weight: 600;
-          letter-spacing: 0.12em;
-          color: var(--ms-muted);
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          color: var(--ms-soft);
           text-transform: uppercase;
         }
 
