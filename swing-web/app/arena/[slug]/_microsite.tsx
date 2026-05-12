@@ -56,6 +56,15 @@ export type ArenaForMicrosite = {
   rating?: number | null;
   totalRatings?: number | null;
   createdAt?: string | null;
+  operatingDays?: number[];
+  advanceBookingDays?: number | null;
+  cancellationHours?: number | null;
+  hasParking?: boolean;
+  hasLights?: boolean;
+  hasWashrooms?: boolean;
+  hasCanteen?: boolean;
+  hasCCTV?: boolean;
+  hasScorer?: boolean;
   brandColor?: string | null;
   logoUrl?: string | null;
   tagline?: string | null;
@@ -151,7 +160,12 @@ const Icon = {
   menu: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 11h6M9 15h6M9 19h4"/></svg>,
   custom: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 14l-1.5 1.5a3 3 0 1 1-4-4L7 9.5M14 10l1.5-1.5a3 3 0 1 1 4 4L16 14.5M9 14l6-6"/></svg>,
   close: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M6 6l12 12M18 6l-12 12"/></svg>,
-  photos: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M3 14l5-5 5 5 3-3 5 5"/><circle cx="9" cy="8" r="1.4" fill="currentColor"/></svg>,
+  lights:    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v3M5 5l2 2M19 5l-2 2M3 12h3M18 12h3M9 18h6M10 21h4"/><circle cx="12" cy="12" r="4"/></svg>,
+  parking:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 17V8h4a3 3 0 0 1 0 6H9"/></svg>,
+  washroom:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><path d="M6 22V12l-2-3 4-2h0l2 3v6m6 6V12l2-3-4-2h0l-2 3v6"/></svg>,
+  canteen:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2v9a2 2 0 0 0 4 0V2M5 12v10M17 2c-2 0-4 2-4 5v5h3v10"/></svg>,
+  cctv:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="14" height="12" rx="1"/><path d="M16 10l6-2v8l-6-2"/></svg>,
+  scorer:    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 8v8M15 8v8M3 12h18"/></svg>,
 };
 const KIND_ICON: Record<MicrositeLink["kind"], React.ReactNode> = {
   instagram: Icon.instagram,
@@ -166,16 +180,17 @@ const KIND_ICON: Record<MicrositeLink["kind"], React.ReactNode> = {
 export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
   const [bookOpen, setBookOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [photosOpen, setPhotosOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Lock body scroll while any sheet is open
+  // Lock body scroll while any sheet is open. One source of truth —
+  // BookingSheet does NOT lock independently (its prop `onClose` ref
+  // changes every render, which caused the lock to ping-pong and
+  // sometimes leave the page un-scrollable).
   useEffect(() => {
-    const open = bookOpen || shareOpen || photosOpen;
-    const prev = document.body.style.overflow;
-    if (open) document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [bookOpen, shareOpen, photosOpen]);
+    if (!bookOpen && !shareOpen) return;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, [bookOpen, shareOpen]);
 
   /* ─ Derived data ──────────────────────────────────────────────────── */
   const palette = resolvePalette(arena.brandColor);
@@ -184,6 +199,17 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
 
   const units = arena.units ?? [];
   const photos = (arena.photoUrls ?? []).filter(Boolean);
+  // Hero slideshow — rotates through up to 3 photos, starting at coverPhotoIndex.
+  const startingPhotoIdx = Math.min(Math.max(arena.coverPhotoIndex ?? 0, 0), Math.max(photos.length - 1, 0));
+  const [heroPhotoIdx, setHeroPhotoIdx] = useState(startingPhotoIdx);
+  useEffect(() => {
+    if (photos.length <= 1) return;
+    const id = setInterval(() => {
+      setHeroPhotoIdx((i) => (i + 1) % photos.length);
+    }, 5500);
+    return () => clearInterval(id);
+  }, [photos.length]);
+
   const sports = (arena.sports ?? []).filter(Boolean);
   const sportLabel = sports.length
     ? sports[0].charAt(0).toUpperCase() + sports[0].slice(1).toLowerCase()
@@ -208,48 +234,46 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
     setOpenNow(m >= toMins(arenaOpen) && m <= toMins(arenaClose));
   }, [arenaOpen, arenaClose]);
 
+  // Status chip text — always include the full open–close range when we
+  // know it, prefixed with OPEN / CLOSED so visitors see both times.
   const statusText = openNow == null
     ? (hoursLine ?? "Hours unlisted")
-    : openNow
-      ? "OPEN NOW"
-      : arenaOpen ? `OPENS ${fmt12Short(arenaOpen)?.toUpperCase()}` : "CLOSED";
-
-  // "From ₹X/hr" — minimum hourly rate across units.
-  const minHourly = units.reduce<number | null>((acc, u) => {
-    const p = u.pricePerHourPaise;
-    if (typeof p !== "number" || p <= 0) return acc;
-    return acc == null || p < acc ? p : acc;
-  }, null);
+    : hoursLine
+      ? `${openNow ? "OPEN" : "CLOSED"} · ${hoursLine.toUpperCase()}`
+      : openNow
+        ? "OPEN NOW"
+        : "CLOSED";
 
   const rating = arena.rating && arena.rating > 0 ? Math.round(arena.rating * 10) / 10 : null;
   const ratingCount = arena.totalRatings ?? null;
 
-  // Years established — best-effort from createdAt.
-  const estYear = arena.createdAt ? new Date(arena.createdAt).getFullYear() : null;
-  const yearsOld = estYear ? Math.max(0, new Date().getFullYear() - estYear) : null;
-
-  // Hours per day (rough — for the desktop stats strip).
-  const hoursPerDay = arenaOpen && arenaClose ? Math.max(0, Math.round((toMins(arenaClose) - toMins(arenaOpen)) / 60)) : null;
-
   const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
-  const publicUrl = typeof window !== "undefined" ? window.location.href : `https://www.swingcricketapp.com/arena/${canonicalSlug}`;
+  // SSR-stable URL. After mount, useEffect upgrades it to the actual
+  // window.location.href so share/copy reflect previews / custom domains.
+  const [publicUrl, setPublicUrl] = useState(`https://www.swingcricketapp.com/arena/${canonicalSlug}`);
+  useEffect(() => { setPublicUrl(window.location.href); }, []);
 
   const mapHref = arena.latitude && arena.longitude
     ? `https://www.google.com/maps/dir/?api=1&destination=${arena.latitude},${arena.longitude}`
     : fullAddress ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}` : null;
 
-  /* ─ Action chips: dynamic, prioritised ────────────────────────────── */
-  type Chip = { key: string; label: string; icon: React.ReactNode; href?: string; onClick?: () => void };
+  /* ─ Owner-curated links (Instagram, WhatsApp, etc.) ──────────────── */
   const customLinks = (arena.micrositeLinks ?? [])
     .filter((l) => l && l.enabled !== false && l.url)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const chips: Chip[] = [];
-  if (arena.phone)   chips.push({ key: "call", label: "Call", icon: Icon.phone, href: `tel:${arena.phone}` });
-  if (mapHref)       chips.push({ key: "dir",  label: "Directions", icon: Icon.navigation, href: mapHref });
-  for (const l of customLinks) {
-    chips.push({ key: `${l.kind}-${chips.length}`, label: l.label, icon: KIND_ICON[l.kind], href: l.url });
-  }
-  if (photos.length) chips.push({ key: "photos", label: "Photos", icon: Icon.photos, onClick: () => setPhotosOpen(true) });
+  // Always render this fixed set of social slots so the area is never empty.
+  // Owner-set ones become full-brand and clickable; the rest stay as dim
+  // outlined placeholders to show the design intent.
+  const SOCIAL_SLOTS: MicrositeLink["kind"][] = ["instagram", "whatsapp", "youtube", "website", "menu"];
+  const setLinksByKind = new Map<MicrositeLink["kind"], MicrositeLink>(customLinks.map((l) => [l.kind, l]));
+  const socials = SOCIAL_SLOTS.map((kind) => ({ kind, link: setLinksByKind.get(kind) ?? null }));
+
+  /* ─ Tagline with sensible fallback so the slot is never blank ─────── */
+  const cityShort = arena.city || (locationLine ? locationLine.split(",")[0].trim() : "");
+  const fallbackTag = sportLabel
+    ? (cityShort ? `Premium ${sportLabel.toLowerCase()} arena in ${cityShort}.` : `Premium ${sportLabel.toLowerCase()} arena.`)
+    : `Book ${arena.name} instantly.`;
+  const heroTagline = arena.tagline?.trim() || fallbackTag;
 
   /* ─ Web Share API + copy ─────────────────────────────────────────── */
   async function shareUrl() {
@@ -272,35 +296,32 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
   const canBook = units.length > 0;
 
   /* ─ Render ────────────────────────────────────────────────────────── */
-  const heroStyle = useMemo(() => ({
+  // Brand color goes through a CSS variable so child elements (chips,
+  // buttons, etc.) can reference it. Gradient/stripes are applied
+  // *directly* via inline style on the hero — CSS-var-held gradients
+  // are brittle across browsers + build pipelines.
+  const rootStyle = useMemo(() => ({
     ["--ms-brand" as string]: brand,
     ["--ms-brand-ink" as string]: brandInk,
-    ["--hero-bg" as string]: palette.bg,
-    ["--hero-stripe" as string]: palette.stripe,
-  } as React.CSSProperties), [brand, brandInk, palette]);
+  } as React.CSSProperties), [brand, brandInk]);
+  const heroStyle = useMemo<React.CSSProperties>(() => ({
+    backgroundColor: "#0A1410",
+    backgroundImage: palette.bg,
+  }), [palette]);
+  const stripeStyle = useMemo<React.CSSProperties>(() => ({
+    backgroundImage: `repeating-linear-gradient(135deg, transparent 0, transparent 14px, ${palette.stripe} 14px, ${palette.stripe} 15px)`,
+  }), [palette]);
 
   return (
-    <main className="ms" style={heroStyle}>
+    <main className="ms" style={rootStyle}>
       {/* ─── TOP BAR ────────────────────────────────────────────────── */}
       <header className="ms-top">
-        <div className="ms-top-left">
-          <span className="ms-avatar" aria-hidden="true">
-            {arena.logoUrl
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={arena.logoUrl} alt="" />
-              : <span>{initialsFrom(arena.name)}</span>}
-          </span>
-          <span className="ms-top-name">{arena.name}</span>
-        </div>
-        <div className="ms-top-right">
+        <span className="ms-top-name">{arena.name}</span>
+        <div className="ms-top-actions">
           <ThemeToggle />
-          <button type="button" className="ms-icon-btn" onClick={shareUrl} aria-label="Share this page" title="Share">
-            {Icon.share}
-          </button>
           {canBook && (
             <button type="button" className="ms-book-pill" onClick={() => setBookOpen(true)}>
-              <span>Book</span>
-              <span className="ms-book-pill-arrow" aria-hidden="true">{Icon.arrow}</span>
+              Book
             </button>
           )}
         </div>
@@ -309,9 +330,24 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
       {/* ─── HERO + CHIPS + BOTTOM BAR ──────────────────────────────── */}
       <section className="ms-stage">
         {/* HERO card */}
-        <article className="ms-hero">
-          <div className="ms-hero-bg" aria-hidden="true" />
-          <div className="ms-hero-stripes" aria-hidden="true" />
+        <article className="ms-hero" style={heroStyle}>
+          {photos.length > 0 ? (
+            <>
+              {photos.map((src, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={src + i}
+                  src={src}
+                  alt=""
+                  aria-hidden="true"
+                  className={`ms-hero-photo${i === heroPhotoIdx ? " is-active" : ""}`}
+                />
+              ))}
+              <div className="ms-hero-veil" aria-hidden="true" />
+            </>
+          ) : (
+            <div className="ms-hero-stripes" style={stripeStyle} aria-hidden="true" />
+          )}
 
           <div className="ms-hero-top">
             <span className="ms-status-chip">
@@ -321,32 +357,14 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           </div>
 
           <div className="ms-hero-body">
-            {sportLabel && (
-              <span className="ms-sport-chip">
-                <span className="ms-sport-dot" aria-hidden="true" />
-                <span>{sportLabel.toUpperCase()}</span>
-              </span>
-            )}
             <h1 className="ms-hero-name">{arena.name}</h1>
-            {arena.tagline && <p className="ms-hero-tag">{arena.tagline}</p>}
+            <p className="ms-hero-tag">&ldquo;{heroTagline}&rdquo;</p>
 
             <ul className="ms-hero-meta">
               {locationLine && (
                 <li>
                   <span className="ms-meta-icon" aria-hidden="true">{Icon.pin}</span>
                   <span>{locationLine}</span>
-                </li>
-              )}
-              {hoursLine && (
-                <li>
-                  <span className="ms-meta-icon" aria-hidden="true">{Icon.clock}</span>
-                  <span>{hoursLine}</span>
-                </li>
-              )}
-              {rating != null && (
-                <li>
-                  <span className="ms-meta-icon ms-meta-icon-star" aria-hidden="true">{Icon.star}</span>
-                  <span>{rating.toFixed(1)}{ratingCount ? ` · ${ratingCount} ${ratingCount === 1 ? "review" : "reviews"}` : ""}</span>
                 </li>
               )}
             </ul>
@@ -368,72 +386,141 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           </div>
         </article>
 
-        {/* CHIPS row — secondary actions */}
-        {chips.length > 0 && (
-          <nav className="ms-chips" aria-label="More from this arena">
-            {chips.slice(0, 6).map((c) => (
-              c.href ? (
-                <a
-                  key={c.key}
-                  className="ms-chip"
-                  href={c.href}
-                  target={c.href.startsWith("http") ? "_blank" : undefined}
-                  rel={c.href.startsWith("http") ? "noopener noreferrer" : undefined}
-                >
-                  <span className="ms-chip-icon" aria-hidden="true">{c.icon}</span>
-                  <span className="ms-chip-label">{c.label}</span>
-                </a>
-              ) : (
-                <button key={c.key} type="button" className="ms-chip" onClick={c.onClick}>
-                  <span className="ms-chip-icon" aria-hidden="true">{c.icon}</span>
-                  <span className="ms-chip-label">{c.label}</span>
-                </button>
-              )
-            ))}
-          </nav>
-        )}
+        {/* ABOUT — description + amenities (as icons) + operating days */}
+        <section className="ms-about" aria-label="About">
+          <span className="ms-rblock-eyebrow">ABOUT</span>
+          {arena.description && <p className="ms-about-prose">{arena.description}</p>}
 
-        {/* DESKTOP stats strip (hidden on mobile) */}
-        <div className="ms-stats">
-          {rating != null && (
-            <div className="ms-stat">
-              <div className="ms-stat-val">{rating.toFixed(1)}</div>
-              <div className="ms-stat-lbl">Rating</div>
-            </div>
+          {(arena.hasLights || arena.hasParking || arena.hasWashrooms || arena.hasCanteen || arena.hasCCTV || arena.hasScorer) && (
+            <ul className="ms-about-amen" aria-label="Amenities">
+              {arena.hasLights    && <li className="ms-amen-cell"><span className="ms-amen-glyph" aria-hidden="true">{Icon.lights}</span><span className="ms-amen-label">Lights</span></li>}
+              {arena.hasParking   && <li className="ms-amen-cell"><span className="ms-amen-glyph" aria-hidden="true">{Icon.parking}</span><span className="ms-amen-label">Parking</span></li>}
+              {arena.hasWashrooms && <li className="ms-amen-cell"><span className="ms-amen-glyph" aria-hidden="true">{Icon.washroom}</span><span className="ms-amen-label">Washroom</span></li>}
+              {arena.hasCanteen   && <li className="ms-amen-cell"><span className="ms-amen-glyph" aria-hidden="true">{Icon.canteen}</span><span className="ms-amen-label">Canteen</span></li>}
+              {arena.hasCCTV      && <li className="ms-amen-cell"><span className="ms-amen-glyph" aria-hidden="true">{Icon.cctv}</span><span className="ms-amen-label">CCTV</span></li>}
+              {arena.hasScorer    && <li className="ms-amen-cell"><span className="ms-amen-glyph" aria-hidden="true">{Icon.scorer}</span><span className="ms-amen-label">Scorer</span></li>}
+            </ul>
           )}
-          {units.length > 0 && (
-            <div className="ms-stat">
-              <div className="ms-stat-val">{units.length}</div>
-              <div className="ms-stat-lbl">{units.length === 1 ? "Court" : "Courts"}</div>
+
+          {/* Operating days — Mon-Sun row; brand-filled = open, dim = closed */}
+          <div className="ms-about-days">
+            <span className="ms-rblock-eyebrow ms-rblock-eyebrow-soft">OPEN ON</span>
+            <ul className="ms-days-row">
+              {[
+                { d: 1, label: "Mon" },
+                { d: 2, label: "Tue" },
+                { d: 3, label: "Wed" },
+                { d: 4, label: "Thu" },
+                { d: 5, label: "Fri" },
+                { d: 6, label: "Sat" },
+                { d: 7, label: "Sun" },
+              ].map(({ d, label }) => {
+                const open = (arena.operatingDays ?? [1, 2, 3, 4, 5, 6, 7]).includes(d);
+                return (
+                  <li key={d} className={`ms-day ${open ? "is-open" : ""}`} aria-label={`${label} ${open ? "open" : "closed"}`}>
+                    {label}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </section>
+
+        {/* RATING + FOLLOW — combined */}
+        <section className="ms-rating-follow" aria-label="Rating and social links">
+          <div className="ms-rf-rating">
+            <span className="ms-rblock-eyebrow ms-rblock-eyebrow-soft">RATING</span>
+            {rating != null ? (
+              <div className="ms-rf-rating-body">
+                <span className="ms-rf-star" aria-hidden="true">{Icon.star}</span>
+                <span className="ms-rf-rating-val">{rating.toFixed(1)}</span>
+                {ratingCount != null && (
+                  <span className="ms-rf-rating-meta">
+                    {ratingCount} {ratingCount === 1 ? "review" : "reviews"}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="ms-rf-rating-body">
+                <span className="ms-rf-star ms-rf-star-empty" aria-hidden="true">{Icon.star}</span>
+                <span className="ms-rf-rating-meta">No reviews yet</span>
+              </div>
+            )}
+          </div>
+
+          <div className="ms-rf-divider" aria-hidden="true" />
+
+          <div className="ms-rf-follow">
+            <span className="ms-rblock-eyebrow ms-rblock-eyebrow-soft">FOLLOW</span>
+            <ul className="ms-socials" aria-label="Social media">
+              {socials.map(({ kind, link }) => (
+                <li key={kind}>
+                  {link ? (
+                    <a
+                      className="ms-social is-active"
+                      href={link.url}
+                      target={link.url.startsWith("http") ? "_blank" : undefined}
+                      rel={link.url.startsWith("http") ? "noopener noreferrer" : undefined}
+                      aria-label={link.label || kind}
+                      title={link.label || kind}
+                    >
+                      {KIND_ICON[kind]}
+                    </a>
+                  ) : (
+                    <span className="ms-social" aria-hidden="true" title={kind}>
+                      {KIND_ICON[kind]}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        {/* DIRECTIONS / MAP */}
+        {(arena.latitude && arena.longitude) || mapHref ? (
+          <a
+            className="ms-mapcard"
+            href={mapHref ?? "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Get directions"
+          >
+            {arena.latitude && arena.longitude ? (
+              <iframe
+                className="ms-mapcard-frame"
+                title={`${arena.name} location`}
+                src={`https://www.google.com/maps?q=${arena.latitude},${arena.longitude}&hl=en&z=15&output=embed`}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                aria-hidden="true"
+              />
+            ) : (
+              <div className="ms-mapcard-frame ms-mapcard-fallback" aria-hidden="true" />
+            )}
+            <div className="ms-mapcard-overlay">
+              <span className="ms-mapcard-pin" aria-hidden="true">{Icon.pin}</span>
+              <div className="ms-mapcard-text">
+                <span className="ms-mapcard-line1">{locationLine || "Find us"}</span>
+                <span className="ms-mapcard-line2">Get directions  →</span>
+              </div>
             </div>
-          )}
-          {hoursPerDay && (
-            <div className="ms-stat">
-              <div className="ms-stat-val">{hoursPerDay}h</div>
-              <div className="ms-stat-lbl">Open daily</div>
-            </div>
-          )}
-          {estYear && yearsOld != null && yearsOld > 0 && (
-            <div className="ms-stat">
-              <div className="ms-stat-val">{yearsOld}yr</div>
-              <div className="ms-stat-lbl">Est. {estYear}</div>
-            </div>
-          )}
-          {minHourly != null && (
-            <div className="ms-stat">
-              <div className="ms-stat-val">{rupees(minHourly)}</div>
-              <div className="ms-stat-lbl">From /hr</div>
-            </div>
-          )}
-        </div>
+          </a>
+        ) : null}
       </section>
+
+      {/* ─── FOOTER — small Swing credit ─────────────────────────────── */}
+      <footer className="ms-footer">
+        <span>Powered by</span>
+        <a href="https://www.swingcricketapp.com" target="_blank" rel="noopener noreferrer">Swing</a>
+      </footer>
 
       {/* ─── STICKY BOTTOM BAR (mobile only) ────────────────────────── */}
       {canBook && (
         <div className="ms-bottombar">
           <div className="ms-bottombar-left">
-            <span className="ms-bottombar-price">{minHourly != null ? `From ${rupees(minHourly)}/hr` : "Book your slot"}</span>
-            <span className="ms-bottombar-sub">LIVE AVAILABILITY</span>
+            <span className="ms-bottombar-status">Live availability</span>
+            <span className="ms-bottombar-sub">Real-time slots</span>
           </div>
           <button type="button" className="ms-bottombar-btn" onClick={() => setBookOpen(true)}>
             <span>Book a slot</span>
@@ -473,32 +560,6 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
         </div>
       )}
 
-      {/* ─── PHOTOS SHEET ───────────────────────────────────────────── */}
-      {photosOpen && photos.length > 0 && (
-        <div className="ms-sheet ms-sheet-photos" role="dialog" aria-modal="true" aria-label="Photos">
-          <button className="ms-sheet-scrim" aria-label="Close" onClick={() => setPhotosOpen(false)} />
-          <div className="ms-sheet-panel">
-            <header className="ms-sheet-head">
-              <div className="ms-sheet-title">
-                <span className="ms-sheet-eyebrow">PHOTOS</span>
-                <span className="ms-sheet-venue">{arena.name}</span>
-              </div>
-              <button className="ms-icon-btn" onClick={() => setPhotosOpen(false)} aria-label="Close">{Icon.close}</button>
-            </header>
-            <div className="ms-sheet-body ms-photos-body">
-              <div className="ms-photos-grid">
-                {photos.map((src, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <a key={src + i} className="ms-photo" href={src} target="_blank" rel="noopener noreferrer">
-                    <img src={src} alt={`${arena.name} photo ${i + 1}`} />
-                  </a>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ─── BOOKING SHEET ──────────────────────────────────────────── */}
       {canBook && (
         <BookingSheet
@@ -515,6 +576,8 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           phone={arena.phone}
           openTime={arenaOpen}
           closeTime={arenaClose}
+          advanceBookingDays={arena.advanceBookingDays ?? null}
+          cancellationHours={arena.cancellationHours ?? null}
         />
       )}
 
@@ -547,52 +610,35 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
         html { color-scheme: light; }
         [data-theme="dark"] { color-scheme: dark; }
 
-        /* ─── SHELL — no-scroll, single viewport ────────────────── */
+        /* ─── SHELL ─────────────────────────────────────────────── */
         .ms {
-          height: 100svh;
+          min-height: 100svh;
           background: var(--ms-bg);
           color: var(--ms-ink);
           font-family: var(--font-geist-sans, "Inter Tight", system-ui, sans-serif);
           display: flex;
           flex-direction: column;
-          overflow: hidden;
+          padding-bottom: 96px; /* room for the fixed bottom Book bar */
           -webkit-font-smoothing: antialiased;
         }
 
-        /* ─── TOP BAR ───────────────────────────────────────────── */
+        /* ─── TOP BAR — minimal ──────────────────────────────────── */
         .ms-top {
-          flex: 0 0 auto;
+          position: sticky;
+          top: 0;
+          z-index: 50;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
-          padding: 14px 16px;
-          border-bottom: 1px solid var(--ms-line);
+          gap: 14px;
+          padding: 14px 18px;
           background: var(--ms-bg);
+          border-bottom: 1px solid var(--ms-line);
         }
-        @media (min-width: 720px) { .ms-top { padding: 18px 32px; } }
-        .ms-top-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-        .ms-top-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+        @media (min-width: 720px) { .ms-top { padding: 18px 36px; } }
 
-        .ms-avatar {
-          width: 30px; height: 30px;
-          display: inline-grid; place-items: center;
-          background: var(--ms-brand);
-          color: var(--ms-brand-ink);
-          border-radius: 7px;
-          font-family: var(--font-geist-sans);
-          font-weight: 700;
-          font-size: 11px;
-          letter-spacing: 0.03em;
-          overflow: hidden;
-          flex: 0 0 auto;
-        }
-        .ms-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        @media (min-width: 720px) {
-          .ms-avatar { width: 34px; height: 34px; font-size: 12px; }
-        }
         .ms-top-name {
-          font-size: 14px;
+          font-size: 14.5px;
           font-weight: 600;
           letter-spacing: -0.005em;
           color: var(--ms-ink);
@@ -603,53 +649,89 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
         }
         @media (min-width: 720px) { .ms-top-name { font-size: 16px; } }
 
-        .ms-icon-btn {
-          all: unset;
-          cursor: pointer;
-          width: 36px; height: 36px;
-          display: inline-grid; place-items: center;
-          color: var(--ms-ink);
-          border: 1px solid var(--ms-line-strong);
-          border-radius: 999px;
-          background: var(--ms-bg);
-          transition: background 0.12s ease;
+        .ms-top-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex: 0 0 auto;
         }
-        .ms-icon-btn:hover { background: var(--ms-line); }
-        .ms-icon-btn svg { width: 15px; height: 15px; }
 
-        /* Theme toggle inherits .ms-icon-btn-ish — restyle the existing
-           class to match circular pill design. */
+        /* Theme toggle — pill with a sliding thumb between sun + moon */
         .ms-theme {
-          width: 36px !important;
-          height: 36px !important;
-          border-radius: 999px !important;
-          border: 1px solid var(--ms-line-strong) !important;
+          all: unset;
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          width: 52px;
+          height: 28px;
+          border-radius: 6px;
+          background: transparent;
+          border: 1px solid var(--ms-line-strong);
+          cursor: pointer;
+          box-sizing: border-box;
         }
-        .ms-theme:hover { background: var(--ms-line) !important; }
+        .ms-theme:hover { border-color: var(--ms-ink); }
+        .ms-theme:focus-visible {
+          outline: 2px solid var(--ms-brand);
+          outline-offset: 2px;
+        }
+
+        .ms-theme-thumb {
+          position: absolute;
+          top: 2px;
+          left: 2px;
+          width: 22px;
+          height: 22px;
+          border-radius: 4px;
+          background: var(--ms-ink);
+          transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+          z-index: 1;
+        }
+        .ms-theme[data-mode="dark"] .ms-theme-thumb {
+          transform: translateX(24px);
+        }
+
+        .ms-theme-icons {
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          padding: 0 8px;
+          z-index: 2;
+          pointer-events: none;
+        }
+        .ms-theme-sun,
+        .ms-theme-moon {
+          display: inline-flex;
+          width: 12px;
+          height: 12px;
+          color: var(--ms-soft);
+          transition: color 0.2s ease;
+        }
+        .ms-theme-sun  svg,
+        .ms-theme-moon svg { width: 12px; height: 12px; }
+        /* Active icon sits ON the ink thumb — invert to bg color for contrast */
+        .ms-theme[data-mode="light"] .ms-theme-sun  { color: var(--ms-bg); }
+        .ms-theme[data-mode="dark"]  .ms-theme-moon { color: var(--ms-bg); }
 
         .ms-book-pill {
           all: unset;
           cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 9px 16px 9px 18px;
-          background: var(--ms-brand);
-          color: var(--ms-brand-ink);
-          border-radius: 999px;
-          font-weight: 700;
-          font-size: 14px;
+          padding: 8px 16px;
+          background: var(--ms-ink);
+          color: var(--ms-bg);
+          border-radius: 6px;
+          font-weight: 600;
+          font-size: 13.5px;
           letter-spacing: -0.005em;
-          transition: filter 0.12s ease, transform 0.12s ease;
+          transition: opacity 0.14s ease;
         }
-        .ms-book-pill:hover { filter: brightness(0.94); }
-        .ms-book-pill-arrow svg { width: 14px; height: 14px; }
+        .ms-book-pill:hover { opacity: 0.86; }
 
-        /* ─── STAGE (fills remaining height) ─────────────────────── */
+        /* ─── STAGE ──────────────────────────────────────────────── */
         .ms-stage {
-          flex: 1 1 auto;
-          min-height: 0;
-          padding: 14px 14px 100px;
+          padding: 14px 14px 24px;
           display: flex;
           flex-direction: column;
           gap: 14px;
@@ -661,10 +743,9 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
         /* ─── HERO CARD ──────────────────────────────────────────── */
         .ms-hero {
           position: relative;
-          flex: 1 1 auto;
-          min-height: 0;
           overflow: hidden;
-          border-radius: 22px;
+          border-radius: 6px;
+          min-height: 380px;
           padding: 20px 22px 22px;
           display: flex;
           flex-direction: column;
@@ -673,26 +754,32 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           color: #FFFFFF;
         }
         @media (min-width: 720px) {
-          .ms-hero { padding: 28px 36px 30px; border-radius: 26px; }
+          .ms-hero { padding: 28px 36px 30px; min-height: 460px; }
         }
-        .ms-hero-bg {
+        .ms-hero-stripes,
+        .ms-hero-photo {
           position: absolute; inset: 0;
-          background: var(--hero-bg);
+          width: 100%; height: 100%;
           z-index: 0;
-        }
-        .ms-hero-stripes {
-          position: absolute; inset: 0;
-          background-image: repeating-linear-gradient(
-            135deg,
-            transparent 0,
-            transparent 14px,
-            var(--hero-stripe) 14px,
-            var(--hero-stripe) 15px
-          );
-          z-index: 1;
           pointer-events: none;
         }
-        .ms-hero > * { position: relative; z-index: 2; }
+        .ms-hero-photo {
+          object-fit: cover;
+          opacity: 0;
+          transition: opacity 0.9s ease;
+        }
+        .ms-hero-photo.is-active { opacity: 1; }
+        /* Dark overlay — strong at the bottom, light at top, so the
+           hero photo reads cinematically and the name/CTA stay legible. */
+        .ms-hero-veil {
+          position: absolute; inset: 0;
+          z-index: 1;
+          pointer-events: none;
+          background:
+            linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.42) 38%, rgba(0,0,0,0.78) 78%, rgba(0,0,0,0.92) 100%);
+        }
+        .ms-hero-top,
+        .ms-hero-body { position: relative; z-index: 2; }
 
         .ms-hero-top {
           display: flex;
@@ -707,7 +794,7 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           background: rgba(0,0,0,0.42);
           backdrop-filter: blur(6px);
           color: rgba(255,255,255,0.92);
-          border-radius: 999px;
+          border-radius: 6px;
           font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
           font-size: 10.5px;
           font-weight: 700;
@@ -731,38 +818,34 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           flex-direction: column;
           gap: 12px;
         }
-        .ms-sport-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          align-self: flex-start;
-          padding: 6px 12px 6px 10px;
-          background: var(--ms-brand);
-          color: var(--ms-brand-ink);
-          border-radius: 999px;
-          font-family: var(--font-geist-mono);
-          font-size: 10.5px;
-          font-weight: 800;
-          letter-spacing: 0.14em;
-        }
-        .ms-sport-dot {
-          width: 8px; height: 8px;
-          border-radius: 50%;
-          background: var(--ms-brand-ink);
-          opacity: 0.4;
-        }
 
         .ms-hero-name {
           margin: 0;
-          font-size: clamp(36px, 9.5vw, 96px);
-          font-weight: 800;
-          line-height: 0.96;
+          font-family: var(--font-bricolage), "Bricolage Grotesque", var(--font-geist-sans), "Inter Tight", system-ui, sans-serif;
+          font-size: clamp(38px, 9.4vw, 92px);
+          font-weight: 700;
+          line-height: 0.94;
           letter-spacing: -0.04em;
           text-wrap: balance;
           color: #FFFFFF;
         }
         @media (min-width: 720px) {
-          .ms-hero-name { font-size: clamp(56px, 7vw, 96px); }
+          .ms-hero-name { font-size: clamp(54px, 6.6vw, 92px); }
+        }
+        .ms-hero-tag {
+          margin: 4px 0 0;
+          font-family: var(--font-bricolage), "Bricolage Grotesque", var(--font-geist-sans), "Inter Tight", system-ui, sans-serif;
+          font-style: normal;
+          font-weight: 400;
+          font-size: clamp(15px, 1.8vw, 18px);
+          line-height: 1.36;
+          letter-spacing: -0.01em;
+          color: rgba(255, 255, 255, 0.86);
+          max-width: 44ch;
+          text-wrap: balance;
+        }
+        @media (min-width: 720px) {
+          .ms-hero-tag { font-size: clamp(17px, 1.6vw, 20px); }
         }
         .ms-hero-tag {
           margin: 0;
@@ -811,7 +894,7 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           align-items: center;
           gap: 8px;
           padding: 12px 18px 12px 20px;
-          border-radius: 999px;
+          border-radius: 6px;
           font-weight: 700;
           font-size: 14.5px;
           letter-spacing: -0.005em;
@@ -833,88 +916,284 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
         }
         .ms-cta-ghost:hover { background: rgba(0,0,0,0.55); }
 
-        /* ─── CHIPS ROW ──────────────────────────────────────────── */
-        .ms-chips {
+        /* ─── ABOUT SECTION (description + amenities + days) ─────── */
+        .ms-about {
+          background: var(--ms-surface);
+          border: 1px solid var(--ms-line);
+          border-radius: 6px;
+          padding: 18px 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        @media (min-width: 720px) { .ms-about { padding: 22px 26px; gap: 20px; } }
+
+        .ms-about-prose {
+          margin: 0;
+          font-size: 15px;
+          line-height: 1.55;
+          color: var(--ms-ink);
+          white-space: pre-wrap;
+          letter-spacing: -0.005em;
+        }
+        @media (min-width: 720px) { .ms-about-prose { font-size: 16px; line-height: 1.6; max-width: 64ch; } }
+
+        /* Amenities — brand-color icon + small caption underneath */
+        .ms-about-amen {
+          list-style: none;
+          margin: 0;
+          padding: 12px 0 6px;
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px;
-          flex: 0 0 auto;
+          gap: 16px 10px;
+          border-top: 1px solid var(--ms-line);
         }
-        @media (min-width: 540px) { .ms-chips { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
-        @media (min-width: 720px) { .ms-chips { gap: 14px; } }
-        .ms-chip {
-          all: unset;
-          cursor: pointer;
+        @media (min-width: 540px) { .ms-about-amen { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; } }
+        .ms-amen-cell {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
           gap: 6px;
-          padding: 14px 8px;
-          background: var(--ms-surface);
-          border: 1px solid var(--ms-line);
-          border-radius: 14px;
-          color: var(--ms-ink);
-          text-decoration: none;
-          transition: border-color 0.12s ease, transform 0.12s ease, background 0.12s ease;
-          min-height: 76px;
           text-align: center;
+          min-width: 0;
         }
-        .ms-chip:hover {
-          border-color: var(--ms-line-strong);
-          background: color-mix(in srgb, var(--ms-line) 60%, var(--ms-surface));
+        .ms-amen-glyph {
+          width: 28px; height: 28px;
+          display: inline-grid; place-items: center;
+          color: var(--ms-brand);
         }
-        .ms-chip-icon {
-          width: 22px; height: 22px;
-          display: inline-flex;
-          color: var(--ms-ink);
-        }
-        .ms-chip-icon svg { width: 22px; height: 22px; }
-        .ms-chip-label {
-          font-size: 12.5px;
+        .ms-amen-glyph svg { width: 26px; height: 26px; }
+        .ms-amen-label {
+          font-size: 11.5px;
           font-weight: 600;
           letter-spacing: -0.005em;
+          color: var(--ms-muted);
+          line-height: 1.1;
         }
 
-        /* ─── STATS (desktop only) ───────────────────────────────── */
-        .ms-stats { display: none; }
-        @media (min-width: 720px) {
-          .ms-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 0;
-            border: 1px solid var(--ms-line);
-            border-radius: 14px;
-            overflow: hidden;
-            background: var(--ms-surface);
-            flex: 0 0 auto;
-          }
-          .ms-stat {
-            padding: 16px 20px;
-            border-right: 1px solid var(--ms-line);
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-          }
-          .ms-stat:last-child { border-right: 0; }
-          .ms-stat-val {
-            font-size: 26px;
-            font-weight: 800;
-            letter-spacing: -0.025em;
-            line-height: 1;
-            color: var(--ms-ink);
-          }
-          .ms-stat-lbl {
-            font-family: var(--font-geist-mono);
-            font-size: 10.5px;
-            font-weight: 600;
-            letter-spacing: 0.16em;
-            text-transform: uppercase;
-            color: var(--ms-muted);
-          }
+        /* Operating days — Mon–Sun chip row */
+        .ms-about-days {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          border-top: 1px solid var(--ms-line);
+          padding-top: 14px;
+        }
+        .ms-rblock-eyebrow-soft { color: var(--ms-muted); }
+        .ms-days-row {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: grid;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          gap: 5px;
+        }
+        @media (min-width: 540px) { .ms-days-row { gap: 8px; } }
+        .ms-day {
+          padding: 8px 4px;
+          text-align: center;
+          border: 1px solid var(--ms-line);
+          border-radius: 4px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 10.5px;
+          font-weight: 700;
+          letter-spacing: 0.1em;
+          color: var(--ms-soft);
+          background: transparent;
+          text-transform: uppercase;
+        }
+        .ms-day.is-open {
+          color: var(--ms-brand-ink);
+          background: var(--ms-brand);
+          border-color: var(--ms-brand);
         }
 
-        /* ─── STICKY BOTTOM BAR (mobile only) ────────────────────── */
+        /* ─── RATING + FOLLOW (combined section) ─────────────────── */
+        .ms-rating-follow {
+          background: var(--ms-surface);
+          border: 1px solid var(--ms-line);
+          border-radius: 6px;
+          padding: 14px 18px;
+          display: flex;
+          align-items: stretch;
+          gap: 14px;
+        }
+        @media (min-width: 720px) { .ms-rating-follow { padding: 18px 24px; gap: 22px; } }
+
+        .ms-rf-rating,
+        .ms-rf-follow {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .ms-rf-rating { flex: 0 0 auto; }
+
+        .ms-rf-rating-body {
+          display: inline-flex;
+          align-items: baseline;
+          gap: 8px;
+        }
+        .ms-rf-star {
+          display: inline-flex;
+          color: var(--ms-brand);
+          align-self: center;
+        }
+        .ms-rf-star svg { width: 18px; height: 18px; }
+        .ms-rf-star-empty { color: var(--ms-soft); }
+        .ms-rf-rating-val {
+          font-size: 22px;
+          font-weight: 800;
+          letter-spacing: -0.025em;
+          line-height: 1;
+          color: var(--ms-ink);
+        }
+        @media (min-width: 720px) { .ms-rf-rating-val { font-size: 26px; } }
+        .ms-rf-rating-meta {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 10.5px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--ms-muted);
+        }
+
+        .ms-rf-divider {
+          width: 1px;
+          align-self: stretch;
+          background: var(--ms-line);
+          flex: 0 0 auto;
+        }
+
+        /* Map card */
+        .ms-mapcard {
+          position: relative;
+          display: block;
+          overflow: hidden;
+          height: 180px;
+          border-radius: 6px;
+          border: 1px solid var(--ms-line);
+          background: var(--ms-surface);
+          color: #FFFFFF;
+          text-decoration: none;
+        }
+        @media (min-width: 720px) { .ms-mapcard { height: 220px; } }
+        .ms-mapcard-frame {
+          position: absolute; inset: 0;
+          width: 100%; height: 100%;
+          border: 0;
+          display: block;
+          pointer-events: none;
+          filter: contrast(0.92) saturate(0.84);
+        }
+        [data-theme="dark"] .ms-mapcard-frame {
+          filter: invert(0.92) hue-rotate(180deg) contrast(0.86) saturate(0.55) brightness(1.05);
+        }
+        .ms-mapcard-fallback {
+          background:
+            radial-gradient(120% 90% at 30% 30%, var(--ms-brand) 0%, transparent 55%),
+            #1a1a1a;
+          opacity: 0.85;
+        }
+        .ms-mapcard-overlay {
+          position: absolute; inset: 0;
+          background: linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.88) 100%);
+          display: flex;
+          align-items: flex-end;
+          gap: 10px;
+          padding: 12px 14px;
+        }
+        .ms-mapcard-pin {
+          width: 32px; height: 32px;
+          display: inline-grid; place-items: center;
+          border-radius: 6px;
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+          flex: 0 0 auto;
+        }
+        .ms-mapcard-pin svg { width: 16px; height: 16px; }
+        .ms-mapcard-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+        .ms-mapcard-line1 {
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: -0.005em;
+          color: #FFFFFF;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .ms-mapcard-line2 {
+          font-family: var(--font-geist-mono);
+          font-size: 10.5px;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          color: rgba(255,255,255,0.78);
+          text-transform: uppercase;
+        }
+
+        .ms-rblock-eyebrow {
+          font-family: var(--font-geist-mono);
+          font-size: 9.5px;
+          font-weight: 700;
+          letter-spacing: 0.22em;
+          color: var(--ms-muted);
+        }
+
+        .ms-socials {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .ms-social {
+          width: 36px; height: 36px;
+          display: inline-grid;
+          place-items: center;
+          border-radius: 6px;
+          border: 1px solid var(--ms-line-strong);
+          background: transparent;
+          color: var(--ms-soft);
+          text-decoration: none;
+          transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+        }
+        .ms-social svg { width: 16px; height: 16px; }
+        .ms-social.is-active {
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+          border-color: var(--ms-brand);
+        }
+        .ms-social.is-active:hover { filter: brightness(0.94); transform: translateY(-1px); }
+        .ms-social:not(.is-active) {
+          opacity: 0.55;
+        }
+
+        /* ─── FOOTER — Powered by Swing credit ─────────────────── */
+        .ms-footer {
+          padding: 24px 18px 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 10.5px;
+          font-weight: 700;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          color: var(--ms-muted);
+        }
+        .ms-footer a {
+          color: var(--ms-ink);
+          text-decoration: underline;
+          text-underline-offset: 3px;
+          text-decoration-color: var(--ms-soft);
+          transition: text-decoration-color 0.12s ease;
+        }
+        .ms-footer a:hover { text-decoration-color: var(--ms-brand); }
+
+        /* ─── STICKY BOTTOM BAR — always visible ──────────────── */
         .ms-bottombar {
           position: fixed;
           left: 0; right: 0; bottom: 0;
@@ -927,12 +1206,16 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           gap: 12px;
           z-index: 800;
         }
-        @media (min-width: 720px) { .ms-bottombar { display: none; } }
-        .ms-bottombar-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-        .ms-bottombar-price {
-          font-size: 17px;
+        @media (min-width: 720px) {
+          .ms-bottombar {
+            padding: 14px 36px;
+          }
+        }
+        .ms-bottombar-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+        .ms-bottombar-status {
+          font-size: 13.5px;
           font-weight: 700;
-          letter-spacing: -0.01em;
+          letter-spacing: -0.005em;
           color: var(--ms-ink);
           white-space: nowrap;
         }
@@ -952,7 +1235,7 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           padding: 12px 18px;
           background: var(--ms-brand);
           color: var(--ms-brand-ink);
-          border-radius: 999px;
+          border-radius: 6px;
           font-weight: 700;
           font-size: 14.5px;
           flex: 0 0 auto;
@@ -982,14 +1265,11 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          border-radius: 22px 22px 0 0;
+          border-radius: 6px 6px 0 0;
           animation: ms-slide 0.22s cubic-bezier(0.2,0.7,0.2,1);
         }
-        @keyframes ms-slide { from { transform: translateY(28px); } to { transform: translateY(0); } }
-        @media (min-width: 720px) {
-          .ms-sheet { align-items: center; padding: 24px; }
-          .ms-sheet-panel { border-radius: 18px; }
-        }
+        @keyframes ms-slide { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        /* Always anchor to the bottom — no centered-modal override. */
         .ms-sheet-small { max-width: 460px; }
         .ms-sheet-head {
           flex: 0 0 auto;
@@ -1052,21 +1332,6 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           white-space: nowrap;
         }
 
-        .ms-photos-body { padding: 14px; }
-        .ms-photos-grid {
-          display: grid;
-          gap: 8px;
-          grid-template-columns: 1fr;
-        }
-        @media (min-width: 540px) { .ms-photos-grid { grid-template-columns: 1fr 1fr; } }
-        .ms-photo {
-          display: block;
-          aspect-ratio: 4 / 3;
-          overflow: hidden;
-          border-radius: 10px;
-          background: var(--ms-line);
-        }
-        .ms-photo img { width: 100%; height: 100%; object-fit: cover; }
       `}</style>
     </main>
   );

@@ -763,30 +763,20 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
     ? { 1: "Court", 2: "Slot", 3: "Confirm" }
     : { 1: "Add-ons", 2: "Date & Time", 3: "Confirm" };
   const StepBar = () => (
-    <div style={{ display: "flex", alignItems: "center", gap: 0, padding: "22px 20px 0" }}>
+    <div className="pass-stepbar">
       {Array.from({ length: totalSteps }, (_, i) => i + 1).map((n) => {
         const done = stepNum > n;
         const active = stepNum === n;
         return (
-          <div key={n} style={{ display: "flex", alignItems: "center", flex: n < totalSteps ? "1 1 auto" : "0 0 auto" }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
-              background: active ? "#0A0B0A" : done ? "#0A0B0A" : "var(--paper-2)",
-              border: `1.5px solid ${active ? "#C8FF3E" : done ? "#0A0B0A" : "var(--hairline)"}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontFamily: "var(--font-ui)", fontWeight: 700, fontSize: 11,
-              color: active ? "#C8FF3E" : done ? "#C8FF3E" : "var(--ink-3)",
-              transition: "all .2s",
-            }}>
+          <div key={n} className="pass-step" style={{ flex: n < totalSteps ? "1 1 auto" : "0 0 auto" }}>
+            <div className={`pass-step-dot ${active ? "is-active" : done ? "is-done" : ""}`}>
               {done ? "✓" : n}
             </div>
-            {n < totalSteps && <div style={{ flex: 1, height: 1.5, background: done ? "#0A0B0A" : "var(--hairline)", margin: "0 8px", transition: "background .2s" }} />}
+            {n < totalSteps && <div className={`pass-step-rail ${done ? "is-done" : ""}`} />}
           </div>
         );
       })}
-      <div style={{ marginLeft: 12, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "var(--ink-3)", whiteSpace: "nowrap" }}>
-        {stepLabels[stepNum] ?? ""}
-      </div>
+      <div className="pass-step-label">{stepLabels[stepNum] ?? ""}</div>
     </div>
   );
 
