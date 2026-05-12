@@ -122,6 +122,14 @@ const arenaTimeBlockSchema = z.object({
   }
 })
 
+const micrositeLinkSchema = z.object({
+  kind: z.enum(['instagram', 'youtube', 'whatsapp', 'website', 'menu', 'custom']),
+  label: z.string().trim().min(1).max(40),
+  url: z.string().trim().min(1).max(500),
+  order: z.number().int().min(0).max(99).default(0),
+  enabled: z.boolean().default(true),
+})
+
 const updateArenaSchema = createArenaSchema.partial().extend({
   customSlug: z.string().min(3).max(60).optional().nullable(),
   isPublicPage: z.boolean().optional(),
@@ -131,6 +139,12 @@ const updateArenaSchema = createArenaSchema.partial().extend({
   advanceBookingDays: z.number().int().optional().nullable(),
   bufferMins: z.number().int().optional().nullable(),
   cancellationHours: z.number().int().optional().nullable(),
+  // Microsite (owner-branded public landing page)
+  brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
+  logoUrl: z.string().url().optional().nullable(),
+  tagline: z.string().trim().max(120).optional().nullable(),
+  coverPhotoIndex: z.number().int().min(0).max(20).optional(),
+  micrositeLinks: z.array(micrositeLinkSchema).max(20).optional().nullable(),
 })
 
 const arenaTimeBlockQuerySchema = z.object({
