@@ -36,16 +36,8 @@ const _kValidOn = <String, Set<String>>{
 // On a free hit (legal delivery after a no-ball) only these apply
 const _kFreeHitValid = {'RUN_OUT', 'HIT_WICKET', 'RETIRED_HURT', 'RETIRED_OUT'};
 
-// These dismissals don't need a fielder recorded.
-// LBW is bowler-only (the umpire's decision); per cricket convention,
-// no fielder is credited.
-const _kNoFielder = {
-  'BOWLED',
-  'LBW',
-  'HIT_WICKET',
-  'RETIRED_HURT',
-  'RETIRED_OUT',
-};
+// These dismissals don't need a fielder recorded
+const _kNoFielder = {'BOWLED', 'HIT_WICKET', 'RETIRED_HURT', 'RETIRED_OUT'};
 
 class WicketSheet extends StatefulWidget {
   const WicketSheet({
@@ -70,7 +62,6 @@ class WicketSheet extends StatefulWidget {
     required String dismissalType,
     required String deliveryType,
     String? fielderId,
-    String? substituteFielderName,
     required bool dismissedIsStriker,
     required int completedRuns,
     bool crossed,
@@ -86,16 +77,6 @@ class _WicketSheetState extends State<WicketSheet> {
   bool _dismissedIsStriker = true;
   String? _fielderId;
   int _completedRuns = 0;
-  // When true the catcher/fielder is a substitute who is not in the
-  // playing XI. Hides the fielder dropdown and forwards a free-text name.
-  bool _substituteFielder = false;
-  final TextEditingController _substituteNameCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _substituteNameCtrl.dispose();
-    super.dispose();
-  }
 
   @override
   void initState() {
@@ -116,7 +97,7 @@ class _WicketSheetState extends State<WicketSheet> {
     if (_dismissalType == 'CAUGHT_BEHIND' || _dismissalType == 'STUMPED') {
       return widget.keeperId;
     }
-    if (_dismissalType == 'CAUGHT_AND_BOWLED') {
+    if (_dismissalType == 'CAUGHT_AND_BOWLED' || _dismissalType == 'LBW') {
       return widget.bowlerId;
     }
     return null;
@@ -132,11 +113,6 @@ class _WicketSheetState extends State<WicketSheet> {
     setState(() {
       _dismissalType = key;
       if (key != 'RUN_OUT') _dismissedIsStriker = true;
-      // Substitute fielder toggle only applies to catches.
-      if (key != 'CAUGHT') {
-        _substituteFielder = false;
-        _substituteNameCtrl.clear();
-      }
       _syncAutoFielder();
     });
   }
@@ -165,20 +141,9 @@ class _WicketSheetState extends State<WicketSheet> {
 
   bool get _canConfirm {
     if (!_isValid(_dismissalType)) return false;
-    if (_needsFielder) {
-      if (_substituteFielder) {
-        if (_substituteNameCtrl.text.trim().isEmpty) return false;
-      } else if (_autoFielderId == null && _fielderId == null) {
-        return false;
-      }
-    }
+    if (_needsFielder && _autoFielderId == null && _fielderId == null) return false;
     return true;
   }
-
-  // Substitute fielders are only relevant for catches. Other dismissals
-  // (run-out, stumped, etc.) involve fielding positions that the keeper or
-  // designated fielder must occupy.
-  bool get _allowSubstituteFielder => _dismissalType == 'CAUGHT';
 
   @override
   Widget build(BuildContext context) {
@@ -302,24 +267,7 @@ class _WicketSheetState extends State<WicketSheet> {
                     const SizedBox(height: 16),
                     _Label('FIELDER', context),
                     const SizedBox(height: 8),
-                    if (_substituteFielder) ...[
-                      TextField(
-                        controller: _substituteNameCtrl,
-                        textCapitalization: TextCapitalization.words,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          hintText: 'Substitute fielder name',
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ] else if (_autoFielderId != null)
+                    if (_autoFielderId != null)
                       _AutoFilledFielder(name: _fielderName(_fielderId))
                     else
                       DropdownButtonFormField<String>(
@@ -349,43 +297,6 @@ class _WicketSheetState extends State<WicketSheet> {
                         ],
                         onChanged: (v) => setState(() => _fielderId = v),
                       ),
-                    if (_allowSubstituteFielder) ...[
-                      const SizedBox(height: 8),
-                      InkWell(
-                        onTap: () => setState(() {
-                          _substituteFielder = !_substituteFielder;
-                          if (_substituteFielder) {
-                            _fielderId = null;
-                          } else {
-                            _substituteNameCtrl.clear();
-                          }
-                        }),
-                        borderRadius: BorderRadius.circular(6),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            children: [
-                              Icon(
-                                _substituteFielder
-                                    ? Icons.check_box_rounded
-                                    : Icons.check_box_outline_blank_rounded,
-                                size: 18,
-                                color: context.fg,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Catch taken by substitute fielder',
-                                style: TextStyle(
-                                  color: context.fg,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
                   ],
 
                   const SizedBox(height: 16),
@@ -437,11 +348,8 @@ class _WicketSheetState extends State<WicketSheet> {
                           ? () => widget.onConfirm(
                                 dismissalType: _dismissalType,
                                 deliveryType: _deliveryType,
-                                fielderId: _needsFielder && !_substituteFielder
+                                fielderId: _needsFielder
                                     ? (_fielderId ?? _autoFielderId)
-                                    : null,
-                                substituteFielderName: _substituteFielder
-                                    ? _substituteNameCtrl.text.trim()
                                     : null,
                                 dismissedIsStriker: _dismissedIsStriker,
                                 completedRuns: _completedRuns,

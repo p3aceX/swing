@@ -950,21 +950,11 @@ class HostMatchDetailRepository {
     final battingRaw = _firstList(raw, const ['batting', 'battingScorecard', 'batters', 'batsmen']);
     final bowlingRaw = _firstList(raw, const ['bowling', 'bowlingScorecard', 'bowlers']);
 
-    final extrasBreakdownRaw = _map(raw['extrasBreakdown']);
-    final extrasBreakdown = MatchExtrasBreakdown(
-      wides: _intOrNull(extrasBreakdownRaw['wides']) ?? 0,
-      noBalls: _intOrNull(extrasBreakdownRaw['noBalls']) ?? 0,
-      byes: _intOrNull(extrasBreakdownRaw['byes']) ?? 0,
-      legByes: _intOrNull(extrasBreakdownRaw['legByes']) ?? 0,
-      penalty: _intOrNull(extrasBreakdownRaw['penalty']) ?? 0,
-    );
-
     return MatchInnings(
       title: title,
       score: score,
       battingTeamName: teamName,
       extras: _intOrNull(raw['extras']) ?? 0,
-      extrasBreakdown: extrasBreakdown,
       isCompleted: isCompleted,
       isSuperOver: isSuperOver,
       batting: battingRaw.whereType<Map<String, dynamic>>().map(_mapBatsmanRow).toList(),
@@ -1036,8 +1026,6 @@ class HostMatchDetailRepository {
       runs: _intOrNull(raw['runs'] ?? raw['runsConceded']) ?? 0,
       wickets: _intOrNull(raw['wickets']) ?? 0,
       economy: ecoLabel,
-      wides: _intOrNull(raw['wides']) ?? 0,
-      noBalls: _intOrNull(raw['noBalls']) ?? 0,
     );
   }
 

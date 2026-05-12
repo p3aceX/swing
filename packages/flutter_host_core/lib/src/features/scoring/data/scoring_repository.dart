@@ -168,22 +168,6 @@ class HostScoringService {
     int inningsNumber,
   ) =>
       _repo.undoLastBall(matchId, inningsNumber);
-
-  Future<void> createSuperOver(String matchId) =>
-      _repo.createSuperOver(matchId);
-
-  Future<void> impactPlayerSwap(
-    String matchId, {
-    required String team,
-    required String outgoingPlayerId,
-    required String incomingPlayerId,
-  }) =>
-      _repo.impactPlayerSwap(
-        matchId,
-        team: team,
-        outgoingPlayerId: outgoingPlayerId,
-        incomingPlayerId: incomingPlayerId,
-      );
   Future<List<ScoringMatchPlayer>> searchPlayers(String query) async {
     final results = await _playerRepo.searchPlayers(query);
     return results.map(ScoringMatchPlayer.fromJson).toList();

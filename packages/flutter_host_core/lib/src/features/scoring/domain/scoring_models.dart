@@ -16,10 +16,6 @@ class ScoringMatch {
     this.category,
     this.ageGroup,
     this.hasImpactPlayer = false,
-    this.impactPlayerUsedTeamA = false,
-    this.impactPlayerUsedTeamB = false,
-    this.namedImpactSubsTeamA = const [],
-    this.namedImpactSubsTeamB = const [],
     this.teamAPlayerIds = const [],
     this.teamBPlayerIds = const [],
     this.teamAId,
@@ -52,10 +48,6 @@ class ScoringMatch {
   /// U14 | U16 | U19 | U23 | SENIOR.
   final String? ageGroup;
   final bool hasImpactPlayer;
-  final bool impactPlayerUsedTeamA;
-  final bool impactPlayerUsedTeamB;
-  final List<String> namedImpactSubsTeamA;
-  final List<String> namedImpactSubsTeamB;
   final List<String> teamAPlayerIds;
   final List<String> teamBPlayerIds;
   final String? teamAId;
@@ -117,16 +109,6 @@ class ScoringMatch {
       category: _nullableString(payload['category']),
       ageGroup: _nullableString(payload['ageGroup']),
       hasImpactPlayer: payload['hasImpactPlayer'] == true,
-      impactPlayerUsedTeamA: payload['impactPlayerUsedTeamA'] == true,
-      impactPlayerUsedTeamB: payload['impactPlayerUsedTeamB'] == true,
-      namedImpactSubsTeamA: _list(payload['namedImpactSubsTeamA'])
-          .map((e) => '$e')
-          .where((e) => e.isNotEmpty)
-          .toList(),
-      namedImpactSubsTeamB: _list(payload['namedImpactSubsTeamB'])
-          .map((e) => '$e')
-          .where((e) => e.isNotEmpty)
-          .toList(),
       teamAPlayerIds: _list(payload['teamAPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       teamBPlayerIds: _list(payload['teamBPlayerIds']).map((e) => '$e').where((e) => e.isNotEmpty).toList(),
       teamAId: _nullableString(payload['teamAId'] ?? _map(payload['teamA'])['id']),
@@ -207,7 +189,6 @@ class ScoringInnings {
     this.totalWickets = 0,
     this.isCompleted = false,
     this.isFreeHit = false,
-    this.isSuperOver = false,
     this.balls = const [],
   });
 
@@ -224,7 +205,6 @@ class ScoringInnings {
   final int totalWickets;
   final bool isCompleted;
   final bool isFreeHit;
-  final bool isSuperOver;
   final List<ScoringBall> balls;
 
   factory ScoringInnings.fromJson(Map<String, dynamic> json) {
@@ -280,7 +260,6 @@ class ScoringInnings {
       totalWickets: _asInt(payload['totalWickets']),
       isCompleted: payload['isCompleted'] == true,
       isFreeHit: payload['isFreeHit'] == true,
-      isSuperOver: payload['isSuperOver'] == true,
       balls: rawBalls
           .whereType<Map>()
           .map((e) => ScoringBall.fromJson(Map<String, dynamic>.from(e)))

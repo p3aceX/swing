@@ -212,8 +212,6 @@ class MatchBowlerRow {
     required this.wickets,
     required this.economy,
     this.playerId,
-    this.wides = 0,
-    this.noBalls = 0,
   });
 
   final String? playerId;
@@ -222,8 +220,6 @@ class MatchBowlerRow {
   final int runs;
   final int wickets;
   final String economy; // "6.25" or "-"
-  final int wides;
-  final int noBalls;
 }
 
 // ── Match center models ────────────────────────────────────────────────────────
@@ -511,25 +507,6 @@ class MatchPartnership {
   final int balls;
 }
 
-class MatchExtrasBreakdown {
-  const MatchExtrasBreakdown({
-    this.wides = 0,
-    this.noBalls = 0,
-    this.byes = 0,
-    this.legByes = 0,
-    this.penalty = 0,
-  });
-
-  final int wides;
-  final int noBalls;
-  final int byes;
-  final int legByes;
-  final int penalty;
-
-  int get total => wides + noBalls + byes + legByes + penalty;
-  bool get isEmpty => total == 0;
-}
-
 class MatchInnings {
   const MatchInnings({
     required this.title,
@@ -538,7 +515,6 @@ class MatchInnings {
     required this.batting,
     required this.bowling,
     this.extras = 0,
-    this.extrasBreakdown = const MatchExtrasBreakdown(),
     this.isCompleted = false,
     this.isSuperOver = false,
     this.fallOfWickets = const [],
@@ -549,7 +525,6 @@ class MatchInnings {
   final String score; // "124/6 (20.0 ov)"
   final String battingTeamName;
   final int extras;
-  final MatchExtrasBreakdown extrasBreakdown;
   final bool isCompleted;
   final bool isSuperOver;
   final List<MatchBatsmanRow> batting;

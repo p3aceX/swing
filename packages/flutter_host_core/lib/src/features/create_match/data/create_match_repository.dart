@@ -271,7 +271,6 @@ class HostTeamEleven {
     this.viceCaptainId,
     this.wicketKeeperId,
     this.impactPlayerId,
-    this.namedImpactSubs = const [],
   });
 
   final List<String> playerIds;
@@ -279,10 +278,6 @@ class HostTeamEleven {
   final String? viceCaptainId;
   final String? wicketKeeperId;
   final String? impactPlayerId;
-  /// Pre-declared Impact Player substitutes (max 4). Only the players in
-  /// this list are eligible for the in-match Impact Player swap. May be
-  /// empty when the rule is off or hosts skip the declaration.
-  final List<String> namedImpactSubs;
 
   Map<String, dynamic> toJson() => {
         'playerIds': playerIds,
@@ -290,7 +285,6 @@ class HostTeamEleven {
         if (viceCaptainId != null) 'viceCaptainId': viceCaptainId,
         if (wicketKeeperId != null) 'wicketKeeperId': wicketKeeperId,
         if (impactPlayerId != null) 'impactPlayerId': impactPlayerId,
-        if (namedImpactSubs.isNotEmpty) 'namedImpactSubs': namedImpactSubs,
       };
 }
 

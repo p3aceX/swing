@@ -2,12 +2,6 @@ bool scoringDeliveryIsLegal(
   String outcome, {
   String? dismissalType,
 }) {
-  // Retirements (hurt or retired-out) are not legal deliveries — no ball
-  // was bowled. The server applies the same rule; mirror it here so the
-  // client's over strip / batter-balls / bowler-overs all agree.
-  if (dismissalType == 'RETIRED_HURT' || dismissalType == 'RETIRED_OUT') {
-    return false;
-  }
   switch (outcome) {
     case 'WIDE':
     case 'NO_BALL':

@@ -93,9 +93,6 @@ class HostPathConfig {
   String matchStart(String matchId) => '$matchesBase/$matchId/start';
   String matchCancel(String matchId) => '$matchesBase/$matchId/cancel';
   String matchComplete(String matchId) => '$matchesBase/$matchId/complete';
-  String matchSuperOver(String matchId) => '$matchesBase/$matchId/superover';
-  String matchImpactPlayerSwap(String matchId) =>
-      '$matchesBase/$matchId/impact-player/swap';
   String matchContinueInnings(String matchId) =>
       '$matchesBase/$matchId/continue-innings';
   String inningsBall(String matchId, int innings) =>

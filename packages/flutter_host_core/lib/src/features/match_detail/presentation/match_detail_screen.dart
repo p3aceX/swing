@@ -2474,16 +2474,6 @@ class _TeamScorecardPageState extends State<_TeamScorecardPage> {
     // bowling rows live in the same innings object (opposing bowlers who bowled against this team)
     final allBowling = widget.battingInnings.expand((i) => i.bowling).toList();
     final allExtras = widget.battingInnings.fold(0, (s, i) => s + i.extras);
-    final aggregatedBreakdown = widget.battingInnings.fold<MatchExtrasBreakdown>(
-      const MatchExtrasBreakdown(),
-      (acc, i) => MatchExtrasBreakdown(
-        wides: acc.wides + i.extrasBreakdown.wides,
-        noBalls: acc.noBalls + i.extrasBreakdown.noBalls,
-        byes: acc.byes + i.extrasBreakdown.byes,
-        legByes: acc.legByes + i.extrasBreakdown.legByes,
-        penalty: acc.penalty + i.extrasBreakdown.penalty,
-      ),
-    );
     final allFow =
         widget.battingInnings.expand((i) => i.fallOfWickets).toList();
 
@@ -2499,11 +2489,7 @@ class _TeamScorecardPageState extends State<_TeamScorecardPage> {
               ? const _ScEmptyRow('No batting data yet.')
               : Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: _BattingTable(
-                    rows: allBatting,
-                    extras: allExtras,
-                    breakdown: aggregatedBreakdown,
-                  ),
+                  child: _BattingTable(rows: allBatting, extras: allExtras),
                 ),
         ),
 
@@ -2690,14 +2676,9 @@ class _ScEmptyRow extends StatelessWidget {
 // ── Batting table ─────────────────────────────────────────────────────────────
 
 class _BattingTable extends StatelessWidget {
-  const _BattingTable({
-    required this.rows,
-    required this.extras,
-    this.breakdown,
-  });
+  const _BattingTable({required this.rows, required this.extras});
   final List<MatchBatsmanRow> rows;
   final int extras;
-  final MatchExtrasBreakdown? breakdown;
 
   @override
   Widget build(BuildContext context) {
@@ -2802,54 +2783,27 @@ class _BattingTable extends StatelessWidget {
           if (extras > 0)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 5,
-                        child: Text('Extras',
-                            style: TextStyle(
-                                color: context.fgSub,
-                                fontSize: 12,
-                                fontStyle: FontStyle.italic)),
-                      ),
-                      _dataCell('$extras', context, flex: 2),
-                      _dataCell('', context, flex: 2),
-                      _dataCell('', context, flex: 2),
-                      _dataCell('', context, flex: 2),
-                      _dataCell('', context, flex: 3),
-                    ],
+                  Expanded(
+                    flex: 5,
+                    child: Text('Extras',
+                        style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic)),
                   ),
-                  if (breakdown != null && !breakdown!.isEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatExtrasBreakdown(breakdown!),
-                      style: TextStyle(
-                        color: context.fgSub,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
+                  _dataCell('$extras', context, flex: 2),
+                  _dataCell('', context, flex: 2),
+                  _dataCell('', context, flex: 2),
+                  _dataCell('', context, flex: 2),
+                  _dataCell('', context, flex: 3),
                 ],
               ),
             ),
         ],
       ),
     );
-  }
-
-  static String _formatExtrasBreakdown(MatchExtrasBreakdown b) {
-    final parts = <String>[];
-    if (b.wides > 0) parts.add('Wd ${b.wides}');
-    if (b.noBalls > 0) parts.add('NB ${b.noBalls}');
-    if (b.byes > 0) parts.add('B ${b.byes}');
-    if (b.legByes > 0) parts.add('LB ${b.legByes}');
-    if (b.penalty > 0) parts.add('Pen ${b.penalty}');
-    return parts.join(' · ');
   }
 }
 
@@ -2881,8 +2835,6 @@ class _BowlingTable extends StatelessWidget {
               _Ch('O', flex: 2),
               _Ch('R', flex: 2),
               _Ch('W', flex: 2),
-              _Ch('WD', flex: 2),
-              _Ch('NB', flex: 2),
               _Ch('ECO', flex: 3),
             ]),
           ),
@@ -2921,8 +2873,6 @@ class _BowlingTable extends StatelessWidget {
                           bold: b.wickets > 0,
                           color: b.wickets > 0 ? context.accent : null,
                           flex: 2),
-                      _dataCell('${b.wides}', context, flex: 2),
-                      _dataCell('${b.noBalls}', context, flex: 2),
                       _dataCell(b.economy, context, flex: 3),
                     ],
                   ),

@@ -158,15 +158,6 @@ class HostScoringState {
     if (inn == null) return false;
     final chaseTarget = target;
 
-    // Super overs are 1 over / 2 wickets per side regardless of match format.
-    if (inn.isSuperOver) {
-      final legalDeliveries = inn.overNumber * 6 + inn.ballInOver;
-      if (chaseTarget != null && inn.totalRuns >= chaseTarget) return true;
-      if (inn.totalWickets >= 2) return true;
-      if (legalDeliveries >= 6) return true;
-      return false;
-    }
-
     if (chaseTarget != null && inn.totalRuns >= chaseTarget) {
       if (!(match?.isMultiInnings ?? false)) return true;
       if (inn.inningsNumber >= 4 ||
@@ -189,20 +180,6 @@ class HostScoringState {
     final m = match;
     final inn = activeInnings;
     if (m == null || inn == null) return null;
-
-    // Super-over pair: chaser's target = first SO innings' total + 1. Each
-    // pair is independent — repeat super overs reset the target.
-    if (inn.isSuperOver) {
-      final soInnings = m.innings
-          .where((i) => i.isSuperOver)
-          .toList()
-        ..sort((a, b) => a.inningsNumber.compareTo(b.inningsNumber));
-      final index = soInnings.indexWhere((i) => i.inningsNumber == inn.inningsNumber);
-      if (index <= 0 || index % 2 != 1) return null;
-      final paired = soInnings[index - 1];
-      if (!paired.isCompleted || paired.battingTeam == inn.battingTeam) return null;
-      return paired.totalRuns + 1;
-    }
 
     if (!m.isMultiInnings) {
       final first = m.completedFirstInnings;
@@ -570,14 +547,12 @@ class HostScoringController extends StateNotifier<HostScoringState> {
             ? '${(e.response!.data as Map)['error'] is Map ? ((e.response!.data as Map)['error'] as Map)['code'] : ''}'
             : '';
         if (code == 'INNINGS_COMPLETED') {
-          // The server auto-completed the innings (target chased, all out,
-          // or overs exhausted). Refresh and return success so the screen's
-          // _afterBall hook can trigger the end-of-innings sheet — surfacing
-          // a confusing "Innings already completed" error here leaves the
-          // scorer stuck on the live screen.
           await _init();
-          state = state.copyWith(isSubmitting: false, clearError: true);
-          return true;
+          state = state.copyWith(
+            isSubmitting: false,
+            error: 'Innings already completed. State refreshed.',
+          );
+          return false;
         }
         if (code == 'NOT_BOWLING_CAPTAIN') {
           state = state.copyWith(
@@ -636,10 +611,6 @@ class HostScoringController extends StateNotifier<HostScoringState> {
         winMargin: currentMatch.winMargin,
         matchType: currentMatch.matchType,
         hasImpactPlayer: currentMatch.hasImpactPlayer,
-        impactPlayerUsedTeamA: currentMatch.impactPlayerUsedTeamA,
-        impactPlayerUsedTeamB: currentMatch.impactPlayerUsedTeamB,
-        namedImpactSubsTeamA: currentMatch.namedImpactSubsTeamA,
-        namedImpactSubsTeamB: currentMatch.namedImpactSubsTeamB,
         teamAPlayerIds: currentMatch.teamAPlayerIds,
         teamBPlayerIds: currentMatch.teamBPlayerIds,
         scorerId: currentMatch.scorerId,
@@ -721,41 +692,6 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       return true;
     } catch (e, st) {
       print('[continueInnings] ERROR: $e\n$st');
-      state = state.copyWith(isSubmitting: false, error: _msg(e));
-      return false;
-    }
-  }
-
-  Future<bool> startSuperOver() async {
-    state = state.copyWith(isSubmitting: true, clearError: true);
-    try {
-      await _service.createSuperOver(_matchId);
-      await _init();
-      return true;
-    } catch (e) {
-      _logError('startSuperOver', e);
-      state = state.copyWith(isSubmitting: false, error: _msg(e));
-      return false;
-    }
-  }
-
-  Future<bool> impactPlayerSwap({
-    required String team,
-    required String outgoingPlayerId,
-    required String incomingPlayerId,
-  }) async {
-    state = state.copyWith(isSubmitting: true, clearError: true);
-    try {
-      await _service.impactPlayerSwap(
-        _matchId,
-        team: team,
-        outgoingPlayerId: outgoingPlayerId,
-        incomingPlayerId: incomingPlayerId,
-      );
-      await _init();
-      return true;
-    } catch (e) {
-      _logError('impactPlayerSwap', e);
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }
