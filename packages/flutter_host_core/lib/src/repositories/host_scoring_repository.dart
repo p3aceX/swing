@@ -66,6 +66,32 @@ class HostScoringRepository {
         await _dio.delete(_paths.inningsUndo(matchId, inningsNumber));
     return _asMap(response.data);
   }
+
+  /// Create a Super Over pair (two innings, both with isSuperOver=true).
+  /// Backend rejects when scores aren't tied or when a SO is already active.
+  Future<Map<String, dynamic>> createSuperOver(String matchId) async {
+    final response = await _dio.post(_paths.matchSuperOver(matchId));
+    return _asMap(response.data);
+  }
+
+  /// Swap a fielder/batter for the team's named impact player. Backend
+  /// validates the eligibility window and remaining substitution credit.
+  Future<Map<String, dynamic>> impactPlayerSwap(
+    String matchId, {
+    required String team,
+    required String outgoingPlayerId,
+    required String incomingPlayerId,
+  }) async {
+    final response = await _dio.post(
+      _paths.matchImpactPlayerSwap(matchId),
+      data: {
+        'team': team,
+        'outgoingPlayerId': outgoingPlayerId,
+        'incomingPlayerId': incomingPlayerId,
+      },
+    );
+    return _asMap(response.data);
+  }
 }
 
 Map<String, dynamic> _asMap(Object? value) {
