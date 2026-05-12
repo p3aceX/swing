@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import LinkCards from "./_link-cards";
-import PhotoCarousel from "./_carousel";
+import ThemeToggle from "./_theme-toggle";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -61,7 +61,6 @@ type Arena = {
   arenaSlug?: string | null;
   latitude?: number | null;
   longitude?: number | null;
-  // Microsite — owner-branded landing fields
   brandColor?: string | null;
   logoUrl?: string | null;
   tagline?: string | null;
@@ -104,7 +103,6 @@ function fmt12Short(time?: string | null) {
   return `${displayHour}${min} ${suffix}`;
 }
 
-// Pick a sensible foreground (black or white) for any brand color.
 function readableInk(hex: string) {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
   if (!m) return "#FFFFFF";
@@ -120,14 +118,12 @@ function marketingDescription(arena: Arena) {
   const unitLabel = units.length
     ? `${units.length} ${units.length === 1 ? "play area" : "play areas"}`
     : "sports venue";
-  const details = ["Book instantly", unitLabel, sports, location].filter(Boolean);
-  return `${details.join(" · ")}. Live availability, secure payments. Powered by Swing.`;
+  return ["Book instantly", unitLabel, sports, location].filter(Boolean).join(" · ") + ". Live availability, secure payments.";
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const arena = await fetchArena(slug);
-
   if (!arena) return { title: "Arena not found" };
 
   const location = [arena.city, arena.state].filter(Boolean).join(", ");
@@ -139,7 +135,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const title = `${arena.name}${location ? ` · ${location}` : ""}`;
   const description = arena.tagline || marketingDescription(arena);
   const image = photo
-    ? [{ url: photo, width: 1200, height: 630, alt: `${arena.name} on Swing` }]
+    ? [{ url: photo, width: 1200, height: 630, alt: `${arena.name}` }]
     : [{ url: "/assets/logo-light.png", width: 1200, height: 630, alt: "Swing" }];
 
   return {
@@ -153,59 +149,55 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       "sports venue booking",
     ].filter(Boolean) as string[],
     alternates: { canonical: `/arena/${canonicalSlug}` },
-    robots: {
-      index: true,
-      follow: true,
-      googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
-    },
+    robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },
     openGraph: { title, description, url: `/arena/${canonicalSlug}`, siteName: arena.name, images: image, type: "website" },
-    twitter: { card: "summary_large_image", title, description, images: image.map((item) => item.url) },
+    twitter: { card: "summary_large_image", title, description, images: image.map((i) => i.url) },
   };
 }
+
+// Inline theme boot — runs before paint to avoid light/dark flash.
+const THEME_BOOT = `(function(){try{var t=localStorage.getItem('arena-theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
 
 export default async function ArenaPage({ params }: PageProps) {
   const { slug } = await params;
   const arena = await fetchArena(slug);
-
   if (!arena) notFound();
 
   const units = arena.units ?? [];
   const photos = arena.photoUrls?.filter(Boolean) ?? [];
   const coverIdx = Math.min(Math.max(arena.coverPhotoIndex ?? 0, 0), Math.max(photos.length - 1, 0));
   const cover = photos[coverIdx] ?? null;
-  const galleryPhotos = photos.filter((_, i) => i !== coverIdx);
+  const insidePhotos = photos.filter((_, i) => i !== coverIdx);
   const sports = (arena.sports ?? []).filter(Boolean);
   const fullAddress = [arena.address, arena.city, arena.state].filter(Boolean).join(", ");
-  const locationLine = [arena.city, arena.state].filter(Boolean).join(" · ") || null;
+  const locationLine = [arena.city, arena.state].filter(Boolean).join(", ");
 
   const brand = arena.brandColor && /^#[0-9a-fA-F]{6}$/.test(arena.brandColor) ? arena.brandColor : "#16A34A";
   const brandInk = readableInk(brand);
 
-  const sv = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  const sv = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   const amenities = [
     arena.hasLights    && { label: "Floodlights", icon: <svg {...sv}><path d="M12 2v3M5 5l2 2M19 5l-2 2M3 12h3M18 12h3M9 18h6M10 21h4"/><circle cx="12" cy="12" r="4"/></svg> },
     arena.hasParking   && { label: "Parking",     icon: <svg {...sv}><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 17V8h4a3 3 0 0 1 0 6H9"/></svg> },
     arena.hasWashrooms && { label: "Washrooms",   icon: <svg {...sv}><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><path d="M6 22V12l-2-3 4-2h0l2 3v6m6 6V12l2-3-4-2h0l-2 3v6"/></svg> },
     arena.hasCanteen   && { label: "Canteen",     icon: <svg {...sv}><path d="M3 2v9a2 2 0 0 0 4 0V2M5 12v10M17 2c-2 0-4 2-4 5v5h3v10"/></svg> },
     arena.hasCCTV      && { label: "CCTV",        icon: <svg {...sv}><rect x="2" y="6" width="14" height="12" rx="1"/><path d="M16 10l6-2v8l-6-2"/></svg> },
-    arena.hasScorer    && { label: "Scorer",      icon: <svg {...sv}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 8v8M15 8v8M3 12h18"/></svg> },
+    arena.hasScorer    && { label: "Live scoring",icon: <svg {...sv}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 8v8M15 8v8M3 12h18"/></svg> },
   ].filter(Boolean) as { label: string; icon: React.ReactElement }[];
 
   const toMins = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + (m || 0); };
-  const unitOpenTimes = units.map((u) => u.openTime).filter(Boolean) as string[];
+  const unitOpenTimes  = units.map((u) => u.openTime).filter(Boolean) as string[];
   const unitCloseTimes = units.map((u) => u.closeTime).filter(Boolean) as string[];
-  const arenaOpenTime = unitOpenTimes.length
-    ? unitOpenTimes.reduce((a, b) => toMins(a) <= toMins(b) ? a : b)
-    : arena.openTime ?? null;
-  const arenaCloseTime = unitCloseTimes.length
-    ? unitCloseTimes.reduce((a, b) => toMins(a) >= toMins(b) ? a : b)
-    : arena.closeTime ?? null;
+  const arenaOpenTime  = unitOpenTimes.length  ? unitOpenTimes.reduce ((a, b) => toMins(a) <= toMins(b) ? a : b) : arena.openTime  ?? null;
+  const arenaCloseTime = unitCloseTimes.length ? unitCloseTimes.reduce((a, b) => toMins(a) >= toMins(b) ? a : b) : arena.closeTime ?? null;
 
   const hoursLine = arenaOpenTime && arenaCloseTime
     ? `${fmt12Short(arenaOpenTime)} – ${fmt12Short(arenaCloseTime)}`
-    : arenaOpenTime
-    ? `Opens ${fmt12Short(arenaOpenTime)}`
-    : null;
+    : arenaOpenTime ? `Opens ${fmt12Short(arenaOpenTime)}` : null;
+
+  // "Open now" check (best-effort, based on IST-ish local time)
+  const nowMin = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
+  const openNow = !!(arenaOpenTime && arenaCloseTime && nowMin >= toMins(arenaOpenTime) && nowMin <= toMins(arenaCloseTime));
 
   const canonicalSlug = arena.customSlug ?? arena.arenaSlug ?? slug;
   const publicUrl = `https://www.swingcricketapp.com/arena/${canonicalSlug}`;
@@ -229,554 +221,706 @@ export default async function ArenaPage({ params }: PageProps) {
     geo: arena.latitude && arena.longitude
       ? { "@type": "GeoCoordinates", latitude: arena.latitude, longitude: arena.longitude }
       : undefined,
-    amenityFeature: amenities.map((a) => ({
-      "@type": "LocationFeatureSpecification",
-      name: a.label,
-      value: true,
-    })),
+    amenityFeature: amenities.map((a) => ({ "@type": "LocationFeatureSpecification", name: a.label, value: true })),
   };
 
   const brandStyle = { ["--ms-brand" as string]: brand, ["--ms-brand-ink" as string]: brandInk } as React.CSSProperties;
+  const year = new Date().getFullYear();
+
+  // Sections that will actually render — used for the eyebrow numbering.
+  const sectionList: string[] = [];
+  if (insidePhotos.length > 0) sectionList.push("inside");
+  if (arena.description) sectionList.push("about");
+  if (amenities.length > 0) sectionList.push("amenities");
+  if (hoursLine || fullAddress || arena.phone) sectionList.push("visit");
+  const num = (key: string) => {
+    const idx = sectionList.indexOf(key);
+    return idx < 0 ? "00" : String(idx + 1).padStart(2, "0");
+  };
 
   return (
     <main className="ms" style={brandStyle}>
+      {/* No-FOUC theme boot — runs as soon as it parses. */}
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
 
-      {/* HERO — full-bleed cover */}
-      <section className="ms-hero">
+      {/* ─── TOP BAR ────────────────────────────────────────────────── */}
+      <header className="ms-top">
+        <span className="ms-top-mark">
+          {locationLine ? <>{locationLine.toUpperCase()}</> : "INDIA"}
+          {sports.length > 0 && <em> · {sports.map(sportLabel).join(" · ")}</em>}
+        </span>
+        <ThemeToggle />
+      </header>
+
+      {/* ─── HERO ───────────────────────────────────────────────────── */}
+      <section className="ms-hero" aria-label={`${arena.name} cover`}>
         {cover ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={cover} alt={arena.name} className="ms-hero-img" />
         ) : (
-          <div className="ms-hero-img ms-hero-fallback" />
+          <div className="ms-hero-img ms-hero-fallback" aria-hidden="true" />
         )}
         <div className="ms-hero-shade" aria-hidden="true" />
         <div className="ms-hero-overlay">
+          <div className="ms-hero-status">
+            <span className={`ms-dot ${openNow ? "is-open" : ""}`} aria-hidden="true" />
+            <span>{openNow ? "Open now" : hoursLine ? "Closed" : "Hours unlisted"}</span>
+            {hoursLine && <span className="ms-hero-status-sep">·</span>}
+            {hoursLine && <span>{hoursLine}</span>}
+          </div>
           <h1 className="ms-hero-name">{arena.name}</h1>
           {arena.tagline && <p className="ms-hero-tag">{arena.tagline}</p>}
-          {locationLine && <p className="ms-hero-loc">{locationLine}</p>}
         </div>
       </section>
 
-      <article className="ms-shell">
-        {/* LEFT RAIL: identity + links */}
-        <aside className="ms-rail">
-          <header className="ms-id">
-            {arena.logoUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={arena.logoUrl} alt={`${arena.name} logo`} className="ms-logo" />
-            )}
-            <h2 className="ms-name">{arena.name}</h2>
-            {arena.tagline && <p className="ms-tag">{arena.tagline}</p>}
-            <div className="ms-meta">
-              {locationLine && <span>{locationLine}</span>}
-              {hoursLine && <span className="ms-meta-dot">{hoursLine}</span>}
-            </div>
-            {sports.length > 0 && (
-              <div className="ms-sports">
-                {sports.map((s) => (
-                  <span key={s} className="ms-pill">{sportLabel(s)}</span>
-                ))}
-              </div>
-            )}
+      {/* ─── BOOK & CONTACT (under hero) ─────────────────────────────── */}
+      <LinkCards
+        units={units}
+        arenaId={arena.id}
+        arenaSlug={slug}
+        apiBaseUrl={API}
+        arenaName={arena.name}
+        address={fullAddress || locationLine || undefined}
+        latitude={arena.latitude}
+        longitude={arena.longitude}
+        phone={arena.phone}
+        openTime={arenaOpenTime}
+        closeTime={arenaCloseTime}
+        micrositeLinks={arena.micrositeLinks ?? null}
+      />
+
+      {units.length === 0 && (
+        <div className="ms-emptywrap">
+          <p className="ms-empty">
+            Online booking isn&apos;t live yet at {arena.name}.
+            {arena.phone ? <> Call <a href={`tel:${arena.phone}`}>{arena.phone}</a> to reserve a slot.</> : null}
+          </p>
+        </div>
+      )}
+
+      {/* ─── INSIDE (photos 2 & 3 — cover already shown above) ───────── */}
+      {insidePhotos.length > 0 && (
+        <section className="ms-sec" id="inside">
+          <header className="ms-h">
+            <span className="ms-h-num">{num("inside")}</span>
+            <span className="ms-h-title">Inside</span>
+            <span className="ms-h-rule" aria-hidden="true" />
+            <span className="ms-h-count">{photos.length} {photos.length === 1 ? "photo" : "photos"}</span>
           </header>
+          <div className={`ms-spread spread-${insidePhotos.length}`}>
+            {insidePhotos.map((src, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <a key={src + i} className="ms-spread-cell" href={src} target="_blank" rel="noopener noreferrer">
+                <img src={src} alt={`${arena.name} photo ${i + 2}`} />
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
 
-          <LinkCards
-            units={units}
-            arenaId={arena.id}
-            arenaSlug={slug}
-            apiBaseUrl={API}
-            arenaName={arena.name}
-            address={fullAddress || locationLine || undefined}
-            latitude={arena.latitude}
-            longitude={arena.longitude}
-            phone={arena.phone}
-            openTime={arenaOpenTime}
-            closeTime={arenaCloseTime}
-            micrositeLinks={arena.micrositeLinks ?? null}
-          />
+      {/* ─── ABOUT ──────────────────────────────────────────────────── */}
+      {arena.description && (
+        <section className="ms-sec" id="about">
+          <header className="ms-h">
+            <span className="ms-h-num">{num("about")}</span>
+            <span className="ms-h-title">About</span>
+            <span className="ms-h-rule" aria-hidden="true" />
+          </header>
+          <div className="ms-prose-wrap">
+            <p className="ms-prose">{arena.description}</p>
+          </div>
+        </section>
+      )}
 
-          {units.length === 0 && (
-            <div className="ms-empty">
-              Online booking not live yet.{arena.phone ? ` Call ${arena.phone} to reserve.` : ""}
-            </div>
-          )}
-        </aside>
+      {/* ─── AMENITIES ──────────────────────────────────────────────── */}
+      {amenities.length > 0 && (
+        <section className="ms-sec" id="amenities">
+          <header className="ms-h">
+            <span className="ms-h-num">{num("amenities")}</span>
+            <span className="ms-h-title">Amenities</span>
+            <span className="ms-h-rule" aria-hidden="true" />
+          </header>
+          <ul className="ms-amen">
+            {amenities.map((a) => (
+              <li key={a.label} className="ms-amen-row">
+                <span className="ms-amen-icon" aria-hidden="true">{a.icon}</span>
+                <span className="ms-amen-label">{a.label}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
-        {/* RIGHT BODY: gallery, about, amenities, map */}
-        <section className="ms-body">
-          {galleryPhotos.length > 0 && (
-            <section className="ms-section">
-              <h3 className="ms-h">Photos</h3>
-              <div className="ms-gallery">
-                <PhotoCarousel photos={galleryPhotos} alt={arena.name} />
-              </div>
-            </section>
-          )}
-
-          {arena.description && (
-            <section className="ms-section">
-              <h3 className="ms-h">About</h3>
-              <p className="ms-prose">{arena.description}</p>
-            </section>
-          )}
-
-          {amenities.length > 0 && (
-            <section className="ms-section">
-              <h3 className="ms-h">Amenities</h3>
-              <div className="ms-amen">
-                {amenities.map((a) => (
-                  <div key={a.label} className="ms-amen-tile">
-                    <span className="ms-amen-icon">{a.icon}</span>
-                    <span className="ms-amen-label">{a.label}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {(hoursLine || fullAddress) && (
-            <section className="ms-section">
-              <h3 className="ms-h">Visit</h3>
-              <dl className="ms-facts">
-                {hoursLine && (
-                  <>
-                    <dt>Hours</dt>
-                    <dd>{hoursLine}</dd>
-                  </>
-                )}
-                {fullAddress && (
-                  <>
-                    <dt>Address</dt>
-                    <dd>{fullAddress}</dd>
-                  </>
-                )}
-                {arena.phone && (
-                  <>
-                    <dt>Phone</dt>
-                    <dd><a href={`tel:${arena.phone}`}>{arena.phone}</a></dd>
-                  </>
-                )}
-              </dl>
-            </section>
-          )}
+      {/* ─── VISIT (hours + address + map) ──────────────────────────── */}
+      {(hoursLine || fullAddress || arena.phone) && (
+        <section className="ms-sec" id="visit">
+          <header className="ms-h">
+            <span className="ms-h-num">{num("visit")}</span>
+            <span className="ms-h-title">Visit</span>
+            <span className="ms-h-rule" aria-hidden="true" />
+          </header>
+          <dl className="ms-facts">
+            {hoursLine && (<><dt>Hours</dt><dd>{hoursLine}</dd></>)}
+            {fullAddress && (<><dt>Address</dt><dd>{fullAddress}</dd></>)}
+            {arena.phone && (<><dt>Phone</dt><dd><a href={`tel:${arena.phone}`}>{arena.phone}</a></dd></>)}
+          </dl>
 
           {arena.latitude && arena.longitude && (
-            <section className="ms-section">
-              <h3 className="ms-h">Find us</h3>
-              <a
-                className="ms-map"
-                href={`https://www.google.com/maps/dir/?api=1&destination=${arena.latitude},${arena.longitude}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <iframe
-                  title={`${arena.name} on map`}
-                  src={`https://www.google.com/maps?q=${arena.latitude},${arena.longitude}&hl=en&z=15&output=embed`}
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
-                <span className="ms-map-cta">Open in Maps →</span>
-              </a>
-            </section>
+            <a
+              className="ms-map"
+              href={`https://www.google.com/maps/dir/?api=1&destination=${arena.latitude},${arena.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <iframe
+                title={`${arena.name} on map`}
+                src={`https://www.google.com/maps?q=${arena.latitude},${arena.longitude}&hl=en&z=15&output=embed`}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+              <span className="ms-map-cta">Open in Maps  →</span>
+            </a>
           )}
         </section>
-      </article>
+      )}
 
+      {/* ─── FOOTER ─────────────────────────────────────────────────── */}
       <footer className="ms-foot">
-        <span>Powered by <a href="https://www.swingcricketapp.com" target="_blank" rel="noopener noreferrer">Swing</a></span>
+        <div className="ms-foot-line">
+          <span className="ms-foot-name">{arena.name.toUpperCase()}</span>
+          <span className="ms-foot-rule" aria-hidden="true" />
+          <span className="ms-foot-year">© {year}</span>
+        </div>
+        <div className="ms-foot-credit">
+          Powered by <a href="https://www.swingcricketapp.com" target="_blank" rel="noopener noreferrer">Swing</a>
+        </div>
       </footer>
 
+      {/* ─── STYLES ─────────────────────────────────────────────────── */}
       <style>{`
-        :root, [data-theme="light"] {
-          --ms-bg:      #FAFAF7;
-          --ms-surface: #FFFFFF;
-          --ms-ink:     #0A0B0A;
-          --ms-muted:   rgba(10,11,10,0.58);
-          --ms-line:    rgba(10,11,10,0.12);
-          --ms-line-2:  rgba(10,11,10,0.06);
+        /* ─── THEME TOKENS ────────────────────────────────────────── */
+        :root {
+          --ms-bg:           #FAFAF7;
+          --ms-bg-soft:      #F2EFE8;
+          --ms-surface:      #FFFFFF;
+          --ms-ink:          #0A0B0A;
+          --ms-muted:        rgba(10, 11, 10, 0.58);
+          --ms-soft:         rgba(10, 11, 10, 0.32);
+          --ms-line:         rgba(10, 11, 10, 0.10);
+          --ms-line-strong:  rgba(10, 11, 10, 0.20);
+          --ms-muted-inv:    rgba(244, 244, 241, 0.62);
+          --ms-line-inv:     rgba(244, 244, 241, 0.30);
         }
         [data-theme="dark"] {
-          --ms-bg:      #0B0C0B;
-          --ms-surface: #131413;
-          --ms-ink:     #F4F4F1;
-          --ms-muted:   rgba(244,244,241,0.58);
-          --ms-line:    rgba(244,244,241,0.14);
-          --ms-line-2:  rgba(244,244,241,0.07);
+          --ms-bg:           #0A0B0A;
+          --ms-bg-soft:      #131413;
+          --ms-surface:      #131413;
+          --ms-ink:          #F4F4F1;
+          --ms-muted:        rgba(244, 244, 241, 0.58);
+          --ms-soft:         rgba(244, 244, 241, 0.32);
+          --ms-line:         rgba(244, 244, 241, 0.10);
+          --ms-line-strong:  rgba(244, 244, 241, 0.22);
+          --ms-muted-inv:    rgba(10, 11, 10, 0.62);
+          --ms-line-inv:     rgba(10, 11, 10, 0.30);
         }
-
-        html, body { background: var(--ms-bg); }
+        html, body { background: var(--ms-bg); color: var(--ms-ink); }
+        html { color-scheme: light; }
+        [data-theme="dark"] { color-scheme: dark; }
 
         .ms {
           min-height: 100svh;
           background: var(--ms-bg);
           color: var(--ms-ink);
           font-family: var(--font-geist-sans, "Inter Tight", system-ui, sans-serif);
+          padding-bottom: env(safe-area-inset-bottom, 0);
+          -webkit-font-smoothing: antialiased;
         }
 
-        /* ─── HERO ────────────────────────────────────────────────────── */
+        /* ─── TOP BAR ─────────────────────────────────────────────── */
+        .ms-top {
+          position: relative;
+          z-index: 5;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 14px 22px;
+          border-bottom: 1px solid var(--ms-line);
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          color: var(--ms-muted);
+          background: var(--ms-bg);
+        }
+        .ms-top-mark { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ms-top-mark em { font-style: normal; color: var(--ms-soft); }
+
+        .ms-theme {
+          all: unset;
+          flex: 0 0 auto;
+          width: 36px; height: 36px;
+          display: inline-grid; place-items: center;
+          cursor: pointer;
+          color: var(--ms-ink);
+          border: 1px solid var(--ms-line-strong);
+          transition: background 0.12s ease, border-color 0.12s ease;
+        }
+        .ms-theme:hover { background: var(--ms-line); }
+        .ms-theme-icon { display: inline-flex; }
+
+        /* ─── HERO ────────────────────────────────────────────────── */
         .ms-hero {
           position: relative;
           width: 100%;
-          height: 56vh;
-          min-height: 320px;
-          max-height: 620px;
+          height: clamp(560px, 86vh, 880px);
           overflow: hidden;
-          background: var(--ms-line-2);
+          background: var(--ms-bg-soft);
+          isolation: isolate;
         }
         .ms-hero-img {
           position: absolute; inset: 0;
           width: 100%; height: 100%;
           object-fit: cover;
           display: block;
+          animation: ms-ken 1.6s ease-out both;
+        }
+        @keyframes ms-ken {
+          from { transform: scale(1.06); }
+          to   { transform: scale(1.00); }
         }
         .ms-hero-fallback {
           background:
-            radial-gradient(120% 90% at 20% 10%, var(--ms-brand) 0%, transparent 60%),
-            radial-gradient(120% 90% at 80% 100%, var(--ms-ink) 0%, transparent 60%),
-            var(--ms-bg);
-          opacity: 0.85;
+            radial-gradient(120% 90% at 18% 8%, var(--ms-brand) 0%, transparent 55%),
+            radial-gradient(140% 100% at 90% 100%, color-mix(in srgb, var(--ms-ink) 88%, transparent) 0%, transparent 60%),
+            var(--ms-bg-soft);
+          opacity: 0.92;
         }
         .ms-hero-shade {
           position: absolute; inset: 0;
-          background: linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.65) 100%);
+          background: linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.0) 40%, rgba(0,0,0,0.78) 100%);
         }
         .ms-hero-overlay {
           position: absolute;
           left: 0; right: 0; bottom: 0;
-          padding: 32px 22px;
+          padding: 28px 22px 36px;
           color: #fff;
-          display: flex; flex-direction: column; gap: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
         }
+        @media (min-width: 720px) {
+          .ms-hero-overlay { padding: 36px 40px 44px; gap: 18px; }
+        }
+        .ms-hero-status {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          opacity: 0.94;
+        }
+        .ms-hero-status-sep { opacity: 0.55; margin: 0 2px; }
+        .ms-dot {
+          width: 8px; height: 8px; border-radius: 50%;
+          background: var(--ms-soft);
+        }
+        .ms-dot.is-open {
+          background: var(--ms-brand);
+          box-shadow: 0 0 0 4px color-mix(in srgb, var(--ms-brand) 30%, transparent);
+          animation: ms-pulse 1.8s ease-in-out infinite;
+        }
+        @keyframes ms-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
         .ms-hero-name {
           margin: 0;
-          font-size: clamp(34px, 9vw, 64px);
+          font-size: clamp(44px, 11vw, 124px);
           font-weight: 800;
-          line-height: 1.0;
-          letter-spacing: -0.035em;
+          line-height: 0.94;
+          letter-spacing: -0.045em;
+          text-wrap: balance;
         }
         .ms-hero-tag {
           margin: 0;
-          font-size: clamp(14px, 2vw, 17px);
-          font-weight: 500;
-          opacity: 0.92;
-          max-width: 540px;
-          line-height: 1.35;
-        }
-        .ms-hero-loc {
-          margin: 4px 0 0;
-          font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          opacity: 0.85;
+          font-size: clamp(16px, 2.2vw, 22px);
+          line-height: 1.32;
+          font-weight: 400;
+          max-width: 640px;
+          opacity: 0.94;
+          text-wrap: balance;
         }
 
-        /* ─── SHELL (mobile = single column, desktop = 2-col magazine) ── */
-        .ms-shell {
+        /* ─── SENTINEL (sticky bar trigger) ───────────────────────── */
+        .ms-sentinel { width: 100%; height: 1px; }
+
+        /* ─── ACTIONS (under hero) ────────────────────────────────── */
+        .ms-actions {
           display: grid;
           grid-template-columns: 1fr;
-          max-width: 1240px;
-          margin: -60px auto 0;
-          padding: 0 18px 24px;
-          gap: 28px;
-          position: relative;
-          z-index: 1;
+          gap: 0;
+          border-bottom: 1px solid var(--ms-line);
         }
-        @media (min-width: 960px) {
-          .ms-shell {
-            grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
-            gap: 56px;
-            margin-top: -90px;
-            padding: 0 36px 36px;
+        @media (min-width: 720px) {
+          .ms-actions {
+            grid-template-columns: 2fr 1fr 1fr;
           }
         }
-
-        /* ─── LEFT RAIL ──────────────────────────────────────────────── */
-        .ms-rail {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-        @media (min-width: 960px) {
-          .ms-rail {
-            position: sticky;
-            top: 24px;
-            align-self: start;
-            max-height: calc(100vh - 48px);
-            overflow-y: auto;
-            padding-right: 4px;
-            scrollbar-width: thin;
-          }
-          .ms-rail::-webkit-scrollbar { width: 4px; }
-          .ms-rail::-webkit-scrollbar-thumb { background: var(--ms-line); border-radius: 4px; }
-        }
-
-        .ms-id {
-          background: var(--ms-surface);
-          padding: 22px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          border: 1px solid var(--ms-line);
-        }
-        .ms-logo {
-          width: 64px; height: 64px;
-          object-fit: cover;
-          margin-top: -52px;
-          margin-bottom: 4px;
-          background: var(--ms-surface);
-          border: 3px solid var(--ms-surface);
-          box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-        }
-        .ms-name {
-          margin: 0;
-          font-size: clamp(22px, 4vw, 26px);
-          font-weight: 800;
-          letter-spacing: -0.02em;
-          line-height: 1.1;
-        }
-        /* On desktop, name is already huge in hero — keep rail subdued */
-        @media (min-width: 960px) {
-          .ms-name { font-size: 22px; }
-        }
-        .ms-tag {
-          margin: 0;
-          font-size: 14px;
-          line-height: 1.4;
-          color: var(--ms-muted);
-        }
-        .ms-meta {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px 14px;
-          margin-top: 2px;
-          font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: var(--ms-muted);
-        }
-        .ms-meta-dot::before {
-          content: "·";
-          margin-right: 12px;
-          color: var(--ms-line);
-        }
-        .ms-meta-dot:first-child::before { content: none; }
-        .ms-sports {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 8px;
-        }
-        .ms-pill {
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          padding: 4px 10px;
-          background: var(--ms-line-2);
-          color: var(--ms-ink);
-        }
-
-        /* ─── LINK CARDS (linktree-style) ────────────────────────────── */
-        .ms-links {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        .ms-card {
+        .ms-act {
           all: unset;
           cursor: pointer;
           display: flex;
           align-items: center;
+          justify-content: space-between;
           gap: 14px;
-          padding: 16px 18px;
-          background: var(--ms-surface);
-          border: 1px solid var(--ms-line);
+          padding: 22px 26px;
           color: var(--ms-ink);
-          transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-          text-decoration: none;
+          background: var(--ms-bg);
+          border-top: 1px solid var(--ms-line);
+          transition: background 0.14s ease, color 0.14s ease;
         }
-        .ms-card:hover {
-          border-color: var(--ms-ink);
-          transform: translateY(-1px);
+        @media (min-width: 720px) {
+          .ms-act { border-top: 0; border-right: 1px solid var(--ms-line); padding: 26px 30px; }
+          .ms-act:last-child { border-right: 0; }
         }
-        .ms-card-icon {
-          flex: 0 0 auto;
-          width: 36px; height: 36px;
-          display: inline-grid; place-items: center;
-          border: 1px solid var(--ms-line);
-          color: var(--ms-ink);
-        }
-        .ms-card-icon svg { width: 18px; height: 18px; }
-        .ms-card-label {
-          flex: 1;
-          font-size: 15px;
-          font-weight: 700;
-          letter-spacing: -0.005em;
-        }
-        .ms-card-arrow {
-          flex: 0 0 auto;
-          font-size: 18px;
-          color: var(--ms-muted);
-          transition: transform 0.15s ease;
-        }
-        .ms-card:hover .ms-card-arrow {
-          transform: translateX(3px);
-          color: var(--ms-ink);
-        }
-        .ms-card-primary {
-          background: var(--ms-brand);
-          color: var(--ms-brand-ink);
-          border-color: var(--ms-brand);
-        }
-        .ms-card-primary .ms-card-icon {
-          border-color: rgba(255,255,255,0.35);
-          color: var(--ms-brand-ink);
-        }
-        .ms-card-primary .ms-card-arrow {
-          color: var(--ms-brand-ink);
-          opacity: 0.85;
-        }
-        .ms-card-primary:hover {
-          filter: brightness(0.94);
-          border-color: var(--ms-brand);
-        }
-
-        .ms-empty {
-          padding: 16px 18px;
-          background: var(--ms-surface);
-          border: 1px dashed var(--ms-line);
-          color: var(--ms-muted);
-          font-size: 14px;
-          line-height: 1.45;
-        }
-
-        /* ─── BODY SECTIONS ──────────────────────────────────────────── */
-        .ms-body {
-          display: flex;
-          flex-direction: column;
-          gap: 28px;
-        }
-        .ms-section {
-          background: var(--ms-surface);
-          border: 1px solid var(--ms-line);
-          padding: 22px 22px 26px;
-        }
-        .ms-h {
-          margin: 0 0 14px;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.2em;
-          text-transform: uppercase;
-          color: var(--ms-muted);
-        }
-        .ms-prose {
-          margin: 0;
-          font-size: 15px;
-          line-height: 1.55;
-          color: var(--ms-ink);
-          white-space: pre-wrap;
-        }
-        .ms-gallery {
-          aspect-ratio: 16 / 10;
-          width: 100%;
-          overflow: hidden;
-          background: var(--ms-line-2);
-        }
-        .ms-gallery > * { height: 100%; }
-
-        .ms-amen {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-          gap: 8px;
-        }
-        .ms-amen-tile {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 14px;
-          border: 1px solid var(--ms-line);
-        }
-        .ms-amen-icon {
-          width: 22px; height: 22px;
-          display: inline-grid; place-items: center;
-          color: var(--ms-brand);
-        }
-        .ms-amen-icon svg { width: 20px; height: 20px; }
-        .ms-amen-label {
-          font-size: 13px;
+        .ms-act:hover { background: var(--ms-line); }
+        .ms-act-label {
+          font-size: 17px;
           font-weight: 600;
           letter-spacing: -0.005em;
         }
-
-        .ms-facts {
-          margin: 0;
-          display: grid;
-          grid-template-columns: 110px 1fr;
-          gap: 10px 18px;
-          font-size: 14px;
+        .ms-act-arrow {
+          font-size: 22px;
+          opacity: 0.9;
+          transition: transform 0.18s ease;
         }
-        .ms-facts dt {
+        .ms-act:hover .ms-act-arrow { transform: translateX(4px); }
+        .ms-act-icon {
+          width: 22px; height: 22px;
+          display: inline-flex; align-items: center;
+          color: var(--ms-muted);
+        }
+        .ms-act-icon svg { width: 20px; height: 20px; }
+
+        .ms-act-primary {
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+        }
+        .ms-act-primary:hover { background: var(--ms-brand); filter: brightness(0.94); }
+        .ms-act-primary .ms-act-icon { color: inherit; }
+        .ms-act-primary .ms-act-label { font-size: 19px; font-weight: 700; }
+
+        /* ─── ELSEWHERE (owner custom links) ──────────────────────── */
+        .ms-elsewhere {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          border-bottom: 1px solid var(--ms-line);
+        }
+        .ms-else-row {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 18px 26px;
+          color: var(--ms-ink);
+          text-decoration: none;
+          border-top: 1px solid var(--ms-line);
+          transition: background 0.12s ease;
+        }
+        .ms-else-row:hover { background: var(--ms-line); }
+        .ms-else-icon {
+          width: 22px; height: 22px;
+          display: inline-grid; place-items: center;
+          color: var(--ms-muted);
+        }
+        .ms-else-icon svg { width: 20px; height: 20px; }
+        .ms-else-label {
+          flex: 1;
+          font-size: 15px;
+          font-weight: 600;
+        }
+        .ms-else-arrow {
+          font-size: 18px;
+          color: var(--ms-soft);
+          transition: transform 0.18s ease, color 0.18s ease;
+        }
+        .ms-else-row:hover .ms-else-arrow { transform: translateX(3px); color: var(--ms-ink); }
+
+        /* ─── EMPTY (no units) ────────────────────────────────────── */
+        .ms-emptywrap {
+          padding: 24px 26px;
+          border-bottom: 1px solid var(--ms-line);
+        }
+        .ms-empty {
+          margin: 0;
+          font-size: 15px;
+          line-height: 1.5;
+          color: var(--ms-muted);
+        }
+        .ms-empty a { color: var(--ms-ink); }
+
+        /* ─── SECTION (editorial header + body) ───────────────────── */
+        .ms-sec {
+          padding: 48px 22px 24px;
+          border-bottom: 1px solid var(--ms-line);
+        }
+        @media (min-width: 720px) {
+          .ms-sec { padding: 60px 40px 36px; }
+        }
+        .ms-h {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          margin: 0 0 28px;
+        }
+        .ms-h-num {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
           font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          color: var(--ms-muted);
+        }
+        .ms-h-title {
+          font-size: 14px;
           font-weight: 700;
           letter-spacing: 0.16em;
           text-transform: uppercase;
+          color: var(--ms-ink);
+        }
+        .ms-h-rule {
+          flex: 1;
+          height: 1px;
+          background: var(--ms-line);
+        }
+        .ms-h-count {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
           color: var(--ms-muted);
-          align-self: center;
         }
-        .ms-facts dd { margin: 0; color: var(--ms-ink); }
-        .ms-facts a { color: var(--ms-ink); text-decoration: underline; text-underline-offset: 3px; }
 
-        .ms-map {
+        /* ─── INSIDE (photo spread) ───────────────────────────────── */
+        .ms-spread {
+          display: grid;
+          gap: 14px;
+        }
+        .spread-1 { grid-template-columns: 1fr; }
+        .spread-2 {
+          grid-template-columns: 1fr;
+        }
+        @media (min-width: 720px) {
+          .spread-2 { grid-template-columns: 1fr 1fr; }
+        }
+        .ms-spread-cell {
           display: block;
-          position: relative;
-          aspect-ratio: 16 / 9;
-          width: 100%;
+          aspect-ratio: 4 / 3;
           overflow: hidden;
-          background: var(--ms-line-2);
-          color: var(--ms-ink);
-          text-decoration: none;
+          background: var(--ms-bg-soft);
         }
-        .ms-map iframe {
-          width: 100%; height: 100%; border: 0; display: block;
-          pointer-events: none;
+        .spread-1 .ms-spread-cell { aspect-ratio: 16 / 9; }
+        .ms-spread-cell img {
+          width: 100%; height: 100%;
+          object-fit: cover;
+          display: block;
+          transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
         }
-        .ms-map-cta {
-          position: absolute;
-          right: 14px; bottom: 14px;
-          padding: 8px 12px;
-          background: var(--ms-surface);
-          border: 1px solid var(--ms-line);
-          font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 0.04em;
+        .ms-spread-cell:hover img { transform: scale(1.04); }
+
+        /* ─── ABOUT ───────────────────────────────────────────────── */
+        .ms-prose-wrap { max-width: 720px; }
+        .ms-prose {
+          margin: 0;
+          font-size: 17px;
+          line-height: 1.62;
+          letter-spacing: -0.003em;
           color: var(--ms-ink);
+          white-space: pre-wrap;
         }
 
-        /* ─── FOOTER ─────────────────────────────────────────────────── */
-        .ms-foot {
-          text-align: center;
-          padding: 24px 18px 36px;
+        /* ─── AMENITIES ───────────────────────────────────────────── */
+        .ms-amen {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+        @media (min-width: 540px) { .ms-amen { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 960px) { .ms-amen { grid-template-columns: 1fr 1fr 1fr; } }
+        .ms-amen-row {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          padding: 16px 0;
+          border-bottom: 1px dashed var(--ms-line);
+        }
+        .ms-amen-row:last-child { border-bottom: 0; }
+        @media (min-width: 540px) {
+          .ms-amen-row {
+            padding: 18px 22px 18px 0;
+          }
+          .ms-amen-row + .ms-amen-row { /* keep dashed line on every row */ }
+        }
+        .ms-amen-icon {
+          width: 26px; height: 26px;
+          display: inline-grid; place-items: center;
+          color: var(--ms-brand);
+        }
+        .ms-amen-icon svg { width: 24px; height: 24px; }
+        .ms-amen-label {
+          font-size: 16px;
+          font-weight: 500;
+          letter-spacing: -0.005em;
+        }
+
+        /* ─── VISIT ───────────────────────────────────────────────── */
+        .ms-facts {
+          margin: 0 0 28px;
+          display: grid;
+          grid-template-columns: 110px 1fr;
+          gap: 18px 28px;
+          max-width: 720px;
+        }
+        @media (min-width: 720px) { .ms-facts { grid-template-columns: 140px 1fr; } }
+        .ms-facts dt {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
           font-size: 11px;
           font-weight: 600;
           letter-spacing: 0.18em;
           text-transform: uppercase;
           color: var(--ms-muted);
+          align-self: start;
+          padding-top: 2px;
         }
-        .ms-foot a {
+        .ms-facts dd {
+          margin: 0;
+          font-size: 17px;
+          line-height: 1.45;
+          color: var(--ms-ink);
+        }
+        .ms-facts dd a {
+          color: var(--ms-ink);
+          text-decoration: underline;
+          text-decoration-color: var(--ms-soft);
+          text-underline-offset: 4px;
+          text-decoration-thickness: 1px;
+        }
+        .ms-facts dd a:hover { text-decoration-color: var(--ms-brand); }
+
+        .ms-map {
+          display: block;
+          position: relative;
+          aspect-ratio: 21 / 9;
+          width: 100%;
+          overflow: hidden;
+          background: var(--ms-bg-soft);
+          color: var(--ms-ink);
+          text-decoration: none;
+        }
+        @media (max-width: 720px) { .ms-map { aspect-ratio: 4 / 3; } }
+        .ms-map iframe {
+          width: 100%; height: 100%; border: 0; display: block;
+          pointer-events: none;
+          filter: contrast(0.92) saturate(0.86);
+        }
+        [data-theme="dark"] .ms-map iframe {
+          filter: invert(0.92) hue-rotate(180deg) contrast(0.86) saturate(0.6) brightness(1.05);
+        }
+        .ms-map-cta {
+          position: absolute;
+          right: 14px; bottom: 14px;
+          padding: 10px 14px;
+          background: var(--ms-bg);
+          border: 1px solid var(--ms-line-strong);
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--ms-ink);
+        }
+
+        /* ─── FOOTER ─────────────────────────────────────────────── */
+        .ms-foot {
+          padding: 60px 22px 100px;
+          display: flex;
+          flex-direction: column;
+          gap: 22px;
+        }
+        @media (min-width: 720px) {
+          .ms-foot {
+            padding: 80px 40px 40px;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 32px;
+          }
+        }
+        .ms-foot-line {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.2em;
+          color: var(--ms-muted);
+        }
+        .ms-foot-name { color: var(--ms-ink); }
+        .ms-foot-rule { flex: 1; height: 1px; background: var(--ms-line); min-width: 40px; }
+        .ms-foot-credit {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          color: var(--ms-muted);
+        }
+        .ms-foot-credit a {
           color: var(--ms-ink);
           text-decoration: underline;
           text-underline-offset: 3px;
+          text-decoration-color: var(--ms-soft);
         }
+        .ms-foot-credit a:hover { text-decoration-color: var(--ms-brand); }
 
-        /* ─── small screens — tighter hero overlay padding ───────────── */
-        @media (max-width: 540px) {
-          .ms-hero { height: 52vh; min-height: 280px; }
-          .ms-hero-overlay { padding: 22px 18px; }
-          .ms-id { padding: 18px; }
-          .ms-section { padding: 18px 18px 22px; }
+        /* ─── STICKY BOOK BAR (mobile only) ──────────────────────── */
+        .ms-stickybar {
+          position: fixed;
+          left: 0; right: 0; bottom: 0;
+          padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0));
+          background: var(--ms-bg);
+          border-top: 1px solid var(--ms-line-strong);
+          z-index: 800;
+          animation: ms-rise 0.22s ease;
+        }
+        @keyframes ms-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @media (min-width: 720px) { .ms-stickybar { display: none; } }
+        .ms-stickybar-btn {
+          all: unset;
+          cursor: pointer;
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 18px;
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+          font-weight: 700;
+          font-size: 16px;
+          box-sizing: border-box;
+        }
+        .ms-stickybar-meta {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          opacity: 0.88;
         }
       `}</style>
     </main>
