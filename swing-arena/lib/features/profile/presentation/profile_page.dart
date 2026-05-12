@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,8 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/auth/me_providers.dart';
 import '../../arena/services/arena_profile_providers.dart';
+
+const _kGooglePlacesKey = 'AIzaSyDpJ1S4JYO-jVA6BgzxM1LYjdSvrSrTkTo';
 
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
@@ -40,6 +43,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
   bool _fetchingPincode = false;
   String? _loadedAccountId;
 
+  final _addressSearchCtrl = TextEditingController();
+  Timer? _placesDebounce;
+  bool _placesLoading = false;
+  List<Map<String, dynamic>> _placeSuggestions = [];
+  String _placesSession =
+      DateTime.now().millisecondsSinceEpoch.toString();
+
   @override
   void initState() {
     super.initState();
@@ -63,7 +73,139 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     _accountNumber.dispose();
     _ifsc.dispose();
     _upi.dispose();
+    _addressSearchCtrl.dispose();
+    _placesDebounce?.cancel();
     super.dispose();
+  }
+
+  void _onAddressSearchChanged(String v) {
+    _placesDebounce?.cancel();
+    if (v.trim().length < 2) {
+      setState(() {
+        _placeSuggestions = [];
+        _placesLoading = false;
+      });
+      return;
+    }
+    setState(() => _placesLoading = true);
+    _placesDebounce = Timer(
+      const Duration(milliseconds: 450),
+      () => _fetchPlacePredictions(v.trim()),
+    );
+  }
+
+  Future<void> _fetchPlacePredictions(String query) async {
+    try {
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/autocomplete/json',
+        {
+          'input': query,
+          'key': _kGooglePlacesKey,
+          'components': 'country:in',
+          'language': 'en',
+          'types': 'geocode|establishment',
+          'sessiontoken': _placesSession,
+        },
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final preds = (body['predictions'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .toList() ??
+            [];
+        setState(() {
+          _placeSuggestions = preds;
+          _placesLoading = false;
+        });
+      } else {
+        setState(() {
+          _placeSuggestions = [];
+          _placesLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _placeSuggestions = [];
+          _placesLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _selectPlace(Map<String, dynamic> pred) async {
+    final placeId = pred['place_id'] as String? ?? '';
+    final desc = pred['description'] as String? ?? '';
+    setState(() {
+      _addressSearchCtrl.text = desc;
+      _placeSuggestions = [];
+      _placesLoading = true;
+    });
+    try {
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/details/json',
+        {
+          'place_id': placeId,
+          'key': _kGooglePlacesKey,
+          'fields': 'address_components',
+          'language': 'en',
+          'sessiontoken': _placesSession,
+        },
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final result = ((jsonDecode(res.body) as Map<String, dynamic>)['result']
+                as Map<String, dynamic>?) ??
+            {};
+        final components = (result['address_components'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .toList() ??
+            [];
+
+        String pick(List<String> types) {
+          for (final c in components) {
+            final t = (c['types'] as List?)?.cast<String>() ?? const [];
+            if (types.any(t.contains)) {
+              return c['long_name'] as String? ?? '';
+            }
+          }
+          return '';
+        }
+
+        final streetNum = pick(['street_number']);
+        final route = pick(['route']);
+        final sub = pick(['sublocality_level_1', 'sublocality']);
+        final city = pick(['locality']);
+        final state = pick(['administrative_area_level_1']);
+        final pin = pick(['postal_code']);
+        final parts = [
+          if (streetNum.isNotEmpty) streetNum,
+          if (route.isNotEmpty) route,
+          if (sub.isNotEmpty) sub,
+        ];
+        final address =
+            parts.isNotEmpty ? parts.join(', ') : desc.split(',').first;
+
+        setState(() {
+          _address.text = address;
+          if (city.isNotEmpty) _city.text = city;
+          if (state.isNotEmpty) _state.text = state;
+          if (pin.isNotEmpty) _pincode.text = pin;
+          _placesSession =
+              DateTime.now().millisecondsSinceEpoch.toString();
+          _placesLoading = false;
+        });
+      } else {
+        if (mounted) setState(() => _placesLoading = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _placesLoading = false);
+    }
   }
 
   Future<void> _lookupPincode(String pincode) async {
@@ -256,6 +398,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                             icon: Icons.business_outlined,
                             validator: _required,
                             enabled: _editMode),
+                        if (_editMode)
+                          _PlacesSearchField(
+                            controller: _addressSearchCtrl,
+                            loading: _placesLoading,
+                            suggestions: _placeSuggestions,
+                            onChanged: _onAddressSearchChanged,
+                            onClear: () => setState(() {
+                              _addressSearchCtrl.clear();
+                              _placeSuggestions = [];
+                            }),
+                            onSelect: _selectPlace,
+                          ),
                         _ProfileTextField(
                             controller: _address,
                             label: 'Address',
@@ -489,6 +643,122 @@ class _ProfileTextField extends StatelessWidget {
         ),
         suffixIcon: suffixIcon,
       ),
+    );
+  }
+}
+
+class _PlacesSearchField extends StatelessWidget {
+  const _PlacesSearchField({
+    required this.controller,
+    required this.loading,
+    required this.suggestions,
+    required this.onChanged,
+    required this.onClear,
+    required this.onSelect,
+  });
+
+  final TextEditingController controller;
+  final bool loading;
+  final List<Map<String, dynamic>> suggestions;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+  final ValueChanged<Map<String, dynamic>> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: controller,
+          onChanged: onChanged,
+          style: TextStyle(
+            color: scheme.onSurface,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+          decoration: InputDecoration(
+            labelText: 'Search address',
+            prefixIcon: loading
+                ? Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  )
+                : Icon(Icons.search_rounded,
+                    size: 19, color: scheme.primary),
+            suffixIcon: controller.text.isNotEmpty
+                ? GestureDetector(
+                    onTap: onClear,
+                    child: Icon(Icons.close_rounded,
+                        size: 18,
+                        color: scheme.onSurface.withValues(alpha: 0.5)),
+                  )
+                : null,
+          ),
+        ),
+        if (suggestions.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Container(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              children: suggestions.map((pred) {
+                final main = (pred['structured_formatting']
+                            as Map?)?['main_text'] as String? ??
+                        pred['description'] as String? ??
+                        '';
+                final secondary = (pred['structured_formatting']
+                        as Map?)?['secondary_text'] as String? ??
+                    '';
+                return InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onSelect(pred),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    child: Row(children: [
+                      Icon(Icons.location_on_outlined,
+                          size: 16,
+                          color: scheme.onSurface.withValues(alpha: 0.6)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(main,
+                                style: TextStyle(
+                                    color: scheme.onSurface,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            if (secondary.isNotEmpty)
+                              Text(secondary,
+                                  style: TextStyle(
+                                      color: scheme.onSurface
+                                          .withValues(alpha: 0.6),
+                                      fontSize: 11),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                          ],
+                        ),
+                      ),
+                    ]),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

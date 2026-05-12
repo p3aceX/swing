@@ -380,8 +380,6 @@ class _BookingsBodyState extends ConsumerState<_BookingsBody> {
                                 bookings: item.bookings,
                                 arenas: widget.arenas,
                                 newIds: _recentlyAddedIds,
-                                onAdd: () =>
-                                    _showAddBookingSheet(context, item.date),
                                 onBookingTap: (b) => _showBookingDetail(
                                   context,
                                   b,
@@ -2959,7 +2957,6 @@ class _DateTicket extends StatelessWidget {
     required this.bookings,
     required this.arenas,
     required this.onBookingTap,
-    required this.onAdd,
     this.newIds = const <String>{},
   });
 
@@ -2968,7 +2965,6 @@ class _DateTicket extends StatelessWidget {
   final List<ArenaReservation> bookings;
   final List<ArenaListing> arenas;
   final ValueChanged<ArenaReservation> onBookingTap;
-  final VoidCallback onAdd;
   final Set<String> newIds;
 
   static int _timeToMins(String t) {
@@ -2982,7 +2978,6 @@ class _DateTicket extends StatelessWidget {
     _c = _C.of(context);
     final isToday = DateUtils.isSameDay(date, today);
     final isPast = date.isBefore(DateTime(today.year, today.month, today.day));
-    final accent = isToday ? _c.accent : _c.text;
     final stubBg = isToday
         ? _c.accent
         : (isPast
@@ -3079,43 +3074,6 @@ class _DateTicket extends StatelessWidget {
                               color: _c.border.withValues(alpha: 0.5)),
                         ),
                     ],
-                    // + Add booking footer
-                    Material(
-                      color: Colors.transparent,
-                      borderRadius: const BorderRadius.only(
-                        topRight: Radius.circular(13),
-                        bottomRight: Radius.circular(13),
-                      ),
-                      child: InkWell(
-                        onTap: onAdd,
-                        borderRadius: const BorderRadius.only(
-                          topRight: Radius.circular(13),
-                          bottomRight: Radius.circular(13),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          child: Row(
-                            children: [
-                              Icon(Icons.add_rounded,
-                                  size: 14, color: accent),
-                              const SizedBox(width: 4),
-                              Text(
-                                sorted.isEmpty
-                                    ? 'Add booking'
-                                    : 'Add another',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: accent,
-                                  letterSpacing: -0.1,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -3241,6 +3199,12 @@ class _TicketBookingRow extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                   color: isCancelled ? _c.muted : _c.text,
                 ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: _c.muted,
               ),
             ],
           ),

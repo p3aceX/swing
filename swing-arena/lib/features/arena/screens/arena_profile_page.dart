@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/router/app_router.dart';
@@ -58,337 +59,66 @@ late _C _c;
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
-class ArenaProfilePage extends ConsumerStatefulWidget {
+class ArenaProfilePage extends ConsumerWidget {
   const ArenaProfilePage({super.key, this.arenaId, this.startEditing = false});
 
   final String? arenaId;
   final bool startEditing;
 
   @override
-  ConsumerState<ArenaProfilePage> createState() => _ArenaProfilePageState();
-}
-
-class _ArenaProfilePageState extends ConsumerState<ArenaProfilePage> {
-  Future<List<String>> _pickAndUploadUnitPhotos({
-    required String folder,
-    required int remainingSlots,
-  }) async {
-    if (remainingSlots <= 0) return const [];
-    final files = await ImagePicker().pickMultiImage();
-    if (files.isEmpty) return const [];
-
-    final uploads = <String>[];
-    for (final file in files.take(remainingSlots)) {
-      final compressedFile = await ImageCompressor.compress(file.path);
-      if (compressedFile == null) {
-        continue;
-      }
-
-      final form = FormData.fromMap({
-        'folder': folder,
-        'file': await MultipartFile.fromFile(compressedFile.path,
-            filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
-      });
-      final response = await ApiClient.instance.dio.post(
-        '/media/upload',
-        data: form,
-        options: Options(
-          contentType: 'multipart/form-data',
-          sendTimeout: Duration(seconds: 30),
-          receiveTimeout: Duration(seconds: 30),
-        ),
-      );
-      final payload = response.data as Map<String, dynamic>;
-      final data = (payload['data'] ?? payload) as Map<String, dynamic>;
-      final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
-      if (url != null && url.isNotEmpty) uploads.add(url);
-    }
-    return uploads;
-  }
-
-  Future<void> _openUnitSheet(ArenaListing arena,
-      [ArenaUnitOption? unit]) async {
-    final changed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: _c.bg,
-      builder: (context) => UnitEditorSheet(
-        arenaId: arena.id,
-        unit: unit,
-      ),
-    );
-    if (changed == true) {
-      ref.invalidate(arenaDetailProvider);
-      ref.invalidate(arenaDetailByIdProvider);
-      ref.invalidate(ownedArenasProvider);
-    }
-  }
-
-  Future<void> _deleteUnit(ArenaUnitOption unit) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove unit?'),
-        content: Text('${unit.name} will be hidden from booking setup.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await ref
-          .read(hostArenaBookingRepositoryProvider)
-          .deleteArenaUnit(unit.id);
-      ref.invalidate(arenaDetailProvider);
-      ref.invalidate(arenaDetailByIdProvider);
-      ref.invalidate(ownedArenasProvider);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Unit removed')));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Remove failed: $error')));
-    }
-  }
-
-  void _showHelpSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: _c.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => const _ArenaHelpSheet(),
-    );
-  }
-
-  bool _didAutoOpenSheet = false;
-
-  void _openArenaDetailSheet(ArenaListing arena, {bool startEditing = false}) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: _c.bg,
-      builder: (_) =>
-          ArenaDetailSheet(arena: arena, startEditing: startEditing),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     _c = _C.of(context);
-    final arenaAsync = widget.arenaId == null
+    final arenaAsync = arenaId == null
         ? ref.watch(arenaDetailProvider)
-        : ref.watch(arenaDetailByIdProvider(widget.arenaId!));
-
-    if (widget.startEditing && !_didAutoOpenSheet) {
-      arenaAsync.whenData((arena) {
-        if (arena != null) {
-          _didAutoOpenSheet = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _openArenaDetailSheet(arena, startEditing: true);
-          });
-        }
-      });
-    }
-
-    return Scaffold(
-      backgroundColor: _c.bg,
-      body: arenaAsync.when(
-        loading: () => Center(child: CircularProgressIndicator()),
-        error: (error, _) => _ErrorState(message: '$error'),
-        data: (arena) {
-          if (arena == null) return const _EmptyState();
-          final loc = _joinNonEmpty([arena.city, arena.state]);
-          return CustomScrollView(
-            slivers: [
-              // ── AppBar ──────────────────────────────────────────────────
-              SliverAppBar(
-                backgroundColor: _c.bg,
-                foregroundColor: _c.text,
-                pinned: true,
-                elevation: 0,
-                scrolledUnderElevation: 1,
-                leading: IconButton(
-                  icon: Icon(Icons.arrow_back_rounded, color: _c.text),
-                  onPressed: () => context.canPop()
-                      ? context.pop()
-                      : context.go(AppRoutes.dashboard),
-                ),
-                title: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(arena.name,
-                        style: TextStyle(color: _c.text, fontSize: 17, fontWeight: FontWeight.w900)),
-                    if (loc.isNotEmpty)
-                      Text(loc, style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w500)),
-                  ],
-                ),
-                actions: [
-                  IconButton(
-                    tooltip: 'Match reviews',
-                    onPressed: () => context.push(
-                      '${AppRoutes.arenaMatchReviews}/${arena.id}',
-                    ),
-                    icon: Icon(Icons.star_outline_rounded,
-                        size: 22, color: _c.text),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: FilledButton.icon(
-                      onPressed: () => _openUnitSheet(arena),
-                      icon: Icon(Icons.add_rounded, size: 16),
-                      label: Text('Add Unit'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _c.accent,
-                        foregroundColor: _c.onAccent,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        textStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              // ── Arena info strip ────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Container(
-                  color: _c.surface,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(children: [
-                    Icon(Icons.schedule_rounded, size: 13, color: _c.muted),
-                    SizedBox(width: 5),
-                    Text('${arena.openTime} – ${arena.closeTime}',
-                        style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
-                    if (arena.sports.isNotEmpty) ...[
-                      SizedBox(width: 12),
-                      Icon(Icons.sports_cricket_rounded, size: 13, color: _c.muted),
-                      SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          arena.sports.map((s) => s[0].toUpperCase() + s.substring(1).toLowerCase()).join(' · '),
-                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ] else
-                      Spacer(),
-                    Text('${arena.units.length} units',
-                        style: TextStyle(color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600)),
-                  ]),
-                ),
-              ),
-
-              // ── Section label ────────────────────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-                sliver: SliverToBoxAdapter(
-                  child: Text('Units', style: TextStyle(color: _c.text, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
-                ),
-              ),
-
-              // ── Units list or empty state ───────────────────────────────
-              if (arena.units.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.add_box_outlined,
-                            size: 52, color: _c.muted),
-                        SizedBox(height: 16),
-                        Text('No units yet',
-                            style: TextStyle(
-                                color: _c.text,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800),
-                            textAlign: TextAlign.center),
-                        SizedBox(height: 8),
-                        Text(
-                          'Add your first unit — a cricket net, full ground, or any bookable space.',
-                          style: TextStyle(
-                              color: _c.muted, fontSize: 14, height: 1.6),
-                          textAlign: TextAlign.center,
-                        ),
-                        SizedBox(height: 28),
-                        FilledButton.icon(
-                          onPressed: () => _openUnitSheet(arena),
-                          icon: Icon(Icons.add_rounded),
-                          label: Text('Add Unit'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _c.accent,
-                            foregroundColor: _c.onAccent,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 28, vertical: 14),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
-                            textStyle: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
-                  sliver: SliverList.separated(
-                    itemCount: arena.units.length,
-                    separatorBuilder: (_, __) => SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final unit = arena.units[index];
-                      return _UnitCard(
-                        unit: unit,
-                        onTap: () => context.push(
-                            '${AppRoutes.arenaUnitDetail}/${arena.id}/${unit.id}'),
-                        onEdit: () => _openUnitSheet(arena, unit),
-                        onDelete: () => _deleteUnit(unit),
-                      );
-                    },
-                  ),
-                ),
-            ],
-          );
-        },
+        : ref.watch(arenaDetailByIdProvider(arenaId!));
+    return arenaAsync.when(
+      loading: () => Scaffold(
+        backgroundColor: _c.bg,
+        body: const Center(child: CircularProgressIndicator()),
       ),
+      error: (e, _) => Scaffold(
+        backgroundColor: _c.bg,
+        body: _ErrorState(message: '$e'),
+      ),
+      data: (arena) {
+        if (arena == null) {
+          return Scaffold(
+            backgroundColor: _c.bg,
+            body: const _EmptyState(),
+          );
+        }
+        return ArenaDetailPage(
+          arena: arena,
+          startEditing: startEditing,
+          initialTabIndex: startEditing ? 0 : 4,
+        );
+      },
     );
   }
 }
 
-// ─── Arena detail bottom sheet ───────────────────────────────────────────────
+// ─── Arena detail page ───────────────────────────────────────────────────────
 
-class ArenaDetailSheet extends ConsumerStatefulWidget {
-  const ArenaDetailSheet({super.key, required this.arena, this.startEditing = false});
+class ArenaDetailPage extends ConsumerStatefulWidget {
+  const ArenaDetailPage({
+    super.key,
+    required this.arena,
+    this.startEditing = false,
+    this.initialTabIndex = 0,
+  });
 
   final ArenaListing arena;
   final bool startEditing;
+  final int initialTabIndex;
 
   @override
-  ConsumerState<ArenaDetailSheet> createState() => _ArenaDetailSheetState();
+  ConsumerState<ArenaDetailPage> createState() => _ArenaDetailPageState();
 }
 
-class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
+class _ArenaDetailPageState extends ConsumerState<ArenaDetailPage>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
+  late final TabController _tabController;
   late final TextEditingController _nameCtrl;
   late final TextEditingController _descriptionCtrl;
   late final TextEditingController _phoneCtrl;
@@ -421,6 +151,14 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
   void initState() {
     super.initState();
     _editing = widget.startEditing;
+    _tabController = TabController(
+      length: 6,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 5),
+    );
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) setState(() {});
+    });
     _initFrom(widget.arena);
   }
 
@@ -487,6 +225,7 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     for (final ctrl in [
       _nameCtrl,
       _descriptionCtrl,
@@ -610,124 +349,239 @@ class _ArenaDetailSheetState extends ConsumerState<ArenaDetailSheet> {
     }
   }
 
+  String get _arenaSubtitle {
+    final a = widget.arena;
+    final loc = [a.city, a.state].where((s) => s.trim().isNotEmpty).join(', ');
+    final sports = a.sports
+        .where((s) => s.trim().isNotEmpty)
+        .map((s) => s[0].toUpperCase() + s.substring(1).toLowerCase())
+        .take(2)
+        .join(', ');
+    return [loc, sports].where((s) => s.isNotEmpty).join(' · ');
+  }
+
+  Future<void> _openUnitSheet(ArenaListing arena,
+      [ArenaUnitOption? unit]) async {
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: _c.bg,
+      builder: (context) =>
+          UnitEditorSheet(arenaId: arena.id, unit: unit),
+    );
+    if (changed == true) {
+      ref.invalidate(arenaDetailProvider);
+      ref.invalidate(arenaDetailByIdProvider);
+      ref.invalidate(ownedArenasProvider);
+    }
+  }
+
+  Future<void> _deleteUnitOnDetail(ArenaUnitOption unit) async {
+    final scheme = Theme.of(context).colorScheme;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: Icon(Icons.warning_amber_rounded,
+            color: scheme.error, size: 36),
+        title: Text('Delete ${unit.name}?'),
+        content: Text(
+          'This unit will be permanently deleted. Existing bookings stay, but no new bookings can be made for it. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: scheme.error,
+              foregroundColor: scheme.onError,
+            ),
+            child: Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ref
+          .read(hostArenaBookingRepositoryProvider)
+          .deleteArenaUnit(unit.id);
+      ref.invalidate(arenaDetailProvider);
+      ref.invalidate(arenaDetailByIdProvider);
+      ref.invalidate(ownedArenasProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Unit removed')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Remove failed: $error')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    const tabs = ['Details', 'Location', 'Photos', 'Facilities', 'Share'];
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottom),
-      child: DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.92,
-        minChildSize: 0.6,
-        maxChildSize: 0.96,
-        builder: (ctx, controller) => DefaultTabController(
-          length: tabs.length,
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                // Drag handle
-                SizedBox(height: 10),
-                Center(
-                    child: Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                            color: _c.line,
-                            borderRadius: BorderRadius.circular(2)))),
-                SizedBox(height: 14),
-                // Header
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 8, 0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Arena Details',
-                          style: TextStyle(
-                              color: _c.text,
-                              fontSize: 19,
-                              fontWeight: FontWeight.w900),
-                        ),
-                      ),
-                      if (_editing)
-                        TextButton(
-                          onPressed: _saving
-                              ? null
-                              : () => setState(() {
-                                    _reset();
-                                    _editing = false;
-                                  }),
-                          child: Text('Cancel'),
-                        ),
-                      SizedBox(width: 4),
-                      IconButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: Icon(Icons.close_rounded)),
-                    ],
-                  ),
+    const tabs = ['Details', 'Location', 'Photos', 'Facilities', 'Units', 'Site'];
+    final onUnitsTab = _tabController.index == 4;
+    return Scaffold(
+      backgroundColor: _c.bg,
+      appBar: AppBar(
+        backgroundColor: _c.bg,
+        surfaceTintColor: _c.bg,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded, color: _c.text),
+          onPressed: () => Navigator.maybePop(context),
+        ),
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.arena.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _c.text,
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.2,
+              ),
+            ),
+            if (_arenaSubtitle.isNotEmpty)
+              Text(
+                _arenaSubtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _c.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                 ),
-                SizedBox(height: 6),
-                // Tab bar
-                TabBar(
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  labelColor: _c.deep,
-                  unselectedLabelColor: _c.muted,
-                  labelStyle: TextStyle(
-                      fontWeight: FontWeight.w800, fontSize: 13),
-                  unselectedLabelStyle: TextStyle(
-                      fontWeight: FontWeight.w600, fontSize: 13),
-                  indicatorColor: _c.deep,
-                  indicatorSize: TabBarIndicatorSize.label,
-                  dividerColor: _c.line,
-                  tabs: tabs.map((t) => Tab(text: t)).toList(),
+              ),
+          ],
+        ),
+        actions: [
+          if (_editing)
+            TextButton(
+              onPressed: _saving
+                  ? null
+                  : () => setState(() {
+                        _reset();
+                        _editing = false;
+                      }),
+              child: Text('Cancel',
+                  style: TextStyle(
+                      color: _c.muted, fontWeight: FontWeight.w700)),
+            )
+          else if (!onUnitsTab)
+            IconButton(
+              tooltip: 'Edit',
+              icon: Icon(Icons.edit_rounded, color: _c.text),
+              onPressed: () => setState(() => _editing = true),
+            ),
+          const SizedBox(width: 4),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(46),
+          child: TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+            labelColor: _c.text,
+            unselectedLabelColor: _c.muted,
+            labelStyle: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+            unselectedLabelStyle:
+                TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            indicator: UnderlineTabIndicator(
+              borderSide: BorderSide(color: _c.text, width: 2),
+              insets: const EdgeInsets.symmetric(horizontal: 4),
+            ),
+            indicatorSize: TabBarIndicatorSize.label,
+            dividerColor: _c.line,
+            dividerHeight: 0.5,
+            overlayColor: WidgetStateProperty.all(Colors.transparent),
+            splashFactory: NoSplash.splashFactory,
+            tabs: tabs.map((t) => Tab(height: 42, text: t)).toList(),
+          ),
+        ),
+      ),
+      body: Form(
+        key: _formKey,
+        child: TabBarView(
+          controller: _tabController,
+          children: [
+            _DetailsTab(parent: this),
+            _LocationTab(parent: this),
+            _PhotosTab(parent: this),
+            _FacilitiesTab(parent: this),
+            _UnitsTab(parent: this),
+            _ShareTab(arena: widget.arena),
+          ],
+        ),
+      ),
+      bottomNavigationBar: _buildBottomBar(onUnitsTab: onUnitsTab),
+    );
+  }
+
+  Widget? _buildBottomBar({required bool onUnitsTab}) {
+    if (onUnitsTab) {
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: () => _openUnitSheet(widget.arena),
+              style: FilledButton.styleFrom(
+                backgroundColor: _c.accent,
+                foregroundColor: _c.onAccent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                // Tab content
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      _DetailsTab(parent: this, scrollCtrl: controller),
-                      _LocationTab(parent: this, scrollCtrl: controller),
-                      _PhotosTab(parent: this, scrollCtrl: controller),
-                      _FacilitiesTab(parent: this, scrollCtrl: controller),
-                      _ShareTab(arena: widget.arena),
-                    ],
-                  ),
-                ),
-                // Save bar
-                if (_editing)
-                  SafeArea(
-                    top: false,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                      decoration: BoxDecoration(
-                          color: _c.bg,
-                          border: Border(top: BorderSide(color: _c.line))),
-                      child: FilledButton(
-                        onPressed: _saving ? null : _saveArena,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _c.accent,
-                          foregroundColor: _c.onAccent,
-                          minimumSize: const Size.fromHeight(52),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        child: _saving
-                            ? SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: _c.onAccent))
-                            : Text('Save Arena'),
-                      ),
-                    ),
-                  ),
-              ],
+              ),
+              icon: const Icon(Icons.add_rounded, size: 22),
+              label: const Text(
+                'Add Unit',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
             ),
           ),
+        ),
+      );
+    }
+    if (!_editing) return null;
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+        decoration: BoxDecoration(
+            color: _c.bg, border: Border(top: BorderSide(color: _c.line))),
+        child: FilledButton(
+          onPressed: _saving ? null : _saveArena,
+          style: FilledButton.styleFrom(
+            backgroundColor: _c.accent,
+            foregroundColor: _c.onAccent,
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: _saving
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: _c.onAccent))
+              : Text('Save Arena'),
         ),
       ),
     );
@@ -828,12 +682,8 @@ class _UnitCard extends StatelessWidget {
     _c = _C.of(context);
     final typeLabel =
         _fallback(unit.unitTypeLabel).replaceAll('Not set', unit.unitType);
-    final isGround = unit.isGround;
-    final isNet = unit.isNet;
-    // Only courts (/hr bookings) show a prominent base price row.
-    // Grounds use slot-based pricing (chips); nets use per-variant prices (chips).
-    final String? basePrice =
-        (!isGround && !isNet) ? '${_money(unit.pricePerHourPaise)}/hr' : null;
+    final showTypeLabel =
+        typeLabel.trim().toLowerCase() != unit.name.trim().toLowerCase();
     final hasSchedule = unit.openTime != null && unit.closeTime != null;
 
     return GestureDetector(
@@ -842,158 +692,90 @@ class _UnitCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: _c.surface,
           borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _c.line),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Info section ──────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 4, 14),
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── name + type badge + menu ───────────────────────────
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              unit.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: _c.text,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              typeLabel,
-                              style: TextStyle(
-                                color: _c.muted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert_rounded,
-                            color: _c.muted, size: 20),
-                        color: _c.surface,
-                        onSelected: (value) {
-                          if (value == 'edit') onEdit();
-                          if (value == 'delete') onDelete();
-                        },
-                        itemBuilder: (context) => const [
-                          PopupMenuItem(
-                              value: 'edit', child: Text('Edit Unit')),
-                          PopupMenuItem(
-                              value: 'delete', child: Text('Remove')),
-                        ],
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 10),
-                  // price + slot row (hidden for nets — per-hour is meaningless)
-                  if (basePrice != null)
-                    Row(
-                      children: [
-                        Text(
-                          basePrice,
-                          style: TextStyle(
-                            color: _c.text,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        SizedBox(width: 10),
-                        Text(
-                          '· ${unit.minSlotMins ~/ 60}h min slot',
-                          style: TextStyle(
-                            color: _c.muted,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+                  // ── name + type ────────────────────────────────────────
+                  Text(
+                    unit.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _c.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
                     ),
-                  if (basePrice != null) SizedBox(height: 10),
-                  // chip row
+                  ),
+                  if (showTypeLabel) ...[
+                    SizedBox(height: 3),
+                    Text(
+                      typeLabel,
+                      style: TextStyle(
+                        color: _c.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  SizedBox(height: 12),
+                  // ── icon info grid ─────────────────────────────────────
                   Wrap(
-                    spacing: 7,
-                    runSpacing: 7,
+                    spacing: 14,
+                    runSpacing: 8,
                     children: [
-                      // net variant prices
-                      for (final v in unit.netVariants)
-                        if (v.pricePaise != null)
-                          _SmallPill('${v.label} ${_money(v.pricePaise!)}'),
-                      // ground slot prices
-                      if (isGround) ...[
-                        _SmallPill(
-                            '4h ${_money(unit.price4HrPaise ?? unit.pricePerHourPaise * 4)}'),
-                        if (unit.price8HrPaise != null)
-                          _SmallPill('8h ${_money(unit.price8HrPaise!)}'),
-                        if (unit.priceFullDayPaise != null)
-                          _SmallPill(
-                              'Day ${_money(unit.priceFullDayPaise!)}'),
-                        if (unit.weekendMultiplier != 1)
-                          _SmallPill(
-                            'Wknd ${_money(((unit.price4HrPaise ?? unit.pricePerHourPaise * 4) * unit.weekendMultiplier).round())}/4hr',
-                            highlight: true,
-                          ),
-                      ],
                       if (hasSchedule)
-                        _SmallPill(
-                            '${unit.openTime} – ${unit.closeTime}'),
-                      if (unit.hasFloodlights)
-                        const _SmallPill('Floodlights', highlight: true),
-                      // weekend chip for non-ground, non-net courts
-                      if (!isGround && !isNet && unit.weekendMultiplier != 1)
-                        _SmallPill(
-                          'Wknd ${_money((unit.pricePerHourPaise * unit.weekendMultiplier).round())}/hr',
-                          highlight: true,
+                        _UnitInfo(
+                          icon: Icons.schedule_rounded,
+                          label: '${unit.openTime}–${unit.closeTime}',
                         ),
-                      if (!isGround && unit.price8HrPaise != null)
-                        _SmallPill('8h ${_money(unit.price8HrPaise!)}'),
-                      if (!isGround && unit.priceFullDayPaise != null)
-                        _SmallPill(
-                            'Day ${_money(unit.priceFullDayPaise!)}'),
-                      if (unit.addons.isNotEmpty)
-                        _SmallPill('${unit.addons.length} add-ons'),
+                      if (unit.operatingDays.isNotEmpty)
+                        _UnitInfo(
+                          icon: Icons.calendar_today_rounded,
+                          label: _formatDays(unit.operatingDays),
+                        ),
+                      if (unit.weekendMultiplier != 1)
+                        _UnitInfo(
+                          icon: Icons.trending_up_rounded,
+                          label:
+                              'Weekend ${_trimMultiplier(unit.weekendMultiplier)}×',
+                        ),
+                      if (unit.minAdvancePaise > 0)
+                        _UnitInfo(
+                          icon: Icons.payments_outlined,
+                          label: '${_money(unit.minAdvancePaise)} advance',
+                        ),
+                      if (unit.advanceBookingDays != null &&
+                          unit.advanceBookingDays! > 0)
+                        _UnitInfo(
+                          icon: Icons.event_rounded,
+                          label:
+                              '${unit.advanceBookingDays}d booking window',
+                        ),
+                      if (unit.cancellationHours != null &&
+                          unit.cancellationHours! > 0)
+                        _UnitInfo(
+                          icon: Icons.cancel_outlined,
+                          label: '${unit.cancellationHours}h cancel',
+                        ),
+                      if (unit.hasFloodlights)
+                        const _UnitInfo(
+                          icon: Icons.flare_rounded,
+                          label: 'Floodlights',
+                        ),
                     ],
                   ),
                   SizedBox(height: 12),
                   // action buttons
                   Row(
                     children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: onTap,
-                          icon: Icon(Icons.tune_rounded, size: 15),
-                          label: Text(
-                            'Manage Unit',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _c.text,
-                            side: BorderSide(color: _c.line),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 8),
                       Expanded(
                         child: OutlinedButton(
                           onPressed: onEdit,
@@ -1008,7 +790,56 @@ class _UnitCard extends StatelessWidget {
                             ),
                           ),
                           child: Text(
-                            'Edit Unit',
+                            'Edit',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: onTap,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _c.accent,
+                            side: BorderSide(
+                                color: _c.accent.withValues(alpha: 0.4)),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            'Manage',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: onDelete,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Theme.of(context).colorScheme.error,
+                            side: BorderSide(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .error
+                                    .withValues(alpha: 0.4)),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            'Delete',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 13,
@@ -1024,6 +855,55 @@ class _UnitCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+String _formatDays(List<int> days) {
+  if (days.isEmpty) return '';
+  final sorted = [...days]..sort();
+  if (sorted.length == 7) return 'Daily';
+  const labels = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  final isWeekdays = sorted.length == 5 &&
+      sorted[0] == 1 &&
+      sorted[1] == 2 &&
+      sorted[2] == 3 &&
+      sorted[3] == 4 &&
+      sorted[4] == 5;
+  if (isWeekdays) return 'Weekdays';
+  final isWeekends =
+      sorted.length == 2 && sorted[0] == 6 && sorted[1] == 7;
+  if (isWeekends) return 'Weekends';
+  return sorted.map((d) => (d >= 1 && d <= 7) ? labels[d] : '').join(', ');
+}
+
+String _trimMultiplier(double v) {
+  if (v == v.roundToDouble()) return v.toStringAsFixed(0);
+  return v.toStringAsFixed(1);
+}
+
+class _UnitInfo extends StatelessWidget {
+  const _UnitInfo({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: _c.muted),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: _c.text,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3995,10 +3875,9 @@ OutlineInputBorder _inputBorder(Color color) {
 // ─── Arena detail tab widgets ─────────────────────────────────────────────────
 
 class _DetailsTab extends StatelessWidget {
-  const _DetailsTab({required this.parent, required this.scrollCtrl});
+  const _DetailsTab({required this.parent});
 
-  final _ArenaDetailSheetState parent;
-  final ScrollController scrollCtrl;
+  final _ArenaDetailPageState parent;
 
   @override
   Widget build(BuildContext context) {
@@ -4006,7 +3885,6 @@ class _DetailsTab extends StatelessWidget {
     final p = parent;
     final dayLabels = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return ListView(
-      controller: scrollCtrl,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
         p._field('Name', p._nameCtrl, p._nameCtrl.text, required: true),
@@ -4070,9 +3948,8 @@ class _DetailsTab extends StatelessWidget {
 const _kGooglePlacesKey = 'AIzaSyDpJ1S4JYO-jVA6BgzxM1LYjdSvrSrTkTo';
 
 class _LocationTab extends StatefulWidget {
-  const _LocationTab({required this.parent, required this.scrollCtrl});
-  final _ArenaDetailSheetState parent;
-  final ScrollController scrollCtrl;
+  const _LocationTab({required this.parent});
+  final _ArenaDetailPageState parent;
   @override
   State<_LocationTab> createState() => _LocationTabState();
 }
@@ -4186,7 +4063,6 @@ class _LocationTabState extends State<_LocationTab> {
     final scheme = Theme.of(context).colorScheme;
     final p = widget.parent;
     return ListView(
-      controller: widget.scrollCtrl,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
         // ── Places search ──────────────────────────────────────────────
@@ -4268,10 +4144,9 @@ class _LocationTabState extends State<_LocationTab> {
 }
 
 class _PhotosTab extends StatelessWidget {
-  const _PhotosTab({required this.parent, required this.scrollCtrl});
+  const _PhotosTab({required this.parent});
 
-  final _ArenaDetailSheetState parent;
-  final ScrollController scrollCtrl;
+  final _ArenaDetailPageState parent;
 
   @override
   Widget build(BuildContext context) {
@@ -4279,7 +4154,6 @@ class _PhotosTab extends StatelessWidget {
     final p = parent;
     final urls = p._photoUrls;
     return ListView(
-      controller: scrollCtrl,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
         Text(
@@ -4376,10 +4250,9 @@ class _PhotosTab extends StatelessWidget {
 }
 
 class _FacilitiesTab extends StatelessWidget {
-  const _FacilitiesTab({required this.parent, required this.scrollCtrl});
+  const _FacilitiesTab({required this.parent});
 
-  final _ArenaDetailSheetState parent;
-  final ScrollController scrollCtrl;
+  final _ArenaDetailPageState parent;
 
   @override
   Widget build(BuildContext context) {
@@ -4424,7 +4297,6 @@ class _FacilitiesTab extends StatelessWidget {
       ),
     ];
     return ListView.separated(
-      controller: scrollCtrl,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       itemCount: amenities.length,
       separatorBuilder: (_, __) => Divider(height: 1, color: _c.line),
@@ -4487,6 +4359,63 @@ class _TabSectionLabel extends StatelessWidget {
   }
 }
 
+class _UnitsTab extends ConsumerWidget {
+  const _UnitsTab({required this.parent});
+  final _ArenaDetailPageState parent;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    _c = _C.of(context);
+    final arenaAsync = ref.watch(arenaDetailByIdProvider(parent.widget.arena.id));
+    final fallback = parent.widget.arena;
+    final arena = arenaAsync.maybeWhen(
+      data: (a) => a ?? fallback,
+      orElse: () => fallback,
+    );
+    if (arena.units.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_box_outlined, size: 52, color: _c.muted),
+            SizedBox(height: 16),
+            Text(
+              'No units yet',
+              style: TextStyle(
+                  color: _c.text,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Add your first unit — a cricket net, full ground, or any bookable space.',
+              style: TextStyle(color: _c.muted, fontSize: 14, height: 1.6),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 48),
+      itemCount: arena.units.length,
+      separatorBuilder: (_, __) => SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final unit = arena.units[index];
+        return _UnitCard(
+          unit: unit,
+          onTap: () => context.push(
+              '${AppRoutes.arenaUnitDetail}/${arena.id}/${unit.id}'),
+          onEdit: () => parent._openUnitSheet(arena, unit),
+          onDelete: () => parent._deleteUnitOnDetail(unit),
+        );
+      },
+    );
+  }
+}
+
 class _ShareTab extends ConsumerStatefulWidget {
   const _ShareTab({required this.arena});
   final ArenaListing arena;
@@ -4502,6 +4431,46 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
   String? _customSlug;
   String? _citySlug;
   String? _arenaSlug;
+
+  // Microsite state
+  final _taglineCtrl = TextEditingController();
+  final _brandColorCtrl = TextEditingController();
+  String? _logoUrl;
+  String? _brandColor;
+  int _coverPhotoIndex = 0;
+  List<MicrositeLink> _links = const [];
+  List<String> _linkIds = const [];
+  int _linkIdSeq = 0;
+  bool _logoUploading = false;
+  bool _savingMicrosite = false;
+  bool _micrositeSaved = false;
+
+  String _nextLinkId() => 'link-${_linkIdSeq++}-${DateTime.now().microsecondsSinceEpoch}';
+
+  static const _brandColorPresets = <(String, String)>[
+    ('Forest',   '#2BA84A'),
+    ('Electric', '#C8FF3E'),
+    ('Royal',    '#3E63FF'),
+    ('Crimson',  '#E11D48'),
+    ('Amber',    '#F59E0B'),
+    ('Violet',   '#7C3AED'),
+    ('Teal',     '#14B8A6'),
+    ('Charcoal', '#1A1A1A'),
+  ];
+
+  static const _linkKinds = [
+    ('instagram', Icons.camera_alt_outlined, 'Instagram'),
+    ('youtube', Icons.smart_display_outlined, 'YouTube'),
+    ('whatsapp', Icons.chat_bubble_outline_rounded, 'WhatsApp'),
+    ('website', Icons.language_rounded, 'Website'),
+    ('menu', Icons.restaurant_menu_rounded, 'Menu'),
+    ('custom', Icons.link_rounded, 'Custom'),
+  ];
+
+  static final _hexRegex = RegExp(r'^#[0-9a-fA-F]{6}$');
+  static final _urlRegex = RegExp(
+      r'^(https?://|mailto:|tel:|wa\.me/)',
+      caseSensitive: false);
 
   String get _publicUrl {
     final a = widget.arena;
@@ -4535,55 +4504,158 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
     _citySlug = widget.arena.citySlug;
     _arenaSlug = widget.arena.arenaSlug;
     _slugCtrl.text = _customSlug ?? '';
+    _logoUrl = widget.arena.logoUrl;
+    _brandColor = widget.arena.brandColor;
+    _brandColorCtrl.text = _brandColor ?? '';
+    _taglineCtrl.text = widget.arena.tagline ?? '';
+    _coverPhotoIndex = widget.arena.coverPhotoIndex;
+    _links = List<MicrositeLink>.from(widget.arena.micrositeLinks);
+    _linkIds = [for (final _ in _links) _nextLinkId()];
   }
 
   @override
   void dispose() {
     _slugCtrl.dispose();
+    _taglineCtrl.dispose();
+    _brandColorCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _saveSlug() async {
-    final rawSlug = _slugCtrl.text.trim();
-    final slug = _normaliseSlug(rawSlug);
-    if (rawSlug.isNotEmpty && slug.length < 3) {
+  Future<void> _openPublicPage() async {
+    final slug = _customSlug?.trim().isNotEmpty == true
+        ? _customSlug!.trim()
+        : _arenaSlug?.trim();
+    if (slug == null || slug.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Custom link must be at least 3 letters or numbers')),
+        const SnackBar(content: Text('Set a custom link first')),
       );
       return;
     }
-    setState(() {
-      _saving = true;
-      _saved = false;
-    });
+    final uri = Uri.parse('https://www.swingcricketapp.com/arena/$slug');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _pickLogo() async {
+    final picker = ImagePicker();
+    final file = await picker.pickImage(source: ImageSource.gallery);
+    if (file == null) return;
+    setState(() => _logoUploading = true);
     try {
-      final updated =
-          await ref.read(hostArenaBookingRepositoryProvider).updateArena(
-        widget.arena.id,
-        {'customSlug': slug.isEmpty ? null : slug},
-      );
-      ref.invalidate(arenaDetailProvider);
-      ref.invalidate(arenaDetailByIdProvider(widget.arena.id));
-      ref.invalidate(ownedArenasProvider);
-      setState(() {
-        _customSlug = updated.customSlug;
-        _citySlug = updated.citySlug;
-        _arenaSlug = updated.arenaSlug;
-        _slugCtrl.text = updated.customSlug ?? '';
-        _saved = true;
+      final compressed = await ImageCompressor.compress(file.path);
+      if (compressed == null) return;
+      final form = FormData.fromMap({
+        'folder': 'arenas/${widget.arena.id}/branding',
+        'file': await MultipartFile.fromFile(compressed.path,
+            filename: '${p.basenameWithoutExtension(file.name)}.jpg'),
       });
-      await Future.delayed(Duration(seconds: 2));
-      if (mounted) setState(() => _saved = false);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save: $e')),
-        );
+      final response = await ApiClient.instance.dio.post(
+        '/media/upload',
+        data: form,
+        options: Options(
+          contentType: 'multipart/form-data',
+          sendTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
+        ),
+      );
+      final payload = response.data as Map<String, dynamic>;
+      final data = (payload['data'] ?? payload) as Map<String, dynamic>;
+      final url = (data['publicUrl'] ?? data['url'] ?? data['link']) as String?;
+      if (url != null && url.isNotEmpty && mounted) {
+        setState(() {
+          _logoUrl = url;
+          _micrositeSaved = false;
+        });
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Logo upload failed: $e')),
+      );
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) setState(() => _logoUploading = false);
     }
+  }
+
+  void _setBrandColor(String hex) {
+    setState(() {
+      _brandColor = hex;
+      _brandColorCtrl.text = hex;
+      _micrositeSaved = false;
+    });
+  }
+
+  void _addLink() {
+    if (_links.length >= 20) return;
+    setState(() {
+      _links = [
+        ..._links,
+        const MicrositeLink(kind: 'instagram', label: 'Instagram', url: ''),
+      ];
+      _linkIds = [..._linkIds, _nextLinkId()];
+      _micrositeSaved = false;
+    });
+  }
+
+  void _updateLink(int index, MicrositeLink updated) {
+    setState(() {
+      _links = [
+        for (int i = 0; i < _links.length; i++)
+          if (i == index) updated else _links[i],
+      ];
+      _micrositeSaved = false;
+    });
+  }
+
+  void _removeLink(int index) {
+    setState(() {
+      _links = [
+        for (int i = 0; i < _links.length; i++)
+          if (i != index) _links[i],
+      ];
+      _linkIds = [
+        for (int i = 0; i < _linkIds.length; i++)
+          if (i != index) _linkIds[i],
+      ];
+      _micrositeSaved = false;
+    });
+  }
+
+  void _reorderLinks(int oldIndex, int newIndex) {
+    setState(() {
+      final list = [..._links];
+      final ids = [..._linkIds];
+      if (newIndex > oldIndex) newIndex -= 1;
+      final item = list.removeAt(oldIndex);
+      list.insert(newIndex, item);
+      final id = ids.removeAt(oldIndex);
+      ids.insert(newIndex, id);
+      _links = list;
+      _linkIds = ids;
+      _micrositeSaved = false;
+    });
+  }
+
+  String? _validateMicrosite() {
+    if (_brandColor != null &&
+        _brandColor!.isNotEmpty &&
+        !_hexRegex.hasMatch(_brandColor!)) {
+      return 'Brand color must be #RRGGBB (e.g. #16A34A)';
+    }
+    if ((_taglineCtrl.text).length > 120) {
+      return 'Tagline must be 120 characters or fewer';
+    }
+    for (final link in _links) {
+      if (link.url.trim().isEmpty) {
+        return 'All links need a URL';
+      }
+      if (link.kind == 'custom' && link.label.trim().isEmpty) {
+        return 'Custom links need a label';
+      }
+      if (!_urlRegex.hasMatch(link.url.trim())) {
+        return 'Link URL must start with http://, https://, mailto:, tel:, or wa.me/';
+      }
+    }
+    return null;
   }
 
   void _copyLink() {
@@ -4598,119 +4670,165 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
     Share.share('https://$_publicUrl', subject: widget.arena.name);
   }
 
+  Future<void> _saveAll() async {
+    final rawSlug = _slugCtrl.text.trim();
+    final slug = _normaliseSlug(rawSlug);
+    if (rawSlug.isNotEmpty && slug.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Custom link must be at least 3 letters or numbers')),
+      );
+      return;
+    }
+    final err = _validateMicrosite();
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      return;
+    }
+
+    setState(() {
+      _savingMicrosite = true;
+      _micrositeSaved = false;
+      _saving = true;
+      _saved = false;
+    });
+
+    final photoMax = widget.arena.photoUrls.length - 1;
+    final clampedCover =
+        photoMax < 0 ? 0 : _coverPhotoIndex.clamp(0, photoMax);
+    final payload = <String, dynamic>{
+      'customSlug': slug.isEmpty ? null : slug,
+      'coverPhotoIndex': clampedCover,
+    };
+    final brand = _brandColor?.trim();
+    if (brand != null && brand.isNotEmpty) payload['brandColor'] = brand;
+    if (_logoUrl != null && _logoUrl!.isNotEmpty) payload['logoUrl'] = _logoUrl;
+    final tagline = _taglineCtrl.text.trim();
+    if (tagline.isNotEmpty) payload['tagline'] = tagline;
+    if (_links.isNotEmpty) {
+      payload['micrositeLinks'] = [
+        for (int i = 0; i < _links.length; i++)
+          _links[i].copyWith(order: i).toJson(),
+      ];
+    }
+    try {
+      final updated = await ref
+          .read(hostArenaBookingRepositoryProvider)
+          .updateArena(widget.arena.id, payload);
+      ref.invalidate(arenaDetailProvider);
+      ref.invalidate(arenaDetailByIdProvider(widget.arena.id));
+      ref.invalidate(ownedArenasProvider);
+      if (!mounted) return;
+      setState(() {
+        _customSlug = updated.customSlug;
+        _citySlug = updated.citySlug;
+        _arenaSlug = updated.arenaSlug;
+        _slugCtrl.text = updated.customSlug ?? '';
+        _saving = false;
+        _saved = true;
+        _savingMicrosite = false;
+        _micrositeSaved = true;
+      });
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) {
+        setState(() {
+          _saved = false;
+          _micrositeSaved = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _savingMicrosite = false;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Save failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     _c = _C.of(context);
+    final arena = widget.arena;
+    final hasPhotos = arena.photoUrls.isNotEmpty;
+    final isSaving = _saving || _savingMicrosite;
+    final justSaved = _saved || _micrositeSaved;
+
+    Widget divider() => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Container(height: 1, color: _c.line),
+        );
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
       children: [
-        // Public link display
-        const _TabSectionLabel('Your Booking Link'),
-        SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          decoration: BoxDecoration(
-            color: _c.bg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: _c.line),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.link_rounded, size: 16, color: _c.muted),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _publicUrl,
-                  style: TextStyle(
-                    color: _c.text,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: 10),
-        Row(
+Row(
           children: [
+            Icon(Icons.link_rounded, size: 16, color: _c.muted),
+            SizedBox(width: 8),
             Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _copyLink,
-                icon: Icon(Icons.copy_rounded, size: 15),
-                label: Text('Copy'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _c.text,
-                  side: BorderSide(color: _c.line),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+              child: Text(
+                _publicUrl,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _c.text,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'monospace',
                 ),
               ),
             ),
-            SizedBox(width: 10),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _shareLink,
-                icon: Icon(Icons.share_rounded, size: 15),
-                label: Text('Share'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _c.accent,
-                  foregroundColor: _c.onAccent,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
+            IconButton(
+              tooltip: 'Open',
+              onPressed: _openPublicPage,
+              icon: Icon(Icons.open_in_new_rounded, size: 18, color: _c.muted),
+              visualDensity: VisualDensity.compact,
+            ),
+            IconButton(
+              tooltip: 'Copy',
+              onPressed: _copyLink,
+              icon: Icon(Icons.copy_rounded, size: 18, color: _c.muted),
+              visualDensity: VisualDensity.compact,
+            ),
+            IconButton(
+              tooltip: 'Share',
+              onPressed: _shareLink,
+              icon: Icon(Icons.share_rounded, size: 18, color: _c.muted),
+              visualDensity: VisualDensity.compact,
             ),
           ],
         ),
-        SizedBox(height: 28),
-
-        // Custom slug
-        const _TabSectionLabel('Custom Link'),
-        SizedBox(height: 4),
-        Text(
-          'Set a short name so customers can remember your link easily.',
-          style: TextStyle(
-              color: _c.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              height: 1.5),
-        ),
-        SizedBox(height: 12),
+        SizedBox(height: 14),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: EdgeInsets.only(top: 14),
-              child: Text(
-                'swingcricketapp.com/',
-                style: TextStyle(
-                    color: _c.muted, fontSize: 13, fontWeight: FontWeight.w600),
+            Text(
+              'swingcricketapp.com/',
+              style: TextStyle(
+                color: _c.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'monospace',
               ),
             ),
             Expanded(
               child: TextField(
                 controller: _slugCtrl,
                 style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: _c.text),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: _c.text,
+                    fontFamily: 'monospace'),
                 decoration: InputDecoration(
                   hintText: 'your-arena-name',
                   hintStyle: TextStyle(color: _c.muted, fontSize: 13),
-                  filled: true,
-                  fillColor: _c.surface,
+                  isDense: true,
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: _c.line)),
-                  enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: _c.line)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: _c.deep, width: 1.4)),
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
                 ),
                 onChanged: (value) => setState(() {
                   _saved = false;
@@ -4720,26 +4838,505 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
             ),
           ],
         ),
-        SizedBox(height: 10),
-        FilledButton(
-          onPressed: _saving ? null : _saveSlug,
-          style: FilledButton.styleFrom(
-            backgroundColor: _saved ? const Color(0xFF059669) : _c.accent,
-            foregroundColor: _c.onAccent,
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+
+        divider(),
+
+Row(
+          children: [
+            GestureDetector(
+              onTap: _logoUploading ? null : _pickLogo,
+              child: Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: _c.surface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: _logoUploading
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _c.accent),
+                      )
+                    : _logoUrl != null && _logoUrl!.isNotEmpty
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.network(_logoUrl!, fit: BoxFit.cover),
+                          )
+                        : Icon(Icons.add_a_photo_outlined,
+                            size: 26, color: _c.muted),
+              ),
+            ),
+            SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _logoUrl != null && _logoUrl!.isNotEmpty
+                        ? 'Square logo set'
+                        : 'Tap to add a square logo',
+                    style: TextStyle(
+                        color: _c.text,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Shown next to your arena name on the public page.',
+                    style: TextStyle(
+                        color: _c.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4),
+                  ),
+                  if (_logoUrl != null && _logoUrl!.isNotEmpty) ...[
+                    SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _logoUrl = null;
+                        _micrositeSaved = false;
+                      }),
+                      child: Text(
+                        'Remove',
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        divider(),
+
+Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          children: [
+            for (final (_, hex) in _brandColorPresets)
+              _BrandSwatch(
+                hex: hex,
+                selected: _brandColor?.toLowerCase() == hex.toLowerCase(),
+                onTap: () => _setBrandColor(hex),
+              ),
+          ],
+        ),
+        SizedBox(height: 12),
+        TextField(
+          controller: _brandColorCtrl,
+          style: TextStyle(
+              color: _c.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'monospace'),
+          decoration: InputDecoration(
+            hintText: '#RRGGBB',
+            hintStyle: TextStyle(color: _c.muted, fontSize: 13),
+            filled: true,
+            fillColor: _c.surface,
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
           ),
-          child: _saving
+          onChanged: (v) => setState(() {
+            _brandColor = v.trim();
+            _micrositeSaved = false;
+          }),
+        ),
+
+        divider(),
+
+TextField(
+          controller: _taglineCtrl,
+          maxLength: 120,
+          style: TextStyle(color: _c.text, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'e.g. Premium turf, fair pricing, family vibe',
+            hintStyle: TextStyle(color: _c.muted, fontSize: 13),
+            filled: true,
+            fillColor: _c.surface,
+            isDense: true,
+            counterStyle: TextStyle(color: _c.muted, fontSize: 10),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+          ),
+          onChanged: (_) => setState(() => _micrositeSaved = false),
+        ),
+        SizedBox(height: 4),
+        Text(
+          'Short subhead shown under your arena name.',
+          style: TextStyle(
+              color: _c.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              height: 1.4),
+        ),
+
+        divider(),
+
+if (!hasPhotos)
+          Text(
+            'Add photos in the Photos tab first.',
+            style: TextStyle(
+                color: _c.muted, fontSize: 12, fontWeight: FontWeight.w600),
+          )
+        else
+          SizedBox(
+            height: 72,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: arena.photoUrls.length,
+              separatorBuilder: (_, __) => SizedBox(width: 10),
+              itemBuilder: (_, i) {
+                final isCover = i == _coverPhotoIndex;
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    _coverPhotoIndex = i;
+                    _micrositeSaved = false;
+                  }),
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 110,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isCover ? _c.text : Colors.transparent,
+                            width: isCover ? 2 : 0,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(9),
+                          child: Image.network(arena.photoUrls[i],
+                              fit: BoxFit.cover),
+                        ),
+                      ),
+                      if (isCover)
+                        Positioned(
+                          top: 4,
+                          left: 4,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: _c.text,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Icon(Icons.star_rounded,
+                                size: 12, color: _c.bg),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+
+        divider(),
+
+Text(
+          'Book, Call, and Directions are added automatically from your phone, address, and units.',
+          style: TextStyle(
+              color: _c.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              height: 1.4),
+        ),
+        SizedBox(height: 12),
+        if (_links.isNotEmpty)
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            itemCount: _links.length,
+            onReorder: _reorderLinks,
+            itemBuilder: (context, i) => Padding(
+              key: ValueKey(_linkIds[i]),
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _MicrositeLinkRow(
+                link: _links[i],
+                index: i,
+                kinds: _linkKinds,
+                onChanged: (updated) => _updateLink(i, updated),
+                onDelete: () => _removeLink(i),
+              ),
+            ),
+          ),
+        TextButton.icon(
+          onPressed: _links.length >= 20 ? null : _addLink,
+          icon: Icon(Icons.add_rounded, size: 16, color: _c.accent),
+          label: Text(
+            'Add link',
+            style: TextStyle(
+                color: _c.accent, fontWeight: FontWeight.w800, fontSize: 13),
+          ),
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            minimumSize: Size.zero,
+            alignment: Alignment.centerLeft,
+          ),
+        ),
+
+        SizedBox(height: 28),
+
+        FilledButton(
+          onPressed: isSaving ? null : _saveAll,
+          style: FilledButton.styleFrom(
+            backgroundColor:
+                justSaved ? const Color(0xFF059669) : _c.accent,
+            foregroundColor: _c.onAccent,
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          child: isSaving
               ? SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: _c.onAccent))
-              : Text(_saved ? 'Saved!' : 'Save Custom Link',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+                      strokeWidth: 2, color: _c.onAccent),
+                )
+              : Text(justSaved ? 'Saved!' : 'Save',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 15)),
         ),
       ],
+    );
+  }
+}
+
+class _SiteLabel extends StatelessWidget {
+  const _SiteLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Text(
+      text.toUpperCase(),
+      style: TextStyle(
+        color: _c.muted,
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.0,
+      ),
+    );
+  }
+}
+
+Color _parseHex(String hex) {
+  final clean = hex.replaceFirst('#', '');
+  final value = int.tryParse(clean, radix: 16) ?? 0;
+  return Color(0xFF000000 | value);
+}
+
+class _BrandSwatch extends StatelessWidget {
+  const _BrandSwatch({
+    required this.hex,
+    required this.selected,
+    required this.onTap,
+  });
+  final String hex;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final color = _parseHex(hex);
+    final isLight = hex.toUpperCase() == '#FFFFFF';
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected
+                ? _c.text
+                : (isLight ? _c.line : Colors.transparent),
+            width: selected ? 2.5 : 1,
+          ),
+        ),
+        alignment: Alignment.center,
+        child: selected
+            ? Icon(Icons.check_rounded,
+                size: 18, color: isLight ? Colors.black : Colors.white)
+            : null,
+      ),
+    );
+  }
+}
+
+class _MicrositeLinkRow extends StatelessWidget {
+  const _MicrositeLinkRow({
+    required this.link,
+    required this.index,
+    required this.kinds,
+    required this.onChanged,
+    required this.onDelete,
+  });
+  final MicrositeLink link;
+  final int index;
+  final List<(String, IconData, String)> kinds;
+  final ValueChanged<MicrositeLink> onChanged;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final currentKind = kinds.firstWhere(
+      (k) => k.$1 == link.kind,
+      orElse: () => kinds.last,
+    );
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _c.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Kind picker — dropdown
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: currentKind.$1,
+              isExpanded: true,
+              isDense: true,
+              icon: Icon(Icons.expand_more_rounded,
+                  size: 18, color: _c.muted),
+              style: TextStyle(
+                color: _c.text,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+              dropdownColor: _c.surface,
+              borderRadius: BorderRadius.circular(8),
+              onChanged: (v) {
+                if (v == null) return;
+                final picked = kinds.firstWhere((k) => k.$1 == v,
+                    orElse: () => kinds.last);
+                final newLabel = v == 'custom' ? link.label : picked.$3;
+                onChanged(link.copyWith(kind: v, label: newLabel));
+              },
+              items: [
+                for (final (kind, icon, label) in kinds)
+                  DropdownMenuItem(
+                    value: kind,
+                    child: Row(
+                      children: [
+                        Icon(icon, size: 16, color: _c.muted),
+                        SizedBox(width: 10),
+                        Text(label),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (link.kind == 'custom') ...[
+            SizedBox(height: 10),
+            TextFormField(
+              initialValue: link.label,
+              maxLength: 40,
+              style: TextStyle(color: _c.text, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Label (e.g. Book a coach)',
+                hintStyle: TextStyle(color: _c.muted, fontSize: 13),
+                counterText: '',
+                isDense: true,
+                filled: true,
+                fillColor: _c.bg,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 12),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+              ),
+              onChanged: (v) => onChanged(link.copyWith(label: v)),
+            ),
+          ],
+          SizedBox(height: 8),
+          // URL
+          TextFormField(
+            initialValue: link.url,
+            keyboardType: TextInputType.url,
+            style: TextStyle(
+                color: _c.text, fontSize: 13, fontFamily: 'monospace'),
+            decoration: InputDecoration(
+              hintText: 'https://… or wa.me/91…',
+              hintStyle: TextStyle(color: _c.muted, fontSize: 12),
+              isDense: true,
+              filled: true,
+              fillColor: _c.bg,
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 12),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+            ),
+            onChanged: (v) => onChanged(link.copyWith(url: v)),
+          ),
+          SizedBox(height: 10),
+          // Footer: drag handle + enabled + delete
+          Row(
+            children: [
+              ReorderableDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Icon(Icons.drag_indicator_rounded,
+                      size: 18, color: _c.muted),
+                ),
+              ),
+              SizedBox(width: 4),
+              Text(
+                link.enabled ? 'Visible on site' : 'Hidden',
+                style: TextStyle(
+                  color: _c.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Transform.scale(
+                scale: 0.85,
+                child: Switch(
+                  value: link.enabled,
+                  onChanged: (v) => onChanged(link.copyWith(enabled: v)),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              SizedBox(width: 4),
+              GestureDetector(
+                onTap: onDelete,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.delete_outline_rounded,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

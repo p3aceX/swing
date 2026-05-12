@@ -2035,8 +2035,13 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
             child: InkWell(
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(16)),
-              onTap: () =>
-                  context.push('${AppRoutes.arenaProfile}/${arena.id}'),
+              onTap: () => Navigator.of(context)
+                  .push(
+                    MaterialPageRoute(
+                      builder: (_) => ArenaDetailPage(arena: arena),
+                    ),
+                  )
+                  .then((_) => ref.invalidate(ownedArenasProvider)),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                 child: Row(
@@ -2182,38 +2187,31 @@ class _ArenaCardState extends ConsumerState<_ArenaCard> {
             ),
           ),
           Divider(height: 1, color: scheme.outline),
-          // Action buttons
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _CardAction(
-                    icon: Icons.edit_outlined,
-                    label: 'Edit Arena',
-                    onTap: () => showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      useSafeArea: true,
-                      backgroundColor: scheme.surface,
-                      builder: (_) => ArenaDetailSheet(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context)
+                  .push(
+                    MaterialPageRoute(
+                      builder: (_) => ArenaDetailPage(
                         arena: arena,
-                        startEditing: true,
+                        initialTabIndex: 4,
                       ),
-                    ).then((_) => ref.invalidate(ownedArenasProvider)),
-                  ),
+                    ),
+                  )
+                  .then((_) => ref.invalidate(ownedArenasProvider)),
+              icon: Icon(Icons.layers_rounded, size: 16),
+              label: Text(
+                'Manage Units',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _CardAction(
-                    icon: Icons.layers_rounded,
-                    label: 'Manage Units',
-                    filled: true,
-                    onTap: () =>
-                        context.push('${AppRoutes.arenaProfile}/${arena.id}'),
-                  ),
-                ),
-              ],
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: scheme.onSurface,
+                minimumSize: const Size.fromHeight(36),
+              ),
             ),
           ),
         ],
@@ -2301,52 +2299,6 @@ class _LinkAction extends StatelessWidget {
       padding: const EdgeInsets.all(6),
       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
       icon: Icon(icon, color: scheme.onSurface.withValues(alpha: 0.7)),
-    );
-  }
-}
-
-class _CardAction extends StatelessWidget {
-  const _CardAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.filled = false,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final bg = filled ? scheme.onSurface : scheme.surface;
-    final fg = filled ? scheme.surface : scheme.onSurface;
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 15, color: fg),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
