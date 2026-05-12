@@ -1,3 +1,4 @@
+# build-stamp: 2026-05-13-microsite
 FROM node:20-bookworm-slim AS base
 WORKDIR /app
 
