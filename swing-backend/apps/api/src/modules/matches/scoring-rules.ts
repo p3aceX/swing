@@ -438,18 +438,96 @@ export function validateBallShape(ball: ScoringBallLike) {
   }
 }
 
+/**
+ * Pure validator for an Impact Player substitution. Throws an Error whose
+ * message uses one of the documented codes from the spec; callers in the
+ * service layer translate that into an AppError.
+ *
+ * Rules (matches Score.md §4.6):
+ *   1. The match must have the Impact Player rule enabled.
+ *   2. Match must be IN_PROGRESS.
+ *   3. Match must be ≥ 10 overs per side (rule is suspended below that).
+ *   4. The swapping team must not have used their substitution already.
+ *   5. The incoming player must be in the team's pre-declared named-4 list.
+ *   6. The outgoing player must currently be in the XI.
+ *   7. The incoming player must NOT already be in the XI.
+ *   8. Window: start of over (legalBalls % 6 === 0) or fall of wicket on
+ *      the most recent ball. Skipped when no innings is live (matches
+ *      between-innings — equivalent to start of an over).
+ *   9. The outgoing player must NOT currently be at the crease.
+ */
+export function validateImpactPlayerSwap(params: {
+  hasImpactPlayer: boolean;
+  matchStatus: string;
+  maxOversPerSide: number;
+  alreadyUsed: boolean;
+  namedSubs: string[];
+  xi: string[];
+  outgoingPlayerId: string;
+  incomingPlayerId: string;
+  liveInnings: {
+    legalBalls: number;
+    lastBallWasWicket: boolean;
+    strikerId: string | null;
+    nonStrikerId: string | null;
+  } | null;
+}) {
+  if (!params.hasImpactPlayer) {
+    throw new Error("IMPACT_PLAYER_DISABLED");
+  }
+  if (params.matchStatus !== "IN_PROGRESS") {
+    throw new Error("MATCH_NOT_IN_PROGRESS");
+  }
+  if (params.maxOversPerSide < 10) {
+    throw new Error("IMPACT_PLAYER_NOT_ALLOWED_UNDER_10_OVERS");
+  }
+  if (params.alreadyUsed) {
+    throw new Error("IMPACT_PLAYER_ALREADY_USED");
+  }
+  if (!params.namedSubs.includes(params.incomingPlayerId)) {
+    throw new Error("IMPACT_PLAYER_NOT_NAMED");
+  }
+  if (!params.xi.includes(params.outgoingPlayerId)) {
+    throw new Error("IMPACT_PLAYER_OUTGOING_INVALID");
+  }
+  if (params.xi.includes(params.incomingPlayerId)) {
+    throw new Error("IMPACT_PLAYER_DUPLICATE");
+  }
+
+  if (params.liveInnings) {
+    const midOver = params.liveInnings.legalBalls % 6 !== 0;
+    if (midOver && !params.liveInnings.lastBallWasWicket) {
+      throw new Error("IMPACT_PLAYER_WINDOW");
+    }
+    const atCrease = new Set(
+      [params.liveInnings.strikerId, params.liveInnings.nonStrikerId].filter(
+        (v): v is string => !!v,
+      ),
+    );
+    if (atCrease.has(params.outgoingPlayerId)) {
+      throw new Error("IMPACT_PLAYER_OUTGOING_ACTIVE");
+    }
+  }
+}
+
 export function validateBallAgainstInningsState(params: {
   currentLegalBalls: number;
   maxLegalBalls: number;
   currentWickets: number;
+  /**
+   * Maximum wickets the innings can absorb before ending. Defaults to 10
+   * (10 batters out = all-out). Super overs override to 2.
+   */
+  maxWickets?: number;
   currentRuns: number;
   targetRuns?: number | null;
   ball: ScoringBallLike;
 }) {
+  const maxWickets = params.maxWickets ?? 10;
   if (params.currentLegalBalls >= params.maxLegalBalls) {
     throw new Error("The innings has already reached the legal-ball limit");
   }
-  if (params.currentWickets >= 10) {
+  if (params.currentWickets >= maxWickets) {
     throw new Error("The innings is already all out");
   }
   if (params.targetRuns != null && params.currentRuns >= params.targetRuns) {

@@ -1322,6 +1322,13 @@ model Match {
   verifiedAt          DateTime?
   isRanked            Boolean           @default(false)
   hasImpactPlayer     Boolean           @default(false)
+  // Named substitutes per team. ICC playing condition is up to 4 named
+  // subs declared with the team sheet. Stored as PlayerProfile IDs.
+  namedImpactSubsTeamA String[]         @default([])
+  namedImpactSubsTeamB String[]         @default([])
+  // Has each side already used their one Impact Player substitution?
+  impactPlayerUsedTeamA Boolean         @default(false)
+  impactPlayerUsedTeamB Boolean         @default(false)
   matchmakingId       String?
   activeScorerId      String?
   highlights          Json              @default("[]")
@@ -2393,6 +2400,14 @@ model Arena {
   arenaSlug    String?
   customSlug   String?
   isPublicPage Boolean @default(true)
+
+  // Public microsite — owner-branded landing page rendered at /arena/:slug.
+  // Owner controls these from the swing-arena app's Microsite editor.
+  brandColor       String? // "#RRGGBB" — accent for CTAs and headings
+  logoUrl          String? // square logo, distinct from photoUrls hero gallery
+  tagline          String? // short subhead under name on microsite
+  coverPhotoIndex  Int     @default(0) // index into photoUrls used as hero
+  micrositeLinks   Json?   // [{kind, label, url, order, enabled}]
 
   @@unique([citySlug, arenaSlug])
   @@unique([customSlug])
