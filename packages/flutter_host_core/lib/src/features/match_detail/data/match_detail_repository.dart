@@ -527,6 +527,17 @@ class HostMatchDetailRepository {
       _str(tournament['name']),
       _str(match['tournamentName']),
     ]);
+    final tournamentIdValue = _firstNonEmpty([
+      _str(tournament['id']),
+      _str(match['tournamentId']),
+    ]);
+    // Either the nested `tournament.myRole` (new payload) or the flat
+    // `match.tournamentRole` (kept for backwards compat). 'host' /
+    // 'participant' / null.
+    final tournamentRoleValue = _firstNonEmpty([
+      _str(tournament['myRole']),
+      _str(match['tournamentRole']),
+    ]).toLowerCase();
     final competitionLabel = _firstNonEmpty([
       tournamentLabel,
       _str(match['competitionName']),
@@ -612,6 +623,12 @@ class HostMatchDetailRepository {
         'B' => _orNull(_str(match['teamAShortName'])),
         _ => _orNull(_str(match['teamBShortName'])),
       },
+      tournamentId: tournamentIdValue.isEmpty ? null : tournamentIdValue,
+      tournamentName: tournamentLabel.isEmpty ? null : tournamentLabel,
+      tournamentRole: (tournamentRoleValue == 'host' ||
+              tournamentRoleValue == 'participant')
+          ? tournamentRoleValue
+          : null,
     );
   }
 

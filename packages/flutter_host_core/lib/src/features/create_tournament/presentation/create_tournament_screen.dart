@@ -214,16 +214,34 @@ class _HostCreateTournamentScreenState
   void _next() {
     FocusScope.of(context).unfocus();
     if (!_validateCurrentStep()) return;
+    // In edit mode the primary button is "Save" on every step — submit
+    // directly instead of forcing the user through all 6 pages. A
+    // separate "Next" button on the nav row still lets the user step
+    // through pages without saving (see _advance).
+    if (_isEditMode) {
+      _submit();
+      return;
+    }
     if (_currentStep < _totalSteps - 1) {
-      setState(() => _currentStep++);
-      _pageController.animateToPage(
-        _currentStep,
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeInOut,
-      );
+      _advance();
     } else {
       _submit();
     }
+  }
+
+  /// Step forward without submitting. Used by the "Next" button in edit
+  /// mode so the user can scrub between pages while keeping unsaved
+  /// changes in memory.
+  void _advance() {
+    FocusScope.of(context).unfocus();
+    if (!_validateCurrentStep()) return;
+    if (_currentStep >= _totalSteps - 1) return;
+    setState(() => _currentStep++);
+    _pageController.animateToPage(
+      _currentStep,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeInOut,
+    );
   }
 
   void _back() {
@@ -571,9 +589,11 @@ class _HostCreateTournamentScreenState
             step: _currentStep,
             totalSteps: _totalSteps,
             isSubmitting: _isSubmitting,
+            isEditMode: _isEditMode,
             canSkip: _currentStep == 4,
             onBack: _back,
             onNext: _next,
+            onForward: _advance,
             onSkip: _skipStep,
           ),
         ],
@@ -696,25 +716,83 @@ class _NavRow extends StatelessWidget {
     required this.step,
     required this.totalSteps,
     required this.isSubmitting,
+    required this.isEditMode,
     required this.canSkip,
     required this.onBack,
     required this.onNext,
+    required this.onForward,
     required this.onSkip,
   });
 
   final int step;
   final int totalSteps;
   final bool isSubmitting;
+  final bool isEditMode;
   final bool canSkip;
   final VoidCallback onBack;
   final VoidCallback onNext;
+  final VoidCallback onForward;
   final VoidCallback onSkip;
 
   @override
   Widget build(BuildContext context) {
     final isLast = step == totalSteps - 1;
+    final primaryLabel = isEditMode
+        ? 'Save Tournament'
+        : (isLast ? 'Create Tournament' : 'Continue');
     final bottom = MediaQuery.of(context).padding.bottom;
 
+    final backButton = step > 0
+        ? GestureDetector(
+            onTap: onBack,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: context.panel,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.arrow_back_ios_new_rounded,
+                  size: 16, color: context.fg),
+            ),
+          )
+        : const SizedBox(width: 44);
+
+    final primary = GestureDetector(
+      onTap: isSubmitting ? null : onNext,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 44,
+        decoration: BoxDecoration(
+          color: isSubmitting
+              ? context.accent.withValues(alpha: 0.5)
+              : context.accent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: isSubmitting
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: context.bg,
+                  ),
+                )
+              : Text(
+                  primaryLabel,
+                  style: TextStyle(
+                    color: context.bg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+        ),
+      ),
+    );
+
+    // In edit mode show: < [Next →] [Save]
+    // In create mode show: < [Set later?] [Continue / Create]
     return Container(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + bottom),
       decoration: BoxDecoration(
@@ -723,81 +801,60 @@ class _NavRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          if (step > 0)
-            GestureDetector(
-              onTap: onBack,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: context.panel,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.arrow_back_ios_new_rounded,
-                    size: 16, color: context.fg),
-              ),
-            )
-          else
-            const SizedBox(width: 44),
+          backButton,
           const SizedBox(width: 12),
-          if (canSkip) ...[
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onSkip,
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: context.stroke),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+          if (isEditMode) ...[
+            if (!isLast) ...[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: isSubmitting ? null : onForward,
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: context.stroke),
+                    foregroundColor: context.fg,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: Text(
-                  'Set later',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                  label: const Text(
+                    'Next',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
+              const SizedBox(width: 10),
+            ],
+            Expanded(flex: isLast ? 1 : 1, child: primary),
+          ] else ...[
+            if (canSkip) ...[
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onSkip,
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: context.stroke),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(
+                    'Set later',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(flex: canSkip ? 2 : 1, child: primary),
           ],
-          Expanded(
-            flex: canSkip ? 2 : 1,
-            child: GestureDetector(
-              onTap: isSubmitting ? null : onNext,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                height: 44,
-                decoration: BoxDecoration(
-                  color: isSubmitting
-                      ? context.accent.withValues(alpha: 0.5)
-                      : context.accent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: isSubmitting
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: context.bg,
-                          ),
-                        )
-                      : Text(
-                          isLast ? 'Create Tournament' : 'Continue',
-                          style: TextStyle(
-                            color: context.bg,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

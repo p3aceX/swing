@@ -61,6 +61,9 @@ class PlayerMatch {
     this.tossDecision,
     this.activeScorerProfileId,
     this.meIsActiveScorer = false,
+    this.tournamentId,
+    this.tournamentName,
+    this.tournamentRole,
   });
 
   final String id;
@@ -136,6 +139,18 @@ class PlayerMatch {
   /// What the toss winner chose, e.g. 'BAT' or 'BOWL'
   final String? tossDecision;
 
+  /// Parent tournament (when this match is part of one). All three are
+  /// supplied together by the server: `tournamentId`, `tournamentName`,
+  /// and `tournamentRole` ∈ {'host', 'participant'}. `host` means the
+  /// current user owns the tournament; `participant` means their team
+  /// is registered. Null when the match is a friendly / ad-hoc match.
+  final String? tournamentId;
+  final String? tournamentName;
+  final String? tournamentRole;
+
+  bool get isHostingTournament => tournamentRole == 'host';
+  bool get isParticipatingInTournament => tournamentRole == 'participant';
+
   PlayerMatch copyWith({
     String? scoreSummary,
     String? tossWinner,
@@ -174,6 +189,9 @@ class PlayerMatch {
       // copyWith inputs; the enrichment step shouldn't ever rewrite them.
       activeScorerProfileId: activeScorerProfileId,
       meIsActiveScorer: meIsActiveScorer,
+      tournamentId: tournamentId,
+      tournamentName: tournamentName,
+      tournamentRole: tournamentRole,
     );
   }
 }

@@ -7,6 +7,7 @@ import '../../../theme/host_colors.dart';
 import '../../match_detail/domain/match_models.dart';
 import '../../match_detail/presentation/match_card.dart';
 import '../controller/play_tab_controller.dart';
+import 'play_search_field.dart';
 import 'play_tab.dart';
 
 class PlayMatchesTab extends ConsumerStatefulWidget {
@@ -36,9 +37,15 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
   String? _venueFilter;
   String? _opponentFilter;
   String? _formatFilter;
+  // Tournament role filter — null = all, 'host' = only tournaments I host,
+  // 'participant' = only tournaments my team plays in. Only meaningful on
+  // the Tournament tab.
+  String? _tournamentRoleFilter;
 
   int get _activeFilterCount =>
-      [_venueFilter, _opponentFilter, _formatFilter].where((f) => f != null).length;
+      [_venueFilter, _opponentFilter, _formatFilter, _tournamentRoleFilter]
+          .where((f) => f != null)
+          .length;
 
   @override
   void initState() {
@@ -128,66 +135,19 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Search ──────────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Container(
-            height: 44,
-            decoration: BoxDecoration(
-              color: context.cardBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _searchQuery = v),
-              style: TextStyle(
-                  color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
-              decoration: InputDecoration(
-                hintText: 'Search matches…',
-                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
-                prefixIcon:
-                    Icon(Icons.search_rounded, color: context.fgSub, size: 18),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? GestureDetector(
-                        onTap: () => setState(
-                            () { _searchCtrl.clear(); _searchQuery = ''; }),
-                        child: Icon(Icons.close_rounded,
-                            color: context.fgSub, size: 18),
-                      )
-                    : GestureDetector(
-                        onTap: () => _openFilters(context, all),
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            clipBehavior: Clip.none,
-                            children: [
-                              Icon(Icons.tune_rounded,
-                                  size: 18,
-                                  color: hasFilters
-                                      ? context.accent
-                                      : context.fgSub),
-                              if (hasFilters)
-                                Positioned(
-                                  top: 10,
-                                  right: 6,
-                                  child: Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      color: context.accent,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                border: InputBorder.none,
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
+        PlaySearchField(
+          controller: _searchCtrl,
+          value: _searchQuery,
+          hintText: 'Search matches',
+          onChanged: (v) => setState(() => _searchQuery = v),
+          onClear: () => setState(() {
+            _searchCtrl.clear();
+            _searchQuery = '';
+          }),
+          trailing: PlaySearchTrailingButton(
+            icon: Icons.tune_rounded,
+            active: hasFilters,
+            onTap: () => _openFilters(context, all),
           ),
         ),
 
@@ -259,6 +219,42 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
           ),
         ),
 
+        // ── Tournament role chips (Tournament tab only) ──────────────────────
+        if (_activeTabIndex == 1) ...[
+          SizedBox(
+            height: 36,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              children: [
+                _FilterChip(
+                  label: 'All',
+                  selected: _tournamentRoleFilter == null,
+                  isLive: false,
+                  onTap: () =>
+                      setState(() => _tournamentRoleFilter = null),
+                ),
+                const SizedBox(width: 8),
+                _FilterChip(
+                  label: 'Hosting',
+                  selected: _tournamentRoleFilter == 'host',
+                  isLive: false,
+                  onTap: () =>
+                      setState(() => _tournamentRoleFilter = 'host'),
+                ),
+                const SizedBox(width: 8),
+                _FilterChip(
+                  label: 'Participated',
+                  selected: _tournamentRoleFilter == 'participant',
+                  isLive: false,
+                  onTap: () => setState(
+                      () => _tournamentRoleFilter = 'participant'),
+                ),
+              ],
+            ),
+          ),
+        ],
+
         // ── Individual / Team segment ────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
@@ -306,6 +302,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                     venueFilter: _venueFilter,
                     opponentFilter: _opponentFilter,
                     formatFilter: _formatFilter,
+                    tournamentRoleFilter: null,
                     callbacks: widget.callbacks,
                     onRefresh: ctrl.refresh,
                   ),
@@ -317,6 +314,7 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                     venueFilter: _venueFilter,
                     opponentFilter: _opponentFilter,
                     formatFilter: _formatFilter,
+                    tournamentRoleFilter: _tournamentRoleFilter,
                     callbacks: widget.callbacks,
                     onRefresh: ctrl.refresh,
                   ),
@@ -363,6 +361,7 @@ class _MatchList extends ConsumerWidget {
     required this.venueFilter,
     required this.opponentFilter,
     required this.formatFilter,
+    required this.tournamentRoleFilter,
     required this.callbacks,
     required this.onRefresh,
   });
@@ -374,6 +373,8 @@ class _MatchList extends ConsumerWidget {
   final String? venueFilter;
   final String? opponentFilter;
   final String? formatFilter;
+  /// 'host' | 'participant' | null — applied only in the Tournament tab.
+  final String? tournamentRoleFilter;
   final PlayTabCallbacks callbacks;
   final Future<void> Function() onRefresh;
 
@@ -519,6 +520,11 @@ class _MatchList extends ConsumerWidget {
       }
       if (formatFilter != null && m.formatLabel != formatFilter) {
         dropped.add('${m.id}: fmt!=$formatFilter');
+        return false;
+      }
+      if (tournamentRoleFilter != null &&
+          m.tournamentRole != tournamentRoleFilter) {
+        dropped.add('${m.id}: tournamentRole!=$tournamentRoleFilter');
         return false;
       }
 

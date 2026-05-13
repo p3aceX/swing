@@ -268,6 +268,55 @@ class SharedTournamentRepository {
     await _dio.delete('${_paths.tournament(tournamentId)}/schedule');
   }
 
+  /// Creates a single fixture for a tournament — used by the "add manual
+  /// fixture" flow when the host wants one-off matches on a custom date
+  /// outside of the auto-generated bracket.
+  ///
+  /// Wraps POST /matches with `tournamentId` set so the match shows up in
+  /// the tournament's schedule alongside auto-generated ones.
+  Future<Map<String, dynamic>> createManualFixture({
+    required String tournamentId,
+    required String teamAName,
+    required String teamBName,
+    required DateTime scheduledAt,
+    required String format,
+    String? teamAId,
+    String? teamBId,
+    String? venueName,
+    String? venueCity,
+    String? category,
+    String? ageGroup,
+    String? ballType,
+    int? customOvers,
+    List<String> teamAPlayerIds = const [],
+    List<String> teamBPlayerIds = const [],
+  }) async {
+    final response = await _dio.post(
+      _paths.createMatch,
+      data: {
+        'teamAName': teamAName.trim(),
+        'teamBName': teamBName.trim(),
+        if ((teamAId ?? '').isNotEmpty) 'teamAId': teamAId,
+        if ((teamBId ?? '').isNotEmpty) 'teamBId': teamBId,
+        if ((venueName ?? '').trim().isNotEmpty)
+          'venueName': venueName!.trim(),
+        if ((venueCity ?? '').trim().isNotEmpty)
+          'venueCity': venueCity!.trim(),
+        'scheduledAt': scheduledAt.toUtc().toIso8601String(),
+        'format': format,
+        if ((category ?? '').isNotEmpty) 'category': category,
+        if ((ageGroup ?? '').isNotEmpty) 'ageGroup': ageGroup,
+        if ((ballType ?? '').isNotEmpty) 'ballType': ballType,
+        if (format == 'CUSTOM' && customOvers != null && customOvers > 0)
+          'customOvers': customOvers,
+        'tournamentId': tournamentId,
+        'teamAPlayerIds': teamAPlayerIds,
+        'teamBPlayerIds': teamBPlayerIds,
+      },
+    );
+    return _extractDataMap(response.data);
+  }
+
   Future<void> advanceRound(String tournamentId) async {
     await _dio.post('${_paths.tournament(tournamentId)}/advance-round');
   }

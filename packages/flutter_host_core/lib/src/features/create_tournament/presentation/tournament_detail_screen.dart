@@ -68,7 +68,7 @@ class _TournamentDetailScreenState
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -221,6 +221,46 @@ class _TournamentDetailScreenState
     });
   }
 
+  /// Opens a bottom sheet to add a single manual fixture (custom date,
+  /// pick two teams from the confirmed roster). Posts to /matches with
+  /// the tournamentId set so it appears alongside auto-generated ones.
+  Future<void> _showAddManualFixtureSheet() async {
+    final t = _tournament;
+    if (t == null) return;
+    final confirmed = _teams.where((tm) => tm['isConfirmed'] == true).toList();
+    if (confirmed.length < 2) {
+      _showSnack('Need at least 2 confirmed teams to add a fixture.');
+      return;
+    }
+    final result = await showModalBottomSheet<_ManualFixtureResult?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AddManualFixtureSheet(tournament: t, teams: confirmed),
+    );
+    if (result == null) return;
+    final format = '${t['format'] ?? 'T20'}';
+    final customOvers = (t['customOvers'] as num?)?.toInt();
+    await _runAction(() async {
+      await _repository.createManualFixture(
+        tournamentId: widget.tournamentId,
+        teamAName: result.teamAName,
+        teamBName: result.teamBName,
+        teamAId: result.teamAId,
+        teamBId: result.teamBId,
+        scheduledAt: result.scheduledAt,
+        format: format,
+        venueName: '${t['venueName'] ?? ''}',
+        venueCity: '${t['city'] ?? ''}',
+        category: '${t['category'] ?? ''}',
+        ageGroup: '${t['ageGroup'] ?? ''}',
+        ballType: '${t['ballType'] ?? ''}',
+        customOvers: customOvers,
+      );
+      _showSnack('Fixture added');
+    });
+  }
+
   /// Pushes the shared create-tournament screen in edit mode. On success
   /// the parent reloads so the rest of the tabs reflect the new values.
   Future<void> _openTournamentEditor() async {
@@ -356,7 +396,6 @@ class _TournamentDetailScreenState
                 Tab(text: 'Teams'),
                 Tab(text: 'Groups'),
                 Tab(text: 'Fixtures'),
-                Tab(text: 'Schedule'),
                 Tab(text: 'Points Table'),
                 Tab(text: 'Settings'),
               ],
@@ -492,6 +531,7 @@ class _TournamentDetailScreenState
                       _FixturesTab(
                         tournament: _tournament ?? const {},
                         schedule: _schedule,
+                        teams: _teams,
                         canManage: _canManage,
                         isBusy: _isBusy,
                         onRefresh: _reload,
@@ -511,19 +551,14 @@ class _TournamentDetailScreenState
                           await _runAction(() =>
                               _repository.deleteSchedule(widget.tournamentId));
                         },
-                      ),
-                      _TournamentScheduleTab(
-                        schedule: _schedule,
-                        canManage: _canManage,
-                        isBusy: _isBusy,
-                        onShowGenerateSheet: () => _showGenerateFixturesSheet(),
+                        onAddManualFixture: _showAddManualFixtureSheet,
                         onNavigateToMatch: widget.onNavigateToMatch != null
-                            ? (matchId) => widget.onNavigateToMatch!(context, matchId)
+                            ? (matchId) =>
+                                widget.onNavigateToMatch!(context, matchId)
                             : null,
                         onStartMatch: widget.onStartMatch != null
                             ? (match) => widget.onStartMatch!(context, match)
                             : null,
-                        onRefresh: _reload,
                       ),
                       _PointsTableTab(
                         standings: _standings,
@@ -1843,23 +1878,81 @@ class _CreateGroupsDialog extends StatefulWidget {
 }
 
 class _CreateGroupsDialogState extends State<_CreateGroupsDialog> {
-  late final TextEditingController _ctrl;
+  static const int _minGroups = 2;
+  static const int _maxGroups = 16;
+
+  late int _count;
   late bool _autoAssign;
+  bool _customNames = false;
+  late final TextEditingController _ctrl;
 
   @override
   void initState() {
     super.initState();
-    final initial = widget.existingGroupNames.isNotEmpty
-        ? widget.existingGroupNames.join(', ')
-        : 'Group A, Group B';
-    _ctrl = TextEditingController(text: initial);
+    final existing = widget.existingGroupNames;
     _autoAssign = widget.defaultAutoAssign;
+    if (existing.isNotEmpty) {
+      _count = existing.length.clamp(_minGroups, _maxGroups);
+      // If existing names don't match the auto-generated pattern, default
+      // into "edit names" mode so we don't silently rewrite the user's
+      // custom labels on save.
+      _customNames = !_isDefaultPattern(existing);
+      _ctrl = TextEditingController(text: existing.join(', '));
+    } else {
+      _count = 2;
+      _ctrl = TextEditingController(text: _autoNames(2).join(', '));
+    }
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  /// 0 -> 'Group A', 1 -> 'Group B', ... 25 -> 'Group Z', 26 -> 'Group AA'.
+  List<String> _autoNames(int n) {
+    String letter(int i) {
+      final buf = StringBuffer();
+      var v = i;
+      do {
+        buf.write(String.fromCharCode(65 + (v % 26)));
+        v = (v ~/ 26) - 1;
+      } while (v >= 0);
+      return buf.toString().split('').reversed.join();
+    }
+
+    return List.generate(n, (i) => 'Group ${letter(i)}');
+  }
+
+  bool _isDefaultPattern(List<String> names) {
+    final expected = _autoNames(names.length);
+    for (var i = 0; i < names.length; i++) {
+      if (names[i].trim() != expected[i]) return false;
+    }
+    return true;
+  }
+
+  void _setCount(int next) {
+    final clamped = next.clamp(_minGroups, _maxGroups);
+    if (clamped == _count) return;
+    setState(() {
+      _count = clamped;
+      if (!_customNames) {
+        _ctrl.text = _autoNames(_count).join(', ');
+      }
+    });
+  }
+
+  List<String> _resolvedNames() {
+    if (_customNames) {
+      return _ctrl.text
+          .split(',')
+          .map((v) => v.trim())
+          .where((v) => v.isNotEmpty)
+          .toList();
+    }
+    return _autoNames(_count);
   }
 
   @override
@@ -1869,15 +1962,104 @@ class _CreateGroupsDialogState extends State<_CreateGroupsDialog> {
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _ctrl,
-              decoration: const InputDecoration(
-                labelText: 'Group names',
-                hintText: 'Group A, Group B',
-                helperText: 'Separate names with commas',
-              ),
+            Text('Number of groups',
+                style: TextStyle(
+                    color: context.fgSub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                _StepperButton(
+                  icon: Icons.remove,
+                  enabled: _count > _minGroups,
+                  onTap: () => _setCount(_count - 1),
+                ),
+                Expanded(
+                  child: Text(
+                    '$_count',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                _StepperButton(
+                  icon: Icons.add,
+                  enabled: _count < _maxGroups,
+                  onTap: () => _setCount(_count + 1),
+                ),
+              ],
             ),
+            const SizedBox(height: 12),
+            if (!_customNames) ...[
+              Text(
+                'Will create:',
+                style: TextStyle(color: context.fgSub, fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _autoNames(_count).join(' · '),
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () => setState(() {
+                  _customNames = true;
+                  _ctrl.text = _autoNames(_count).join(', ');
+                }),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.edit_outlined,
+                        size: 14, color: context.accent),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Edit names manually',
+                      style: TextStyle(
+                        color: context.accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              TextField(
+                controller: _ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'Group names',
+                  hintText: 'Group A, Group B',
+                  helperText: 'Separate names with commas',
+                ),
+              ),
+              const SizedBox(height: 4),
+              InkWell(
+                onTap: () => setState(() {
+                  _customNames = false;
+                  _ctrl.text = _autoNames(_count).join(', ');
+                }),
+                child: Text(
+                  'Use auto-named groups',
+                  style: TextStyle(
+                    color: context.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             SwitchListTile(
               value: _autoAssign,
@@ -1895,17 +2077,319 @@ class _CreateGroupsDialogState extends State<_CreateGroupsDialog> {
         ),
         FilledButton(
           onPressed: () {
-            final groups = _ctrl.text
-                .split(',')
-                .map((v) => v.trim())
-                .where((v) => v.isNotEmpty)
-                .toList();
+            final groups = _resolvedNames();
             if (groups.isEmpty) return;
             Navigator.of(context).pop((groups, _autoAssign));
           },
           child: const Text('Create'),
         ),
       ],
+    );
+  }
+}
+
+// ── Add Manual Fixture ──────────────────────────────────────────────────────
+
+class _ManualFixtureResult {
+  const _ManualFixtureResult({
+    required this.teamAName,
+    required this.teamBName,
+    required this.scheduledAt,
+    this.teamAId,
+    this.teamBId,
+  });
+
+  final String teamAName;
+  final String teamBName;
+  final DateTime scheduledAt;
+  final String? teamAId;
+  final String? teamBId;
+}
+
+class _AddManualFixtureSheet extends StatefulWidget {
+  const _AddManualFixtureSheet({
+    required this.tournament,
+    required this.teams,
+  });
+
+  final Map<String, dynamic> tournament;
+  final List<Map<String, dynamic>> teams;
+
+  @override
+  State<_AddManualFixtureSheet> createState() =>
+      _AddManualFixtureSheetState();
+}
+
+class _AddManualFixtureSheetState extends State<_AddManualFixtureSheet> {
+  String? _teamAKey;
+  String? _teamBKey;
+  late DateTime _scheduledAt;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    // Default to next round hour, at least an hour from now, to avoid
+    // accidentally scheduling a fixture in the past.
+    _scheduledAt = DateTime(now.year, now.month, now.day, now.hour + 1);
+    if (widget.teams.length >= 2) {
+      _teamAKey = _keyFor(widget.teams[0]);
+      _teamBKey = _keyFor(widget.teams[1]);
+    } else if (widget.teams.isNotEmpty) {
+      _teamAKey = _keyFor(widget.teams.first);
+    }
+  }
+
+  String _keyFor(Map<String, dynamic> t) =>
+      '${t['teamId'] ?? t['team']?['id'] ?? t['id'] ?? ''}::'
+      '${t['teamName'] ?? t['team']?['name'] ?? ''}';
+
+  String _nameOf(Map<String, dynamic> t) =>
+      '${t['teamName'] ?? t['team']?['name'] ?? 'Unnamed'}';
+
+  String? _idOf(Map<String, dynamic> t) {
+    final id = '${t['teamId'] ?? t['team']?['id'] ?? t['id'] ?? ''}'.trim();
+    return id.isEmpty ? null : id;
+  }
+
+  Map<String, dynamic>? _teamByKey(String? key) {
+    if (key == null) return null;
+    for (final t in widget.teams) {
+      if (_keyFor(t) == key) return t;
+    }
+    return null;
+  }
+
+  Future<void> _pickDateTime() async {
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _scheduledAt,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
+    );
+    if (d == null || !mounted) return;
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_scheduledAt),
+    );
+    if (t == null || !mounted) return;
+    setState(() {
+      _scheduledAt = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+    });
+  }
+
+  bool get _canSubmit {
+    final a = _teamByKey(_teamAKey);
+    final b = _teamByKey(_teamBKey);
+    if (a == null || b == null) return false;
+    if (_keyFor(a) == _keyFor(b)) return false;
+    return true;
+  }
+
+  void _submit() {
+    final a = _teamByKey(_teamAKey)!;
+    final b = _teamByKey(_teamBKey)!;
+    Navigator.of(context).pop(_ManualFixtureResult(
+      teamAName: _nameOf(a),
+      teamBName: _nameOf(b),
+      teamAId: _idOf(a),
+      teamBId: _idOf(b),
+      scheduledAt: _scheduledAt,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateLabel = DateFormat('EEE, d MMM y · h:mm a').format(_scheduledAt);
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: context.bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: context.stroke,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Add manual fixture',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _TeamDropdown(
+                label: 'Team A',
+                value: _teamAKey,
+                teams: widget.teams,
+                keyOf: _keyFor,
+                nameOf: _nameOf,
+                onChanged: (v) => setState(() => _teamAKey = v),
+              ),
+              const SizedBox(height: 12),
+              _TeamDropdown(
+                label: 'Team B',
+                value: _teamBKey,
+                teams: widget.teams,
+                keyOf: _keyFor,
+                nameOf: _nameOf,
+                onChanged: (v) => setState(() => _teamBKey = v),
+                excludeKey: _teamAKey,
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: _pickDateTime,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 14),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: context.stroke),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.event_outlined,
+                          size: 16, color: context.fgSub),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          dateLabel,
+                          style: TextStyle(
+                            color: context.fg,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Icon(Icons.edit_calendar_outlined,
+                          size: 16, color: context.fgSub),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.accent,
+                  foregroundColor: context.bg,
+                  minimumSize: const Size(double.infinity, 46),
+                ),
+                onPressed: _canSubmit ? _submit : null,
+                child: const Text('Add fixture'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TeamDropdown extends StatelessWidget {
+  const _TeamDropdown({
+    required this.label,
+    required this.value,
+    required this.teams,
+    required this.keyOf,
+    required this.nameOf,
+    required this.onChanged,
+    this.excludeKey,
+  });
+
+  final String label;
+  final String? value;
+  final List<Map<String, dynamic>> teams;
+  final String Function(Map<String, dynamic>) keyOf;
+  final String Function(Map<String, dynamic>) nameOf;
+  final ValueChanged<String?> onChanged;
+  final String? excludeKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = teams
+        .where((t) => excludeKey == null || keyOf(t) != excludeKey)
+        .map((t) => DropdownMenuItem<String>(
+              value: keyOf(t),
+              child: Text(nameOf(t)),
+            ))
+        .toList();
+    // If the current selection got filtered out (because Team A changed),
+    // null it so the dropdown shows the hint instead of crashing.
+    final safeValue =
+        items.any((i) => i.value == value) ? value : null;
+    return DropdownButtonFormField<String>(
+      initialValue: safeValue,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(
+          borderSide: BorderSide(color: context.stroke),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: context.stroke),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      ),
+      items: items,
+      onChanged: onChanged,
+    );
+  }
+}
+
+class _StepperButton extends StatelessWidget {
+  const _StepperButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Material(
+        color: context.cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: context.stroke),
+        ),
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(8),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled ? context.fg : context.fgSub.withValues(alpha: 0.4),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1979,20 +2463,31 @@ class _OptionCard extends StatelessWidget {
 // Tab 4 — Fixtures
 // ---------------------------------------------------------------------------
 
+/// Which slice of the schedule the Fixtures tab is currently showing.
+/// `create` is the management view (auto + manual generation + grouped
+/// list). `timeline` is chronological (Live/Today/Upcoming/Completed
+/// with Start/Resume). `bracket` is the knockout diagram.
+enum _FixturesView { create, timeline, bracket }
+
 class _FixturesTab extends StatefulWidget {
   const _FixturesTab({
     required this.tournament,
     required this.schedule,
+    required this.teams,
     required this.canManage,
     required this.isBusy,
     required this.onRefresh,
     required this.onShowGenerateSheet,
     required this.onUpdateMatch,
     required this.onDeleteSchedule,
+    required this.onAddManualFixture,
+    this.onNavigateToMatch,
+    this.onStartMatch,
   });
 
   final Map<String, dynamic> tournament;
   final List<Map<String, dynamic>> schedule;
+  final List<Map<String, dynamic>> teams;
   final bool canManage;
   final bool isBusy;
   final Future<void> Function() onRefresh;
@@ -2000,6 +2495,12 @@ class _FixturesTab extends StatefulWidget {
   final Future<void> Function(String matchId,
       {DateTime? scheduledAt, bool swapTeams}) onUpdateMatch;
   final Future<void> Function() onDeleteSchedule;
+  final VoidCallback onAddManualFixture;
+  // Both optional — Timeline view uses these for Start/Resume. When null
+  // the row falls back to opening ScoringScreen directly (same as the
+  // legacy schedule tab did).
+  final void Function(String matchId)? onNavigateToMatch;
+  final void Function(Map<String, dynamic> match)? onStartMatch;
 
   @override
   State<_FixturesTab> createState() => _FixturesTabState();
@@ -2007,7 +2508,7 @@ class _FixturesTab extends StatefulWidget {
 
 class _FixturesTabState extends State<_FixturesTab> {
   String? _selectedRound;
-  bool _bracketMode = false;
+  _FixturesView _view = _FixturesView.create;
 
   List<String> _orderedRounds(List<Map<String, dynamic>> schedule) {
     final knownOrder = ['Quarter Final', 'Semi Final', 'Final'];
@@ -2031,79 +2532,186 @@ class _FixturesTabState extends State<_FixturesTab> {
             .where((m) => '${m['round']}' == _selectedRound)
             .toList();
 
+    Widget body;
+    switch (_view) {
+      case _FixturesView.create:
+        body = _FixturesListView(
+          schedule: filteredSchedule,
+          rounds: rounds,
+          selectedRound: _selectedRound,
+          canManage: widget.canManage,
+          isBusy: widget.isBusy,
+          onShowGenerateSheet: widget.onShowGenerateSheet,
+          onAddManualFixture: widget.onAddManualFixture,
+          onUpdateMatch: widget.onUpdateMatch,
+          onDeleteSchedule: widget.onDeleteSchedule,
+        );
+        break;
+      case _FixturesView.timeline:
+        body = _TimelineView(
+          schedule: widget.schedule,
+          canManage: widget.canManage,
+          isBusy: widget.isBusy,
+          onRefresh: widget.onRefresh,
+          onShowGenerateSheet: widget.onShowGenerateSheet,
+          onAddManualFixture: widget.onAddManualFixture,
+          onNavigateToMatch: widget.onNavigateToMatch,
+          onStartMatch: widget.onStartMatch,
+        );
+        break;
+      case _FixturesView.bracket:
+        body = _BracketView(schedule: widget.schedule);
+        break;
+    }
+
     return RefreshIndicator(
       onRefresh: widget.onRefresh,
       child: Column(
         children: [
-          // Top bar: round filter + view toggle
+          // Top bar: view-mode segmented control. Always visible so the
+          // user can flip between Rounds / Timeline / Bracket regardless
+          // of whether fixtures exist yet.
           ColoredBox(
             color: context.bg,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        children: [
-                          _RoundChip(
-                            label: 'All',
-                            selected: _selectedRound == null,
-                            onTap: () =>
-                                setState(() => _selectedRound = null),
-                          ),
-                          ...rounds.map((r) => Padding(
-                                padding: const EdgeInsets.only(left: 6),
-                                child: _RoundChip(
-                                  label: r,
-                                  selected: _selectedRound == r,
-                                  onTap: () =>
-                                      setState(() => _selectedRound = r),
-                                ),
-                              )),
-                        ],
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      _bracketMode
-                          ? Icons.view_list_rounded
-                          : Icons.account_tree_rounded,
-                      color: _bracketMode
-                          ? context.accent
-                          : context.fgSub,
-                      size: 20,
-                    ),
-                    onPressed: () =>
-                        setState(() => _bracketMode = !_bracketMode),
-                    tooltip: _bracketMode ? 'List view' : 'Bracket view',
-                  ),
-                ],
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: _ViewModeSelector(
+                value: _view,
+                onChanged: (v) => setState(() => _view = v),
               ),
             ),
           ),
-          Divider(height: 1, color: context.stroke),
-
-          // Content
-          Expanded(
-            child: _bracketMode
-                ? _BracketView(schedule: widget.schedule)
-                : _FixturesListView(
-                    schedule: filteredSchedule,
-                    rounds: rounds,
-                    selectedRound: _selectedRound,
-                    canManage: widget.canManage,
-                    isBusy: widget.isBusy,
-                    onShowGenerateSheet: widget.onShowGenerateSheet,
-                    onUpdateMatch: widget.onUpdateMatch,
-                    onDeleteSchedule: widget.onDeleteSchedule,
+          // Round-filter chips only make sense in the Create (rounds) view.
+          if (_view == _FixturesView.create && rounds.isNotEmpty) ...[
+            Divider(height: 1, color: context.stroke),
+            ColoredBox(
+              color: context.bg,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _RoundChip(
+                        label: 'All',
+                        selected: _selectedRound == null,
+                        onTap: () => setState(() => _selectedRound = null),
+                      ),
+                      ...rounds.map((r) => Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: _RoundChip(
+                              label: r,
+                              selected: _selectedRound == r,
+                              onTap: () =>
+                                  setState(() => _selectedRound = r),
+                            ),
+                          )),
+                    ],
                   ),
+                ),
+              ),
+            ),
+          ],
+          Divider(height: 1, color: context.stroke),
+          Expanded(child: body),
+        ],
+      ),
+    );
+  }
+}
+
+class _ViewModeSelector extends StatelessWidget {
+  const _ViewModeSelector({required this.value, required this.onChanged});
+
+  final _FixturesView value;
+  final ValueChanged<_FixturesView> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    // Flat pill segmented control. The accent fill on the active chip
+    // gives a single strong focal point; inactive chips sit on the
+    // neutral card surface so the row reads as one connected control
+    // rather than three loose buttons.
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        border: Border.all(color: context.stroke),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          _ViewModeChip(
+            icon: Icons.tune_rounded,
+            label: 'Create',
+            selected: value == _FixturesView.create,
+            onTap: () => onChanged(_FixturesView.create),
+          ),
+          _ViewModeChip(
+            icon: Icons.access_time_rounded,
+            label: 'Matches',
+            selected: value == _FixturesView.timeline,
+            onTap: () => onChanged(_FixturesView.timeline),
+          ),
+          _ViewModeChip(
+            icon: Icons.account_tree_rounded,
+            label: 'Bracket',
+            selected: value == _FixturesView.bracket,
+            onTap: () => onChanged(_FixturesView.bracket),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ViewModeChip extends StatelessWidget {
+  const _ViewModeChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Material(
+        color: selected ? context.accent : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: selected ? context.bg : context.fgSub,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: selected ? context.bg : context.fg,
+                    fontSize: 13,
+                    fontWeight:
+                        selected ? FontWeight.w800 : FontWeight.w600,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2117,6 +2725,7 @@ class _FixturesListView extends StatelessWidget {
     required this.canManage,
     required this.isBusy,
     required this.onShowGenerateSheet,
+    required this.onAddManualFixture,
     required this.onUpdateMatch,
     required this.onDeleteSchedule,
   });
@@ -2127,47 +2736,20 @@ class _FixturesListView extends StatelessWidget {
   final bool canManage;
   final bool isBusy;
   final VoidCallback onShowGenerateSheet;
+  final VoidCallback onAddManualFixture;
   final Future<void> Function(String matchId,
       {DateTime? scheduledAt, bool swapTeams}) onUpdateMatch;
   final Future<void> Function() onDeleteSchedule;
 
   @override
   Widget build(BuildContext context) {
-    if (schedule.isEmpty && canManage) {
-      return ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            'No fixtures yet',
-            style: TextStyle(
-              color: context.fg,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Generate fixtures with custom scheduling — pick match days, start time, and matches per day.',
-            style: TextStyle(color: context.fgSub, fontSize: 14, height: 1.5),
-          ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: context.accent,
-              foregroundColor: context.bg,
-              minimumSize: const Size(double.infinity, 48),
-            ),
-            onPressed: isBusy ? null : onShowGenerateSheet,
-            icon: const Icon(Icons.calendar_month_rounded, size: 18),
-            label: const Text('Generate Fixtures'),
-          ),
-        ],
-      );
-    }
-
     if (schedule.isEmpty) {
-      return const Center(child: Text('No fixtures found.'));
+      return _FixturesEmptyState(
+        canManage: canManage,
+        isBusy: isBusy,
+        onShowGenerateSheet: onShowGenerateSheet,
+        onAddManualFixture: onAddManualFixture,
+      );
     }
 
     // Group matches by round (preserving order)
@@ -2176,11 +2758,63 @@ class _FixturesListView extends StatelessWidget {
         : rounds.where(
             (r) => schedule.any((m) => '${m['round']}' == r)).toList();
 
+    // Layout: [Add-fixture button] · rounds · [Delete-schedule]
+    // Indexes 0 = add (when canManage), 1..N = rounds, last = delete.
+    final addOffset = canManage ? 1 : 0;
+    final totalCount =
+        activeRounds.length + addOffset + (canManage ? 1 : 0);
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 32),
-      itemCount: activeRounds.length + (canManage ? 1 : 0),
+      itemCount: totalCount,
       itemBuilder: (context, index) {
-        if (canManage && index == activeRounds.length) {
+        if (canManage && index == 0) {
+          // Both generation paths up top — auto for round-robin / knockout,
+          // manual for one-off fixtures with a custom date.
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.accent,
+                      foregroundColor: context.bg,
+                      minimumSize: const Size(double.infinity, 44),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    onPressed: isBusy ? null : onShowGenerateSheet,
+                    icon: const Icon(
+                        Icons.auto_awesome_motion_rounded, size: 16),
+                    label: const Text(
+                      'Auto-generate',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: context.accent),
+                      foregroundColor: context.accent,
+                      minimumSize: const Size(double.infinity, 44),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    onPressed: isBusy ? null : onAddManualFixture,
+                    icon: const Icon(
+                        Icons.event_available_outlined, size: 16),
+                    label: const Text(
+                      'Add manually',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        if (canManage && index == totalCount - 1) {
           return Padding(
             padding: const EdgeInsets.all(16),
             child: OutlinedButton.icon(
@@ -2196,7 +2830,7 @@ class _FixturesListView extends StatelessWidget {
             ),
           );
         }
-        final round = activeRounds[index];
+        final round = activeRounds[index - addOffset];
         final matches =
             schedule.where((m) => '${m['round']}' == round).toList();
         return Column(
@@ -2986,17 +3620,128 @@ class _BracketView extends StatelessWidget {
   }
 }
 
+/// Shared empty state for the Fixtures tab — same dual-CTA in Rounds and
+/// Timeline views so the user sees the same options regardless of which
+/// slice they were looking at.
+class _FixturesEmptyState extends StatelessWidget {
+  const _FixturesEmptyState({
+    required this.canManage,
+    required this.isBusy,
+    required this.onShowGenerateSheet,
+    required this.onAddManualFixture,
+  });
+
+  final bool canManage;
+  final bool isBusy;
+  final VoidCallback onShowGenerateSheet;
+  final VoidCallback onAddManualFixture;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!canManage) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 100),
+        children: [
+          Text('No fixtures yet',
+              style: TextStyle(
+                  color: context.fg,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3)),
+          const SizedBox(height: 6),
+          Text(
+            'No fixtures have been generated yet.',
+            style: TextStyle(color: context.fgSub, fontSize: 14, height: 1.5),
+          ),
+        ],
+      );
+    }
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          'No fixtures yet',
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Choose how you want to schedule matches.',
+          style: TextStyle(color: context.fgSub, fontSize: 14, height: 1.5),
+        ),
+        const SizedBox(height: 18),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: context.accent,
+            foregroundColor: context.bg,
+            minimumSize: const Size(double.infinity, 48),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+          ),
+          onPressed: isBusy ? null : onShowGenerateSheet,
+          icon: const Icon(Icons.auto_awesome_motion_rounded, size: 18),
+          label: const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Auto-generate fixtures'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
+            'Builds the full bracket from your tournament format — pick match days, start time, matches per day.',
+            style: TextStyle(color: context.fgSub, fontSize: 12, height: 1.45),
+          ),
+        ),
+        const SizedBox(height: 14),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: context.stroke),
+            foregroundColor: context.fg,
+            minimumSize: const Size(double.infinity, 48),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+          ),
+          onPressed: isBusy ? null : onAddManualFixture,
+          icon: const Icon(Icons.event_available_outlined, size: 18),
+          label: const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Add a fixture manually'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
+            'Pick two teams and a custom date — one match at a time.',
+            style: TextStyle(color: context.fgSub, fontSize: 12, height: 1.45),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Tab 5 — Schedule (Today / Upcoming / Completed with Start/Resume)
+// Timeline view (Live / Today / Upcoming / Completed with Start/Resume).
+// Used by the unified Fixtures tab — the parent already wraps us in a
+// RefreshIndicator so we render a plain ListView.
 // ---------------------------------------------------------------------------
 
-class _TournamentScheduleTab extends StatelessWidget {
-  const _TournamentScheduleTab({
+class _TimelineView extends StatelessWidget {
+  const _TimelineView({
     required this.schedule,
     required this.canManage,
     required this.isBusy,
     required this.onRefresh,
     required this.onShowGenerateSheet,
+    required this.onAddManualFixture,
     this.onNavigateToMatch,
     this.onStartMatch,
   });
@@ -3006,46 +3751,20 @@ class _TournamentScheduleTab extends StatelessWidget {
   final bool isBusy;
   final Future<void> Function() onRefresh;
   final VoidCallback onShowGenerateSheet;
+  final VoidCallback onAddManualFixture;
   final void Function(String matchId)? onNavigateToMatch;
   final void Function(Map<String, dynamic> match)? onStartMatch;
 
   @override
   Widget build(BuildContext context) {
     if (schedule.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: onRefresh,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-          children: [
-            Text('No schedule yet',
-                style: TextStyle(
-                    color: context.fg,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3)),
-            const SizedBox(height: 6),
-            Text(
-                canManage
-                    ? 'Generate fixtures with custom scheduling — pick match days, start time, and matches per day.'
-                    : 'No fixtures have been generated yet.',
-                style: TextStyle(
-                    color: context.fgSub, fontSize: 14, height: 1.5)),
-            if (canManage) ...[
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: context.accent,
-                  foregroundColor: context.bg,
-                  minimumSize: const Size(double.infinity, 48),
-                ),
-                onPressed: isBusy ? null : onShowGenerateSheet,
-                icon: const Icon(Icons.calendar_month_rounded, size: 18),
-                label: const Text('Generate Fixtures'),
-              ),
-            ],
-          ],
-        ),
+      // Same empty state as the Rounds view — keep the two CTAs in sync
+      // so the user sees both options whichever view they land in.
+      return _FixturesEmptyState(
+        canManage: canManage,
+        isBusy: isBusy,
+        onShowGenerateSheet: onShowGenerateSheet,
+        onAddManualFixture: onAddManualFixture,
       );
     }
 
@@ -3096,11 +3815,10 @@ class _TournamentScheduleTab extends StatelessWidget {
     upcoming.sort((a, b) => _dt(a).compareTo(_dt(b)));
     completed.sort((a, b) => _dt(b).compareTo(_dt(a)));
 
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.only(bottom: 48),
-        children: [
+    // Parent _FixturesTab already wraps in a RefreshIndicator.
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 48),
+      children: [
           if (live.isNotEmpty) ...[
             _ScheduleSectionHeader(label: 'Live', count: live.length, color: context.success),
             ...live.map((m) {
@@ -3161,7 +3879,6 @@ class _TournamentScheduleTab extends StatelessWidget {
             }),
           ],
         ],
-      ),
     );
   }
 
@@ -4664,38 +5381,50 @@ class _SheetState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 40, color: iconColor ?? context.fgSub),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              style: TextStyle(
-                color: context.fg,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 6),
+    // The empty / error state can land in a very short slot (keyboard
+    // open, sheet collapsed, etc). LayoutBuilder so we shrink padding
+    // and the icon when the available height is tight, plus a scroll
+    // fallback so we never throw an overflow exception.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tight = constraints.maxHeight < 200;
+        final iconSize = tight ? 28.0 : 40.0;
+        final padV = tight ? 16.0 : 32.0;
+        final padH = tight ? 24.0 : 40.0;
+        final iconGap = tight ? 8.0 : 14.0;
+        return SingleChildScrollView(
+          padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: iconSize, color: iconColor ?? context.fgSub),
+              SizedBox(height: iconGap),
               Text(
-                subtitle!,
-                style: TextStyle(color: context.fgSub, fontSize: 13, height: 1.5),
+                title,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
                 textAlign: TextAlign.center,
               ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  subtitle!,
+                  style: TextStyle(
+                      color: context.fgSub, fontSize: 13, height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              if (action != null) ...[
+                SizedBox(height: tight ? 12 : 20),
+                action!,
+              ],
             ],
-            if (action != null) ...[
-              const SizedBox(height: 20),
-              action!,
-            ],
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

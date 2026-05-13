@@ -153,6 +153,53 @@ class HostMatchCard extends StatelessWidget {
               ],
             ),
 
+            // ── Tournament context (Hosting / Participated · Name) ────────
+            // Surfaces "this is a tournament match" and the user's relation
+            // to it. Server-supplied; null for friendlies / ad-hoc matches.
+            if (_hasText(match.tournamentName) &&
+                match.tournamentRole != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    Icons.emoji_events_outlined,
+                    size: 12,
+                    color: match.isHostingTournament
+                        ? context.accent
+                        : context.fgSub,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    match.isHostingTournament ? 'Hosting' : 'Participated',
+                    style: TextStyle(
+                      color: match.isHostingTournament
+                          ? context.accent
+                          : context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  Text(
+                    '  ·  ',
+                    style: TextStyle(color: context.fgSub, fontSize: 10),
+                  ),
+                  Flexible(
+                    child: Text(
+                      match.tournamentName!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
             const SizedBox(height: 12),
 
             // ── Innings score rows ────────────────────────────────────────
