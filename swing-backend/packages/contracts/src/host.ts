@@ -269,6 +269,8 @@ export const createHostedTournamentRequestSchema = z.object({
   earlyBirdFee: z.number().int().min(0).optional(),
   organiserName: z.string().max(120).optional(),
   organiserPhone: z.string().max(40).optional(),
+  logoUrl: z.string().url().max(500).optional(),
+  coverUrl: z.string().url().max(500).optional(),
 });
 
 export const createEventRequestSchema = z.object({

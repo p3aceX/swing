@@ -39,6 +39,8 @@ export type TournamentInput = {
   earlyBirdFee?: number
   organiserName?: string
   organiserPhone?: string
+  logoUrl?: string
+  coverUrl?: string
 }
 
 export class TournamentService {
@@ -90,6 +92,8 @@ export class TournamentService {
         earlyBirdFee: input.earlyBirdFee || null,
         organiserName: input.organiserName?.trim() || null,
         organiserPhone: input.organiserPhone?.trim() || null,
+        logoUrl: input.logoUrl?.trim() || null,
+        coverUrl: input.coverUrl?.trim() || null,
         ...(isSeries ? { seriesMatchCount: input.seriesMatchCount ?? 3 } : {}),
       },
     })
@@ -136,10 +140,17 @@ export class TournamentService {
 
   async listTournamentTeams(userId: string, tournamentId: string) {
     await this.verifyOwner(userId, tournamentId)
-    return prisma.tournamentTeam.findMany({
+    const rows = await prisma.tournamentTeam.findMany({
       where: { tournamentId },
       orderBy: { registeredAt: "asc" },
+      include: {
+        team: { select: { id: true, name: true, shortName: true, logoUrl: true } },
+      },
     })
+    return rows.map((r) => ({
+      ...r,
+      teamLogoUrl: r.team?.logoUrl ?? null,
+    }))
   }
 
   async addTournamentTeam(
