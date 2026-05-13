@@ -111,8 +111,9 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
         @keyframes ms-fade { from { opacity: 0; } to { opacity: 1; } }
         .ms-sheet-scrim {
           position: absolute; inset: 0;
-          background: rgba(0, 0, 0, 0.55);
-          backdrop-filter: blur(3px);
+          background: rgba(0, 0, 0, 0.86);
+          backdrop-filter: blur(8px) saturate(0.85);
+          -webkit-backdrop-filter: blur(8px) saturate(0.85);
           border: 0;
           cursor: pointer;
         }
@@ -182,9 +183,18 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
         .ms-sheet-body {
           flex: 1 1 auto;
           overflow-y: auto;
-          padding: 22px 24px 40px;
+          overflow-x: hidden;
+          scrollbar-gutter: stable;
+          padding: 0;
+          /* Reserve space for the absolutely-positioned cta-bar so the
+             last form row can scroll above it. */
+          padding-bottom: 96px;
           -webkit-overflow-scrolling: touch;
         }
+        /* Stop any inline-styled child from triggering horizontal overflow */
+        .ms-sheet-body * { max-width: 100%; }
+        .ms-sheet-body img,
+        .ms-sheet-body iframe { display: block; }
         /* Every step pane gets breathing room before the sticky CTA bar */
         .pass .pass-pane { padding-bottom: 36px; }
         .pass .opt-list,
@@ -256,7 +266,7 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
         /* Arena policy line shown at the top of the booking sheet */
         .ms-sheet-policy {
           list-style: none;
-          margin: 0 0 18px;
+          margin: 18px 20px 8px;
           padding: 12px 14px;
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -378,7 +388,7 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           width: 100%;
           padding: 12px 14px;
           font: inherit;
-          font-size: 15px;
+          font-size: 16px; /* >= 16px so iOS Safari doesn't auto-zoom on focus */
           color: var(--ms-ink);
           background: var(--ms-bg);
           border: 1px solid var(--ms-line-strong);
@@ -392,6 +402,41 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
         }
         .pass .form-input::placeholder { color: var(--ms-soft); }
         .pass select.form-input { padding-right: 36px; background-position: right 10px center; background-repeat: no-repeat; background-size: 12px; }
+
+        /* Phone input with a locked +91 prefix */
+        .pass .form-phone {
+          display: flex;
+          align-items: stretch;
+          border: 1px solid var(--ms-line-strong);
+          border-radius: 4px;
+          background: var(--ms-bg);
+          overflow: hidden;
+          transition: border-color 0.12s ease, background 0.12s ease;
+        }
+        .pass .form-phone:focus-within {
+          border-color: var(--ms-ink);
+          background: var(--ms-surface);
+        }
+        .pass .form-phone-prefix {
+          display: inline-flex;
+          align-items: center;
+          padding: 0 12px;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 14px;
+          font-weight: 700;
+          color: var(--ms-muted);
+          background: color-mix(in srgb, var(--ms-line) 60%, transparent);
+          border-right: 1px solid var(--ms-line);
+          user-select: none;
+        }
+        .pass .form-input-phone {
+          border: 0 !important;
+          border-radius: 0 !important;
+          background: transparent !important;
+          flex: 1;
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          letter-spacing: 0.04em;
+        }
 
         /* ── Option rows (sport/unit/etc selectors) ── */
         .pass .opt-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 0; }
@@ -707,18 +752,29 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           .pass .bulk-fields, .pass .bulk-guest { grid-template-columns: 1fr; }
         }
 
-        /* ── Bottom CTA bar inside the booking flow ── */
+        /* ── CTA bar — pinned to the BOTTOM of the modal panel (not the
+              scrolling body). Absolute positioning takes it out of the
+              scroll flow so content can't bleed through it. ── */
         .pass .cta-bar {
-          position: sticky;
+          position: absolute;
+          left: 0;
+          right: 0;
           bottom: 0;
-          margin: 22px -24px -28px;
-          padding: 16px 24px calc(16px + env(safe-area-inset-bottom, 0));
+          margin: 0;
+          padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0));
           background: var(--ms-bg);
           border-top: 1px solid var(--ms-line);
+          box-shadow: 0 -12px 24px -8px rgba(0, 0, 0, 0.18);
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 16px;
+          z-index: 5;
+        }
+        [data-theme="dark"] .pass .cta-bar {
+          box-shadow:
+            0 -1px 0 var(--ms-line-strong),
+            0 -10px 24px -8px rgba(0, 0, 0, 0.5);
         }
         .pass .cta-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
         .pass .cta-amt {
@@ -741,7 +797,9 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           all: unset; cursor: pointer;
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 8px;
+          min-width: 152px; /* keeps width stable as label/disabled state flips, no layout shake */
           padding: 14px 22px;
           font-weight: 700;
           font-size: 15px;
@@ -751,7 +809,7 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           color: var(--ms-ink);
           background: var(--ms-bg);
           white-space: nowrap;
-          transition: background 0.14s ease, filter 0.14s ease;
+          transition: background 0.14s ease, filter 0.14s ease, opacity 0.14s ease;
         }
         .pass .cta-btn:hover { background: var(--ms-line); }
         .pass .cta-btn.cta-primary {
@@ -772,6 +830,51 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           font-size: 12.5px;
           line-height: 1.4;
           color: var(--ms-ink);
+        }
+
+        /* Pay-at-venue chip — premium info card with icon + label + sub */
+        .pass .pay-chip {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin: 16px 14px 18px;
+          padding: 12px 14px;
+          background: color-mix(in srgb, var(--ms-brand) 8%, var(--ms-bg));
+          border: 1px solid color-mix(in srgb, var(--ms-brand) 22%, transparent);
+          border-radius: 6px;
+        }
+        [data-theme="dark"] .pass .pay-chip {
+          background: color-mix(in srgb, var(--ms-brand) 14%, var(--ms-surface));
+        }
+        .pass .pay-chip-icon {
+          width: 32px;
+          height: 32px;
+          flex: 0 0 auto;
+          display: inline-grid;
+          place-items: center;
+          border-radius: 4px;
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+        }
+        .pass .pay-chip-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          min-width: 0;
+        }
+        .pass .pay-chip-label {
+          font-family: var(--font-geist-mono, ui-monospace, Menlo, monospace);
+          font-size: 10.5px;
+          font-weight: 700;
+          letter-spacing: 0.2em;
+          color: var(--ms-ink);
+        }
+        .pass .pay-chip-sub {
+          font-size: 12.5px;
+          font-weight: 500;
+          letter-spacing: -0.005em;
+          color: var(--ms-muted);
+          line-height: 1.35;
         }
       `}</style>
     </div>

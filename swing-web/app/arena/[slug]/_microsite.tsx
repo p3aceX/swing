@@ -1251,8 +1251,9 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
         @keyframes ms-fade { from { opacity: 0; } to { opacity: 1; } }
         .ms-sheet-scrim {
           position: absolute; inset: 0;
-          background: rgba(0,0,0,0.5);
-          backdrop-filter: blur(3px);
+          background: rgba(0,0,0,0.86);
+          backdrop-filter: blur(8px) saturate(0.85);
+          -webkit-backdrop-filter: blur(8px) saturate(0.85);
           border: 0; cursor: pointer;
         }
         .ms-sheet-panel {

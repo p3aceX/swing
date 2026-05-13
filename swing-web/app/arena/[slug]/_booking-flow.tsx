@@ -1050,7 +1050,10 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
             </div>
             <div className="form-field" style={{ flex: 1 }}>
               <label className="form-label">Mobile number</label>
-              <input className="form-input" type="tel" placeholder="98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
+              <div className="form-phone">
+                <span className="form-phone-prefix">+91</span>
+                <input className="form-input form-input-phone" type="tel" placeholder="10-digit mobile" value={guestPhone} onChange={e => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
+              </div>
             </div>
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
@@ -1166,7 +1169,10 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           </div>
           <div className="form-field">
             <label className="form-label">MOBILE</label>
-            <input className="form-input" type="tel" placeholder="98765 43210" value={guestPhone} onChange={e => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
+            <div className="form-phone">
+              <span className="form-phone-prefix">+91</span>
+              <input className="form-input form-input-phone" type="tel" placeholder="10-digit mobile" value={guestPhone} onChange={e => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
+            </div>
           </div>
         </div>
 
@@ -1334,11 +1340,20 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
           </div>
           <div className="form-field">
             <label className="form-label">Mobile number</label>
-            <input className="form-input" type="tel" placeholder="98765 43210" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
+            <div className="form-phone">
+              <span className="form-phone-prefix">+91</span>
+              <input className="form-input form-input-phone" type="tel" placeholder="10-digit mobile" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} inputMode="numeric" />
+            </div>
           </div>
           {error && <div style={{ font: "600 12px var(--font-ui)", color: "var(--bad)" }}>{error}</div>}
-          <div className="pay-note" style={{ padding: "0 0 10px" }}>
-            Payment collected at venue
+          <div className="pay-chip" role="note">
+            <span className="pay-chip-icon" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 11h20"/><path d="M6 16h4"/></svg>
+            </span>
+            <span className="pay-chip-text">
+              <span className="pay-chip-label">PAY AT VENUE</span>
+              <span className="pay-chip-sub">No prepayment required · pay cash or UPI at the arena</span>
+            </span>
           </div>
         </div>
         );
