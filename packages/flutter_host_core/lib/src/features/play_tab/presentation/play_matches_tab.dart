@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../repositories/host_match_repository.dart';
 import '../../../theme/host_colors.dart';
+import '../../create_match/data/create_match_repository.dart';
+import '../../create_match/presentation/create_match_screen.dart';
 import '../../match_detail/domain/match_models.dart';
 import '../../match_detail/presentation/match_card.dart';
 import '../controller/play_tab_controller.dart';
@@ -33,19 +36,25 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
   final _searchCtrl = TextEditingController();
   int _activeTabIndex = 0;
 
-  // Attribute filters
+  // Attribute filters — apply to both Individual and Tournament tabs.
   String? _venueFilter;
   String? _opponentFilter;
   String? _formatFilter;
-  // Tournament role filter — null = all, 'host' = only tournaments I host,
-  // 'participant' = only tournaments my team plays in. Only meaningful on
-  // the Tournament tab.
-  String? _tournamentRoleFilter;
+  String? _tournamentFilter; // tournament name
+  String? _tournamentRoleFilter; // 'host' | 'participant' | null
+  DateTime? _dateFilter; // exact day match
+  // Month bucket — first day of month at 00:00, used as the comparison anchor.
+  DateTime? _monthFilter;
 
-  int get _activeFilterCount =>
-      [_venueFilter, _opponentFilter, _formatFilter, _tournamentRoleFilter]
-          .where((f) => f != null)
-          .length;
+  int get _activeFilterCount => [
+        _venueFilter,
+        _opponentFilter,
+        _formatFilter,
+        _tournamentFilter,
+        _tournamentRoleFilter,
+        _dateFilter,
+        _monthFilter,
+      ].where((f) => f != null).length;
 
   @override
   void initState() {
@@ -84,6 +93,13 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
         .toSet()
         .toList()
       ..sort();
+    final tournaments = all
+        .map((m) => m.tournamentName)
+        .whereType<String>()
+        .where((n) => n.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
 
     showModalBottomSheet(
       context: context,
@@ -96,14 +112,23 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
         venues: venues,
         opponents: opponents,
         formats: formats,
+        tournaments: tournaments,
         selectedVenue: _venueFilter,
         selectedOpponent: _opponentFilter,
         selectedFormat: _formatFilter,
-        onApply: (venue, opponent, format) {
+        selectedTournament: _tournamentFilter,
+        selectedTournamentRole: _tournamentRoleFilter,
+        selectedDate: _dateFilter,
+        selectedMonth: _monthFilter,
+        onApply: (state) {
           setState(() {
-            _venueFilter = venue;
-            _opponentFilter = opponent;
-            _formatFilter = format;
+            _venueFilter = state.venue;
+            _opponentFilter = state.opponent;
+            _formatFilter = state.format;
+            _tournamentFilter = state.tournament;
+            _tournamentRoleFilter = state.tournamentRole;
+            _dateFilter = state.date;
+            _monthFilter = state.month;
           });
         },
       ),
@@ -159,6 +184,19 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
+                if (_tournamentRoleFilter != null)
+                  _ActiveFilterChip(
+                    label: _tournamentRoleFilter == 'host'
+                        ? 'Hosting'
+                        : 'Participated',
+                    onRemove: () =>
+                        setState(() => _tournamentRoleFilter = null),
+                  ),
+                if (_tournamentFilter != null)
+                  _ActiveFilterChip(
+                    label: _tournamentFilter!,
+                    onRemove: () => setState(() => _tournamentFilter = null),
+                  ),
                 if (_formatFilter != null)
                   _ActiveFilterChip(
                     label: _formatFilter!,
@@ -173,6 +211,16 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                   _ActiveFilterChip(
                     label: _venueFilter!,
                     onRemove: () => setState(() => _venueFilter = null),
+                  ),
+                if (_dateFilter != null)
+                  _ActiveFilterChip(
+                    label: _formatDateChip(_dateFilter!),
+                    onRemove: () => setState(() => _dateFilter = null),
+                  ),
+                if (_monthFilter != null)
+                  _ActiveFilterChip(
+                    label: _formatMonthChip(_monthFilter!),
+                    onRemove: () => setState(() => _monthFilter = null),
                   ),
               ],
             ),
@@ -218,42 +266,6 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
             ],
           ),
         ),
-
-        // ── Tournament role chips (Tournament tab only) ──────────────────────
-        if (_activeTabIndex == 1) ...[
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-              children: [
-                _FilterChip(
-                  label: 'All',
-                  selected: _tournamentRoleFilter == null,
-                  isLive: false,
-                  onTap: () =>
-                      setState(() => _tournamentRoleFilter = null),
-                ),
-                const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'Hosting',
-                  selected: _tournamentRoleFilter == 'host',
-                  isLive: false,
-                  onTap: () =>
-                      setState(() => _tournamentRoleFilter = 'host'),
-                ),
-                const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'Participated',
-                  selected: _tournamentRoleFilter == 'participant',
-                  isLive: false,
-                  onTap: () => setState(
-                      () => _tournamentRoleFilter = 'participant'),
-                ),
-              ],
-            ),
-          ),
-        ],
 
         // ── Individual / Team segment ────────────────────────────────────────
         Padding(
@@ -302,7 +314,10 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                     venueFilter: _venueFilter,
                     opponentFilter: _opponentFilter,
                     formatFilter: _formatFilter,
+                    tournamentFilter: _tournamentFilter,
                     tournamentRoleFilter: null,
+                    dateFilter: _dateFilter,
+                    monthFilter: _monthFilter,
                     callbacks: widget.callbacks,
                     onRefresh: ctrl.refresh,
                   ),
@@ -314,7 +329,10 @@ class _PlayMatchesTabState extends ConsumerState<PlayMatchesTab>
                     venueFilter: _venueFilter,
                     opponentFilter: _opponentFilter,
                     formatFilter: _formatFilter,
+                    tournamentFilter: _tournamentFilter,
                     tournamentRoleFilter: _tournamentRoleFilter,
+                    dateFilter: _dateFilter,
+                    monthFilter: _monthFilter,
                     callbacks: widget.callbacks,
                     onRefresh: ctrl.refresh,
                   ),
@@ -361,7 +379,10 @@ class _MatchList extends ConsumerWidget {
     required this.venueFilter,
     required this.opponentFilter,
     required this.formatFilter,
+    required this.tournamentFilter,
     required this.tournamentRoleFilter,
+    required this.dateFilter,
+    required this.monthFilter,
     required this.callbacks,
     required this.onRefresh,
   });
@@ -373,8 +394,11 @@ class _MatchList extends ConsumerWidget {
   final String? venueFilter;
   final String? opponentFilter;
   final String? formatFilter;
+  final String? tournamentFilter;
   /// 'host' | 'participant' | null — applied only in the Tournament tab.
   final String? tournamentRoleFilter;
+  final DateTime? dateFilter;
+  final DateTime? monthFilter;
   final PlayTabCallbacks callbacks;
   final Future<void> Function() onRefresh;
 
@@ -527,6 +551,29 @@ class _MatchList extends ConsumerWidget {
         dropped.add('${m.id}: tournamentRole!=$tournamentRoleFilter');
         return false;
       }
+      if (tournamentFilter != null && m.tournamentName != tournamentFilter) {
+        dropped.add('${m.id}: tournament!=$tournamentFilter');
+        return false;
+      }
+      if (dateFilter != null) {
+        final mDate = m.scheduledAt;
+        if (mDate == null ||
+            mDate.year != dateFilter!.year ||
+            mDate.month != dateFilter!.month ||
+            mDate.day != dateFilter!.day) {
+          dropped.add('${m.id}: date!=${dateFilter}');
+          return false;
+        }
+      }
+      if (monthFilter != null) {
+        final mDate = m.scheduledAt;
+        if (mDate == null ||
+            mDate.year != monthFilter!.year ||
+            mDate.month != monthFilter!.month) {
+          dropped.add('${m.id}: month!=${monthFilter}');
+          return false;
+        }
+      }
 
       final q = searchQuery.trim().toLowerCase();
       if (q.isEmpty) return true;
@@ -572,7 +619,7 @@ class _MatchList extends ConsumerWidget {
 /// Match card variant for hosted matches — shows the normal card plus a
 /// contextual resume CTA based on where the match is in its lifecycle.
 /// [onDelete] is provided only for non-live matches.
-class _HostedMatchItem extends StatelessWidget {
+class _HostedMatchItem extends ConsumerWidget {
   const _HostedMatchItem({
     required this.match,
     required this.callbacks,
@@ -587,7 +634,7 @@ class _HostedMatchItem extends StatelessWidget {
   final VoidCallback? onDelete;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isLive = match.lifecycle == MatchLifecycle.live;
     final hasToss = (match.tossWinner ?? '').isNotEmpty;
     // Scorer-only users always see the direct scoring CTA; managers see the full setup flow labels.
@@ -625,7 +672,7 @@ class _HostedMatchItem extends StatelessWidget {
                   if (showScoringCta)
                     Expanded(
                       child: GestureDetector(
-                        onTap: () => _onResume(context),
+                        onTap: () => _onResume(context, ref),
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 11),
                           decoration: BoxDecoration(
@@ -685,19 +732,120 @@ class _HostedMatchItem extends StatelessWidget {
     );
   }
 
-  void _onResume(BuildContext context) {
+  void _onResume(BuildContext context, WidgetRef ref) {
     final hasToss = (match.tossWinner ?? '').isNotEmpty;
     final isLive = match.lifecycle == MatchLifecycle.live;
-    if (canManage && !hasToss && !isLive && callbacks.onSetPlayingXI != null) {
-      callbacks.onSetPlayingXI!(
-        context,
-        match.id,
-        match.playerTeamName,
-        match.opponentTeamName,
+    final inSetupPhase = canManage && !hasToss && !isLive;
+
+    if (inSetupPhase) {
+      // Push the Match Review screen entirely from inside host_core — no
+      // per-host callback wiring needed. The loader fetches the match
+      // summary (including parent tournament context) and renders the
+      // shared CreateMatchScreen in edit mode so every field is reviewable
+      // before scoring starts.
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _MatchReviewLoader(matchId: match.id),
+        ),
       );
-    } else {
-      callbacks.onScoreMatch?.call(context, match.id);
+      return;
     }
+    callbacks.onScoreMatch?.call(context, match.id);
+  }
+}
+
+/// Self-contained loader → Match Review screen. Lives in host_core so the
+/// "Setup Match" CTA doesn't need any per-app routing. Fetches the match
+/// summary (+ tournament context, when present), then renders the shared
+/// CreateMatchScreen pre-filled in edit mode. Saving the edit pops back
+/// to the Play tab.
+class _MatchReviewLoader extends ConsumerStatefulWidget {
+  const _MatchReviewLoader({required this.matchId});
+
+  final String matchId;
+
+  @override
+  ConsumerState<_MatchReviewLoader> createState() => _MatchReviewLoaderState();
+}
+
+class _MatchReviewLoaderState extends ConsumerState<_MatchReviewLoader> {
+  HostMatchSummary? _summary;
+  String? _error;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final summary = await ref
+          .read(hostCreateMatchRepositoryProvider)
+          .getMatch(widget.matchId);
+      if (!mounted) return;
+      setState(() {
+        _summary = summary;
+        _loaded = true;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+        _loaded = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    final s = _summary;
+    if (s == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Match Review')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              _error ?? 'Could not load this match.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+    return CreateMatchScreen(
+      onBack: () => Navigator.of(context).maybePop(),
+      onTossCompleted: (ctx, _) => Navigator.of(ctx).maybePop(),
+      editMatchId: s.id,
+      onEditSaved: (ctx, _) => Navigator.of(ctx).maybePop(),
+      initialPrefill: CreateMatchPrefill(
+        teamAId: s.teamAId,
+        teamAName: s.teamAName,
+        teamALogoUrl: s.teamALogoUrl,
+        teamACity: s.teamACity,
+        teamBId: s.teamBId,
+        teamBName: s.teamBName,
+        teamBLogoUrl: s.teamBLogoUrl,
+        teamBCity: s.teamBCity,
+        format: s.format,
+        category: s.category,
+        ageGroup: s.ageGroup,
+        ballType: s.ballType,
+        venueId: s.venueId,
+        venueName: s.venueName,
+        venueCity: s.venueCity,
+        scheduledAt: s.scheduledAt,
+        customOvers: s.customOvers,
+        hasImpactPlayer: s.hasImpactPlayer,
+      ),
+    );
   }
 }
 
@@ -796,24 +944,59 @@ class _ActiveFilterChip extends StatelessWidget {
 
 // ─── Filter sheet ─────────────────────────────────────────────────────────────
 
+String _formatDateChip(DateTime d) => DateFormat('d MMM y').format(d);
+String _formatMonthChip(DateTime d) => DateFormat('MMM y').format(d);
+
+class _FilterApplyState {
+  const _FilterApplyState({
+    this.venue,
+    this.opponent,
+    this.format,
+    this.tournament,
+    this.tournamentRole,
+    this.date,
+    this.month,
+  });
+
+  final String? venue;
+  final String? opponent;
+  final String? format;
+  final String? tournament;
+  final String? tournamentRole;
+  final DateTime? date;
+  final DateTime? month;
+}
+
+enum _FilterRow { tournamentRole, tournament, format, team, ground, date, month }
+
 class _FilterSheet extends StatefulWidget {
   const _FilterSheet({
     required this.venues,
     required this.opponents,
     required this.formats,
+    required this.tournaments,
     required this.selectedVenue,
     required this.selectedOpponent,
     required this.selectedFormat,
+    required this.selectedTournament,
+    required this.selectedTournamentRole,
+    required this.selectedDate,
+    required this.selectedMonth,
     required this.onApply,
   });
 
   final List<String> venues;
   final List<String> opponents;
   final List<String> formats;
+  final List<String> tournaments;
   final String? selectedVenue;
   final String? selectedOpponent;
   final String? selectedFormat;
-  final void Function(String? venue, String? opponent, String? format) onApply;
+  final String? selectedTournament;
+  final String? selectedTournamentRole; // 'host' | 'participant' | null
+  final DateTime? selectedDate;
+  final DateTime? selectedMonth;
+  final void Function(_FilterApplyState state) onApply;
 
   @override
   State<_FilterSheet> createState() => _FilterSheetState();
@@ -823,6 +1006,12 @@ class _FilterSheetState extends State<_FilterSheet> {
   String? _venue;
   String? _opponent;
   String? _format;
+  String? _tournament;
+  String? _tournamentRole;
+  DateTime? _date;
+  DateTime? _month;
+  // Which row is expanded — null = all collapsed (default).
+  _FilterRow? _open;
 
   @override
   void initState() {
@@ -830,53 +1019,109 @@ class _FilterSheetState extends State<_FilterSheet> {
     _venue = widget.selectedVenue;
     _opponent = widget.selectedOpponent;
     _format = widget.selectedFormat;
+    _tournament = widget.selectedTournament;
+    _tournamentRole = widget.selectedTournamentRole;
+    _date = widget.selectedDate;
+    _month = widget.selectedMonth;
+  }
+
+  int get _activeCount => [
+        _venue,
+        _opponent,
+        _format,
+        _tournament,
+        _tournamentRole,
+        _date,
+        _month,
+      ].where((v) => v != null).length;
+
+  void _toggle(_FilterRow r) {
+    setState(() => _open = _open == r ? null : r);
+  }
+
+  String _summary(_FilterRow r) {
+    switch (r) {
+      case _FilterRow.tournamentRole:
+        return _tournamentRole == 'host'
+            ? 'Hosting'
+            : _tournamentRole == 'participant'
+                ? 'Participated'
+                : 'Any';
+      case _FilterRow.tournament:
+        return _tournament ?? 'Any';
+      case _FilterRow.format:
+        return _format ?? 'Any';
+      case _FilterRow.team:
+        return _opponent ?? 'Any';
+      case _FilterRow.ground:
+        return _venue ?? 'Any';
+      case _FilterRow.date:
+        return _date != null ? DateFormat('d MMM y').format(_date!) : 'Any';
+      case _FilterRow.month:
+        return _month != null ? DateFormat('MMM y').format(_month!) : 'Any';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasAny = _venue != null || _opponent != null || _format != null;
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.6,
-      minChildSize: 0.4,
-      maxChildSize: 0.9,
+      initialChildSize: 0.7,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
       builder: (_, scrollController) => Column(
         children: [
           Container(
-            margin: const EdgeInsets.only(top: 12, bottom: 4),
-            width: 36,
+            margin: const EdgeInsets.only(top: 10, bottom: 4),
+            width: 40,
             height: 4,
             decoration: BoxDecoration(
               color: context.stroke,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
+          // ── Header ────────────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
             child: Row(
               children: [
                 Text(
-                  'Filter Matches',
+                  'Filters',
                   style: TextStyle(
                     color: context.fg,
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
+                if (_activeCount > 0) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '($_activeCount)',
+                    style: TextStyle(
+                      color: context.fgSub,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
                 const Spacer(),
-                if (hasAny)
+                if (_activeCount > 0)
                   TextButton(
                     onPressed: () => setState(() {
                       _venue = null;
                       _opponent = null;
                       _format = null;
+                      _tournament = null;
+                      _tournamentRole = null;
+                      _date = null;
+                      _month = null;
                     }),
                     child: Text(
-                      'Clear all',
+                      'Reset',
                       style: TextStyle(
                         color: context.danger,
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -884,60 +1129,146 @@ class _FilterSheetState extends State<_FilterSheet> {
             ),
           ),
           Divider(height: 1, color: context.stroke),
+          // ── Rows ──────────────────────────────────────────────────────────
           Expanded(
             child: ListView(
               controller: scrollController,
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: EdgeInsets.zero,
               children: [
-                if (widget.formats.isNotEmpty) ...[
-                  _SectionHeader(title: 'Match Type', context: context),
-                  _OptionGroup(
+                _FilterListRow(
+                  label: 'Tournament role',
+                  value: _summary(_FilterRow.tournamentRole),
+                  isOpen: _open == _FilterRow.tournamentRole,
+                  onTap: () => _toggle(_FilterRow.tournamentRole),
+                  expanded: _RolePills(
+                    selected: _tournamentRole,
+                    onSelect: (v) => setState(() => _tournamentRole = v),
+                  ),
+                ),
+                _FilterListRow(
+                  label: 'Tournament',
+                  value: _summary(_FilterRow.tournament),
+                  isOpen: _open == _FilterRow.tournament,
+                  onTap: () => _toggle(_FilterRow.tournament),
+                  expanded: _PillList(
+                    options: widget.tournaments,
+                    selected: _tournament,
+                    onSelect: (v) => setState(() => _tournament = v),
+                    emptyText: 'No tournaments yet',
+                  ),
+                ),
+                _FilterListRow(
+                  label: 'Format',
+                  value: _summary(_FilterRow.format),
+                  isOpen: _open == _FilterRow.format,
+                  onTap: () => _toggle(_FilterRow.format),
+                  expanded: _PillList(
                     options: widget.formats,
                     selected: _format,
-                    onSelect: (v) => setState(() => _format = _format == v ? null : v),
-                    context: context,
+                    onSelect: (v) => setState(() => _format = v),
+                    emptyText: 'No formats yet',
                   ),
-                ],
-                if (widget.opponents.isNotEmpty) ...[
-                  _SectionHeader(title: 'Opponent', context: context),
-                  _OptionGroup(
+                ),
+                _FilterListRow(
+                  label: 'Team',
+                  value: _summary(_FilterRow.team),
+                  isOpen: _open == _FilterRow.team,
+                  onTap: () => _toggle(_FilterRow.team),
+                  expanded: _PillList(
                     options: widget.opponents,
                     selected: _opponent,
-                    onSelect: (v) => setState(() => _opponent = _opponent == v ? null : v),
-                    context: context,
+                    onSelect: (v) => setState(() => _opponent = v),
+                    emptyText: 'No teams yet',
                   ),
-                ],
-                if (widget.venues.isNotEmpty) ...[
-                  _SectionHeader(title: 'Ground', context: context),
-                  _OptionGroup(
+                ),
+                _FilterListRow(
+                  label: 'Ground',
+                  value: _summary(_FilterRow.ground),
+                  isOpen: _open == _FilterRow.ground,
+                  onTap: () => _toggle(_FilterRow.ground),
+                  expanded: _PillList(
                     options: widget.venues,
                     selected: _venue,
-                    onSelect: (v) => setState(() => _venue = _venue == v ? null : v),
-                    context: context,
+                    onSelect: (v) => setState(() => _venue = v),
+                    emptyText: 'No grounds yet',
                   ),
-                ],
+                ),
+                _FilterListRow(
+                  label: 'Date',
+                  value: _summary(_FilterRow.date),
+                  isOpen: false, // date opens picker directly
+                  onTap: () async {
+                    final initial = _date ?? DateTime.now();
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: initial,
+                      firstDate: DateTime(initial.year - 5),
+                      lastDate: DateTime(initial.year + 3),
+                    );
+                    if (picked != null) setState(() => _date = picked);
+                  },
+                  onClear: _date == null
+                      ? null
+                      : () => setState(() => _date = null),
+                ),
+                _FilterListRow(
+                  label: 'Month',
+                  value: _summary(_FilterRow.month),
+                  isOpen: false,
+                  onTap: () async {
+                    final initial = _month ?? DateTime.now();
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime(initial.year, initial.month),
+                      firstDate: DateTime(initial.year - 5),
+                      lastDate: DateTime(initial.year + 3),
+                      helpText: 'Pick any day — only the month is used',
+                    );
+                    if (picked != null) {
+                      setState(() =>
+                          _month = DateTime(picked.year, picked.month));
+                    }
+                  },
+                  onClear: _month == null
+                      ? null
+                      : () => setState(() => _month = null),
+                ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          // ── Apply button (sticky bottom) ─────────────────────────────────
+          Container(
+            decoration: BoxDecoration(
+              color: context.bg,
+              border: Border(top: BorderSide(color: context.stroke)),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
             child: SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: () {
-                  widget.onApply(_venue, _opponent, _format);
+                  widget.onApply(_FilterApplyState(
+                    venue: _venue,
+                    opponent: _opponent,
+                    format: _format,
+                    tournament: _tournament,
+                    tournamentRole: _tournamentRole,
+                    date: _date,
+                    month: _month,
+                  ));
                   Navigator.of(context).pop();
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: context.accent,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text(
-                  'Apply',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                child: Text(
+                  _activeCount == 0 ? 'Apply' : 'Apply ($_activeCount)',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
             ),
@@ -948,76 +1279,197 @@ class _FilterSheetState extends State<_FilterSheet> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.context});
-  final String title;
-  final BuildContext context;
+/// One row in the filter list. Tapping toggles the inline expansion
+/// (or for Date/Month, calls onTap directly to open a picker). When
+/// `expanded` is null and `isOpen` is false, the row just shows the
+/// label + current value + chevron — utility row, nothing fancy.
+class _FilterListRow extends StatelessWidget {
+  const _FilterListRow({
+    required this.label,
+    required this.value,
+    required this.isOpen,
+    required this.onTap,
+    this.expanded,
+    this.onClear,
+  });
+
+  final String label;
+  final String value;
+  final bool isOpen;
+  final VoidCallback onTap;
+  final Widget? expanded;
+  final VoidCallback? onClear;
 
   @override
-  Widget build(BuildContext _) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-      child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          color: context.fgSub,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.8,
+  Widget build(BuildContext context) {
+    final hasValue = value != 'Any';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: onTap,
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: context.stroke, width: 0.5),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: hasValue ? context.accent : context.fgSub,
+                    fontSize: 13,
+                    fontWeight:
+                        hasValue ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+                if (onClear != null && hasValue) ...[
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: onClear,
+                    customBorder: const CircleBorder(),
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Icon(Icons.close_rounded,
+                          size: 14, color: context.fgSub),
+                    ),
+                  ),
+                ] else if (expanded != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    isOpen
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: context.fgSub,
+                  ),
+                ] else ...[
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: context.fgSub),
+                ],
+              ],
+            ),
+          ),
         ),
-      ),
+        if (isOpen && expanded != null)
+          Container(
+            color: context.cardBg,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+            child: expanded!,
+          ),
+      ],
     );
   }
 }
 
-class _OptionGroup extends StatelessWidget {
-  const _OptionGroup({
+class _RolePills extends StatelessWidget {
+  const _RolePills({required this.selected, required this.onSelect});
+  final String? selected;
+  final ValueChanged<String?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget pill(String label, String? value) {
+      final sel = selected == value;
+      return GestureDetector(
+        onTap: () => onSelect(sel ? null : value),
+        child: Container(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: sel
+                ? context.accent.withValues(alpha: 0.12)
+                : Colors.transparent,
+            border: Border.all(
+                color: sel ? context.accent : context.stroke),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: sel ? context.accent : context.fg,
+              fontSize: 12.5,
+              fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        pill('Any', null),
+        pill('Hosting', 'host'),
+        pill('Participated', 'participant'),
+      ],
+    );
+  }
+}
+
+class _PillList extends StatelessWidget {
+  const _PillList({
     required this.options,
     required this.selected,
     required this.onSelect,
-    required this.context,
+    required this.emptyText,
   });
-
   final List<String> options;
   final String? selected;
-  final void Function(String) onSelect;
-  final BuildContext context;
+  final ValueChanged<String?> onSelect;
+  final String emptyText;
 
   @override
-  Widget build(BuildContext _) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: options.map((opt) {
-          final isSelected = opt == selected;
-          return GestureDetector(
-            onTap: () => onSelect(opt),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? context.accent.withValues(alpha: 0.12)
-                    : Colors.transparent,
-                border: Border.all(
-                  color: isSelected ? context.accent : context.stroke,
-                  width: 1,
-                ),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                opt,
-                style: TextStyle(
-                  color: isSelected ? context.accent : context.fg,
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                ),
+  Widget build(BuildContext context) {
+    if (options.isEmpty) {
+      return Text(emptyText,
+          style: TextStyle(color: context.fgSub, fontSize: 13));
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: options.map((opt) {
+        final sel = opt == selected;
+        return GestureDetector(
+          onTap: () => onSelect(sel ? null : opt),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: sel
+                  ? context.accent.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              border: Border.all(
+                  color: sel ? context.accent : context.stroke),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              opt,
+              style: TextStyle(
+                color: sel ? context.accent : context.fg,
+                fontSize: 12.5,
+                fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

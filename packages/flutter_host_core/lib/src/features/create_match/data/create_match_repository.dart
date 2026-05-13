@@ -27,6 +27,7 @@ class HostMatchSummary {
     this.scheduledAt,
     this.customOvers,
     this.hasImpactPlayer,
+    this.tournament,
   });
 
   final String id;
@@ -49,6 +50,29 @@ class HostMatchSummary {
   final DateTime? scheduledAt;
   final int? customOvers;
   final bool? hasImpactPlayer;
+  /// Parent tournament context — non-null when the match belongs to one.
+  /// Used by the Match Review / Edit screens to show a read-only tournament
+  /// header and back-fill any fields the Match row may have missed (older
+  /// auto-generated tournament matches didn't inherit category / age).
+  final HostMatchTournament? tournament;
+}
+
+class HostMatchTournament {
+  const HostMatchTournament({
+    required this.id,
+    required this.name,
+    this.format,
+    this.category,
+    this.ageGroup,
+    this.customOvers,
+  });
+
+  final String id;
+  final String name;
+  final String? format;
+  final String? category;
+  final String? ageGroup;
+  final int? customOvers;
 }
 
 class HostCreateMatchRepository {
@@ -113,6 +137,32 @@ class HostCreateMatchRepository {
     final venue = data['venue'];
     final venueObj = venue is Map ? Map<String, dynamic>.from(venue) : null;
 
+    final tournamentRaw = data['tournament'];
+    HostMatchTournament? tournament;
+    if (tournamentRaw is Map) {
+      final t = Map<String, dynamic>.from(tournamentRaw);
+      final id = '${t['id'] ?? ''}'.trim();
+      final name = '${t['name'] ?? ''}'.trim();
+      if (id.isNotEmpty || name.isNotEmpty) {
+        tournament = HostMatchTournament(
+          id: id,
+          name: name,
+          format: trimToNull(t['format']),
+          category: trimToNull(t['category']),
+          ageGroup: trimToNull(t['ageGroup']),
+          customOvers: (t['customOvers'] as num?)?.toInt(),
+        );
+      }
+    }
+
+    // Back-fill category / age / format / overs from the parent tournament
+    // when the match row itself is missing them (older auto-generated
+    // tournament matches were created before the inheritance fix).
+    final rawCategory = trimToNull(data['category']);
+    final rawAgeGroup = trimToNull(data['ageGroup']);
+    final rawFormat = trimToNull(data['format']);
+    final rawCustomOvers = (data['customOvers'] as num?)?.toInt();
+
     return HostMatchSummary(
       id: '${data['id'] ?? matchId}',
       teamAId: pickId('teamAId', 'teamA'),
@@ -123,17 +173,18 @@ class HostCreateMatchRepository {
       teamBLogoUrl: pickNested('teamB', 'logoUrl'),
       teamACity: pickNested('teamA', 'city'),
       teamBCity: pickNested('teamB', 'city'),
-      format: trimToNull(data['format']),
+      format: rawFormat ?? tournament?.format,
       matchType: trimToNull(data['matchType']),
-      category: trimToNull(data['category']),
-      ageGroup: trimToNull(data['ageGroup']),
+      category: rawCategory ?? tournament?.category,
+      ageGroup: rawAgeGroup ?? tournament?.ageGroup,
       ballType: trimToNull(data['ballType']),
       venueId: trimToNull(data['facilityId'] ?? venueObj?['id']),
       venueName: trimToNull(data['venueName'] ?? venueObj?['name']),
       venueCity: trimToNull(data['venueCity'] ?? venueObj?['city']),
       scheduledAt: parseDate(data['scheduledAt']),
-      customOvers: (data['customOvers'] as num?)?.toInt(),
+      customOvers: rawCustomOvers ?? tournament?.customOvers,
       hasImpactPlayer: data['hasImpactPlayer'] == true,
+      tournament: tournament,
     );
   }
 

@@ -27,6 +27,12 @@ class PlayTabCallbacks {
 
   /// Navigate to Playing XI setup for a hosted match that hasn't completed toss.
   /// [teamAName] and [teamBName] are used to pre-fill the team names.
+  ///
+  /// NOTE: the Play-tab "Setup Match" CTA does NOT call this anymore — it
+  /// opens the in-host_core Match Review (edit) screen directly via
+  /// `Navigator.push` so we don't have to thread a new callback through
+  /// every host app. This callback is kept for hosts that explicitly want
+  /// the legacy direct-to-Playing-11 behaviour from custom UI.
   final void Function(
     BuildContext context,
     String matchId,
