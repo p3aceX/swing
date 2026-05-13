@@ -1842,9 +1842,17 @@ export class MatchService {
     await this.computePlayerStats(matchId)
     await prisma.match.update({ where: { id: matchId }, data: { status: 'COMPLETED', completedAt: new Date(), winnerId, winMargin } })
     console.log('[completeMatch] match marked COMPLETED')
-    const statsResult = await performanceService.processVerifiedMatch(matchId, { allowUnverified: true })
-    if (!statsResult.processed) {
-      console.error('[completeMatch] Stats generation failed', { matchId, reason: statsResult.reason })
+    // Downstream stats / index pipeline is non-blocking: the match is
+    // already committed as COMPLETED above, so a crash here (e.g. Prisma
+    // schema drift in playerIndexSnapshot) must NOT surface as a 500 to
+    // the scoring client. Log and swallow.
+    try {
+      const statsResult = await performanceService.processVerifiedMatch(matchId, { allowUnverified: true })
+      if (!statsResult.processed) {
+        console.error('[completeMatch] Stats generation failed', { matchId, reason: statsResult.reason })
+      }
+    } catch (e) {
+      console.error('[completeMatch] Stats pipeline crashed (match still COMPLETED):', e)
     }
     fireStudioEvent(matchId, TriggerEventType.MATCH_COMPLETED)
     return prisma.match.findUnique({ where: { id: matchId }, include: { innings: true, playerMatchStats: true } })

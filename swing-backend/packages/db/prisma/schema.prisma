@@ -1738,6 +1738,11 @@ model PlayerIndexSnapshot {
   impactIndex      Float?
   captaincyIndex   Float?
   swingIndex       Float?
+  // Calculator emits these alongside the other index dimensions —
+  // adding the columns so playerIndexSnapshot.createMany no longer
+  // throws "Unknown argument" at the end of completeMatch.
+  clutchIndex      Float?
+  physicalIndex    Float?
   impactPoints     Int?
   seasonPoints     Int?
   rankKey          CompetitiveRankKey?
