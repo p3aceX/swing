@@ -631,18 +631,55 @@ export class PlayerService {
     const matchIds = data.map((item) => item.matchId)
     const roleMap = await resolveMatchRoleBatch(profileId, matchIds)
 
+    // Surface tournament info + the user's role in the parent tournament
+    // so the Play > Matches card can show "Hosting <Name>" vs
+    // "Participated <Name>" and the user can filter by either.
+    const tournamentIds = Array.from(
+      new Set(
+        data
+          .map((item) => (item.match as any).tournamentId as string | null)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    )
+    const tournaments = tournamentIds.length > 0
+      ? await prisma.tournament.findMany({
+          where: { id: { in: tournamentIds } },
+          select: { id: true, name: true, createdByUserId: true },
+        })
+      : []
+    const tournamentById = new Map(tournaments.map((t) => [t.id, t]))
+    const requestingUserId = profileForUser?.userId ?? null
+
     const enriched = data.map((item) => {
       const myRole = roleMap.get(item.matchId) ?? null
       const activeScorerId = (item.match as any).activeScorerId as string | null
       const meIsActiveScorer = !!activeScorerId && activeScorerId === profileId
+      const tId = (item.match as any).tournamentId as string | null
+      const tournament = tId ? tournamentById.get(tId) ?? null : null
+      let tournamentRole: 'host' | 'participant' | null = null
+      if (tournament) {
+        tournamentRole =
+          requestingUserId && tournament.createdByUserId === requestingUserId
+            ? 'host'
+            : 'participant'
+      }
       return {
         ...item,
         myRole,
         meIsActiveScorer,
         // legacy field — kept for backwards compat, derived from myRole
         isHost: myRole === 'owner' || myRole === 'manager',
+        tournament: tournament
+          ? {
+              id: tournament.id,
+              name: tournament.name,
+              myRole: tournamentRole,
+            }
+          : null,
         match: {
           ...item.match,
+          tournamentName: tournament?.name ?? null,
+          tournamentRole,
           teamALogoUrl: teamByName.get(item.match.teamAName)?.logoUrl ?? null,
           teamAShortName: teamByName.get(item.match.teamAName)?.shortName ?? null,
           teamBLogoUrl: teamByName.get(item.match.teamBName)?.logoUrl ?? null,
