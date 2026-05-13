@@ -105,22 +105,31 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     required List<ScoringMatchPlayer> players,
     required void Function(ScoringMatchPlayer) onPicked,
     String? wicketKeeperId,
+    bool mandatory = false,
+    List<String> Function(ScoringMatchPlayer player)? roleLabelsForPlayer,
   }) async {
     if (players.isEmpty) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      isDismissible: !mandatory,
+      enableDrag: !mandatory,
       backgroundColor: Colors.transparent,
-      builder: (_) => PlayerPickerSheet(
-        title: title,
-        players: players,
-        wicketKeeperId: wicketKeeperId,
-        onSearchExternal: _ctrl.searchPlayers,
-        onSelected: (player) {
-          Navigator.pop(context);
-          onPicked(player);
-        },
-      ),
+      builder: (sheetCtx) {
+        final sheet = PlayerPickerSheet(
+          title: title,
+          players: players,
+          wicketKeeperId: wicketKeeperId,
+          roleLabelsForPlayer: roleLabelsForPlayer,
+          onSearchExternal: _ctrl.searchPlayers,
+          onSelected: (player) {
+            Navigator.pop(sheetCtx);
+            onPicked(player);
+          },
+        );
+        if (!mandatory) return sheet;
+        return PopScope(canPop: false, child: sheet);
+      },
     );
   }
 
@@ -173,7 +182,13 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
   Set<String> _dismissedIds(HostScoringState state) {
     final players = state.players;
     return state.balls
-        .where((b) => b.isWicket && b.dismissalType != 'RETIRED_HURT')
+        .where((b) {
+          // RETIRED_HURT players can return to bat — never count them as
+          // dismissed, regardless of how isWicket was stored on the ball.
+          final dt = (b.dismissalType ?? '').toUpperCase();
+          if (dt == 'RETIRED_HURT' || dt == 'NOT_OUT') return false;
+          return b.isWicket;
+        })
         .map((b) {
           // Use dismissedPlayerId if present (catches non-striker run-outs),
           // fall back to batterId (the batter facing the ball).
@@ -184,11 +199,27 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
         .toSet();
   }
 
-  Future<void> _pickStriker(HostScoringState state) async {
+  /// Profile IDs of players who left the crease via RETIRED_HURT and have
+  /// not yet returned. Used to tag them in the new-batter picker so the
+  /// scorer knows they're eligible to come back.
+  Set<String> _retiredHurtIds(HostScoringState state) {
+    final players = state.players;
+    return state.balls
+        .where((b) => (b.dismissalType ?? '').toUpperCase() == 'RETIRED_HURT')
+        .map((b) {
+          final id = b.dismissedPlayerId ?? b.batterId;
+          return players?.normalizeId(id) ?? id ?? '';
+        })
+        .where((id) => id.isNotEmpty)
+        .toSet();
+  }
+
+  Future<void> _pickStriker(HostScoringState state, {bool mandatory = false}) async {
     final players = state.players;
     final innings = state.activeInnings;
     if (players == null || innings == null) return;
     final dismissed = _dismissedIds(state);
+    final retiredHurt = _retiredHurtIds(state);
     final nonStrikerId = state.effectiveNonStrikerId;
     final eligible = players
         .forSide(innings.battingTeam)
@@ -197,18 +228,22 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
             !p.matchesId(nonStrikerId))
         .toList();
     await _pickPlayer(
-      title: 'Select New Batter',
+      title: mandatory ? 'Pick new batter (required)' : 'Select New Batter',
       players: eligible,
+      mandatory: mandatory,
       wicketKeeperId: _wicketKeeperIdForSide(state, innings.battingTeam),
+      roleLabelsForPlayer: (p) =>
+          retiredHurt.contains(p.profileId) ? const ['Ret. Hurt'] : const [],
       onPicked: (p) => _ctrl.setNewBatter(p.profileId),
     );
   }
 
-  Future<void> _pickNonStriker(HostScoringState state) async {
+  Future<void> _pickNonStriker(HostScoringState state, {bool mandatory = false}) async {
     final players = state.players;
     final innings = state.activeInnings;
     if (players == null || innings == null) return;
     final dismissed = _dismissedIds(state);
+    final retiredHurt = _retiredHurtIds(state);
     final eligible = players
         .forSide(innings.battingTeam)
         .where((p) =>
@@ -216,9 +251,12 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
             !p.matchesId(state.effectiveStrikerId))
         .toList();
     await _pickPlayer(
-      title: 'Select Non-Striker',
+      title: mandatory ? 'Pick non-striker (required)' : 'Select Non-Striker',
       players: eligible,
+      mandatory: mandatory,
       wicketKeeperId: _wicketKeeperIdForSide(state, innings.battingTeam),
+      roleLabelsForPlayer: (p) =>
+          retiredHurt.contains(p.profileId) ? const ['Ret. Hurt'] : const [],
       onPicked: (p) => _ctrl.setNonStriker(p.profileId),
     );
   }
@@ -262,28 +300,50 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     required String bowlingSide,
     required String excludePlayerId,
   }) async {
-    final state = ref.read(hostScoringControllerProvider(widget.matchId));
-    final players = state.players;
-    if (players == null) return;
-    final candidates = players
-        .forSide(bowlingSide)
-        .where((p) => !p.matchesId(excludePlayerId))
-        .toList();
-    if (candidates.isEmpty) return;
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bowler can\'t also be wicket-keeper — pick a new WK'),
-          duration: Duration(seconds: 3),
+    // Loop until a WK is selected. The sheet itself is undismissable, but the
+    // loop is a belt-and-braces in case any future code path closes it
+    // without a pick (e.g. controller refresh tearing down the route).
+    while (mounted) {
+      final state = ref.read(hostScoringControllerProvider(widget.matchId));
+      final players = state.players;
+      if (players == null) return;
+      final currentWk = bowlingSide == 'A'
+          ? players.teamAWicketKeeperId
+          : players.teamBWicketKeeperId;
+      final hasValidWk = currentWk != null &&
+          currentWk.isNotEmpty &&
+          currentWk != excludePlayerId;
+      if (hasValidWk) return;
+
+      final candidates = players
+          .forSide(bowlingSide)
+          .where((p) => !p.matchesId(excludePlayerId))
+          .toList();
+      if (candidates.isEmpty) return;
+
+      bool picked = false;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        isDismissible: false,
+        enableDrag: false,
+        backgroundColor: Colors.transparent,
+        builder: (sheetCtx) => PopScope(
+          canPop: false,
+          child: PlayerPickerSheet(
+            title: 'Pick wicket-keeper (required)',
+            players: candidates,
+            onSearchExternal: _ctrl.searchPlayers,
+            onSelected: (wk) {
+              picked = true;
+              Navigator.pop(sheetCtx);
+              _ctrl.changeWicketKeeper(bowlingSide, wk.profileId);
+            },
+          ),
         ),
       );
+      if (picked) return;
     }
-    await _pickPlayer(
-      title: 'Select Wicket-Keeper',
-      players: candidates,
-      onPicked: (wk) =>
-          _ctrl.changeWicketKeeper(bowlingSide, wk.profileId),
-    );
   }
 
   // ─── Wicket-keeper change ──────────────────────────────────────────────────
@@ -353,14 +413,23 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       await _showEndOfInningsSheet(s);
       return;
     }
-    // Pick the player that was actually dismissed.
-    // After _init(), the dismissed player's slot will be empty in server state.
-    if (inn.totalWickets < 10) {
-      if (s.effectiveStrikerId.isEmpty) {
-        await _pickStriker(s);
-      } else if (s.effectiveNonStrikerId.isEmpty) {
-        await _pickNonStriker(s);
+    // After _init(), the dismissed batter's slot is empty in server state.
+    // Re-prompt mandatorily until both slots are filled — runs can never
+    // leak onto a dismissed batter because nothing else can happen first.
+    while (mounted) {
+      final live = ref.read(hostScoringControllerProvider(widget.matchId));
+      final liveInn = live.activeInnings;
+      if (liveInn == null || liveInn.isCompleted) return;
+      if ((liveInn.totalWickets) >= 10) break;
+      if (live.effectiveStrikerId.isEmpty) {
+        await _pickStriker(live, mandatory: true);
+        continue;
       }
+      if (live.effectiveNonStrikerId.isEmpty) {
+        await _pickNonStriker(live, mandatory: true);
+        continue;
+      }
+      break;
     }
     if (!mounted) return;
     final s2 = ref.read(hostScoringControllerProvider(widget.matchId));
@@ -558,6 +627,48 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     );
   }
 
+  void _showNoBallSheet() {
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _NoBallPicker(
+        onConfirm: (type, count) {
+          Navigator.pop(ctx);
+          _recordNoBall(type, count);
+        },
+      ),
+    );
+  }
+
+  Future<void> _recordNoBall(String type, int count) async {
+    _snapshotOver();
+    int runs = 0;
+    int extras = 1;
+    final tags = <String>[];
+    switch (type) {
+      case 'BYE':
+        extras = 1 + count;
+        tags.add('no_ball_extra:bye:$count');
+        break;
+      case 'LEG_BYE':
+        extras = 1 + count;
+        tags.add('no_ball_extra:leg_bye:$count');
+        break;
+      default: // BAT
+        runs = count;
+        break;
+    }
+    final ok = await _ctrl.recordBall(
+      outcome: 'NO_BALL',
+      runs: runs,
+      extras: extras,
+      tags: tags,
+    );
+    if (ok && mounted) await _afterBall();
+  }
+
   void _showScoringPad() {
     if (!mounted) return;
     showModalBottomSheet<void>(
@@ -576,46 +687,20 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
   Future<void> _showExtraSelector({
     required String title,
     required void Function(int value) onConfirm,
+    String? subtitle,
     List<int> options = const [1, 2, 3, 4, 5],
   }) async {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => SafeArea(
-        child: Container(
-          color: context.cardBg,
-          padding: const EdgeInsets.all(20),
-          child: Wrap(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: options
-                    .map(
-                      (v) => FilledButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          onConfirm(v);
-                        },
-                        child: Text('$v'),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => _ExtrasPicker(
+        title: title,
+        subtitle: subtitle,
+        options: options,
+        onConfirm: (v) {
+          Navigator.pop(ctx);
+          onConfirm(v);
+        },
       ),
     );
   }
@@ -637,6 +722,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       String dismissalType,
       String deliveryType,
       String? fielderId,
+      String? substituteFielderName,
       bool dismissedIsStriker,
       int completedRuns,
     })? result;
@@ -658,6 +744,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
           required String dismissalType,
           required String deliveryType,
           String? fielderId,
+          String? substituteFielderName,
           required bool dismissedIsStriker,
           required int completedRuns,
           bool crossed = false,
@@ -667,6 +754,7 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
             dismissalType: dismissalType,
             deliveryType: deliveryType,
             fielderId: fielderId,
+            substituteFielderName: substituteFielderName,
             dismissedIsStriker: dismissedIsStriker,
             completedRuns: completedRuns,
           );
@@ -695,6 +783,10 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
           ? state.effectiveStrikerId
           : state.effectiveNonStrikerId,
       fielderId: r.fielderId,
+      tags: [
+        if ((r.substituteFielderName ?? '').isNotEmpty)
+          'substitute_fielder:${r.substituteFielderName}',
+      ],
     );
 
     if (ok && mounted) await _afterWicket();
@@ -1289,24 +1381,19 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     _showWicketSheet(s);
                   },
                   onWide: () => _showExtraSelector(
-                    title: 'Wides',
+                    title: 'Wide  ·  + ?',
+                    subtitle: 'Extra runs on top of the 1 wide penalty (0 = wide only)',
+                    options: const [0, 1, 2, 3, 4],
                     onConfirm: (v) async {
                       _snapshotOver();
-                      final ok = await _ctrl.recordBall(outcome: 'WIDE', runs: 0, extras: v);
+                      final ok = await _ctrl.recordBall(outcome: 'WIDE', runs: 0, extras: v + 1);
                       if (ok && mounted) await _afterBall();
                     },
                   ),
-                  onNoBall: () => _showExtraSelector(
-                    title: 'Runs off bat (No Ball)',
-                    options: const [0, 1, 2, 3, 4, 5, 6],
-                    onConfirm: (v) async {
-                      _snapshotOver();
-                      final ok = await _ctrl.recordBall(outcome: 'NO_BALL', runs: v, extras: 1);
-                      if (ok && mounted) await _afterBall();
-                    },
-                  ),
+                  onNoBall: _showNoBallSheet,
                   onBye: () => _showExtraSelector(
-                    title: 'Bye runs',
+                    title: 'Bye  ·  + ?',
+                    subtitle: 'Runs taken as byes',
                     onConfirm: (v) async {
                       _snapshotOver();
                       final ok = await _ctrl.recordBall(outcome: 'BYE', runs: 0, extras: v);
@@ -1314,7 +1401,8 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                     },
                   ),
                   onLegBye: () => _showExtraSelector(
-                    title: 'Leg bye runs',
+                    title: 'Leg Bye  ·  + ?',
+                    subtitle: 'Runs taken as leg-byes',
                     onConfirm: (v) async {
                       _snapshotOver();
                       final ok = await _ctrl.recordBall(outcome: 'LEG_BYE', runs: 0, extras: v);
@@ -1419,6 +1507,7 @@ class _ScoringBody extends StatelessWidget {
             match: match,
             innings: innings,
             toWin: state.toWin,
+            currentOverBalls: currentOverBalls,
           ),
           Divider(height: 1, color: context.stroke),
         ],
@@ -1610,6 +1699,7 @@ class _ScoringBody extends StatelessWidget {
                   icon: Icons.add_circle_outline_rounded,
                   label: 'Overthrow',
                   busy: state.isSubmitting,
+                  enabled: state.balls.isNotEmpty,
                   onTap: onOverthrow,
                 ),
               ],
@@ -1963,26 +2053,29 @@ class _PadBtn extends StatelessWidget {
     required this.busy,
     required this.onTap,
     this.color,
+    this.enabled = true,
   });
 
   final IconData icon;
   final String label;
   final Color? color;
   final bool busy;
+  final bool enabled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final highlighted = color != null;
+    final dim = busy || !enabled;
     final Color bg;
     final Color fg;
     BorderSide border = BorderSide.none;
     if (highlighted) {
-      bg = busy ? color!.withValues(alpha: 0.45) : color!;
-      fg = busy ? Colors.white.withValues(alpha: 0.4) : Colors.white;
+      bg = dim ? color!.withValues(alpha: 0.45) : color!;
+      fg = dim ? Colors.white.withValues(alpha: 0.4) : Colors.white;
     } else {
       bg = context.bg;
-      fg = busy ? context.fgSub : context.fg;
+      fg = dim ? context.fgSub : context.fg;
       border = BorderSide(color: context.stroke);
     }
     return Expanded(
@@ -1995,12 +2088,12 @@ class _PadBtn extends StatelessWidget {
             side: border,
           ),
           child: InkWell(
-            onTap: busy ? null : onTap,
+            onTap: dim ? null : onTap,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 18, color: fg),
-                const SizedBox(width: 6),
+                Icon(icon, size: 16, color: fg),
+                const SizedBox(width: 4),
                 Flexible(
                   child: Text(
                     label,
@@ -2008,9 +2101,9 @@ class _PadBtn extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: fg,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.4,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
                     ),
                   ),
                 ),
@@ -2313,6 +2406,257 @@ class _OverthrowPicker extends StatelessWidget {
             ]),
             const SizedBox(height: 12),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Generic extras picker (wide / no-ball / bye / leg-bye) ──────────────────
+// Mirrors _OverthrowPicker so all extras flows share the same sheet layout.
+
+class _ExtrasPicker extends StatelessWidget {
+  const _ExtrasPicker({
+    required this.title,
+    required this.options,
+    required this.onConfirm,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<int> options;
+  final void Function(int value) onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: context.bg,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                subtitle!,
+                style: TextStyle(color: context.fgSub, fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 12),
+            ..._buildRows(),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Lay out options in rows of up to 4. Pads short trailing rows with empty
+  // Expanded slots so button widths stay aligned with the full row above.
+  List<Widget> _buildRows() {
+    const perRow = 4;
+    final rows = <Widget>[];
+    for (var i = 0; i < options.length; i += perRow) {
+      final end = (i + perRow > options.length) ? options.length : i + perRow;
+      final chunk = options.sublist(i, end);
+      final children = <Widget>[];
+      for (var j = 0; j < perRow; j++) {
+        if (j > 0) children.add(const SizedBox(width: 8));
+        if (j < chunk.length) {
+          final v = chunk[j];
+          children.add(_ScorePadBtn(
+            label: '$v',
+            busy: false,
+            onTap: () => onConfirm(v),
+          ));
+        } else {
+          children.add(const Expanded(child: SizedBox()));
+        }
+      }
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
+      rows.add(Row(children: children));
+    }
+    return rows;
+  }
+}
+
+// ─── No Ball picker (off-bat / bye / leg-bye + count) ────────────────────────
+
+class _NoBallPicker extends StatefulWidget {
+  const _NoBallPicker({required this.onConfirm});
+
+  /// type ∈ {BAT, BYE, LEG_BYE}, count is the number of runs added on top of
+  /// the 1-run no-ball penalty.
+  final void Function(String type, int count) onConfirm;
+
+  @override
+  State<_NoBallPicker> createState() => _NoBallPickerState();
+}
+
+class _NoBallPickerState extends State<_NoBallPicker> {
+  String _type = 'BAT';
+
+  String get _subtitle => switch (_type) {
+        'BYE' => 'Bye runs taken off the no-ball (1 NB penalty added)',
+        'LEG_BYE' =>
+          'Leg-bye runs taken off the no-ball (1 NB penalty added)',
+        _ => 'Runs off the bat (1 NB penalty added) · 0 = NB only',
+      };
+
+  List<int> get _options => switch (_type) {
+        'BAT' => const [0, 1, 2, 3, 4, 5, 6],
+        _ => const [1, 2, 3, 4],
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: context.bg,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No Ball  ·  + ?',
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _subtitle,
+              style: TextStyle(color: context.fgSub, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _NoBallTypeChip(
+                  label: 'Off Bat',
+                  selected: _type == 'BAT',
+                  onTap: () => setState(() => _type = 'BAT'),
+                ),
+                const SizedBox(width: 6),
+                _NoBallTypeChip(
+                  label: 'Bye',
+                  selected: _type == 'BYE',
+                  onTap: () => setState(() => _type = 'BYE'),
+                ),
+                const SizedBox(width: 6),
+                _NoBallTypeChip(
+                  label: 'Leg Bye',
+                  selected: _type == 'LEG_BYE',
+                  onTap: () => setState(() => _type = 'LEG_BYE'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ..._buildRows(),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildRows() {
+    const perRow = 4;
+    final opts = _options;
+    final rows = <Widget>[];
+    for (var i = 0; i < opts.length; i += perRow) {
+      final end = (i + perRow > opts.length) ? opts.length : i + perRow;
+      final chunk = opts.sublist(i, end);
+      final children = <Widget>[];
+      for (var j = 0; j < perRow; j++) {
+        if (j > 0) children.add(const SizedBox(width: 8));
+        if (j < chunk.length) {
+          final v = chunk[j];
+          children.add(_ScorePadBtn(
+            label: '$v',
+            busy: false,
+            onTap: () => widget.onConfirm(_type, v),
+          ));
+        } else {
+          children.add(const Expanded(child: SizedBox()));
+        }
+      }
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
+      rows.add(Row(children: children));
+    }
+    return rows;
+  }
+}
+
+class _NoBallTypeChip extends StatelessWidget {
+  const _NoBallTypeChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Material(
+        color: selected ? context.fg : context.bg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: context.stroke),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected ? context.bg : context.fg,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -3672,53 +4016,84 @@ class _ScoreStrip extends StatelessWidget {
     return (crr * maxOvers).round();
   }
 
+  /// Compact toss line: "TEAM • bat" — shown small + light beneath the score.
+  /// Null when toss hasn't been recorded yet.
+  String? get _tossLine {
+    final w = match.tossWonBy;
+    final d = match.tossDecision;
+    if (w == null || w.isEmpty || d == null || d.isEmpty) return null;
+    final t = w == 'A' ? match.teamAName : match.teamBName;
+    final action = d.toUpperCase() == 'BAT' ? 'bat' : 'bowl';
+    return '$t won toss · chose to $action';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final toss = _tossLine;
     return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flexible(
-            child: Text(
-              _teamName.toUpperCase(),
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  _teamName.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                innings.scoreDisplay,
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${innings.overNumber}.${innings.ballInOver}',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              _StripStat(label: 'CRR', value: _crr),
+              if (_projected != null) ...[
+                const SizedBox(width: 12),
+                _StripStat(
+                  label: 'PROJ',
+                  value: '${_projected!}',
+                  accent: true,
+                ),
+              ],
+            ],
+          ),
+          if (toss != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              toss,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: context.fg,
-                fontSize: 15,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.6,
+                color: context.fgSub.withValues(alpha: 0.75),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.1,
               ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            innings.scoreDisplay,
-            style: TextStyle(
-              color: context.fg,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '${innings.overNumber}.${innings.ballInOver}',
-            style: TextStyle(
-              color: context.fgSub,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const Spacer(),
-          _StripStat(label: 'CRR', value: _crr),
-          if (_projected != null) ...[
-            const SizedBox(width: 12),
-            _StripStat(
-              label: 'PROJ',
-              value: '${_projected!}',
-              accent: true,
             ),
           ],
         ],
@@ -3781,20 +4156,13 @@ class _TossChaseStrip extends StatelessWidget {
     required this.match,
     required this.innings,
     required this.toWin,
+    required this.currentOverBalls,
   });
 
   final ScoringMatch match;
   final ScoringInnings innings;
   final int? toWin;
-
-  String? _tossLine() {
-    final w = match.tossWonBy;
-    final d = match.tossDecision;
-    if (w == null || w.isEmpty || d == null || d.isEmpty) return null;
-    final t = w == 'A' ? match.teamAName : match.teamBName;
-    final action = d.toUpperCase() == 'BAT' ? 'bat' : 'bowl';
-    return '$t won the toss · chose to $action';
-  }
+  final List<ScoringBall> currentOverBalls;
 
   ({int need, int ballsLeft, String rrr})? _chase() {
     if (match.format == 'TEST') return null;
@@ -3874,26 +4242,27 @@ class _TossChaseStrip extends StatelessWidget {
       );
     }
 
-    final toss = _tossLine();
-    if (toss == null) return const SizedBox.shrink();
+    // 1st innings: ball-by-ball strip for the current over.
     return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
         children: [
-          Icon(Icons.casino_rounded, size: 14, color: context.fgSub),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              toss,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: context.fgSub,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.1,
-              ),
+          Text(
+            'OVER ${innings.overNumber + 1}',
+            style: TextStyle(
+              color: context.fgSub,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: OverDotsRow(overBalls: currentOverBalls),
             ),
           ),
         ],
@@ -4700,8 +5069,9 @@ class _StripPlayerSegment extends StatelessWidget {
   }
 }
 
-// Small confirmation toast that flashes near the top after each ball is
-// successfully synced to the server. Self-dismisses; no user interaction.
+// Confirmation animation that flashes near the top after each ball syncs:
+// a small green "ball" streaks across the score-strip area leaving a fading
+// dotted trail behind it. Pure motion, no text. Self-dismisses.
 class _SyncedToast extends StatefulWidget {
   const _SyncedToast();
 
@@ -4709,64 +5079,93 @@ class _SyncedToast extends StatefulWidget {
   State<_SyncedToast> createState() => _SyncedToastState();
 }
 
-class _SyncedToastState extends State<_SyncedToast> {
-  bool _visible = false;
+class _SyncedToastState extends State<_SyncedToast>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _visible = true);
-    });
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (mounted) setState(() => _visible = false);
-    });
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 750),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     return Positioned(
-      top: mq.padding.top + 76,
+      top: mq.padding.top + 72,
       left: 0,
       right: 0,
+      height: 14,
       child: IgnorePointer(
-        child: Center(
-          child: AnimatedSlide(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOut,
-            offset: _visible ? Offset.zero : const Offset(0, -0.4),
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 220),
-              opacity: _visible ? 1 : 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 7),
-                decoration: const BoxDecoration(color: Color(0xFF065F46)),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle_rounded,
-                        size: 14, color: Colors.white),
-                    SizedBox(width: 6),
-                    Text(
-                      'Score synced',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+        child: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (_, __) => CustomPaint(
+            painter: _BallTrailPainter(progress: _ctrl.value),
           ),
         ),
       ),
     );
   }
+}
+
+class _BallTrailPainter extends CustomPainter {
+  _BallTrailPainter({required this.progress});
+
+  final double progress;
+  static const _color = Color(0xFF22C55E); // success green
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0 || progress >= 1) return;
+
+    final eased = Curves.easeOutCubic.transform(progress);
+    final ballX = eased * (size.width + 24) - 12; // start/end just off-screen
+    final cy = size.height / 2;
+
+    // Tail-off fade in the last 20% of the animation.
+    final tailFade = progress < 0.8 ? 1.0 : (1.0 - (progress - 0.8) / 0.2);
+
+    // Faint dotted trail behind the ball — eight steps, shrinking + fading.
+    const trail = 8;
+    for (var i = 1; i <= trail; i++) {
+      final delay = i * 0.05;
+      final tProgress = (eased - delay).clamp(0.0, 1.0);
+      final x = tProgress * (size.width + 24) - 12;
+      final alpha = (1.0 - i / trail) * 0.45 * tailFade;
+      final r = 1.6 + (1.0 - i / trail) * 1.4;
+      canvas.drawCircle(
+        Offset(x, cy),
+        r,
+        Paint()..color = _color.withValues(alpha: alpha),
+      );
+    }
+
+    // Soft outer glow + crisp ball.
+    canvas.drawCircle(
+      Offset(ballX, cy),
+      8,
+      Paint()..color = _color.withValues(alpha: 0.18 * tailFade),
+    );
+    canvas.drawCircle(
+      Offset(ballX, cy),
+      4.5,
+      Paint()..color = _color.withValues(alpha: tailFade),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _BallTrailPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 class _ScoreBlock extends StatelessWidget {

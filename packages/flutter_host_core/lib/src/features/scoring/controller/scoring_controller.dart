@@ -272,17 +272,23 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       final nextBowlerId =
           toNullable(players.normalizeId(innings?.currentBowlerId));
 
+      // Before the first ball, server slots can be empty just because the
+      // scorer hasn't picked yet — keep local picks. After play has started,
+      // an empty slot is authoritative: a wicket / retirement cleared the
+      // batter, or the over rotated the bowler. If we hold a stale ID the
+      // wicket-resume prompt never fires.
+      final hasStarted = (innings?.balls.isNotEmpty ?? false);
       state = state.copyWith(
         isLoading: false,
         isSubmitting: false,
         match: match,
         players: players,
         strikerId: nextStrikerId,
-        clearStrikerId: false,
+        clearStrikerId: hasStarted && nextStrikerId == null,
         nonStrikerId: nextNonStrikerId,
-        clearNonStrikerId: false,
+        clearNonStrikerId: hasStarted && nextNonStrikerId == null,
         bowlerId: nextBowlerId,
-        clearBowlerId: false,
+        clearBowlerId: hasStarted && nextBowlerId == null,
         isFreeHit: innings?.isFreeHit ?? false,
         clearError: true,
       );
