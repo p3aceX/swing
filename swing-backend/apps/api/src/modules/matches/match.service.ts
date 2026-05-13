@@ -1871,6 +1871,33 @@ export class MatchService {
     })
     if (!match) throw Errors.notFound('Match')
 
+    // Parent tournament context for Match Review / Edit screens. Lets the
+    // client show a read-only "part of <Tournament>" block and surface the
+    // tournament's category / age / overs even when the underlying Match
+    // row pre-dates the auto-gen inheritance fix.
+    let tournament: {
+      id: string
+      name: string
+      format: string
+      category: string
+      ageGroup: string
+      customOvers: number | null
+    } | null = null
+    if (match.tournamentId) {
+      const t = await prisma.tournament.findUnique({
+        where: { id: match.tournamentId },
+        select: {
+          id: true,
+          name: true,
+          format: true,
+          category: true,
+          ageGroup: true,
+          customOvers: true,
+        },
+      })
+      if (t) tournament = t
+    }
+
     if (!match.liveCode || !match.livePin) {
       const liveCode = match.liveCode ?? (await this.generateUniqueMatchLiveCode())
       const livePin = match.livePin ?? this.generateMatchLivePin()
@@ -1907,7 +1934,8 @@ export class MatchService {
       }
     }
 
-    return this.enrichMatchReadModel(match)
+    const enriched = this.enrichMatchReadModel(match)
+    return { ...enriched, tournament }
   }
 
   async getPreview(matchId: string) {

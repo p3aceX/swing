@@ -684,6 +684,14 @@ export class TournamentService {
               isRanked: false,
               scorerId: organizerProfile?.id ?? null,
               customOvers: tournament.customOvers ?? null,
+              // Tournament-generated matches inherit category / age / ball
+              // from the parent tournament — without this they fall back to
+              // the Match.category Prisma default (CLUB_ACADEMY) regardless
+              // of what the tournament actually is, which surfaces wrong
+              // category labels on the Edit / Match Review pages.
+              category: tournament.category,
+              ageGroup: tournament.ageGroup,
+              ballType: tournament.ballType,
             })
             busyTeamsToday.add(finalPair.teamAName)
             busyTeamsToday.add(finalPair.teamBName)
@@ -1027,6 +1035,14 @@ export class TournamentService {
     matchFormat: string,
     customOvers: number | null,
   ) {
+    // Re-fetch the parent tournament so each generated match inherits the
+    // tournament's category / age / ball type. Without this, Match.category
+    // falls to the Prisma default (CLUB_ACADEMY) regardless of what the
+    // tournament is — surfacing wrong labels on the Match Review screen.
+    const tournament = await prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      select: { category: true, ageGroup: true, ballType: true },
+    })
     const baseTime = new Date(
       referenceMatches[referenceMatches.length - 1].scheduledAt,
     )
@@ -1046,6 +1062,9 @@ export class TournamentService {
         matchType: "TOURNAMENT" as const,
         format: matchFormat as any,
         customOvers,
+        category: tournament?.category,
+        ageGroup: tournament?.ageGroup,
+        ballType: tournament?.ballType,
         round: roundName,
         teamAName: teams[i],
         teamBName: teams[i + 1],
