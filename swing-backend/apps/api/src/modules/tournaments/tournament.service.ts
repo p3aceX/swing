@@ -20,6 +20,7 @@ function inningsBallsForNrr(innings: { totalOvers: number; totalWickets: number 
 export type TournamentInput = {
   name: string
   format: string
+  customOvers?: number | null
   tournamentFormat?: string
   startDate: string
   endDate?: string
@@ -59,11 +60,18 @@ export class TournamentService {
       category === 'CORPORATE' || category === 'GULLY'
         ? 'SENIOR'
         : input.ageGroup || 'SENIOR'
+    // Only meaningful when format = CUSTOM. We persist it on the tournament
+    // so every auto-generated match inherits the same overs cap.
+    const customOvers =
+      input.format === 'CUSTOM' && input.customOvers && input.customOvers > 0
+        ? Math.trunc(input.customOvers)
+        : null
     return prisma.tournament.create({
       data: {
         createdByUserId: userId,
         name: input.name.trim(),
         format: input.format as any,
+        customOvers,
         tournamentFormat: (input.tournamentFormat as any) || "LEAGUE",
         category,
         ageGroup,
@@ -664,6 +672,7 @@ export class TournamentService {
               status: "SCHEDULED",
               isRanked: false,
               scorerId: organizerProfile?.id ?? null,
+              customOvers: tournament.customOvers ?? null,
             })
             busyTeamsToday.add(finalPair.teamAName)
             busyTeamsToday.add(finalPair.teamBName)
@@ -790,6 +799,7 @@ export class TournamentService {
         winners,
         orderedMatches,
         matchFormat,
+        tournament.customOvers ?? null,
       )
     }
 
@@ -872,6 +882,7 @@ export class TournamentService {
         seededQualifiers.filter(Boolean) as string[],
         [lastGroupMatch],
         matchFormat,
+        tournament.customOvers ?? null,
       )
     }
 
@@ -1003,6 +1014,7 @@ export class TournamentService {
     teams: string[],
     referenceMatches: Array<{ scheduledAt: Date } & { format?: any }>,
     matchFormat: string,
+    customOvers: number | null,
   ) {
     const baseTime = new Date(
       referenceMatches[referenceMatches.length - 1].scheduledAt,
@@ -1022,6 +1034,7 @@ export class TournamentService {
       nextMatches.push({
         matchType: "TOURNAMENT" as const,
         format: matchFormat as any,
+        customOvers,
         round: roundName,
         teamAName: teams[i],
         teamBName: teams[i + 1],

@@ -249,6 +249,8 @@ export const createTournamentRequestSchema = z.object({
 export const createHostedTournamentRequestSchema = z.object({
   name: z.string().min(1).max(120),
   format: z.enum(HOST_TOURNAMENT_MATCH_FORMATS),
+  // Required only when format = CUSTOM; ignored otherwise.
+  customOvers: z.number().int().min(1).max(50).optional(),
   tournamentFormat: z.enum(TOURNAMENT_FORMATS).optional(),
   category: z.enum(TEAM_CATEGORIES).optional(),
   ageGroup: z.enum(AGE_GROUPS).optional(),

@@ -2142,6 +2142,10 @@ model Tournament {
   name              String
   description       String?
   format            MatchFormat
+  // Overs per innings when format = CUSTOM. Propagated onto every Match
+  // generated for this tournament so the in-match scoring engine knows
+  // the over cap. Null for canonical formats (T10/T20/ODI/etc.).
+  customOvers       Int?
   sport             Sport            @default(CRICKET)
   startDate         DateTime
   endDate           DateTime?

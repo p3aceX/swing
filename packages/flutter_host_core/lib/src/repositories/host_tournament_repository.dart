@@ -43,6 +43,7 @@ class SharedTournamentRepository {
     String? description,
     bool isPublic = true,
     int? seriesMatchCount,
+    int? customOvers,
     String ballType = 'LEATHER',
     String category = 'CLUB_ACADEMY',
     String ageGroup = 'SENIOR',
@@ -71,6 +72,8 @@ class SharedTournamentRepository {
         'isPublic': isPublic,
         if (tournamentFormat == 'SERIES' && seriesMatchCount != null)
           'seriesMatchCount': seriesMatchCount,
+        if (format == 'CUSTOM' && customOvers != null && customOvers > 0)
+          'customOvers': customOvers,
         'ballType': ballType,
         if (earlyBirdDeadline != null)
           'earlyBirdDeadline': earlyBirdDeadline.toUtc().toIso8601String(),

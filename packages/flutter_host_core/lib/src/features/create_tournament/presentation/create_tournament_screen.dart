@@ -48,6 +48,7 @@ class _HostCreateTournamentScreenState
   final _prizePoolController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _seriesMatchCountController = TextEditingController(text: '3');
+  final _customOversController = TextEditingController(text: '20');
   final _organiserNameController = TextEditingController();
   final _organiserPhoneController = TextEditingController();
 
@@ -84,6 +85,7 @@ class _HostCreateTournamentScreenState
     _prizePoolController.dispose();
     _descriptionController.dispose();
     _seriesMatchCountController.dispose();
+    _customOversController.dispose();
     _organiserNameController.dispose();
     _organiserPhoneController.dispose();
     super.dispose();
@@ -160,6 +162,9 @@ class _HostCreateTournamentScreenState
                 seriesMatchCount: _tournamentFormat == 'SERIES'
                     ? int.tryParse(_seriesMatchCountController.text.trim())
                     : null,
+                customOvers: _format == 'CUSTOM'
+                    ? int.tryParse(_customOversController.text.trim())
+                    : null,
                 ballType: _ballType,
                 category: _category,
                 ageGroup: _ageGroup,
@@ -220,6 +225,7 @@ class _HostCreateTournamentScreenState
         nameController: _nameController,
         format: _format,
         onFormatChanged: (v) => setState(() => _format = v),
+        customOversController: _customOversController,
         category: _category,
         onCategoryChanged: (v) => setState(() {
           _category = v;
@@ -589,6 +595,7 @@ class _Step1Identity extends StatelessWidget {
     required this.nameController,
     required this.format,
     required this.onFormatChanged,
+    required this.customOversController,
     required this.category,
     required this.onCategoryChanged,
     required this.ageGroup,
@@ -599,6 +606,7 @@ class _Step1Identity extends StatelessWidget {
   final TextEditingController nameController;
   final String format;
   final ValueChanged<String> onFormatChanged;
+  final TextEditingController customOversController;
   final String category;
   final ValueChanged<String> onCategoryChanged;
   final String ageGroup;
@@ -646,6 +654,26 @@ class _Step1Identity extends StatelessWidget {
             selected: format,
             onSelected: onFormatChanged,
           ),
+          if (format == 'CUSTOM') ...[
+            const SizedBox(height: 16),
+            _FieldLabel(label: 'Overs per innings'),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: customOversController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: TextStyle(
+                  color: context.fg, fontSize: 15, fontWeight: FontWeight.w600),
+              decoration: _inputDecoration(context, hint: 'e.g. 15'),
+              validator: (v) {
+                final n = int.tryParse((v ?? '').trim());
+                if (n == null || n < 1 || n > 50) {
+                  return 'Enter overs between 1 and 50';
+                }
+                return null;
+              },
+            ),
+          ],
           const SizedBox(height: 24),
 
           // Match type (category)
