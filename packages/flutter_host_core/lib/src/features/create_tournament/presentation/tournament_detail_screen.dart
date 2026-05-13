@@ -10,6 +10,7 @@ import '../../../repositories/host_team_repository.dart';
 import '../../../repositories/host_tournament_repository.dart';
 import '../../../theme/host_colors.dart';
 import '../../scoring/presentation/scoring_screen.dart';
+import 'create_tournament_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Public entry points
@@ -47,15 +48,8 @@ class _TournamentDetailScreenState
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
 
-  // Settings form controllers
-  late final TextEditingController _nameController;
-  late final TextEditingController _organiserNameController;
-  late final TextEditingController _organiserPhoneController;
-  late final TextEditingController _descriptionController;
-  late final TextEditingController _maxTeamsController;
-  late final TextEditingController _entryFeeController;
-  late final TextEditingController _prizePoolController;
-  bool _isPublic = true;
+  // Tournament editing now lives in the shared create-tournament stepper
+  // (opened via _openTournamentEditor) — no inline form state needed here.
 
   Map<String, dynamic>? _tournament;
   List<Map<String, dynamic>> _teams = const [];
@@ -79,38 +73,13 @@ class _TournamentDetailScreenState
       if (mounted) setState(() {});
     });
     _tournament = widget.initialData;
-    _nameController = TextEditingController();
-    _organiserNameController = TextEditingController();
-    _organiserPhoneController = TextEditingController();
-    _descriptionController = TextEditingController();
-    _maxTeamsController = TextEditingController();
-    _entryFeeController = TextEditingController();
-    _prizePoolController = TextEditingController();
     _reload();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _nameController.dispose();
-    _organiserNameController.dispose();
-    _organiserPhoneController.dispose();
-    _descriptionController.dispose();
-    _maxTeamsController.dispose();
-    _entryFeeController.dispose();
-    _prizePoolController.dispose();
     super.dispose();
-  }
-
-  void _syncSettingsControllers(Map<String, dynamic> t) {
-    _nameController.text = '${t['name'] ?? ''}';
-    _organiserNameController.text = '${t['organiserName'] ?? ''}';
-    _organiserPhoneController.text = '${t['organiserPhone'] ?? ''}';
-    _descriptionController.text = '${t['description'] ?? ''}';
-    _maxTeamsController.text = t['maxTeams'] != null ? '${t['maxTeams']}' : '';
-    _entryFeeController.text = t['entryFee'] != null ? '${t['entryFee']}' : '';
-    _prizePoolController.text = '${t['prizePool'] ?? ''}';
-    _isPublic = t['isPublic'] == true;
   }
 
   // ── Data loading ──────────────────────────────────────────────────────────
@@ -137,7 +106,6 @@ class _TournamentDetailScreenState
         _standings = result[3] as Map<String, List<Map<String, dynamic>>>;
         _schedule = result[4] as List<Map<String, dynamic>>;
       });
-      _syncSettingsControllers(tournament);
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error.toString());
@@ -251,6 +219,26 @@ class _TournamentDetailScreenState
         }
       }
     });
+  }
+
+  /// Pushes the shared create-tournament screen in edit mode. On success
+  /// the parent reloads so the rest of the tabs reflect the new values.
+  Future<void> _openTournamentEditor() async {
+    final t = _tournament;
+    if (t == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HostCreateTournamentScreen(
+          title: 'Edit Tournament',
+          initialTournament: t,
+          onTournamentCreated: (ctx, _) {
+            Navigator.of(ctx).maybePop();
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _reload();
   }
 
   Future<void> _showCreateGroupDialog({bool defaultAutoAssign = true}) async {
@@ -471,11 +459,6 @@ class _TournamentDetailScreenState
                                 widget.tournamentId,
                                 tournamentTeamId,
                                 confirmed)),
-                        onAssignGroup: (tournamentTeamId, groupId) =>
-                            _runAction(() => _repository.assignTeamToGroup(
-                                widget.tournamentId,
-                                tournamentTeamId,
-                                groupId)),
                         onReject: (tournamentTeamId) async {
                           await _runAction(() async {
                             await _repository.confirmTeam(
@@ -556,37 +539,7 @@ class _TournamentDetailScreenState
                         groups: _groups,
                         canManage: _canManage,
                         isBusy: _isBusy,
-                        nameController: _nameController,
-                        organiserNameController: _organiserNameController,
-                        organiserPhoneController: _organiserPhoneController,
-                        descriptionController: _descriptionController,
-                        maxTeamsController: _maxTeamsController,
-                        entryFeeController: _entryFeeController,
-                        prizePoolController: _prizePoolController,
-                        isPublic: _isPublic,
-                        onIsPublicChanged: (v) =>
-                            setState(() => _isPublic = v),
-                        onSave: () => _runAction(() async {
-                          final payload = <String, dynamic>{
-                            'name': _nameController.text.trim(),
-                            'organiserName': _organiserNameController.text.trim(),
-                            'organiserPhone': _organiserPhoneController.text.trim(),
-                            'description': _descriptionController.text.trim(),
-                            'isPublic': _isPublic,
-                          };
-                          final maxTeams = int.tryParse(_maxTeamsController.text.trim());
-                          final entryFee = int.tryParse(_entryFeeController.text.trim());
-                          final prizePool = _prizePoolController.text.trim();
-                          if (maxTeams != null) payload['maxTeams'] = maxTeams;
-                          if (entryFee != null) payload['entryFee'] = entryFee;
-                          if (prizePool.isNotEmpty) payload['prizePool'] = prizePool;
-
-                          await _repository.updateTournament(
-                            widget.tournamentId,
-                            payload,
-                          );
-                          _showSnack('Tournament updated');
-                        }),
+                        onEditTournament: _openTournamentEditor,
                         onCreateGroups: () => _showCreateGroupDialog(defaultAutoAssign: false),
                         onAutoAssign: () => _showCreateGroupDialog(defaultAutoAssign: true),
                         onDeleteTournament: () async {
@@ -683,7 +636,6 @@ class _OverviewTab extends StatelessWidget {
 
     final isOngoing =
         status == 'ONGOING' || status == 'IN_PROGRESS' || status == 'LIVE';
-    final title = '${tournament['name'] ?? 'Tournament'}';
 
     return RefreshIndicator(
       onRefresh: onRefresh,
@@ -692,50 +644,6 @@ class _OverviewTab extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    context.accent.withValues(alpha: 0.16),
-                    context.panel,
-                  ],
-                ),
-                border: Border.all(color: context.stroke),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: context.fg,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      height: 1.15,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      _StatusPill(status: status),
-                      if (canManage) ..._statusCta(context, status),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Row(
               children: [
                 Icon(Icons.info_outline_rounded, color: context.fgSub, size: 16),
@@ -1208,7 +1116,6 @@ class _TeamsTab extends StatelessWidget {
     required this.onRefresh,
     required this.onRemove,
     required this.onConfirm,
-    required this.onAssignGroup,
     required this.onReject,
   });
 
@@ -1220,8 +1127,6 @@ class _TeamsTab extends StatelessWidget {
   final Future<void> Function(String tournamentTeamId) onRemove;
   final Future<void> Function(String tournamentTeamId, bool confirmed)
       onConfirm;
-  final Future<void> Function(String tournamentTeamId, String? groupId)
-      onAssignGroup;
   final Future<void> Function(String tournamentTeamId) onReject;
 
   @override
@@ -1285,8 +1190,7 @@ class _TeamsTab extends StatelessWidget {
               final ttId = '${team['id'] ?? ''}';
               final name =
                   '${team['teamName'] ?? team['team']?['name'] ?? 'Unnamed'}';
-              final logoUrl =
-                  '${team['team']?['logoUrl'] ?? ''}';
+              final logoUrl = _resolveTeamLogo(team);
               return Column(
                 children: [
                   Padding(
@@ -1396,8 +1300,7 @@ class _TeamsTab extends StatelessWidget {
               final ttId = '${team['id'] ?? ''}';
               final name =
                   '${team['teamName'] ?? team['team']?['name'] ?? 'Unnamed'}';
-              final logoUrl =
-                  '${team['team']?['logoUrl'] ?? ''}';
+              final logoUrl = _resolveTeamLogo(team);
               final groupId =
                   '${team['groupId'] ?? ''}'.trim();
               String? groupName;
@@ -1456,17 +1359,20 @@ class _TeamsTab extends StatelessWidget {
                           ),
                         ),
                         if (canManage)
-                          IconButton(
-                            icon: Icon(Icons.more_horiz_rounded,
-                                color: context.fgSub, size: 20),
-                            onPressed: isBusy
-                                ? null
-                                : () => _showConfirmedOptions(
-                                      context,
-                                      team: team,
-                                      ttId: ttId,
-                                      groupId: groupId,
-                                    ),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: context.danger),
+                              foregroundColor: context.danger,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed:
+                                isBusy ? null : () => onRemove(ttId),
+                            child: const Text('Remove',
+                                style: TextStyle(fontSize: 12)),
                           ),
                       ],
                     ),
@@ -1481,121 +1387,15 @@ class _TeamsTab extends StatelessWidget {
     );
   }
 
-  void _showConfirmedOptions(
-    BuildContext context, {
-    required Map<String, dynamic> team,
-    required String ttId,
-    required String groupId,
-  }) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.panel,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                '${team['teamName'] ?? 'Team'}',
-                style: TextStyle(
-                  color: context.fg,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            Divider(height: 1, color: context.stroke),
-            ListTile(
-              leading:
-                  Icon(Icons.group_work_outlined, color: context.fg),
-              title: Text('Assign to Group',
-                  style: TextStyle(color: context.fg)),
-              onTap: groups.isEmpty
-                  ? null
-                  : () {
-                      Navigator.of(ctx).pop();
-                      _showAssignGroupSheet(context,
-                          ttId: ttId, currentGroupId: groupId);
-                    },
-            ),
-            ListTile(
-              leading: Icon(Icons.person_remove_outlined,
-                  color: context.danger),
-              title: Text('Remove',
-                  style: TextStyle(color: context.danger)),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                onRemove(ttId);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showAssignGroupSheet(
-    BuildContext context, {
-    required String ttId,
-    required String currentGroupId,
-  }) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.panel,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                'Assign to group',
-                style: TextStyle(
-                  color: context.fg,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            Divider(height: 1, color: context.stroke),
-            ListTile(
-              title:
-                  Text('No group', style: TextStyle(color: context.fgSub)),
-              trailing: currentGroupId.isEmpty
-                  ? Icon(Icons.check_rounded, color: context.accent)
-                  : null,
-              onTap: () {
-                Navigator.of(ctx).pop();
-                onAssignGroup(ttId, null);
-              },
-            ),
-            ...groups.map((g) {
-              final gId = '${g['id'] ?? ''}';
-              return ListTile(
-                title: Text('${g['name'] ?? 'Group'}',
-                    style: TextStyle(color: context.fg)),
-                trailing: currentGroupId == gId
-                    ? Icon(Icons.check_rounded, color: context.accent)
-                    : null,
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  onAssignGroup(ttId, gId);
-                },
-              );
-            }),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+  String _resolveTeamLogo(Map<String, dynamic> team) {
+    final direct =
+        '${team['teamLogoUrl'] ?? team['logoUrl'] ?? ''}'.trim();
+    if (direct.isNotEmpty) return direct;
+    final nested = team['team'];
+    if (nested is Map) {
+      return '${nested['logoUrl'] ?? ''}'.trim();
+    }
+    return '';
   }
 }
 
@@ -4007,16 +3807,7 @@ class _SettingsTab extends StatefulWidget {
     required this.groups,
     required this.canManage,
     required this.isBusy,
-    required this.nameController,
-    required this.organiserNameController,
-    required this.organiserPhoneController,
-    required this.descriptionController,
-    required this.maxTeamsController,
-    required this.entryFeeController,
-    required this.prizePoolController,
-    required this.isPublic,
-    required this.onIsPublicChanged,
-    required this.onSave,
+    required this.onEditTournament,
     required this.onCreateGroups,
     required this.onAutoAssign,
     required this.onDeleteTournament,
@@ -4027,16 +3818,7 @@ class _SettingsTab extends StatefulWidget {
   final List<Map<String, dynamic>> groups;
   final bool canManage;
   final bool isBusy;
-  final TextEditingController nameController;
-  final TextEditingController organiserNameController;
-  final TextEditingController organiserPhoneController;
-  final TextEditingController descriptionController;
-  final TextEditingController maxTeamsController;
-  final TextEditingController entryFeeController;
-  final TextEditingController prizePoolController;
-  final bool isPublic;
-  final ValueChanged<bool> onIsPublicChanged;
-  final VoidCallback onSave;
+  final VoidCallback onEditTournament;
   final Future<void> Function() onCreateGroups;
   final Future<void> Function() onAutoAssign;
   final VoidCallback onDeleteTournament;
@@ -4049,6 +3831,22 @@ class _SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<_SettingsTab> {
   final _deleteConfirmController = TextEditingController();
   bool _deleteEnabled = false;
+
+  /// Short summary line shown under the tournament name on the Settings tab.
+  /// Folds the most useful fields together so the host can see at a glance
+  /// what they're about to edit without opening the editor first.
+  String _editSubtitle(Map<String, dynamic> t) {
+    final parts = <String>[];
+    final fmt = '${t['format'] ?? ''}';
+    if (fmt.isNotEmpty) parts.add(fmt.toUpperCase());
+    final tFmt = '${t['tournamentFormat'] ?? ''}';
+    if (tFmt.isNotEmpty) parts.add(tFmt);
+    final category = '${t['category'] ?? ''}';
+    if (category.isNotEmpty) parts.add(category);
+    final ageGroup = '${t['ageGroup'] ?? ''}';
+    if (ageGroup.isNotEmpty) parts.add(ageGroup);
+    return parts.isEmpty ? 'Tap edit to set the basics' : parts.join(' · ');
+  }
 
   @override
   void initState() {
@@ -4072,76 +3870,41 @@ class _SettingsTabState extends State<_SettingsTab> {
       padding: const EdgeInsets.only(bottom: 48),
       children: [
         // ── Edit section ──────────────────────────────────────────────────
+        // The inline form has been replaced by an entry point into the
+        // shared create-tournament stepper in edit mode — one form for
+        // both create and edit so they can't drift apart.
         _SectionHeader(title: 'TOURNAMENT DETAILS'),
         const SizedBox(height: 4),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SettingsField(
-                label: 'Tournament name',
-                controller: widget.nameController,
-              ),
-              const SizedBox(height: 12),
-              _SettingsField(
-                label: 'Organiser name',
-                controller: widget.organiserNameController,
-              ),
-              const SizedBox(height: 12),
-              _SettingsField(
-                label: 'Organiser phone',
-                controller: widget.organiserPhoneController,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 12),
-              _SettingsField(
-                label: 'Description',
-                controller: widget.descriptionController,
-                maxLines: 3,
-              ),
-              const SizedBox(height: 12),
-              _SettingsField(
-                label: 'Max teams',
-                controller: widget.maxTeamsController,
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 12),
-              _SettingsField(
-                label: 'Entry fee',
-                controller: widget.entryFeeController,
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 12),
-              _SettingsField(
-                label: 'Prize pool',
-                controller: widget.prizePoolController,
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Public tournament',
-                      style: TextStyle(color: context.fg, fontSize: 14),
-                    ),
-                  ),
-                  Switch(
-                    value: widget.isPublic,
-                    onChanged: widget.onIsPublicChanged,
-                    activeThumbColor: context.accent,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: context.accent,
-                  foregroundColor: context.bg,
-                  minimumSize: const Size(double.infinity, 44),
+              Text(
+                '${widget.tournament['name'] ?? ''}',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
                 ),
-                onPressed: widget.isBusy ? null : widget.onSave,
-                child: const Text('Save Changes'),
               ),
+              const SizedBox(height: 4),
+              Text(
+                _editSubtitle(widget.tournament),
+                style: TextStyle(color: context.fgSub, fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              if (widget.canManage)
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: context.accent,
+                    foregroundColor: context.bg,
+                    minimumSize: const Size(double.infinity, 44),
+                  ),
+                  onPressed: widget.isBusy ? null : widget.onEditTournament,
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Edit tournament'),
+                ),
             ],
           ),
         ),
@@ -5038,10 +4801,11 @@ class _StatTile extends StatelessWidget {
       ),
       child: Padding(
         padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               value,
@@ -5049,6 +4813,7 @@ class _StatTile extends StatelessWidget {
                 color: context.fg,
                 fontWeight: FontWeight.w800,
                 fontSize: 18,
+                height: 1.1,
               ),
             ),
             const SizedBox(height: 2),
@@ -5057,6 +4822,7 @@ class _StatTile extends StatelessWidget {
               style: TextStyle(
                 color: context.fgSub,
                 fontSize: 11,
+                height: 1.1,
               ),
             ),
           ],
@@ -5184,45 +4950,6 @@ class _TeamAvatar extends StatelessWidget {
                 fontSize: size * 0.42,
               ),
             ),
-    );
-  }
-}
-
-class _SettingsField extends StatelessWidget {
-  const _SettingsField({
-    required this.label,
-    required this.controller,
-    this.keyboardType,
-    this.maxLines = 1,
-  });
-
-  final String label;
-  final TextEditingController controller;
-  final TextInputType? keyboardType;
-  final int maxLines;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      maxLines: maxLines,
-      style: TextStyle(color: context.fg, fontSize: 14),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: context.fgSub, fontSize: 13),
-        border: OutlineInputBorder(
-          borderSide: BorderSide(color: context.stroke),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: context.stroke),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: context.accent),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      ),
     );
   }
 }

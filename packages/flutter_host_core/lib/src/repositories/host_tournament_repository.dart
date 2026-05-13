@@ -51,6 +51,8 @@ class SharedTournamentRepository {
     int? earlyBirdFee,
     String? organiserName,
     String? organiserPhone,
+    String? logoUrl,
+    String? coverUrl,
   }) async {
     final response = await _dio.post(
       _paths.myTournaments,
@@ -82,6 +84,8 @@ class SharedTournamentRepository {
           'organiserName': organiserName!.trim(),
         if ((organiserPhone ?? '').trim().isNotEmpty)
           'organiserPhone': organiserPhone!.trim(),
+        if ((logoUrl ?? '').trim().isNotEmpty) 'logoUrl': logoUrl!.trim(),
+        if ((coverUrl ?? '').trim().isNotEmpty) 'coverUrl': coverUrl!.trim(),
       },
     );
     return _extractDataMap(response.data);

@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../../features/arena_booking/domain/arena_booking_models.dart';
+import '../../../features/tournament_detail/data/tournament_detail_repository.dart';
 import '../../../repositories/host_arena_repository.dart';
 import '../../../repositories/host_tournament_repository.dart';
 import '../../../theme/host_colors.dart';
@@ -18,10 +22,16 @@ class HostCreateTournamentScreen extends ConsumerStatefulWidget {
     super.key,
     this.onTournamentCreated,
     this.title = 'Create Tournament',
+    this.initialTournament,
   });
 
   final HostTournamentCreated? onTournamentCreated;
   final String title;
+
+  /// When non-null the screen runs in "edit mode": every step is pre-filled
+  /// from this tournament's data and submit issues a PATCH instead of POST.
+  /// Pass the raw tournament map (same shape as the GET response).
+  final Map<String, dynamic>? initialTournament;
 
   @override
   ConsumerState<HostCreateTournamentScreen> createState() =>
@@ -67,12 +77,114 @@ class _HostCreateTournamentScreenState
   // ── Venue state ────────────────────────────────────────────────────────────
   ArenaListing? _selectedVenue;
 
+  // ── Branding state ─────────────────────────────────────────────────────────
+  XFile? _logoFile;
+  XFile? _coverFile;
+  // Existing remote URLs from the loaded tournament — used as fallback
+  // previews in edit mode until the user picks a new file.
+  String? _existingLogoUrl;
+  String? _existingCoverUrl;
+  bool _pickingImage = false;
+
+  // ── Edit-mode bookkeeping ──────────────────────────────────────────────────
+
+  bool get _isEditMode => widget.initialTournament != null;
+  String? get _editingTournamentId => widget.initialTournament?['id'] as String?;
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController();
+    final t = widget.initialTournament;
+    if (t != null) _hydrateFromTournament(t);
+  }
+
+  void _hydrateFromTournament(Map<String, dynamic> t) {
+    String s(dynamic v) => v == null ? '' : '$v';
+
+    _nameController.text = s(t['name']);
+    _descriptionController.text = s(t['description']);
+    _organiserNameController.text = s(t['organiserName']);
+    _organiserPhoneController.text = s(t['organiserPhone']);
+    _prizePoolController.text = s(t['prizePool']);
+
+    final maxTeams = t['maxTeams'];
+    if (maxTeams != null) _maxTeamsController.text = '$maxTeams';
+    final entryFee = t['entryFee'];
+    if (entryFee != null) _entryFeeController.text = '$entryFee';
+    final earlyBird = t['earlyBirdFee'];
+    if (earlyBird != null) _earlyBirdFeeController.text = '$earlyBird';
+    final series = t['seriesMatchCount'];
+    if (series != null) _seriesMatchCountController.text = '$series';
+    final customOvers = t['customOvers'];
+    if (customOvers != null) _customOversController.text = '$customOvers';
+
+    const formats = {
+      'T10', 'T20', 'ONE_DAY', 'TWO_INNINGS', 'BOX_CRICKET', 'CUSTOM',
+    };
+    final fmt = s(t['format']).toUpperCase();
+    if (formats.contains(fmt)) _format = fmt;
+
+    const tournamentFormats = {
+      'LEAGUE', 'KNOCKOUT', 'GROUP_STAGE_KNOCKOUT',
+      'DOUBLE_ELIMINATION', 'SUPER_LEAGUE', 'SERIES',
+    };
+    final tFmt = s(t['tournamentFormat']).toUpperCase();
+    if (tournamentFormats.contains(tFmt)) _tournamentFormat = tFmt;
+
+    final ball = s(t['ballType']).toUpperCase();
+    if (ball.isNotEmpty) _ballType = ball;
+
+    const categories = {
+      'SCHOOL', 'CLUB_ACADEMY', 'CORPORATE', 'GULLY', 'ASSOCIATION',
+    };
+    final cat = s(t['category']).toUpperCase();
+    if (categories.contains(cat)) _category = cat;
+
+    const ages = {'U14', 'U16', 'U19', 'U23', 'SENIOR'};
+    final age = s(t['ageGroup']).toUpperCase();
+    if (ages.contains(age)) _ageGroup = age;
+
+    final start = t['startDate'];
+    if (start is String && start.isNotEmpty) {
+      final parsed = DateTime.tryParse(start);
+      if (parsed != null) _startDate = parsed.toLocal();
+    }
+    final end = t['endDate'];
+    if (end is String && end.isNotEmpty) {
+      final parsed = DateTime.tryParse(end);
+      if (parsed != null) _endDate = parsed.toLocal();
+    }
+    final ebd = t['earlyBirdDeadline'];
+    if (ebd is String && ebd.isNotEmpty) {
+      final parsed = DateTime.tryParse(ebd);
+      if (parsed != null) _earlyBirdDeadline = parsed.toLocal();
+    }
+
+    if (t['isPublic'] != null) _isPublic = t['isPublic'] == true;
+
+    _existingLogoUrl = s(t['logoUrl']).isEmpty ? null : s(t['logoUrl']);
+    _existingCoverUrl = s(t['coverUrl']).isEmpty ? null : s(t['coverUrl']);
+
+    // Venue: existing tournaments store venueName + city as flat strings.
+    // Wrap them in a minimal ArenaListing so the schedule step shows the
+    // same readout as create — every other field defaults to a sentinel
+    // value the schedule step never reads.
+    final venueName = s(t['venueName']);
+    final venueCity = s(t['city']);
+    if (venueName.isNotEmpty) {
+      _selectedVenue = ArenaListing(
+        id: 'existing:${_editingTournamentId ?? venueName}',
+        name: venueName,
+        address: '',
+        city: venueCity,
+        openTime: '',
+        closeTime: '',
+        units: const [],
+      );
+    }
   }
 
   @override
@@ -145,35 +257,94 @@ class _HostCreateTournamentScreenState
       _error = null;
     });
     try {
-      final tournament =
-          await ref.read(hostTournamentRepositoryProvider).createTournament(
-                name: _nameController.text.trim(),
-                format: _format,
-                tournamentFormat: _tournamentFormat,
-                startDate: _startDate,
-                endDate: _endDate,
-                city: _selectedVenue?.city ?? '',
-                venueName: _selectedVenue?.name ?? '',
-                maxTeams: int.tryParse(_maxTeamsController.text.trim()),
-                entryFee: int.tryParse(_entryFeeController.text.trim()),
-                prizePool: _prizePoolController.text.trim(),
-                description: _descriptionController.text.trim(),
-                isPublic: _isPublic,
-                seriesMatchCount: _tournamentFormat == 'SERIES'
-                    ? int.tryParse(_seriesMatchCountController.text.trim())
-                    : null,
-                customOvers: _format == 'CUSTOM'
-                    ? int.tryParse(_customOversController.text.trim())
-                    : null,
-                ballType: _ballType,
-                category: _category,
-                ageGroup: _ageGroup,
-                earlyBirdDeadline: _earlyBirdDeadline,
-                earlyBirdFee:
-                    int.tryParse(_earlyBirdFeeController.text.trim()),
-                organiserName: _organiserNameController.text.trim(),
-                organiserPhone: _organiserPhoneController.text.trim(),
-              );
+      final tournamentRepo = ref.read(hostTournamentRepositoryProvider);
+      final uploader = ref.read(hostTournamentDetailRepositoryProvider);
+
+      // Upload any newly-picked branding images. In edit mode, fall back
+      // to the existing remote URLs so unchanged branding stays put.
+      final folder = _isEditMode
+          ? 'tournaments/${_editingTournamentId ?? 'edit'}'
+          : 'tournaments/new';
+      final logoUrl = _logoFile != null
+          ? await uploader.uploadImage(_logoFile!, folder)
+          : _existingLogoUrl;
+      final coverUrl = _coverFile != null
+          ? await uploader.uploadImage(_coverFile!, folder)
+          : _existingCoverUrl;
+
+      Map<String, dynamic> tournament;
+      if (_isEditMode) {
+        final id = _editingTournamentId;
+        if (id == null) {
+          throw StateError('Edit mode without tournament id');
+        }
+        final payload = <String, dynamic>{
+          'name': _nameController.text.trim(),
+          'format': _format,
+          'tournamentFormat': _tournamentFormat,
+          'category': _category,
+          'ageGroup': _ageGroup,
+          'startDate': _startDate.toUtc().toIso8601String(),
+          if (_endDate != null)
+            'endDate': _endDate!.toUtc().toIso8601String(),
+          if ((_selectedVenue?.city ?? '').trim().isNotEmpty)
+            'city': _selectedVenue!.city.trim(),
+          if ((_selectedVenue?.name ?? '').trim().isNotEmpty)
+            'venueName': _selectedVenue!.name.trim(),
+          'isPublic': _isPublic,
+          if (_descriptionController.text.trim().isNotEmpty)
+            'description': _descriptionController.text.trim(),
+          if (_prizePoolController.text.trim().isNotEmpty)
+            'prizePool': _prizePoolController.text.trim(),
+        };
+        final maxTeams = int.tryParse(_maxTeamsController.text.trim());
+        if (maxTeams != null) payload['maxTeams'] = maxTeams;
+        final entryFee = int.tryParse(_entryFeeController.text.trim());
+        if (entryFee != null) payload['entryFee'] = entryFee;
+        if (_format == 'CUSTOM') {
+          final overs = int.tryParse(_customOversController.text.trim());
+          if (overs != null && overs > 0) payload['customOvers'] = overs;
+        }
+        if (_tournamentFormat == 'SERIES') {
+          final series =
+              int.tryParse(_seriesMatchCountController.text.trim());
+          if (series != null) payload['seriesMatchCount'] = series;
+        }
+        if (logoUrl != null) payload['logoUrl'] = logoUrl;
+        if (coverUrl != null) payload['coverUrl'] = coverUrl;
+        tournament = await tournamentRepo.updateTournament(id, payload);
+      } else {
+        tournament = await tournamentRepo.createTournament(
+          name: _nameController.text.trim(),
+          format: _format,
+          tournamentFormat: _tournamentFormat,
+          startDate: _startDate,
+          endDate: _endDate,
+          city: _selectedVenue?.city ?? '',
+          venueName: _selectedVenue?.name ?? '',
+          maxTeams: int.tryParse(_maxTeamsController.text.trim()),
+          entryFee: int.tryParse(_entryFeeController.text.trim()),
+          prizePool: _prizePoolController.text.trim(),
+          description: _descriptionController.text.trim(),
+          isPublic: _isPublic,
+          seriesMatchCount: _tournamentFormat == 'SERIES'
+              ? int.tryParse(_seriesMatchCountController.text.trim())
+              : null,
+          customOvers: _format == 'CUSTOM'
+              ? int.tryParse(_customOversController.text.trim())
+              : null,
+          ballType: _ballType,
+          category: _category,
+          ageGroup: _ageGroup,
+          earlyBirdDeadline: _earlyBirdDeadline,
+          earlyBirdFee: int.tryParse(_earlyBirdFeeController.text.trim()),
+          organiserName: _organiserNameController.text.trim(),
+          organiserPhone: _organiserPhoneController.text.trim(),
+          logoUrl: logoUrl,
+          coverUrl: coverUrl,
+        );
+      }
+
       if (!mounted) return;
       widget.onTournamentCreated?.call(context, tournament);
     } catch (error) {
@@ -181,6 +352,38 @@ class _HostCreateTournamentScreenState
       setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _pickBrandingImage({required bool isCover}) async {
+    if (_pickingImage) return;
+    setState(() => _pickingImage = true);
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: isCover ? 1920 : 800,
+        maxHeight: isCover ? 1080 : 800,
+      );
+      if (!mounted || file == null) return;
+      setState(() {
+        if (isCover) {
+          _coverFile = file;
+        } else {
+          _logoFile = file;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open gallery. Try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _pickingImage = false);
     }
   }
 
@@ -226,6 +429,20 @@ class _HostCreateTournamentScreenState
         format: _format,
         onFormatChanged: (v) => setState(() => _format = v),
         customOversController: _customOversController,
+        logoFile: _logoFile,
+        coverFile: _coverFile,
+        existingLogoUrl: _existingLogoUrl,
+        existingCoverUrl: _existingCoverUrl,
+        onPickLogo: () => _pickBrandingImage(isCover: false),
+        onPickCover: () => _pickBrandingImage(isCover: true),
+        onClearLogo: () => setState(() {
+          _logoFile = null;
+          _existingLogoUrl = null;
+        }),
+        onClearCover: () => setState(() {
+          _coverFile = null;
+          _existingCoverUrl = null;
+        }),
         category: _category,
         onCategoryChanged: (v) => setState(() {
           _category = v;
@@ -596,6 +813,14 @@ class _Step1Identity extends StatelessWidget {
     required this.format,
     required this.onFormatChanged,
     required this.customOversController,
+    required this.logoFile,
+    required this.coverFile,
+    required this.existingLogoUrl,
+    required this.existingCoverUrl,
+    required this.onPickLogo,
+    required this.onPickCover,
+    required this.onClearLogo,
+    required this.onClearCover,
     required this.category,
     required this.onCategoryChanged,
     required this.ageGroup,
@@ -607,6 +832,14 @@ class _Step1Identity extends StatelessWidget {
   final String format;
   final ValueChanged<String> onFormatChanged;
   final TextEditingController customOversController;
+  final XFile? logoFile;
+  final XFile? coverFile;
+  final String? existingLogoUrl;
+  final String? existingCoverUrl;
+  final VoidCallback onPickLogo;
+  final VoidCallback onPickCover;
+  final VoidCallback onClearLogo;
+  final VoidCallback onClearCover;
   final String category;
   final ValueChanged<String> onCategoryChanged;
   final String ageGroup;
@@ -716,6 +949,21 @@ class _Step1Identity extends StatelessWidget {
               onSelected: onAgeGroupChanged,
             ),
           ],
+          const SizedBox(height: 24),
+
+          // Branding (optional cover + logo) — kept at the bottom because
+          // it's optional and shouldn't push the must-fill fields below the
+          // fold.
+          _BrandingSection(
+            coverFile: coverFile,
+            logoFile: logoFile,
+            existingCoverUrl: existingCoverUrl,
+            existingLogoUrl: existingLogoUrl,
+            onPickCover: onPickCover,
+            onPickLogo: onPickLogo,
+            onClearCover: onClearCover,
+            onClearLogo: onClearLogo,
+          ),
         ],
       ),
     );
@@ -1794,6 +2042,177 @@ class _FieldLabel extends StatelessWidget {
         fontSize: 11,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.4,
+      ),
+    );
+  }
+}
+
+class _BrandingSection extends StatelessWidget {
+  const _BrandingSection({
+    required this.coverFile,
+    required this.logoFile,
+    required this.existingCoverUrl,
+    required this.existingLogoUrl,
+    required this.onPickCover,
+    required this.onPickLogo,
+    required this.onClearCover,
+    required this.onClearLogo,
+  });
+
+  final XFile? coverFile;
+  final XFile? logoFile;
+  final String? existingCoverUrl;
+  final String? existingLogoUrl;
+  final VoidCallback onPickCover;
+  final VoidCallback onPickLogo;
+  final VoidCallback onClearCover;
+  final VoidCallback onClearLogo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _FieldLabel(label: 'Branding (optional)'),
+        const SizedBox(height: 8),
+        // Cover tile — full-width 16:9
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: _ImagePickTile(
+            file: coverFile,
+            remoteUrl: existingCoverUrl,
+            hint: 'Tap to add cover photo',
+            onTap: onPickCover,
+            onClear: onClearCover,
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Logo tile — square, smaller
+        Row(
+          children: [
+            SizedBox(
+              width: 88,
+              height: 88,
+              child: _ImagePickTile(
+                file: logoFile,
+                remoteUrl: existingLogoUrl,
+                hint: 'Add logo',
+                onTap: onPickLogo,
+                onClear: onClearLogo,
+                compact: true,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                (logoFile == null && (existingLogoUrl ?? '').isEmpty)
+                    ? 'Square logo (used on cards, scoreboards, microsite)'
+                    : 'Logo ready — tap to change',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 12,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ImagePickTile extends StatelessWidget {
+  const _ImagePickTile({
+    required this.file,
+    required this.hint,
+    required this.onTap,
+    required this.onClear,
+    this.remoteUrl,
+    this.compact = false,
+  });
+
+  final XFile? file;
+  final String? remoteUrl;
+  final String hint;
+  final VoidCallback onTap;
+  final VoidCallback onClear;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = context.cardBg;
+    final stroke = context.stroke;
+    final hasFile = file != null;
+    final hasRemote = !hasFile && (remoteUrl ?? '').isNotEmpty;
+    return Material(
+      color: bg,
+      child: InkWell(
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: stroke),
+          ),
+          child: (!hasFile && !hasRemote)
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: compact ? 20 : 28,
+                        color: context.fgSub,
+                      ),
+                      if (!compact) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          hint,
+                          style: TextStyle(
+                            color: context.fgSub,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (hasFile)
+                      Image.file(File(file!.path), fit: BoxFit.cover)
+                    else
+                      Image.network(
+                        remoteUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: context.cardBg,
+                          alignment: Alignment.center,
+                          child: Icon(Icons.broken_image_outlined,
+                              size: 20, color: context.fgSub),
+                        ),
+                      ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Material(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          onTap: onClear,
+                          customBorder: const CircleBorder(),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.close,
+                                size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
       ),
     );
   }
