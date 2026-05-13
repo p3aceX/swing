@@ -460,19 +460,24 @@ class _MatchList extends ConsumerWidget {
               canManage: m.canManage,
               onDelete: canDelete
                   ? () async {
+                      // CRITICAL: pop the dialog using its OWN BuildContext
+                      // (the `ctx` from the builder). Using the outer
+                      // captured `context` pops the play-tab route off
+                      // go_router's stack instead — leaves the navigator
+                      // empty and the app shows a black screen.
                       final confirmed = await showDialog<bool>(
                         context: context,
-                        builder: (_) => AlertDialog(
+                        builder: (ctx) => AlertDialog(
                           title: const Text('Delete match?'),
                           content: const Text(
                               'This will permanently delete the match and cannot be undone.'),
                           actions: [
                             TextButton(
-                              onPressed: () => Navigator.pop(context, false),
+                              onPressed: () => Navigator.pop(ctx, false),
                               child: const Text('Cancel'),
                             ),
                             TextButton(
-                              onPressed: () => Navigator.pop(context, true),
+                              onPressed: () => Navigator.pop(ctx, true),
                               child: Text(
                                 'Delete',
                                 style: TextStyle(color: context.danger),

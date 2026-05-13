@@ -15,6 +15,7 @@ import '../../my_teams/controller/my_teams_controller.dart';
 import '../../my_teams/domain/my_teams_models.dart';
 import '../../playing_eleven/presentation/playing_eleven_screen.dart';
 import '../controller/create_match_controller.dart';
+import 'toss_screen.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SCREEN
@@ -613,10 +614,22 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
                       ),
                     ],
                     const SizedBox(height: 22),
+                    // Re-do toss — only meaningful for an existing match.
+                    // The toss endpoint accepts a fresh POST and overwrites
+                    // the previous winner/decision, so the host can correct
+                    // a mis-recorded toss without rebuilding the match.
+                    if (widget.editMatchId != null) ...[
+                      _RetossButton(
+                        onTap: () => _openRetoss(),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     _PrimaryCta(
-                      label: _scheduleForLater
-                          ? 'Schedule match'
-                          : 'Create match',
+                      label: widget.editMatchId != null
+                          ? 'Save changes'
+                          : _scheduleForLater
+                              ? 'Schedule match'
+                              : 'Create match',
                       isLoading: state.isSubmitting,
                       enabled: _canSubmit,
                       onTap: _submit,
@@ -632,6 +645,37 @@ class _CreateMatchScreenState extends ConsumerState<CreateMatchScreen> {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /// Open the shared TossScreen so the operator can re-record the toss
+  /// for an existing match. The screen POSTs to /matches/:id/toss which
+  /// overwrites whatever was there. We pop back to Match Review on
+  /// completion — no other navigation needed.
+  Future<void> _openRetoss() async {
+    final id = widget.editMatchId;
+    if (id == null) return;
+    final teamA = _teamA?.name ?? '';
+    final teamB = _teamB?.name ?? '';
+    if (teamA.isEmpty || teamB.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Team names are missing — load the match again.')),
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TossScreen(
+          matchId: id,
+          teamAName: teamA,
+          teamBName: teamB,
+          onCompleted: (ctx, _) => Navigator.of(ctx).maybePop(),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Toss recorded')),
+    );
+  }
 
   Future<T?> _showOptionPicker<T>({
     required String title,
@@ -1644,6 +1688,38 @@ class _SwitchRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [body, divider],
+    );
+  }
+}
+
+class _RetossButton extends StatelessWidget {
+  const _RetossButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(Icons.casino_outlined, size: 16, color: context.accent),
+        label: Text(
+          'Re-do toss',
+          style: TextStyle(
+            color: context.accent,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: context.accent),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../contracts/host_path_config.dart';
@@ -1316,8 +1317,19 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
   Future<void> _createQuickPlayer() async {
     final name = _nameCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
-    if (name.length < 2) return;
-    if (phone.length < 8) return;
+    if (name.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a player name')),
+      );
+      return;
+    }
+    // 10-digit India mobile (matches the input formatter).
+    if (phone.length != 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a 10-digit mobile number')),
+      );
+      return;
+    }
 
     // Prevent duplicate quick-create when mobile already exists.
     final normalizedPhone = _digitsOnly(phone);
@@ -1350,260 +1362,518 @@ class _AddPlayerSheetState extends ConsumerState<_AddPlayerSheet> {
     ]);
   }
 
+  bool _showQuickCreate = false;
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    final maxH = MediaQuery.of(context).size.height * 0.82;
+    final maxH = MediaQuery.of(context).size.height * 0.92;
     final accent = context.accent;
     final query = _ctrl.text.trim();
     final canSearch = query.length >= 2;
+    final pickedCount = _pickedIds.length;
+    // Light background — the playing-XI screen body is dark/themed, so the
+    // sheet uses surf (Theme.colorScheme.surface) to feel like a separate
+    // light panel rather than continuing the dark area.
+    final sheetColor = context.surf;
+    final fillColor = context.bg;
 
     return Container(
       constraints: BoxConstraints(maxHeight: maxH),
       decoration: BoxDecoration(
-        color: context.bg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        color: sheetColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 4),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: context.fgSub.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(2),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Drag handle ─────────────────────────────────────────────
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: context.stroke,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Add Player',
-                  style: TextStyle(
-                    color: context.fg,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.3,
+            // ── Header: title + selected count + close ───────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 8, 12),
+              child: Row(
+                children: [
+                  Text(
+                    'Add players',
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
                   ),
+                  if (pickedCount > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: accent,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$pickedCount',
+                        style: TextStyle(
+                          color: context.ctaFg,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded,
+                        size: 20, color: context.fgSub),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                ],
+              ),
+            ),
+            // ── Search bar ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: TextField(
+                controller: _ctrl,
+                autofocus: true,
+                onChanged: _search,
+                style: TextStyle(color: context.fg, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Search by name, phone or Swing ID',
+                  hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
+                  prefixIcon: Icon(Icons.search_rounded,
+                      color: context.fgSub, size: 20),
+                  suffixIcon: query.isEmpty
+                      ? null
+                      : IconButton(
+                          onPressed: () {
+                            _ctrl.clear();
+                            setState(() {
+                              _results = [];
+                              _pickedIds = {};
+                              _loading = false;
+                            });
+                          },
+                          icon: Icon(Icons.close_rounded,
+                              color: context.fgSub, size: 18),
+                        ),
+                  filled: true,
+                  fillColor: fillColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: context.stroke),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: context.stroke),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: accent, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Search first. If not found, create quickly.',
-                  style: TextStyle(
-                    color: context.fgSub,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+              ),
+            ),
+            // ── Body ─────────────────────────────────────────────────────
+            Flexible(
+              child: _loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : _showQuickCreate
+                      ? _buildQuickCreate(context, fillColor)
+                      : _buildResultsList(context, accent, fillColor,
+                          canSearch: canSearch),
+            ),
+            // ── Sticky bottom CTA bar ───────────────────────────────────
+            _buildBottomBar(
+              context: context,
+              accent: accent,
+              fillColor: fillColor,
+              pickedCount: pickedCount,
+              query: query,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultsList(
+    BuildContext context,
+    Color accent,
+    Color fillColor, {
+    required bool canSearch,
+  }) {
+    if (_results.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                canSearch
+                    ? Icons.person_search_outlined
+                    : Icons.search_rounded,
+                size: 36,
+                color: context.fgSub.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                canSearch
+                    ? 'No players matched “${_ctrl.text.trim()}”'
+                    : 'Type at least 2 characters',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (canSearch) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    // Seed the create form with whatever they typed.
+                    if (_nameCtrl.text.trim().isEmpty) {
+                      _nameCtrl.text = _ctrl.text.trim();
+                    }
+                    setState(() => _showQuickCreate = true);
+                  },
+                  icon: Icon(Icons.person_add_alt_rounded,
+                      size: 16, color: accent),
+                  label: Text(
+                    'Create new player',
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: accent),
+                    minimumSize: const Size(0, 40),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ],
-            ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-            child: TextField(
-              controller: _ctrl,
-              autofocus: true,
-              onChanged: _search,
-              style: TextStyle(color: context.fg, fontSize: 14),
-              decoration: InputDecoration(
-                hintText: 'Search by name, phone or Swing ID…',
-                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
-                prefixIcon: Icon(Icons.search_rounded, color: context.fgSub, size: 20),
-                suffixIcon: query.isEmpty
-                    ? null
-                    : IconButton(
-                        onPressed: () {
-                          _ctrl.clear();
-                          setState(() {
-                            _results = [];
-                            _pickedIds = {};
-                            _loading = false;
-                          });
-                        },
-                        icon: Icon(Icons.close_rounded, color: context.fgSub, size: 18),
-                      ),
-                filled: true,
-                fillColor: context.surf,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      shrinkWrap: true,
+      itemCount: _results.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 4),
+      itemBuilder: (_, i) {
+        final p = _results[i];
+        final picked = _pickedIds.contains(p.profileId);
+        return _PlayerCheckRow(
+          player: p,
+          picked: picked,
+          fillColor: fillColor,
+          onTap: () {
+            setState(() {
+              if (picked) {
+                _pickedIds.remove(p.profileId);
+              } else {
+                _pickedIds.add(p.profileId);
+              }
+            });
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildQuickCreate(BuildContext context, Color fillColor) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Back to search
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _showQuickCreate = false),
+              icon: Icon(Icons.arrow_back_rounded,
+                  size: 16, color: context.fg),
+              label: Text(
+                'Back to search',
+                style: TextStyle(
+                    color: context.fg,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600),
               ),
             ),
           ),
-          Flexible(
-            child: _loading
-                ? const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                : _results.isEmpty
-                    ? SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              canSearch
-                                  ? 'No players found'
-                                  : 'Type at least 2 characters to search',
-                              style: TextStyle(
-                                color: context.fgSub,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              textAlign: TextAlign.left,
-                            ),
-                            if (canSearch) ...[
-                              const SizedBox(height: 12),
-                              TextField(
-                                controller: _nameCtrl,
-                                textCapitalization: TextCapitalization.words,
-                                style: TextStyle(
-                                  color: context.fg,
-                                  fontSize: 14,
-                                ),
-                                decoration: InputDecoration(
-                                  labelText: 'Player name',
-                                  labelStyle: TextStyle(
-                                    color: context.fgSub,
-                                    fontSize: 13,
-                                  ),
-                                  filled: true,
-                                  fillColor: context.surf,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              TextField(
-                                controller: _phoneCtrl,
-                                keyboardType: TextInputType.phone,
-                                style: TextStyle(
-                                  color: context.fg,
-                                  fontSize: 14,
-                                ),
-                                decoration: InputDecoration(
-                                  labelText: 'Mobile number',
-                                  labelStyle: TextStyle(
-                                    color: context.fgSub,
-                                    fontSize: 13,
-                                  ),
-                                  filled: true,
-                                  fillColor: context.surf,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.icon(
-                                  onPressed: _createQuickPlayer,
-                                  icon: const Icon(Icons.person_add_alt_rounded, size: 16),
-                                  label: const Text('Create Player'),
-                                  style: FilledButton.styleFrom(
-                                    minimumSize: const Size(double.infinity, 46),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                        shrinkWrap: true,
-                        itemCount: _results.length,
-                        itemBuilder: (_, i) {
-                          final p = _results[i];
-                          final picked = _pickedIds.contains(p.profileId);
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () {
-                              setState(() {
-                                if (picked) {
-                                  _pickedIds.remove(p.profileId);
-                                } else {
-                                  _pickedIds.add(p.profileId);
-                                }
-                              });
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 11),
-                              child: Row(
-                                children: [
-                                  _Avatar(
-                                    name: p.name,
-                                    url: p.avatarUrl,
-                                    size: 38,
-                                    accent: accent,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          p.name,
-                                          style: TextStyle(
-                                            color: context.fg,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        if (p.swingId.isNotEmpty)
-                                          Text(
-                                            p.swingId,
-                                            style: TextStyle(
-                                              color: context.fgSub,
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  Icon(Icons.add_circle_outline_rounded,
-                                      color: picked ? accent : context.fgSub, size: 20),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+          const SizedBox(height: 8),
+          Text(
+            'Create new player',
+            style: TextStyle(
+              color: context.fg,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          if (_results.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _pickedIds.isEmpty
-                      ? null
-                      : () {
-                          final selected = _results
-                              .where((p) => _pickedIds.contains(p.profileId))
-                              .toList();
-                          Navigator.of(context).pop(selected);
-                        },
-                  child: Text('Add Selected (${_pickedIds.length})'),
-                ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _nameCtrl,
+            textCapitalization: TextCapitalization.words,
+            autofocus: true,
+            style: TextStyle(color: context.fg, fontSize: 14),
+            decoration: _inputDecoration(context, 'Player name', fillColor),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            maxLength: 10,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(10),
+            ],
+            style: TextStyle(color: context.fg, fontSize: 14),
+            decoration: _inputDecoration(
+                    context, 'Mobile number (10 digits)', fillColor)
+                .copyWith(counterText: ''),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _createQuickPlayer,
+            icon: const Icon(Icons.person_add_alt_rounded, size: 16),
+            label: const Text('Add player'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 46),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
+          ),
         ],
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(
+      BuildContext context, String label, Color fillColor) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: context.fgSub, fontSize: 13),
+      filled: true,
+      fillColor: fillColor,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: context.stroke),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: context.stroke),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: context.accent, width: 1.5),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar({
+    required BuildContext context,
+    required Color accent,
+    required Color fillColor,
+    required int pickedCount,
+    required String query,
+  }) {
+    // Hide bar when the create form is open — it has its own primary button.
+    if (_showQuickCreate) return const SizedBox.shrink();
+    return Container(
+      decoration: BoxDecoration(
+        color: context.surf,
+        border: Border(top: BorderSide(color: context.stroke)),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      child: Row(
+        children: [
+          // Add new player — secondary action, always reachable.
+          OutlinedButton.icon(
+            onPressed: () {
+              if (_nameCtrl.text.trim().isEmpty && query.isNotEmpty) {
+                _nameCtrl.text = query;
+              }
+              setState(() => _showQuickCreate = true);
+            },
+            icon: Icon(Icons.person_add_alt_rounded,
+                size: 16, color: context.fg),
+            label: Text(
+              'New',
+              style: TextStyle(
+                  color: context.fg,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: context.stroke),
+              minimumSize: const Size(0, 46),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Primary action — adds all selected players.
+          Expanded(
+            child: FilledButton(
+              onPressed: pickedCount == 0
+                  ? null
+                  : () {
+                      final selected = _results
+                          .where((p) => _pickedIds.contains(p.profileId))
+                          .toList();
+                      Navigator.of(context).pop(selected);
+                    },
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                minimumSize: const Size(double.infinity, 46),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Text(
+                pickedCount == 0
+                    ? 'Select players to add'
+                    : pickedCount == 1
+                        ? 'Add 1 player'
+                        : 'Add $pickedCount players',
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A list row with a leading checkbox indicator, avatar, name, and an
+/// accent-tinted fill when picked. Tapping anywhere on the row toggles.
+class _PlayerCheckRow extends StatelessWidget {
+  const _PlayerCheckRow({
+    required this.player,
+    required this.picked,
+    required this.fillColor,
+    required this.onTap,
+  });
+
+  final _RosterPlayer player;
+  final bool picked;
+  final Color fillColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = context.accent;
+    return Material(
+      color: picked ? accent.withValues(alpha: 0.08) : fillColor,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: picked ? accent : context.stroke,
+              width: picked ? 1.5 : 1,
+            ),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              // Custom checkbox so the visual matches the rest of the sheet.
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: picked ? accent : Colors.transparent,
+                  border: Border.all(
+                    color: picked ? accent : context.stroke,
+                    width: 1.5,
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: picked
+                    ? Icon(Icons.check_rounded,
+                        size: 16, color: context.ctaFg)
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              _Avatar(
+                name: player.name,
+                url: player.avatarUrl,
+                size: 36,
+                accent: accent,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      player.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.fg,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (player.swingId.isNotEmpty ||
+                        (player.phone ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        player.swingId.isNotEmpty
+                            ? player.swingId
+                            : (player.phone ?? ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.fgSub,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
