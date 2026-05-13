@@ -182,16 +182,22 @@ class HostPathConfig {
         playerSearchPath: '/admin/players/search',
       );
 
-  /// Paths for the club/academy app. Teams are created under `/admin/teams`
-  /// with an `academyId` stamped at the API layer from the JWT context.
+  /// Paths for the club/academy app. Mirrors `HostPathConfig.player()` —
+  /// the `/admin/*` routes the previous version pointed at all run through
+  /// `verifyAdmin()` server-side and hard-reject anyone whose JWT role
+  /// isn't `SWING_ADMIN`/`SWING_SUPPORT`. Club/academy/coach owners sign in
+  /// via `/auth/biz/phone-login` and carry roles like `ACADEMY_OWNER` /
+  /// `ARENA_OWNER` / `COACH`, so every Play-tab call was 403'ing.
+  /// `/player/*` is the unauthed-role-tolerant module the backend already
+  /// uses for ownership-scoped reads/writes.
   factory HostPathConfig.club() => const HostPathConfig(
-        teamsBase: '/admin/teams',
-        teamsMutationBase: '/admin/teams',
-        tournamentsBase: '/admin/tournaments',
+        teamsBase: '/player/teams',
+        teamsMutationBase: '/player/teams',
+        tournamentsBase: '/player/tournaments',
         matchesBase: '/matches',
         arenasBase: '/arenas',
-        playerSearchPath: '/admin/players/search',
-        matchHistoryPath: '/admin/matches',
+        playerSearchPath: '/player/search',
+        matchHistoryPath: '/player/matches',
       );
 
 }
