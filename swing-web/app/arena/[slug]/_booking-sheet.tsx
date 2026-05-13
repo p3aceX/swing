@@ -186,17 +186,26 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           overflow-x: hidden;
           scrollbar-gutter: stable;
           padding: 0;
-          /* Reserve space for the absolutely-positioned cta-bar so the
-             last form row can scroll above it. */
-          padding-bottom: 96px;
+          /* Reserve enough space for the absolutely-positioned cta-bar
+             (~82 px including padding + shadow) so the last item/form
+             row in any step clears the bar with breathing room. */
+          padding-bottom: 140px;
           -webkit-overflow-scrolling: touch;
         }
         /* Stop any inline-styled child from triggering horizontal overflow */
         .ms-sheet-body * { max-width: 100%; }
         .ms-sheet-body img,
         .ms-sheet-body iframe { display: block; }
-        /* Every step pane gets breathing room before the sticky CTA bar */
-        .pass .pass-pane { padding-bottom: 36px; }
+        /* Every step pane gets breathing room before the absolute CTA bar.
+           Also force min-height so short content (e.g. step 1 "Pick
+           duration" with only 4 options) makes the body scrollable
+           instead of squeezing the last option behind the bar. */
+        .pass .pass-pane {
+          padding: 22px 14px 48px;
+          min-height: 100%;
+          box-sizing: border-box;
+        }
+        @media (min-width: 540px) { .pass .pass-pane { padding: 24px 20px 56px; } }
         .pass .opt-list,
         .pass .slot-grid,
         .pass .cal-strip,
@@ -690,35 +699,79 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           margin-left: 10px;
         }
 
-        /* ── Bulk booking ── */
+        /* ── Multi-day booking ─────────────────────────────────── */
+
+        /* Mode toggle — two-half segmented control, brand-color active half */
         .pass .bulk-modes {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 0;
-          margin: 6px 0 14px;
+          margin: 10px 0 18px;
           border: 1px solid var(--ms-line-strong);
           border-radius: 6px;
           overflow: hidden;
+          background: var(--ms-bg);
         }
-        .pass .bulk-modes .opt {
-          border: 0;
-          border-radius: 0;
-          border-right: 1px solid var(--ms-line-strong);
+        .pass .bulk-mode {
+          all: unset;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
           justify-content: center;
+          gap: 2px;
+          padding: 12px 14px;
+          color: var(--ms-ink);
+          border-right: 1px solid var(--ms-line);
+          transition: background 0.14s ease, color 0.14s ease;
+          text-align: center;
         }
-        .pass .bulk-modes .opt:last-child { border-right: 0; }
+        .pass .bulk-mode:last-child { border-right: 0; }
+        .pass .bulk-mode:hover:not(.active) { background: var(--ms-line); }
+        .pass .bulk-mode.active {
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+        }
+        .pass .bulk-mode-label {
+          font-size: 13.5px;
+          font-weight: 700;
+          letter-spacing: -0.005em;
+        }
+        .pass .bulk-mode-hint {
+          font-family: var(--font-geist-mono);
+          font-size: 9.5px;
+          font-weight: 600;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          opacity: 0.7;
+        }
+
+        /* Calendar card */
         .pass .bulk-cal {
           background: var(--ms-bg);
-          border: 1px solid var(--ms-line-strong);
+          border: 1px solid var(--ms-line);
           border-radius: 6px;
-          padding: 12px;
-          margin: 8px 0 14px;
+          padding: 16px 14px 14px;
+          margin: 8px 0 18px;
+        }
+        .pass .bulk-cal-month {
+          font-family: var(--font-bricolage), var(--font-geist-sans), system-ui, sans-serif;
+          font-size: 16px;
+          font-weight: 700;
+          letter-spacing: -0.015em;
+          color: var(--ms-ink);
+          margin-bottom: 12px;
         }
         .pass .bulk-cal-dow,
         .pass .bulk-cal-grid {
           display: grid;
           grid-template-columns: repeat(7, 1fr);
           gap: 4px;
+        }
+        .pass .bulk-cal-dow {
+          margin-bottom: 6px;
+          padding-bottom: 8px;
+          border-bottom: 1px solid var(--ms-line);
         }
         .pass .bulk-cal-dow > * {
           font-family: var(--font-geist-mono);
@@ -727,26 +780,93 @@ export default function BookingSheet({ open, onClose, advanceBookingDays, cancel
           letter-spacing: 0.14em;
           color: var(--ms-muted);
           text-align: center;
-          padding: 4px 0;
         }
-        .pass .bulk-cal-grid button {
-          all: unset; cursor: pointer;
+        .pass .bulk-cal-grid {
+          padding-top: 4px;
+        }
+        .pass .bulk-cal-cell {
+          all: unset;
+          cursor: pointer;
           aspect-ratio: 1 / 1;
-          display: grid; place-items: center;
-          border-radius: 6px;
-          font-size: 12px;
+          display: grid;
+          place-items: center;
+          border-radius: 4px;
+          font-size: 13px;
           font-weight: 600;
           color: var(--ms-ink);
-          transition: background 0.12s ease;
+          background: transparent;
+          transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+          position: relative;
         }
-        .pass .bulk-cal-grid button:hover { background: var(--ms-line); }
-        .pass .bulk-cal-grid button.selected { background: var(--ms-brand); color: var(--ms-brand-ink); }
-        .pass .bulk-cal-grid button:disabled { color: var(--ms-soft); cursor: not-allowed; }
+        .pass .bulk-cal-cell:hover:not(:disabled):not(.selected) {
+          background: var(--ms-line);
+        }
+        .pass .bulk-cal-cell.today {
+          box-shadow: inset 0 0 0 1px var(--ms-line-strong);
+        }
+        .pass .bulk-cal-cell.today.selected {
+          box-shadow: none;
+        }
+        .pass .bulk-cal-cell.selected {
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+          font-weight: 700;
+        }
+        .pass .bulk-cal-cell.past,
+        .pass .bulk-cal-cell:disabled {
+          color: var(--ms-soft);
+          cursor: not-allowed;
+          background: transparent;
+        }
+        .pass .bulk-cal-cell.dim:not(.selected) {
+          color: var(--ms-soft);
+        }
+
+        /* Selected days summary at the bottom of the calendar card */
+        .pass .bulk-cal-summary {
+          margin-top: 14px;
+          padding-top: 14px;
+          border-top: 1px solid var(--ms-line);
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .pass .bulk-cal-summary-count {
+          font-family: var(--font-bricolage), var(--font-geist-sans), system-ui, sans-serif;
+          font-size: 22px;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+          color: var(--ms-ink);
+          line-height: 1;
+        }
+        .pass .bulk-cal-summary-label {
+          font-family: var(--font-geist-mono);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--ms-muted);
+        }
+        .pass .bulk-cal-summary-hint {
+          font-family: var(--font-geist-mono);
+          font-size: 10.5px;
+          font-weight: 600;
+          letter-spacing: 0.1em;
+          color: var(--ms-brand);
+        }
+
+        /* Date range fields + guest details: 2-col grid on wide, 1-col on narrow */
         .pass .bulk-fields,
         .pass .bulk-guest {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 10px;
+        }
+        .pass .bulk-guest {
+          margin-top: 18px;
+          padding-top: 18px;
+          border-top: 1px solid var(--ms-line);
         }
         @media (max-width: 480px) {
           .pass .bulk-fields, .pass .bulk-guest { grid-template-columns: 1fr; }

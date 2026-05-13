@@ -1105,12 +1105,26 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         <div className="pass-sub">Book the ground for {minDays}+ full days. Pick a date range or hand-pick dates.</div>
 
         {/* Mode toggle */}
-        <div className="bulk-modes">
-          <button className={`bulk-mode ${bulkMode === "range" ? "active" : ""}`} onClick={() => setBulkMode("range")}>
-            DATE RANGE
+        <div className="bulk-modes" role="tablist" aria-label="Date selection mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={bulkMode === "range"}
+            className={`bulk-mode ${bulkMode === "range" ? "active" : ""}`}
+            onClick={() => setBulkMode("range")}
+          >
+            <span className="bulk-mode-label">Date range</span>
+            <span className="bulk-mode-hint">From → to</span>
           </button>
-          <button className={`bulk-mode ${bulkMode === "custom" ? "active" : ""}`} onClick={() => setBulkMode("custom")}>
-            PICK DATES
+          <button
+            type="button"
+            role="tab"
+            aria-selected={bulkMode === "custom"}
+            className={`bulk-mode ${bulkMode === "custom" ? "active" : ""}`}
+            onClick={() => setBulkMode("custom")}
+          >
+            <span className="bulk-mode-label">Pick dates</span>
+            <span className="bulk-mode-hint">Hand-pick days</span>
           </button>
         </div>
 
@@ -1137,26 +1151,42 @@ export default function BookingFlow({ units, arenaId, arenaSlug, apiBaseUrl, are
         {/* Custom dates mode */}
         {bulkMode === "custom" && (
           <div className="bulk-cal">
+            <div className="bulk-cal-month">
+              {(() => {
+                const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                const m = Number(today.split("-")[1]);
+                const y = Number(today.split("-")[0]);
+                return `${monthNames[m - 1]} ${y}`;
+              })()}
+            </div>
             <div className="bulk-cal-dow">
-              {["M","T","W","T","F","S","S"].map((d, i) => <span key={i}>{d}</span>)}
+              {["MO","TU","WE","TH","FR","SA","SU"].map((d, i) => <span key={i}>{d}</span>)}
             </div>
             <div className="bulk-cal-grid">
               {gridDates.map(d => {
                 const inPast = d < today;
                 const selected = bulkCustomDates.has(d);
+                const isToday = d === today;
                 const monthNum = Number(d.split("-")[1]);
                 const dayNum = Number(d.split("-")[2]);
                 const todayMonth = Number(today.split("-")[1]);
                 const dim = !inPast && monthNum !== todayMonth && monthNum !== (todayMonth % 12) + 1;
                 return (
                   <button key={d}
-                    className={`bulk-cal-cell ${selected ? "selected" : ""} ${inPast ? "past" : ""} ${dim ? "dim" : ""}`}
+                    className={`bulk-cal-cell ${selected ? "selected" : ""} ${inPast ? "past" : ""} ${dim ? "dim" : ""} ${isToday ? "today" : ""}`}
                     disabled={inPast}
                     onClick={() => toggleCustomDate(d)}>
                     {dayNum}
                   </button>
                 );
               })}
+            </div>
+            <div className="bulk-cal-summary">
+              <span className="bulk-cal-summary-count">{picked.length}</span>
+              <span className="bulk-cal-summary-label">{picked.length === 1 ? "day" : "days"} selected</span>
+              {minDays > 1 && picked.length > 0 && picked.length < minDays && (
+                <span className="bulk-cal-summary-hint">· need at least {minDays}</span>
+              )}
             </div>
           </div>
         )}

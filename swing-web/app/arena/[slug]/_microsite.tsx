@@ -316,7 +316,15 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
     <main className="ms" style={rootStyle}>
       {/* ─── TOP BAR ────────────────────────────────────────────────── */}
       <header className="ms-top">
-        <span className="ms-top-name">{arena.name}</span>
+        <div className="ms-top-brand">
+          <span className="ms-avatar" aria-hidden="true">
+            {arena.logoUrl
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={arena.logoUrl} alt="" />
+              : <span>{initialsFrom(arena.name)}</span>}
+          </span>
+          <span className="ms-top-name">{arena.name}</span>
+        </div>
         <div className="ms-top-actions">
           <ThemeToggle />
           {canBook && (
@@ -631,11 +639,37 @@ export default function Microsite({ arena, slug, apiBaseUrl }: Props) {
           align-items: center;
           justify-content: space-between;
           gap: 14px;
-          padding: 14px 18px;
+          padding: 12px 18px;
           background: var(--ms-bg);
           border-bottom: 1px solid var(--ms-line);
         }
-        @media (min-width: 720px) { .ms-top { padding: 18px 36px; } }
+        @media (min-width: 720px) { .ms-top { padding: 14px 36px; } }
+
+        .ms-top-brand {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .ms-avatar {
+          width: 30px;
+          height: 30px;
+          flex: 0 0 auto;
+          display: inline-grid;
+          place-items: center;
+          background: var(--ms-brand);
+          color: var(--ms-brand-ink);
+          border-radius: 6px;
+          font-family: var(--font-geist-sans);
+          font-weight: 700;
+          font-size: 11px;
+          letter-spacing: 0.02em;
+          overflow: hidden;
+        }
+        .ms-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        @media (min-width: 720px) {
+          .ms-avatar { width: 34px; height: 34px; font-size: 12px; }
+        }
 
         .ms-top-name {
           font-size: 14.5px;
