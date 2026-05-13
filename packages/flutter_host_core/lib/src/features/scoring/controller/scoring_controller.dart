@@ -506,27 +506,61 @@ class HostScoringController extends StateNotifier<HostScoringState> {
 
     state = state.copyWith(isSubmitting: true, clearError: true);
     print('[recordBall] → matchId=$_matchId inn=${inn.inningsNumber} over=${inn.overNumber} ball=${inn.ballInOver + 1} outcome=$outcome runs=$runs extras=$extras isWicket=$isWicket striker=$sid bowler=$bid');
+
+    Future<void> postBall() => _withColdStartRetry(() => _service.recordBall(
+          _matchId,
+          inn.inningsNumber,
+          batterId: sid,
+          nonBatterId: nextNonStrikerId,
+          bowlerId: bid,
+          overNumber: inn.overNumber,
+          ballNumber: inn.ballInOver + 1,
+          outcome: outcome,
+          runs: runs,
+          extras: extras,
+          isWicket: isWicket,
+          isOverthrow: isOverthrow,
+          overthrowRuns: overthrowRuns,
+          dismissalType: dismissalType,
+          dismissedPlayerId: dismissedPlayerId,
+          fielderId: fielderId,
+          wagonZone: outcome == 'DOT'
+              ? null
+              : canonicalizeWagonZone(state.zone),
+          tags: tags,
+        ));
+
+    String? errCode(Object e) {
+      if (e is! DioException) return null;
+      final body = e.response?.data;
+      if (body is! Map) return null;
+      final err = body['error'];
+      if (err is! Map) return null;
+      return '${err['code'] ?? ''}';
+    }
+
     try {
-      await _withColdStartRetry(() => _service.recordBall(
-        _matchId,
-        inn.inningsNumber,
-        batterId: sid,
-        nonBatterId: nextNonStrikerId,
-        bowlerId: bid,
-        overNumber: inn.overNumber,
-        ballNumber: inn.ballInOver + 1,
-        outcome: outcome,
-        runs: runs,
-        extras: extras,
-        isWicket: isWicket,
-        isOverthrow: isOverthrow,
-        overthrowRuns: overthrowRuns,
-        dismissalType: dismissalType,
-        dismissedPlayerId: dismissedPlayerId,
-        fielderId: fielderId,
-        wagonZone: outcome == 'DOT' ? null : canonicalizeWagonZone(state.zone),
-        tags: tags,
-      ));
+      try {
+        await postBall();
+      } on DioException catch (e) {
+        // Common bad state: the operator hit "End Match" early, then tried
+        // to keep scoring. Backend rejects with INNINGS_COMPLETED. Reopen
+        // the innings (which also reverts match.status if it was marked
+        // COMPLETED) and retry the same ball once. If reopen or the retry
+        // still fail we fall through to the normal error path below.
+        if (errCode(e) == 'INNINGS_COMPLETED') {
+          print('[recordBall] auto-reopening innings ${inn.inningsNumber} and retrying');
+          try {
+            await _withColdStartRetry(
+                () => _service.reopenInnings(_matchId, inn.inningsNumber));
+            await postBall();
+          } catch (_) {
+            rethrow;
+          }
+        } else {
+          rethrow;
+        }
+      }
       print('[recordBall] ✓ success — refreshing state');
       await _init();
 
@@ -549,10 +583,10 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     } catch (e) {
       if (e is DioException) {
         print('[recordBall] ✗ status=${e.response?.statusCode} body=${e.response?.data}');
-        final code = (e.response?.data is Map)
-            ? '${(e.response!.data as Map)['error'] is Map ? ((e.response!.data as Map)['error'] as Map)['code'] : ''}'
-            : '';
+        final code = errCode(e);
         if (code == 'INNINGS_COMPLETED') {
+          // Auto-reopen didn't help (e.g. forbidden, network) — fall back
+          // to a clean state refresh + clear user-facing message.
           await _init();
           state = state.copyWith(
             isSubmitting: false,
@@ -650,11 +684,31 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       print('[undoLastBall] skipped — no active innings');
       return false;
     }
-    print('[undoLastBall] → matchId=$_matchId inn=${inn.inningsNumber} totalBalls=${inn.balls.length} lastBall=${inn.balls.isNotEmpty ? inn.balls.last.outcome : "none"}');
+    final wasInningsCompleted = inn.isCompleted;
+    final wasMatchCompleted = state.match?.isComplete ?? false;
+    print('[undoLastBall] → matchId=$_matchId inn=${inn.inningsNumber} '
+        'totalBalls=${inn.balls.length} '
+        'lastBall=${inn.balls.isNotEmpty ? inn.balls.last.outcome : "none"} '
+        'wasInningsCompleted=$wasInningsCompleted wasMatchCompleted=$wasMatchCompleted');
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
       await _withColdStartRetry(() => _service.undoLastBall(_matchId, inn.inningsNumber));
       print('[undoLastBall] ✓ success');
+      // If the innings (or whole match) had been marked complete before the
+      // undo — e.g. user tapped "End Match" by mistake — the ball deletion
+      // alone won't let them score again because the backend still gates
+      // recordBall on `innings.isCompleted`. Reopen the innings so subsequent
+      // scoring goes through. Server's reopenInnings also reverts
+      // match.status to IN_PROGRESS and clears winnerId/winMargin.
+      if (wasInningsCompleted || wasMatchCompleted) {
+        print('[undoLastBall] reopening innings ${inn.inningsNumber}');
+        try {
+          await _withColdStartRetry(
+              () => _service.reopenInnings(_matchId, inn.inningsNumber));
+        } catch (e) {
+          print('[undoLastBall] reopen failed (continuing anyway): $e');
+        }
+      }
       await _init();
       return true;
     } catch (e) {
@@ -663,6 +717,25 @@ class HostScoringController extends StateNotifier<HostScoringState> {
       } else {
         print('[undoLastBall] ✗ error: $e');
       }
+      state = state.copyWith(isSubmitting: false, error: _msg(e));
+      return false;
+    }
+  }
+
+  /// Manually reopen an innings (and the parent match, if it was flagged
+  /// COMPLETED). Useful when the operator wants to recover from an early
+  /// "End Match" without first undoing a ball. The default is the active
+  /// innings; pass an explicit number when you need a specific one.
+  Future<bool> reopenInnings({int? inningsNumber}) async {
+    final num = inningsNumber ?? state.activeInnings?.inningsNumber;
+    if (num == null) return false;
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _withColdStartRetry(() => _service.reopenInnings(_matchId, num));
+      await _init();
+      return true;
+    } catch (e) {
+      _logError('reopenInnings', e);
       state = state.copyWith(isSubmitting: false, error: _msg(e));
       return false;
     }

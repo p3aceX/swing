@@ -66,6 +66,18 @@ class HostScoringRepository {
         await _dio.delete(_paths.inningsUndo(matchId, inningsNumber));
     return _asMap(response.data);
   }
+
+  /// POST /matches/:id/innings/:num/reopen — resets innings.isCompleted to
+  /// false AND, if the match was marked COMPLETED, reverts it to IN_PROGRESS
+  /// (clears winnerId / winMargin / completedAt). Used by the client's undo
+  /// path to unstick the match when the operator accidentally tapped
+  /// "End Match" before everyone was actually done.
+  Future<Map<String, dynamic>> reopenInnings(
+      String matchId, int inningsNumber) async {
+    final response =
+        await _dio.post(_paths.inningsReopen(matchId, inningsNumber));
+    return _asMap(response.data);
+  }
 }
 
 Map<String, dynamic> _asMap(Object? value) {

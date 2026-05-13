@@ -476,16 +476,13 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
     return ('', null); // tie
   }
 
+  /// The complete-match endpoint accepts a strict enum
+  /// (`['A', 'B', 'DRAW', 'TIE', 'ABANDONED']`), never a team UUID.
+  /// `_calcWinner` returns 'A' / 'B' for a win and '' for a tie, so we
+  /// just map the empty case to 'TIE' and pass the side letter through.
   String _resolveWinnerId(ScoringMatch match, String winnerSide) {
-    if (winnerSide == 'A') {
-      final id = (match.teamAId ?? '').trim();
-      return id.isNotEmpty ? id : 'A';
-    }
-    if (winnerSide == 'B') {
-      final id = (match.teamBId ?? '').trim();
-      return id.isNotEmpty ? id : 'B';
-    }
-    return winnerSide;
+    if (winnerSide == 'A' || winnerSide == 'B') return winnerSide;
+    return 'TIE';
   }
 
   bool _canStartNextInnings(ScoringMatch match, ScoringInnings inn) {

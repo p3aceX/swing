@@ -168,6 +168,11 @@ class HostScoringService {
     int inningsNumber,
   ) =>
       _repo.undoLastBall(matchId, inningsNumber);
+  Future<Map<String, dynamic>> reopenInnings(
+    String matchId,
+    int inningsNumber,
+  ) =>
+      _repo.reopenInnings(matchId, inningsNumber);
   Future<List<ScoringMatchPlayer>> searchPlayers(String query) async {
     final results = await _playerRepo.searchPlayers(query);
     return results.map(ScoringMatchPlayer.fromJson).toList();

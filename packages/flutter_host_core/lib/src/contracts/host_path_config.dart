@@ -101,6 +101,8 @@ class HostPathConfig {
       '$matchesBase/$matchId/innings/$innings/complete';
   String inningsUndo(String matchId, int innings) =>
       '$matchesBase/$matchId/innings/$innings/last-ball';
+  String inningsReopen(String matchId, int innings) =>
+      '$matchesBase/$matchId/innings/$innings/reopen';
   String inningsState(String matchId, int innings) =>
       '$matchesBase/$matchId/innings/$innings/state';
 
