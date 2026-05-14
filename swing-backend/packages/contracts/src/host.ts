@@ -220,9 +220,18 @@ export const inningsStateRequestSchema = z.object({
 
 // Umpire-awarded penalty runs. Capped at 5 — matches the standard cricket
 // penalty quantum (slow over rate, illegal field, ball tampering, etc.).
+//
+// `awardedTo` is the team whose effective total moves.
+// `direction` decides which way:
+//   ADD      → +runs (e.g. bowling side at fault → +runs to batting side)
+//   SUBTRACT → -runs (e.g. batting side at fault → -runs from batting side)
+//
+// Stored as signed Int in PenaltyAward.runs so the per-team sum already
+// produces the right effective total without any extra bookkeeping.
 export const awardPenaltyRequestSchema = z.object({
   awardedTo: z.enum(["A", "B"]),
   runs: z.number().int().min(1).max(5),
+  direction: z.enum(["ADD", "SUBTRACT"]).default("ADD"),
   reason: z.string().max(200).optional(),
   inningsNumber: z.number().int().min(1).max(4).optional(),
 });

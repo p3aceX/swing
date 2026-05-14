@@ -546,10 +546,24 @@ export async function publicRoutes(app: FastifyInstance) {
             },
           },
         },
+        penaltyAwards: { orderBy: { scoredAt: "asc" } },
       },
     });
 
     if (!match) return null;
+
+    // Per-team penalty totals (signed — SUBTRACT awards are stored as
+    // negative `runs`). Folded into the displayed score so the overlay
+    // matches what the scorer sees in-app and on the web scorer.
+    const penaltyByTeam: Record<string, number> = { A: 0, B: 0 };
+    for (const p of match.penaltyAwards ?? []) {
+      const side = `${p.awardedTo ?? ""}`.toUpperCase();
+      if (side === "A" || side === "B") {
+        penaltyByTeam[side] += Number(p.runs) || 0;
+      }
+    }
+    const effectiveRuns = (innings: { battingTeam: string; totalRuns: number }) =>
+      innings.totalRuns + (penaltyByTeam[innings.battingTeam] ?? 0);
 
     // Try exact name match first for each team (most reliable), then fuzzy fallback
     const [teamAExact, teamBExact] = await Promise.all([
@@ -625,18 +639,27 @@ export async function publicRoutes(app: FastifyInstance) {
     const teamALogoUrl = teamAMeta?.logoUrl ?? null;
     const teamBLogoUrl = teamBMeta?.logoUrl ?? null;
 
-    const inningsSummary = match.innings.map((innings) => ({
-      inningsNumber: innings.inningsNumber,
-      teamKey: innings.battingTeam,
-      team: innings.battingTeam === "A" ? match.teamAName : match.teamBName,
-      shortName:
-        innings.battingTeam === "A"
-          ? teamAShortName
-          : teamBShortName,
-      score: `${innings.totalRuns}/${innings.totalWickets}`,
-      overs: Number(innings.totalOvers.toFixed(1)),
-      isCompleted: innings.isCompleted,
-    }));
+    const inningsSummary = match.innings.map((innings) => {
+      const eff = effectiveRuns(innings);
+      const teamPenalty = penaltyByTeam[innings.battingTeam] ?? 0;
+      return {
+        inningsNumber: innings.inningsNumber,
+        teamKey: innings.battingTeam,
+        team: innings.battingTeam === "A" ? match.teamAName : match.teamBName,
+        shortName:
+          innings.battingTeam === "A"
+            ? teamAShortName
+            : teamBShortName,
+        score: `${eff}/${innings.totalWickets}`,
+        // Raw batted total + signed penalty so overlay templates can render
+        // a separate "(+5 pen)" footnote if desired.
+        runs: eff,
+        batRuns: innings.totalRuns,
+        penaltyRuns: teamPenalty,
+        overs: Number(innings.totalOvers.toFixed(1)),
+        isCompleted: innings.isCompleted,
+      };
+    });
 
     const tossSummary =
       match.tossWonBy && match.tossDecision
@@ -761,16 +784,17 @@ export async function publicRoutes(app: FastifyInstance) {
         : (overlayFormatOvers[match.format] ?? 20);
     const maxDeliveries = scheduledOvers * 6;
 
-    const target = isChasing ? firstInnings.totalRuns + 1 : null;
-    const toWin = target !== null ? target - currentInnings.totalRuns : null;
+    // Target chase honours penalty totals on both sides so a chasing team's
+    // "Need X" line accounts for umpire-awarded runs already on either bank.
+    const currentEffective = effectiveRuns(currentInnings);
+    const target = isChasing ? effectiveRuns(firstInnings) + 1 : null;
+    const toWin = target !== null ? target - currentEffective : null;
     const ballsRemaining =
       target !== null ? maxDeliveries - legalDeliveries : null;
 
     const crr =
       legalDeliveries > 0
-        ? parseFloat(
-            ((currentInnings.totalRuns / legalDeliveries) * 6).toFixed(2),
-          )
+        ? parseFloat(((currentEffective / legalDeliveries) * 6).toFixed(2))
         : 0;
 
     const rrr =
@@ -939,10 +963,14 @@ export async function publicRoutes(app: FastifyInstance) {
         bowlingTeamName: bowlingTeamName,
         bowlingTeamShortName: bowlingTeamShortName,
         bowlingTeamLogoUrl: bowlingTeamLogoUrl,
-        runs: currentInnings.totalRuns,
+        runs: currentEffective,
+        // Separate raw batted and penalty so overlay templates can show a
+        // footnote like "150 (+5 pen)" if they want.
+        batRuns: currentInnings.totalRuns,
+        penaltyRuns: penaltyByTeam[currentInnings.battingTeam] ?? 0,
         wickets: currentInnings.totalWickets,
         overs: Number(currentInnings.totalOvers.toFixed(1)),
-        score: `${currentInnings.totalRuns}/${currentInnings.totalWickets}`,
+        score: `${currentEffective}/${currentInnings.totalWickets}`,
         crr,
         target,
         toWin,

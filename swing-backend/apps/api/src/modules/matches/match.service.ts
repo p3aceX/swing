@@ -751,18 +751,30 @@ export class MatchService {
   }
 
   // ── Penalty awards ──────────────────────────────────────────────────────
+  // Stored as signed Int. SUBTRACT comes in as positive `runs` on the
+  // request but is persisted as negative — so the per-team sum in
+  // `enrichMatchReadModel` naturally produces the right effective total
+  // without extra bookkeeping at read time.
   async awardPenalty(
     matchId: string,
     userId: string,
-    body: { awardedTo: 'A' | 'B'; runs: number; reason?: string; inningsNumber?: number },
+    body: {
+      awardedTo: 'A' | 'B'
+      runs: number
+      direction?: 'ADD' | 'SUBTRACT'
+      reason?: string
+      inningsNumber?: number
+    },
     options: MutationOptions = {},
   ) {
     await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'SCORER' })
+    const direction = body.direction ?? 'ADD'
+    const signedRuns = direction === 'SUBTRACT' ? -body.runs : body.runs
     await prisma.penaltyAward.create({
       data: {
         matchId,
         awardedTo: body.awardedTo,
-        runs: body.runs,
+        runs: signedRuns,
         reason: body.reason ?? null,
         inningsNumber: body.inningsNumber ?? null,
         scorerUserId: userId,
