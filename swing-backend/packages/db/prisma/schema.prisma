@@ -1352,11 +1352,36 @@ model Match {
   venue                   Venue?                   @relation(fields: [venueId], references: [id])
 
   roles                   MatchRole[]
+  penaltyAwards           PenaltyAward[]
 
   @@index([academyId, scheduledAt])
   @@index([overlayPackId])
   @@index([tournamentId])
   @@index([venueId])
+}
+
+// Umpire-awarded penalty runs. Lives outside Innings/BallEvent so it can
+// be awarded to either team regardless of which team is currently batting
+// (cricket rules: when the batting side commits an infraction, the runs
+// go to the bowling side and are credited when they bat — or shown as a
+// "+5 pen" on their existing batted innings). Aggregated per team into
+// the scorecard at read time.
+model PenaltyAward {
+  id           String   @id @default(cuid())
+  matchId      String
+  awardedTo    String   // 'A' or 'B' — the team that gets the runs
+  runs         Int
+  reason       String?
+  // Innings number this was awarded during. Useful for ordering and undo;
+  // not used for the totals math (which always credits `awardedTo`).
+  inningsNumber Int?
+  scoredAt     DateTime @default(now())
+  scorerUserId String?
+
+  match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@index([matchId, awardedTo])
+  @@index([matchId, scoredAt])
 }
 
 model MatchRole {

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '@swing/db'
 import {
+  awardPenaltyRequestSchema,
   completeMatchRequestSchema,
   inningsStateRequestSchema,
   recordBallRequestSchema,
@@ -204,6 +205,25 @@ export async function publicScorerRoutes(app: FastifyInstance) {
     return reply.send({
       success: true,
       data: await svc.setInningsState(id, Number(num), actor.userId, body),
+    })
+  })
+
+  app.post('/match/:id/penalty', guard, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const actor = await resolveScorerActor(id)
+    const body = awardPenaltyRequestSchema.parse(request.body)
+    return reply.send({
+      success: true,
+      data: await svc.awardPenalty(id, actor.userId, body),
+    })
+  })
+
+  app.delete('/match/:id/penalty/last', guard, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const actor = await resolveScorerActor(id)
+    return reply.send({
+      success: true,
+      data: await svc.undoLastPenalty(id, actor.userId),
     })
   })
 

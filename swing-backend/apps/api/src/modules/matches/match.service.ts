@@ -106,6 +106,14 @@ export class MatchService {
     inningsNum: number,
     isMultiInnings: boolean,
   ): Promise<number | null> {
+    // Penalty awards never expire — sum them in for the target so a
+    // chasing team has to clear opponent batting runs + opponent penalty
+    // bank. Also subtract our own penalty bank, which already counts as
+    // runs in our totals on the scorecard but doesn't sit on any innings.
+    const penaltyTotals = await this.penaltyTotalsByTeam(matchId)
+    const opponentPenalty = penaltyTotals[battingTeam === 'A' ? 'B' : 'A'] ?? 0
+    const ownPenalty = penaltyTotals[battingTeam] ?? 0
+
     if (!isMultiInnings) {
       // Standard limited-overs: only innings 2 has a target
       if (inningsNum !== 2) return null
@@ -114,7 +122,7 @@ export class MatchService {
         select: { totalRuns: true, isCompleted: true },
       })
       if (!inn1?.isCompleted) return null
-      return inn1.totalRuns + 1
+      return inn1.totalRuns + opponentPenalty - ownPenalty + 1
     }
 
     // Multi-innings: target applies when opponent has completed more innings than us
@@ -128,9 +136,23 @@ export class MatchService {
     if (opponentInnings.length === 0) return null
     if (ownPreviousInnings.length >= opponentInnings.length) return null
 
-    const opponentTotal = opponentInnings.reduce((s, i) => s + i.totalRuns, 0)
-    const ownTotal = ownPreviousInnings.reduce((s, i) => s + i.totalRuns, 0)
+    const opponentTotal = opponentInnings.reduce((s, i) => s + i.totalRuns, 0) + opponentPenalty
+    const ownTotal = ownPreviousInnings.reduce((s, i) => s + i.totalRuns, 0) + ownPenalty
     return opponentTotal - ownTotal + 1
+  }
+
+  private async penaltyTotalsByTeam(matchId: string): Promise<Record<string, number>> {
+    const rows = await prisma.penaltyAward.groupBy({
+      by: ['awardedTo'],
+      where: { matchId },
+      _sum: { runs: true },
+    })
+    const totals: Record<string, number> = { A: 0, B: 0 }
+    for (const r of rows) {
+      const side = `${r.awardedTo}`.toUpperCase()
+      if (side === 'A' || side === 'B') totals[side] = Number(r._sum.runs ?? 0)
+    }
+    return totals
   }
 
   /**
@@ -689,19 +711,36 @@ export class MatchService {
     }
   }
 
-  private enrichMatchReadModel<T extends { innings?: any[] }>(match: T) {
+  private enrichMatchReadModel<T extends { innings?: any[]; penaltyAwards?: any[] }>(match: T) {
     if (!match?.innings) return match
+    const penaltyByTeam: Record<string, number> = { A: 0, B: 0 }
+    for (const p of (match.penaltyAwards ?? [])) {
+      const side = `${p.awardedTo ?? ''}`.toUpperCase()
+      if (side === 'A' || side === 'B') {
+        penaltyByTeam[side] += Number(p.runs) || 0
+      }
+    }
     return {
       ...match,
       innings: match.innings.map((inn) => {
         const snapshot = this.buildInningsSnapshot(inn.ballEvents ?? [])
+        const teamPenalty = penaltyByTeam[`${inn.battingTeam}`.toUpperCase()] ?? 0
         return {
           ...inn,
           // Always derive totals live from ball events so stale DB values never leak
           totalRuns: snapshot.totalRuns,
           totalWickets: snapshot.totalWickets,
           totalOvers: snapshot.totalOvers,
-          extras: snapshot.extras,
+          extras: snapshot.extras + teamPenalty,
+          // Penalty runs awarded to this innings's batting team. Live snapshot
+          // keeps the raw batted total in `totalRuns`; clients should display
+          // `totalRuns + penaltyRuns` (or read `effectiveTotalRuns`).
+          penaltyRuns: teamPenalty,
+          effectiveTotalRuns: snapshot.totalRuns + teamPenalty,
+          extrasBreakdown: {
+            ...(snapshot.extrasBreakdown ?? {}),
+            penalty: teamPenalty,
+          },
           currentStrikerId: inn.currentStrikerId ?? snapshot.currentStrikerId,
           currentNonStrikerId: inn.currentNonStrikerId ?? snapshot.currentNonStrikerId,
           currentBowlerId: inn.currentBowlerId ?? snapshot.currentBowlerId,
@@ -709,6 +748,38 @@ export class MatchService {
         }
       }),
     }
+  }
+
+  // ── Penalty awards ──────────────────────────────────────────────────────
+  async awardPenalty(
+    matchId: string,
+    userId: string,
+    body: { awardedTo: 'A' | 'B'; runs: number; reason?: string; inningsNumber?: number },
+    options: MutationOptions = {},
+  ) {
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'SCORER' })
+    await prisma.penaltyAward.create({
+      data: {
+        matchId,
+        awardedTo: body.awardedTo,
+        runs: body.runs,
+        reason: body.reason ?? null,
+        inningsNumber: body.inningsNumber ?? null,
+        scorerUserId: userId,
+      },
+    })
+    return this.getMatch(matchId)
+  }
+
+  async undoLastPenalty(matchId: string, userId: string, options: MutationOptions = {}) {
+    await this.authorizeMutation(matchId, userId, { ...options, access: options.access ?? 'SCORER' })
+    const last = await prisma.penaltyAward.findFirst({
+      where: { matchId },
+      orderBy: { scoredAt: 'desc' },
+    })
+    if (!last) throw new AppError('NO_PENALTY', 'No penalty to undo', 404)
+    await prisma.penaltyAward.delete({ where: { id: last.id } })
+    return this.getMatch(matchId)
   }
 
   async createMatch(userId: string, data: any) {
@@ -1875,6 +1946,7 @@ export class MatchService {
           },
         },
         playerMatchStats: true,
+        penaltyAwards: { orderBy: { scoredAt: 'asc' } },
       },
     })
     if (!match) throw Errors.notFound('Match')

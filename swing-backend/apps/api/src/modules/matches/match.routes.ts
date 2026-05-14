@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
+  awardPenaltyRequestSchema,
   completeMatchRequestSchema,
   createMatchRequestSchema,
   inningsStateRequestSchema,
@@ -161,6 +162,22 @@ export async function matchRoutes(app: FastifyInstance) {
     const user = (request as any).user as { userId: string }
     const { id, num } = request.params as { id: string; num: string }
     return reply.send({ success: true, data: await svc.reopenInnings(id, Number(num), user.userId) })
+  })
+
+  // Umpire-awarded penalty runs. Either team can be awarded penalty runs
+  // regardless of who is currently batting; the scorecard sums these into
+  // each team's effective total.
+  app.post('/:id/penalty', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = awardPenaltyRequestSchema.parse(request.body)
+    return reply.send({ success: true, data: await svc.awardPenalty(id, user.userId, body) })
+  })
+
+  app.delete('/:id/penalty/last', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    return reply.send({ success: true, data: await svc.undoLastPenalty(id, user.userId) })
   })
 
   app.post('/:id/complete', auth, async (request, reply) => {

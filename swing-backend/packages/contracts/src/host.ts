@@ -218,6 +218,16 @@ export const inningsStateRequestSchema = z.object({
   bowlerId: z.string().nullable().optional(),
 });
 
+// Umpire-awarded penalty runs. Capped at 5 — matches the standard cricket
+// penalty quantum (slow over rate, illegal field, ball tampering, etc.).
+export const awardPenaltyRequestSchema = z.object({
+  awardedTo: z.enum(["A", "B"]),
+  runs: z.number().int().min(1).max(5),
+  reason: z.string().max(200).optional(),
+  inningsNumber: z.number().int().min(1).max(4).optional(),
+});
+export type AwardPenaltyRequest = z.infer<typeof awardPenaltyRequestSchema>;
+
 export const createTournamentRequestSchema = z.object({
   name: z.string().min(2).max(120),
   description: z.string().max(500).optional(),
