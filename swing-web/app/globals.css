@@ -551,3 +551,10 @@ a { color: inherit; text-decoration: none; }
 .cell.busy { background: oklch(0.94 0.05 75); color: oklch(0.45 0.13 75); }
 .cell.full { background: var(--paper-2); color: var(--ink-3); cursor: not-allowed; }
 .cell.selected { background: var(--ink); color: var(--accent); font-weight: 700; }
+
+/* Web scorer — score-update floating delta. Used by /score/[matchId]. */
+@keyframes score-rise {
+  0%   { opacity: 0;    transform: translate(-50%, 4px) scale(0.85); }
+  20%  { opacity: 1;    transform: translate(-50%, -2px) scale(1.05); }
+  100% { opacity: 0;    transform: translate(-50%, -22px) scale(1); }
+}

@@ -217,6 +217,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
   const [zone, setZone] = useState<WagonZone | null>(null);
 
   // Modal state — only one open at a time.
+  type PickRole = "striker" | "nonStriker" | "bowler" | "wk";
   type Modal =
     | { kind: "runs"; zone: WagonZone | null }
     | { kind: "wide" }
@@ -228,8 +229,21 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     | { kind: "new-batter" }
     | { kind: "penalty" }
     | { kind: "end-match" }
+    | { kind: "pick"; role: PickRole }
+    | { kind: "declare" }
     | null;
   const [modal, setModal] = useState<Modal>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Score-change pulse: when effectiveTotalRuns increases after a ball
+  // record, we briefly render a "+N" indicator floating up out of the
+  // score and flash the score number green so the scorer gets visual
+  // confirmation the server accepted the ball.
+  const lastEffectiveRef = useRef<number | null>(null);
+  const [scorePulse, setScorePulse] = useState<{
+    delta: number;
+    nonce: number;
+  } | null>(null);
 
   // ── Data ─────────────────────────────────────────────────────────────────
   const refresh = useCallback(async () => {
@@ -364,6 +378,26 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
   useEffect(() => {
     lastBallRef.current = lastBall;
   }, [lastBall]);
+
+  // Score pulse: fire whenever the batting team's effective total changes.
+  // Skips the initial mount so we don't pulse just because the match
+  // loaded. Negative delta still pulses — useful when a penalty subtract
+  // or an undo lands.
+  useEffect(() => {
+    const current = activeInnings?.effectiveTotalRuns ?? activeInnings?.totalRuns ?? null;
+    const prev = lastEffectiveRef.current;
+    if (current !== null && prev !== null && current !== prev) {
+      setScorePulse({ delta: current - prev, nonce: Date.now() });
+    }
+    if (current !== null) lastEffectiveRef.current = current;
+  }, [activeInnings?.effectiveTotalRuns, activeInnings?.totalRuns]);
+
+  // Auto-clear the pulse after the animation finishes.
+  useEffect(() => {
+    if (!scorePulse) return;
+    const t = setTimeout(() => setScorePulse(null), 1400);
+    return () => clearTimeout(t);
+  }, [scorePulse]);
 
   // Three mutually-exclusive "needs input" states. Backend clears slots
   // at specific moments (end of over → bowler null; after wicket →
@@ -586,6 +620,78 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       method: "POST",
       body: { winnerId, ...(winMargin ? { winMargin } : {}) },
     });
+  }
+
+  async function completeInnings(inningsNumber: number) {
+    await call(`/match/${matchId}/innings/${inningsNumber}/complete`, {
+      method: "POST",
+    });
+  }
+
+  async function changeWicketKeeper(team: "A" | "B", wkId: string) {
+    await call(`/match/${matchId}/wicketkeeper`, {
+      method: "PATCH",
+      body: { team, wicketKeeperId: wkId },
+    });
+  }
+
+  // ── Side-drawer menu actions ─────────────────────────────────────────────
+  function onMenuChangeStriker() {
+    setMenuOpen(false);
+    setModal({ kind: "pick", role: "striker" });
+  }
+  function onMenuChangeNonStriker() {
+    setMenuOpen(false);
+    setModal({ kind: "pick", role: "nonStriker" });
+  }
+  function onMenuSwapBatters() {
+    setMenuOpen(false);
+    if (!activeInnings) return;
+    const s = activeInnings.currentStrikerId;
+    const ns = activeInnings.currentNonStrikerId;
+    if (!s || !ns) return;
+    void setInningsState({ strikerId: ns, nonStrikerId: s });
+  }
+  function onMenuChangeBowler() {
+    setMenuOpen(false);
+    setModal({ kind: "pick", role: "bowler" });
+  }
+  function onMenuChangeWicketKeeper() {
+    setMenuOpen(false);
+    setModal({ kind: "pick", role: "wk" });
+  }
+  function onMenuDeclareInnings() {
+    setMenuOpen(false);
+    setModal({ kind: "declare" });
+  }
+  async function onMenuRefresh() {
+    setMenuOpen(false);
+    setError(null);
+    try {
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  // Picker submit dispatcher — routes the selected player to the right
+  // backend call based on which role we're picking for.
+  async function onPickPlayer(role: PickRole, playerId: string) {
+    setModal(null);
+    if (role === "striker") {
+      await setInningsState({ strikerId: playerId });
+    } else if (role === "nonStriker") {
+      await setInningsState({ nonStrikerId: playerId });
+    } else if (role === "bowler") {
+      await setInningsState({ bowlerId: playerId });
+    } else if (role === "wk") {
+      if (!activeInnings) return;
+      // The wicket-keeper is on the BOWLING team. innings.battingTeam tells
+      // us which is batting; the WK belongs to the other side.
+      const team: "A" | "B" =
+        activeInnings.battingTeam === "A" ? "B" : "A";
+      await changeWicketKeeper(team, playerId);
+    }
   }
 
   // ── Pad actions ──────────────────────────────────────────────────────────
@@ -976,6 +1082,8 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       onUndoLastPenalty={
         (match.penaltyAwards?.length ?? 0) > 0 ? onUndoLastPenalty : undefined
       }
+      onOpenMenu={() => setMenuOpen(true)}
+      scorePulse={scorePulse}
     >
       {chase &&
         (chase.runsNeeded <= 0 ? (
@@ -1102,6 +1210,61 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
           onPick={onWicketPick}
         />
       )}
+      {modal?.kind === "pick" && (
+        <PlayerPickerModal
+          role={modal.role}
+          battingTeam={battingTeam}
+          bowlingTeam={bowlingTeam}
+          activeInnings={activeInnings}
+          currentKeeperId={
+            activeInnings.battingTeam === "A"
+              ? match.teamBWicketKeeperId ?? null
+              : match.teamAWicketKeeperId ?? null
+          }
+          onCancel={() => setModal(null)}
+          onPick={(id) => onPickPlayer(modal.role, id)}
+        />
+      )}
+      {modal?.kind === "declare" && (
+        <ConfirmModal
+          title="Declare innings"
+          body={
+            activeInnings.inningsNumber === 1
+              ? "End the current innings now (declared). Team will move to the chase / next innings."
+              : "End the current innings now (declared)."
+          }
+          confirmLabel="Declare"
+          danger
+          onCancel={() => setModal(null)}
+          onConfirm={async () => {
+            setModal(null);
+            await completeInnings(activeInnings.inningsNumber);
+          }}
+        />
+      )}
+      <MenuDrawer
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        actions={[
+          { label: "Change striker", onClick: onMenuChangeStriker },
+          { label: "Change non-striker", onClick: onMenuChangeNonStriker },
+          { label: "Swap batters", onClick: onMenuSwapBatters },
+          { label: "Change bowler", onClick: onMenuChangeBowler },
+          {
+            label: "Change wicket-keeper",
+            onClick: onMenuChangeWicketKeeper,
+          },
+          { divider: true },
+          {
+            label: "Declare innings",
+            onClick: onMenuDeclareInnings,
+            danger: true,
+          },
+          { label: "Refresh", onClick: onMenuRefresh },
+          { divider: true },
+          { label: "Sign out", onClick: onSignOut },
+        ]}
+      />
     </Shell>
   );
 }
@@ -1127,6 +1290,8 @@ function Shell({
   nextBall,
   onSignOut,
   onUndoLastPenalty,
+  onOpenMenu,
+  scorePulse,
   children,
 }: {
   match: MatchPayload;
@@ -1137,6 +1302,8 @@ function Shell({
   nextBall?: number;
   onSignOut: () => void;
   onUndoLastPenalty?: () => void;
+  onOpenMenu?: () => void;
+  scorePulse?: { delta: number; nonce: number } | null;
   children: React.ReactNode;
 }) {
   return (
@@ -1151,12 +1318,35 @@ function Shell({
             {match.teamBName}
           </div>
         </div>
-        <button
-          onClick={onSignOut}
-          className="text-[11px] text-neutral-600 underline shrink-0 ml-3"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-3 shrink-0 ml-3">
+          {onOpenMenu && (
+            <button
+              type="button"
+              aria-label="Open scorer menu"
+              onClick={onOpenMenu}
+              className="w-9 h-9 flex items-center justify-center rounded-md border border-neutral-300 active:bg-neutral-100"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                aria-hidden
+              >
+                <path d="M3 6h18M3 12h18M3 18h18" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={onSignOut}
+            className="text-[11px] text-neutral-600 underline"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       {innings && (
@@ -1167,6 +1357,7 @@ function Shell({
           nextOver={nextOver ?? 0}
           nextBall={nextBall ?? 1}
           onUndoLastPenalty={onUndoLastPenalty}
+          scorePulse={scorePulse ?? null}
         />
       )}
 
@@ -1182,6 +1373,7 @@ function ScoreStrip({
   nextOver,
   nextBall,
   onUndoLastPenalty,
+  scorePulse,
 }: {
   match: MatchPayload;
   innings: Innings;
@@ -1189,6 +1381,7 @@ function ScoreStrip({
   nextOver: number;
   nextBall: number;
   onUndoLastPenalty?: () => void;
+  scorePulse?: { delta: number; nonce: number } | null;
 }) {
   const teamName =
     innings.battingTeam === "A" ? match.teamAName : match.teamBName;
@@ -1211,10 +1404,27 @@ function ScoreStrip({
         <div className="text-[13px] font-extrabold tracking-wider text-neutral-900 truncate">
           {teamName.toUpperCase()}
         </div>
-        <div className="text-base font-extrabold text-neutral-900 tabular-nums">
+        <div
+          key={scorePulse?.nonce ?? 0}
+          className={
+            "relative text-base font-extrabold tabular-nums transition-colors duration-700 " +
+            (scorePulse ? "text-emerald-700" : "text-neutral-900")
+          }
+        >
           {effectiveRuns}
           <span className="text-neutral-400">/</span>
           {innings.totalWickets}
+          {scorePulse && (
+            <span
+              className={
+                "pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 " +
+                "text-xs font-extrabold animate-[score-rise_1.2s_ease-out_forwards] " +
+                (scorePulse.delta > 0 ? "text-emerald-600" : "text-red-600")
+              }
+            >
+              {scorePulse.delta > 0 ? `+${scorePulse.delta}` : scorePulse.delta}
+            </span>
+          )}
         </div>
         {penaltyRuns !== 0 && (
           <button
@@ -2535,5 +2745,224 @@ function ErrorState({
         </div>
       </div>
     </main>
+  );
+}
+
+// ── Side drawer + pickers ──────────────────────────────────────────────────
+type DrawerAction =
+  | { divider: true }
+  | { label: string; onClick: () => void; danger?: boolean };
+
+function MenuDrawer({
+  open,
+  onClose,
+  actions,
+}: {
+  open: boolean;
+  onClose: () => void;
+  actions: DrawerAction[];
+}) {
+  return (
+    <div
+      className={
+        "fixed inset-0 z-40 transition-opacity " +
+        (open
+          ? "opacity-100 pointer-events-auto"
+          : "opacity-0 pointer-events-none")
+      }
+      aria-hidden={!open}
+    >
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+      <aside
+        className={
+          "absolute top-0 right-0 h-full w-72 max-w-[80vw] bg-white shadow-xl " +
+          "transition-transform duration-200 " +
+          (open ? "translate-x-0" : "translate-x-full")
+        }
+        role="dialog"
+        aria-label="Scorer menu"
+      >
+        <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
+          <div className="text-sm font-semibold text-neutral-900">
+            Scorer menu
+          </div>
+          <button
+            onClick={onClose}
+            className="text-xs text-neutral-500 underline"
+          >
+            Close
+          </button>
+        </div>
+        <nav className="py-1">
+          {actions.map((a, i) =>
+            "divider" in a ? (
+              <div key={`d-${i}`} className="h-px bg-neutral-100 my-1" />
+            ) : (
+              <button
+                key={a.label}
+                onClick={a.onClick}
+                className={
+                  "block w-full text-left px-4 py-3 text-sm active:bg-neutral-100 " +
+                  (a.danger
+                    ? "text-red-700 font-medium"
+                    : "text-neutral-900")
+                }
+              >
+                {a.label}
+              </button>
+            ),
+          )}
+        </nav>
+      </aside>
+    </div>
+  );
+}
+
+function PlayerPickerModal({
+  role,
+  battingTeam,
+  bowlingTeam,
+  activeInnings,
+  currentKeeperId,
+  onCancel,
+  onPick,
+}: {
+  role: "striker" | "nonStriker" | "bowler" | "wk";
+  battingTeam: Team | null;
+  bowlingTeam: Team | null;
+  activeInnings: Innings;
+  currentKeeperId: string | null;
+  onCancel: () => void;
+  onPick: (id: string) => void;
+}) {
+  // Which team's players to show + who to exclude depends on the role.
+  const { team, exclude, title, subtitle, currentId } = (() => {
+    switch (role) {
+      case "striker":
+        return {
+          team: battingTeam,
+          exclude: [activeInnings.currentNonStrikerId].filter(
+            Boolean,
+          ) as string[],
+          title: "Change striker",
+          subtitle: "Pick the new on-strike batter",
+          currentId: activeInnings.currentStrikerId,
+        };
+      case "nonStriker":
+        return {
+          team: battingTeam,
+          exclude: [activeInnings.currentStrikerId].filter(
+            Boolean,
+          ) as string[],
+          title: "Change non-striker",
+          subtitle: "Pick the new non-striker",
+          currentId: activeInnings.currentNonStrikerId,
+        };
+      case "bowler":
+        return {
+          team: bowlingTeam,
+          // Exclude the currently bowling player so you can't reselect them.
+          exclude: [],
+          title: "Change bowler",
+          subtitle: "Pick the bowler for the next ball",
+          currentId: activeInnings.currentBowlerId,
+        };
+      case "wk":
+        return {
+          team: bowlingTeam,
+          exclude: [],
+          title: "Change wicket-keeper",
+          subtitle: "Pick the new wicket-keeper",
+          currentId: currentKeeperId,
+        };
+    }
+  })();
+
+  const players = (team?.players ?? []).filter(
+    (p) => !exclude.includes(p.profileId),
+  );
+
+  return (
+    <ModalShell title={title} subtitle={subtitle} onCancel={onCancel}>
+      <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+        {players.length === 0 && (
+          <div className="text-sm text-neutral-500 px-2 py-3">
+            No players available.
+          </div>
+        )}
+        {players.map((p) => {
+          const isCurrent = p.profileId === currentId;
+          return (
+            <button
+              key={p.profileId}
+              onClick={() => onPick(p.profileId)}
+              disabled={isCurrent}
+              className={
+                "w-full text-left px-3 py-3 rounded-md border " +
+                (isCurrent
+                  ? "border-neutral-200 bg-neutral-50 text-neutral-400"
+                  : "border-neutral-200 bg-white text-neutral-900 active:bg-neutral-100")
+              }
+            >
+              <div className="text-sm font-medium flex items-center justify-between">
+                <span>{p.name}</span>
+                {isCurrent && (
+                  <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                    current
+                  </span>
+                )}
+                {p.isOut && !isCurrent && (
+                  <span className="text-[10px] uppercase tracking-wide text-red-500">
+                    out
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </ModalShell>
+  );
+}
+
+function ConfirmModal({
+  title,
+  body,
+  confirmLabel,
+  danger,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  return (
+    <ModalShell title={title} onCancel={onCancel}>
+      <p className="text-sm text-neutral-700 mb-4">{body}</p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={onCancel}
+          className="h-11 border border-neutral-300 bg-white text-sm font-medium text-neutral-900"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => void onConfirm()}
+          className={
+            "h-11 text-white font-semibold " +
+            (danger ? "bg-red-700" : "bg-neutral-900")
+          }
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
