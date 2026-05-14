@@ -183,13 +183,31 @@ test('bye and leg-bye dismissal matrix allows run out and hit wicket but blocks 
   )
 })
 
-test('bowler conceded excludes byes and leg byes but includes wides and no-balls', () => {
+test('bowler conceded: only the 1-run wide / NB penalty + bat runs', () => {
+  // Byes / leg-byes — never charged to the bowler.
   assert.equal(bowlerRunsConcededFromBall(ball({ outcome: 'BYE', extras: 2, totalRuns: 2 })), 0)
   assert.equal(bowlerRunsConcededFromBall(ball({ outcome: 'LEG_BYE', extras: 3, totalRuns: 3 })), 0)
-  assert.equal(bowlerRunsConcededFromBall(ball({ outcome: 'WIDE', extras: 2, totalRuns: 2 })), 2)
+  // Wide: always exactly 1 to the bowler. Extras beyond the 1 wide
+  // penalty are byes off the wide and don't inflate bowler figures.
+  assert.equal(bowlerRunsConcededFromBall(ball({ outcome: 'WIDE', extras: 1, totalRuns: 1 })), 1)
+  assert.equal(bowlerRunsConcededFromBall(ball({ outcome: 'WIDE', extras: 3, totalRuns: 3 })), 1)
+  // No-ball OFF THE BAT: 1 NB penalty + bat runs.
   assert.equal(
     bowlerRunsConcededFromBall(ball({ outcome: 'NO_BALL', runs: 4, extras: 1, totalRuns: 5 })),
     5,
+  )
+  // No-ball BYE / LEG_BYE: only the 1 NB penalty — byes don't go to bowler.
+  assert.equal(
+    bowlerRunsConcededFromBall(
+      ball({ outcome: 'NO_BALL', runs: 0, extras: 3, totalRuns: 3, tags: ['no_ball_extra:bye:2'] }),
+    ),
+    1,
+  )
+  assert.equal(
+    bowlerRunsConcededFromBall(
+      ball({ outcome: 'NO_BALL', runs: 0, extras: 4, totalRuns: 4, tags: ['no_ball_extra:leg_bye:3'] }),
+    ),
+    1,
   )
 })
 

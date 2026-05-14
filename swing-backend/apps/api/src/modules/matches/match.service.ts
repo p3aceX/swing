@@ -437,7 +437,11 @@ export class MatchService {
       const extrasVal = ball.extras || 0
       switch (ball.outcome) {
         case 'WIDE':
-          wides += extrasVal
+          // 1 wide penalty + any additional runs as byes. Matches the
+          // bowler-runs rule: only the 1 wide is charged against the
+          // bowler; the remainder lives under byes in the scorecard.
+          wides += 1
+          byes += Math.max(0, extrasVal - 1)
           break
         case 'NO_BALL':
           // Tagged byes / leg-byes on a no-ball still count as the corresponding

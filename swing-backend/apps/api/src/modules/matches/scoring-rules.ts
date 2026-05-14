@@ -313,10 +313,29 @@ export function batterRunsFromBall(ball: ScoringBallLike) {
 export function bowlerRunsConcededFromBall(ball: ScoringBallLike) {
   const outcome = normalizedOutcome(ball.outcome);
   const runs = ball.runs ?? 0;
-  const extras = ball.extras ?? 0;
+  const tags = (ball as { tags?: unknown }).tags;
+  const tagList: string[] = Array.isArray(tags)
+    ? (tags as unknown[]).filter((t): t is string => typeof t === "string")
+    : [];
 
-  if (outcome === "WIDE") return extras;
-  if (outcome === "NO_BALL") return runs + extras;
+  // Club-cricket convention (and what scorers expect on the UI):
+  //   WIDE → only the 1-run wide penalty is charged to the bowler.
+  //          Any additional runs taken on the wide are byes and appear
+  //          under byes, NOT in the bowler's conceded column.
+  //   NO_BALL with BAT runs → 1 NB penalty + bat runs go to the bowler.
+  //   NO_BALL tagged bye/leg-bye → only the 1 NB penalty; the
+  //          bye/leg-bye runs don't inflate bowler figures.
+  //   BYE / LEG_BYE → not charged to the bowler.
+  if (outcome === "WIDE") return 1;
+  if (outcome === "NO_BALL") {
+    const nbExtraIsBye = tagList.some(
+      (t) =>
+        t.startsWith("no_ball_extra:bye") ||
+        t.startsWith("no_ball_extra:leg_bye"),
+    );
+    if (nbExtraIsBye) return 1;
+    return 1 + runs;
+  }
   if (outcome === "BYE" || outcome === "LEG_BYE") return 0;
   return runs;
 }
