@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@swing/db'
 import {
   completeMatchRequestSchema,
+  inningsStateRequestSchema,
   recordBallRequestSchema,
 } from '@swing/contracts'
 import { MatchService } from '../matches/match.service'
@@ -104,13 +105,16 @@ export async function publicScorerRoutes(app: FastifyInstance) {
       livePin: z.string().trim().min(3).max(32),
     }).parse(request.body)
 
-    const normalizedCode = body.liveCode.toUpperCase()
+    // Codes are issued lowercase (`swing#1234`) but we accept any casing
+    // a user might paste from a share message.
+    const raw = body.liveCode
     const match = await prisma.match.findFirst({
       where: {
         OR: [
-          { liveCode: normalizedCode },
-          { liveCode: body.liveCode },
-          { id: body.liveCode },
+          { liveCode: raw },
+          { liveCode: raw.toLowerCase() },
+          { liveCode: raw.toUpperCase() },
+          { id: raw },
         ],
       },
       select: { id: true, livePin: true },
@@ -190,6 +194,16 @@ export async function publicScorerRoutes(app: FastifyInstance) {
     return reply.send({
       success: true,
       data: await svc.completeInnings(id, Number(num), actor.userId),
+    })
+  })
+
+  app.patch('/match/:id/innings/:num/state', guard, async (request, reply) => {
+    const { id, num } = request.params as { id: string; num: string }
+    const actor = await resolveScorerActor(id)
+    const body = inningsStateRequestSchema.parse(request.body)
+    return reply.send({
+      success: true,
+      data: await svc.setInningsState(id, Number(num), actor.userId, body),
     })
   })
 
