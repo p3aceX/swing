@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   clearScorerSession,
@@ -8,6 +8,50 @@ import {
   scorerFetch,
 } from "../_session";
 import { WagonWheel, ZONE_LABEL, type WagonZone } from "./_wagon-wheel";
+
+// ── Cold-start retry helpers ──────────────────────────────────────────────
+// Cloud Run cold starts surface as either a network error or a transient
+// 5xx (502/503/504). Mutations get wrapped to retry through a delay schedule
+// before bubbling failure. 4xx is always caller error → no retry.
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isTransient5xx(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+async function withColdStartRetry(
+  fn: () => Promise<Response>,
+  delays: number[],
+): Promise<Response> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const res = await fn();
+      if (res.ok || !isTransient5xx(res.status)) return res;
+      // Transient 5xx → retry if we have delays left, else return the
+      // response so caller can read the body for its error message.
+      if (attempt === delays.length) return res;
+      await sleep(delays[attempt]);
+      continue;
+    } catch (e) {
+      lastErr = e;
+      if (attempt === delays.length) throw e;
+      await sleep(delays[attempt]);
+    }
+  }
+  // Unreachable — the loop either returns or throws.
+  throw lastErr ?? new Error("retry exhausted");
+}
+
+const MUTATION_RETRY_DELAYS = [5000, 10000, 15000];
+const INITIAL_LOAD_RETRY_DELAYS = [800, 1500, 2500, 4000];
+
+// 401 is a fatal auth issue — distinguish from transient errors so the
+// initial-load retry can bail out instead of retrying.
+class AuthError extends Error {}
 
 // React port of the Flutter scoring screen — same layout, same flows:
 // score strip → over dots → batter rows → bowler row → wagon wheel →
@@ -183,6 +227,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     | { kind: "wicket" }
     | { kind: "new-batter" }
     | { kind: "penalty" }
+    | { kind: "end-match" }
     | null;
   const [modal, setModal] = useState<Modal>(null);
 
@@ -193,21 +238,24 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       scorerFetch(`/match/${matchId}/players`),
     ]);
     if (mRes.status === 401 || pRes.status === 401) {
-      clearScorerSession();
-      router.replace("/score");
-      return;
+      throw new AuthError("unauthorized");
     }
     const mBody = await mRes.json().catch(() => ({}));
     const pBody = await pRes.json().catch(() => ({}));
     if (!mRes.ok || !mBody?.success) {
-      throw new Error(mBody?.error?.message ?? "Failed to load match");
+      const err = new Error(mBody?.error?.message ?? "Failed to load match");
+      // Tag with status so caller can decide whether to retry.
+      (err as Error & { status?: number }).status = mRes.status;
+      throw err;
     }
     if (!pRes.ok || !pBody?.success) {
-      throw new Error(pBody?.error?.message ?? "Failed to load players");
+      const err = new Error(pBody?.error?.message ?? "Failed to load players");
+      (err as Error & { status?: number }).status = pRes.status;
+      throw err;
     }
     setMatch(mBody.data as MatchPayload);
     setPlayers(pBody.data as PlayersPayload);
-  }, [matchId, router]);
+  }, [matchId]);
 
   useEffect(() => {
     const s = readScorerSession();
@@ -215,17 +263,40 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       router.replace("/score");
       return;
     }
+    let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
-      try {
-        await refresh();
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
+      const delays = INITIAL_LOAD_RETRY_DELAYS;
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt <= delays.length; attempt++) {
+        if (cancelled) return;
+        try {
+          await refresh();
+          if (!cancelled) setLoading(false);
+          return;
+        } catch (e) {
+          if (e instanceof AuthError) {
+            clearScorerSession();
+            router.replace("/score");
+            return;
+          }
+          lastErr = e as Error;
+          const status = (e as Error & { status?: number }).status;
+          // Only retry on transient 5xx or network errors (no status).
+          const retriable = status === undefined || isTransient5xx(status);
+          if (!retriable || attempt === delays.length) break;
+          await sleep(delays[attempt]);
+        }
+      }
+      if (!cancelled) {
+        setError(lastErr?.message ?? "Failed to load");
         setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [matchId, refresh, router]);
 
   function onSignOut() {
@@ -289,6 +360,11 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     };
   }, [activeInnings]);
 
+  // Keep lastBall reachable from inside async mutation flows (overthrow).
+  useEffect(() => {
+    lastBallRef.current = lastBall;
+  }, [lastBall]);
+
   // Three mutually-exclusive "needs input" states. Backend clears slots
   // at specific moments (end of over → bowler null; after wicket →
   // striker or non-striker null; brand-new innings → all three null).
@@ -306,6 +382,32 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     !!activeInnings && hasEvents && !needsNewBatter && bidMissing;
 
   // ── Mutations ────────────────────────────────────────────────────────────
+  // Track the latest lastBall in a ref so the overthrow handler can read it
+  // mid-flow (between undo and re-record) without racing React state.
+  const lastBallRef = useRef<BallEvent | null>(null);
+
+  function doFetch(
+    path: string,
+    method: string,
+    body?: unknown,
+  ): Promise<Response> {
+    const serialised =
+      body === undefined
+        ? undefined
+        : typeof body === "string"
+          ? body
+          : JSON.stringify(body);
+    return scorerFetch(path, { method, body: serialised });
+  }
+
+  async function readError(res: Response): Promise<{ message: string; code: string | null }> {
+    const data = await res.json().catch(() => ({}));
+    return {
+      message: data?.error?.message ?? "Action failed",
+      code: (data?.error?.code as string | undefined) ?? null,
+    };
+  }
+
   async function call(
     path: string,
     init: { method: string; body?: unknown },
@@ -313,13 +415,10 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const body =
-        init.body === undefined
-          ? undefined
-          : typeof init.body === "string"
-            ? init.body
-            : JSON.stringify(init.body);
-      const res = await scorerFetch(path, { method: init.method, body });
+      const res = await withColdStartRetry(
+        () => doFetch(path, init.method, init.body),
+        MUTATION_RETRY_DELAYS,
+      );
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
         throw new Error(data?.error?.message ?? "Action failed");
@@ -350,23 +449,115 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     };
   }
 
+  // Low-level ball POST with retry + INNINGS_COMPLETED auto-recovery.
+  // Returns the final response (which the caller should validate). On
+  // INNINGS_COMPLETED 4xx, reopens the innings and retries once. Match
+  // Flutter scoring_controller.dart:551-562.
+  async function postBallWithRecover(
+    inningsNumber: number,
+    payload: unknown,
+  ): Promise<Response> {
+    const path = `/match/${matchId}/innings/${inningsNumber}/ball`;
+    const first = await withColdStartRetry(
+      () => doFetch(path, "POST", payload),
+      MUTATION_RETRY_DELAYS,
+    );
+    if (first.ok) return first;
+    // Clone before reading body so the caller can read it again if we don't
+    // recover.
+    const clone = first.clone();
+    if (first.status < 500) {
+      const { code } = await readError(clone);
+      if (code === "INNINGS_COMPLETED") {
+        try {
+          await withColdStartRetry(
+            () =>
+              doFetch(
+                `/match/${matchId}/innings/${inningsNumber}/reopen`,
+                "POST",
+              ),
+            MUTATION_RETRY_DELAYS,
+          );
+        } catch {
+          return first; // reopen failed → surface original error
+        }
+        const retry = await withColdStartRetry(
+          () => doFetch(path, "POST", payload),
+          MUTATION_RETRY_DELAYS,
+        );
+        // If retry still fails, surface the ORIGINAL error (per spec).
+        return retry.ok ? retry : first;
+      }
+    }
+    return first;
+  }
+
   async function recordBall(extra: Record<string, unknown>) {
     if (!activeInnings) return;
     const payload = ballPayload(extra);
     if (!payload) return;
-    await call(
-      `/match/${matchId}/innings/${activeInnings.inningsNumber}/ball`,
-      { method: "POST", body: payload },
-    );
-    setZone(null);
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await postBallWithRecover(
+        activeInnings.inningsNumber,
+        payload,
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error?.message ?? "Action failed");
+      }
+      await refresh();
+      setZone(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function undo() {
     if (!activeInnings) return;
-    await call(
-      `/match/${matchId}/innings/${activeInnings.inningsNumber}/last-ball`,
-      { method: "DELETE" },
-    );
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await withColdStartRetry(
+        () =>
+          doFetch(
+            `/match/${matchId}/innings/${activeInnings.inningsNumber}/last-ball`,
+            "DELETE",
+          ),
+        MUTATION_RETRY_DELAYS,
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error?.message ?? "Action failed");
+      }
+      // If the innings/match was marked complete and the user is backing out
+      // of it, reopen so subsequent scoring isn't blocked by the backend's
+      // isCompleted gate. Match Flutter scoring_controller.dart:686-723.
+      const wasInningsCompleted = activeInnings.isCompleted === true;
+      const hadEvents = (activeInnings.ballEvents?.length ?? 0) > 0;
+      if (wasInningsCompleted && hadEvents) {
+        try {
+          await withColdStartRetry(
+            () =>
+              doFetch(
+                `/match/${matchId}/innings/${activeInnings.inningsNumber}/reopen`,
+                "POST",
+              ),
+            MUTATION_RETRY_DELAYS,
+          );
+        } catch {
+          // Continue — refresh will surface state regardless.
+        }
+      }
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function setInningsState(s: {
@@ -379,6 +570,22 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       `/match/${matchId}/innings/${activeInnings.inningsNumber}/state`,
       { method: "PATCH", body: s },
     );
+  }
+
+  async function reopenInnings(inningsNumber: number) {
+    await call(`/match/${matchId}/innings/${inningsNumber}/reopen`, {
+      method: "POST",
+    });
+  }
+
+  async function completeMatch(
+    winnerId: "A" | "B" | "TIE" | "DRAW" | "ABANDONED",
+    winMargin?: string,
+  ) {
+    await call(`/match/${matchId}/complete`, {
+      method: "POST",
+      body: { winnerId, ...(winMargin ? { winMargin } : {}) },
+    });
   }
 
   // ── Pad actions ──────────────────────────────────────────────────────────
@@ -461,6 +668,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
   const onPenaltyPick = async (data: {
     awardedTo: "A" | "B";
     runs: number;
+    direction: "ADD" | "SUBTRACT";
     reason?: string;
   }) => {
     setModal(null);
@@ -469,24 +677,104 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       body: {
         awardedTo: data.awardedTo,
         runs: data.runs,
+        direction: data.direction,
         reason: data.reason || undefined,
         inningsNumber: activeInnings?.inningsNumber,
       },
     });
   };
 
-  const onOverthrowPick = (n: number) => {
+  // Separate from undo-last-ball: removes the most recent PenaltyAward.
+  // Useful when the scorer mis-picked the side or amount.
+  const onUndoLastPenalty = async () => {
+    await call(`/match/${matchId}/penalty/last`, { method: "DELETE" });
+  };
+
+  // Overthrow flow: backend doesn't support "append to last ball" — to avoid
+  // double-counting we have to (1) snapshot the original ball, (2) DELETE
+  // last-ball, then (3) re-POST the SAME ball with total runs and
+  // isOverthrow:true. We deliberately bypass the generic call() helper
+  // because it refreshes between steps, which would wipe lastBall and corrupt
+  // the snapshot. The user sees a brief busy state but no flash of the
+  // intermediate "undone" score — refresh runs once at the end.
+  // Matches Flutter `_addOverthrowToLastBall` (scoring_screen.dart:589-606).
+  const onOverthrowPick = async (n: number) => {
     setModal(null);
-    // Append overthrow to the last ball isn't a separate endpoint — we
-    // record a brand new event flagged as an overthrow with overthrowRuns.
-    // (matches the Flutter `_addOverthrowToLastBall` path.)
-    if (!lastBall) return;
-    void recordBall({
-      outcome: lastBall.outcome,
-      runs: lastBall.runs + n,
-      isOverthrow: true,
-      overthrowRuns: n,
-    });
+    if (!activeInnings) return;
+    const original = lastBallRef.current ?? lastBall;
+    if (!original) return;
+
+    // Snapshot BEFORE doing anything — undo would clear lastBall from state.
+    const snapshot = {
+      overNumber: original.overNumber,
+      ballNumber: original.ballNumber,
+      batterId: original.batterId ?? activeInnings.currentStrikerId,
+      bowlerId: original.bowlerId ?? activeInnings.currentBowlerId,
+      wagonZone: original.wagonZone ?? null,
+      batsmanRuns: original.runs,
+    };
+    const total = snapshot.batsmanRuns + n;
+    const outcomeMap: Record<number, string> = {
+      0: "DOT",
+      1: "SINGLE",
+      2: "DOUBLE",
+      3: "TRIPLE",
+      4: "FOUR",
+      5: "FIVE",
+      6: "SIX",
+    };
+    const outcome = outcomeMap[Math.max(0, Math.min(6, total))] ?? "SINGLE";
+
+    setBusy(true);
+    setError(null);
+    try {
+      const undoRes = await withColdStartRetry(
+        () =>
+          doFetch(
+            `/match/${matchId}/innings/${activeInnings.inningsNumber}/last-ball`,
+            "DELETE",
+          ),
+        MUTATION_RETRY_DELAYS,
+      );
+      const undoData = await undoRes.json().catch(() => ({}));
+      if (!undoRes.ok || !undoData?.success) {
+        // Bail BEFORE re-recording — otherwise we'd add a fresh ball on top.
+        throw new Error(undoData?.error?.message ?? "Undo failed");
+      }
+
+      const payload = {
+        overNumber: snapshot.overNumber,
+        ballNumber: snapshot.ballNumber,
+        batterId: snapshot.batterId,
+        bowlerId: snapshot.bowlerId,
+        runs: total,
+        extras: 0,
+        isWicket: false,
+        isOverthrow: true,
+        overthrowRuns: n,
+        outcome,
+        ...(snapshot.wagonZone ? { wagonZone: snapshot.wagonZone } : {}),
+      };
+      const rec = await withColdStartRetry(
+        () =>
+          doFetch(
+            `/match/${matchId}/innings/${activeInnings.inningsNumber}/ball`,
+            "POST",
+            payload,
+          ),
+        MUTATION_RETRY_DELAYS,
+      );
+      const recData = await rec.json().catch(() => ({}));
+      if (!rec.ok || !recData?.success) {
+        throw new Error(recData?.error?.message ?? "Re-record failed");
+      }
+      await refresh();
+      setZone(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -519,12 +807,33 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     );
   }
   if (activeInnings.isCompleted) {
+    const teamName =
+      activeInnings.battingTeam === "A" ? match.teamAName : match.teamBName;
+    const effRuns = activeInnings.effectiveTotalRuns ?? activeInnings.totalRuns;
     return (
       <Shell match={match} onSignOut={onSignOut}>
-        <InfoPanel>
-          Innings {activeInnings.inningsNumber} completed. Open the host app
-          to continue or end the match.
-        </InfoPanel>
+        <InningsSummaryPanel
+          teamName={teamName}
+          runs={effRuns}
+          wickets={activeInnings.totalWickets}
+          overs={activeInnings.totalOvers}
+          inningsNumber={activeInnings.inningsNumber}
+          busy={busy}
+          onEndMatch={() => setModal({ kind: "end-match" })}
+          onContinue={() => void reopenInnings(activeInnings.inningsNumber)}
+        />
+        {error && <ErrorBanner message={error} />}
+        {modal?.kind === "end-match" && (
+          <EndMatchModal
+            teamAName={match.teamAName}
+            teamBName={match.teamBName}
+            onCancel={() => setModal(null)}
+            onConfirm={async (winnerId, winMargin) => {
+              setModal(null);
+              await completeMatch(winnerId, winMargin);
+            }}
+          />
+        )}
       </Shell>
     );
   }
@@ -560,6 +869,9 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         nextOver={nextOver}
         nextBall={nextBall}
         onSignOut={onSignOut}
+        onUndoLastPenalty={
+          (match.penaltyAwards?.length ?? 0) > 0 ? onUndoLastPenalty : undefined
+        }
       >
         <NewBatterPanel
           batting={battingTeam}
@@ -600,6 +912,9 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         nextOver={nextOver}
         nextBall={nextBall}
         onSignOut={onSignOut}
+        onUndoLastPenalty={
+          (match.penaltyAwards?.length ?? 0) > 0 ? onUndoLastPenalty : undefined
+        }
       >
         <BowlerPicker
           bowling={bowlingTeam}
@@ -621,16 +936,58 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
   const nsStats = batterStats(events, nsid!);
   const bStats = bowlerStats(events, bid!);
 
+  const maxOvers = maxOversOf(match);
+  const firstInnings = match.innings.find((i) => i.inningsNumber === 1);
+  const chase = (() => {
+    if (
+      activeInnings.inningsNumber !== 2 ||
+      match.format === "TEST" ||
+      !firstInnings
+    ) {
+      return null;
+    }
+    const firstEff =
+      firstInnings.effectiveTotalRuns ?? firstInnings.totalRuns;
+    const target = firstEff + 1;
+    const currentEff =
+      activeInnings.effectiveTotalRuns ?? activeInnings.totalRuns;
+    const runsNeeded = target - currentEff;
+    // totalOvers can be a float like 4.3 (4 overs and 3 legal balls). Convert
+    // back to legal-ball count carefully: floor part × 6 + frac × 10 (rounded
+    // to handle FP error from server math).
+    const whole = Math.floor(activeInnings.totalOvers);
+    const fracBalls = Math.round((activeInnings.totalOvers - whole) * 10);
+    const legalBallsBowled = whole * 6 + fracBalls;
+    const ballsLeft = maxOvers * 6 - legalBallsBowled;
+    const rrr =
+      ballsLeft > 0 && runsNeeded > 0 ? (runsNeeded / ballsLeft) * 6 : null;
+    return { target, runsNeeded, ballsLeft, rrr };
+  })();
+
   return (
     <Shell
       match={match}
       innings={activeInnings}
-      maxOvers={maxOversOf(match)}
+      maxOvers={maxOvers}
       nameOf={nameOf}
       nextOver={nextOver}
       nextBall={nextBall}
       onSignOut={onSignOut}
+      onUndoLastPenalty={
+        (match.penaltyAwards?.length ?? 0) > 0 ? onUndoLastPenalty : undefined
+      }
     >
+      {chase &&
+        (chase.runsNeeded <= 0 ? (
+          <ChaseStrip text="Target reached — innings complete" />
+        ) : (
+          <ChaseStrip
+            text={`Need ${chase.runsNeeded} from ${chase.ballsLeft} balls${
+              chase.rrr !== null ? ` · RRR ${chase.rrr.toFixed(2)}` : ""
+            }`}
+          />
+        ))}
+
       <OverDots balls={currentOverBalls} />
 
       <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
@@ -644,6 +1001,8 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         <Divider />
         <BowlerRowView name={nameOf(bid)} stats={bStats} />
       </div>
+
+      {activeInnings.isFreeHit === true && <FreeHitBanner />}
 
       <WagonWheel selectedZone={zone} onZoneTap={onWheelZoneTap} />
       <div className="text-center text-[11px] text-neutral-500 -mt-1">
@@ -704,7 +1063,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         <ExtraPickerModal
           title="Byes"
           subtitle="Runs scored as byes"
-          options={[1, 2, 3, 4]}
+          options={[1, 2, 3, 4, 5]}
           onCancel={() => setModal(null)}
           onPick={onByePick}
         />
@@ -713,7 +1072,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         <ExtraPickerModal
           title="Leg Byes"
           subtitle="Runs scored off the pad"
-          options={[1, 2, 3, 4]}
+          options={[1, 2, 3, 4, 5]}
           onCancel={() => setModal(null)}
           onPick={onLegByePick}
         />
@@ -722,7 +1081,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         <ExtraPickerModal
           title="Overthrow"
           subtitle={`Last ball batsman: ${modal.batsmanRuns} • extra runs from overthrow`}
-          options={[1, 2, 3, 4]}
+          options={[1, 2, 3, 4, 5]}
           onCancel={() => setModal(null)}
           onPick={onOverthrowPick}
         />
@@ -767,6 +1126,7 @@ function Shell({
   nextOver,
   nextBall,
   onSignOut,
+  onUndoLastPenalty,
   children,
 }: {
   match: MatchPayload;
@@ -776,6 +1136,7 @@ function Shell({
   nextOver?: number;
   nextBall?: number;
   onSignOut: () => void;
+  onUndoLastPenalty?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -805,6 +1166,7 @@ function Shell({
           maxOvers={maxOvers ?? 20}
           nextOver={nextOver ?? 0}
           nextBall={nextBall ?? 1}
+          onUndoLastPenalty={onUndoLastPenalty}
         />
       )}
 
@@ -819,12 +1181,14 @@ function ScoreStrip({
   maxOvers,
   nextOver,
   nextBall,
+  onUndoLastPenalty,
 }: {
   match: MatchPayload;
   innings: Innings;
   maxOvers: number;
   nextOver: number;
   nextBall: number;
+  onUndoLastPenalty?: () => void;
 }) {
   const teamName =
     innings.battingTeam === "A" ? match.teamAName : match.teamBName;
@@ -852,10 +1216,26 @@ function ScoreStrip({
           <span className="text-neutral-400">/</span>
           {innings.totalWickets}
         </div>
-        {penaltyRuns > 0 && (
-          <div className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
-            +{penaltyRuns} pen
-          </div>
+        {penaltyRuns !== 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!onUndoLastPenalty) return;
+              if (window.confirm("Undo the last penalty award?")) {
+                onUndoLastPenalty();
+              }
+            }}
+            disabled={!onUndoLastPenalty}
+            title="Tap to undo last penalty"
+            className={
+              "text-[10px] font-bold px-1.5 py-0.5 rounded " +
+              (penaltyRuns > 0
+                ? "text-amber-700 bg-amber-100 active:bg-amber-200"
+                : "text-red-700 bg-red-50 active:bg-red-100")
+            }
+          >
+            {penaltyRuns > 0 ? `+${penaltyRuns}` : `${penaltyRuns}`} pen
+          </button>
         )}
         <div className="text-xs font-bold text-neutral-500 tabular-nums">
           {nextOver}.{nextBall - 1}
@@ -1193,54 +1573,77 @@ function PenaltyModal({
   onPick: (data: {
     awardedTo: "A" | "B";
     runs: number;
+    direction: "ADD" | "SUBTRACT";
     reason?: string;
   }) => void;
 }) {
-  // Default: penalty awarded to the BATTING team (commonest case — fielding
-  // side slow over rate, illegal field, etc.). Scorer can flip with the
-  // toggle if the umpire awards to the bowling team instead.
-  const [awardedTo, setAwardedTo] = useState<"A" | "B">(battingTeamSide);
+  // `offender` is the team the umpire is penalising. The batting team's
+  // visible score always moves — minus if the batting team was at fault
+  // (their visible score reduces), plus if the bowling team was at fault
+  // (batting side benefits). This matches the user's expected UX: penalty
+  // against batting reduces, penalty against bowling adds.
+  const [offender, setOffender] = useState<"A" | "B">(battingTeamSide);
   const [runs, setRuns] = useState(5);
   const [reason, setReason] = useState("");
+
+  const direction: "ADD" | "SUBTRACT" =
+    offender === battingTeamSide ? "SUBTRACT" : "ADD";
+
+  const previewLine = (() => {
+    const battingName = battingTeamSide === "A" ? teamAName : teamBName;
+    if (direction === "SUBTRACT") return `${battingName} score: −${runs}`;
+    return `${battingName} score: +${runs}`;
+  })();
+
   return (
     <ModalShell
       title="Umpire penalty"
-      subtitle="Penalty runs awarded by the umpire"
+      subtitle="Penalty against the offending team"
       onCancel={onCancel}
     >
       <div className="space-y-4">
         <div>
           <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
-            Award runs to
+            Penalty against
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => setAwardedTo("A")}
+              onClick={() => setOffender("A")}
               className={
-                "h-12 rounded-md border text-sm font-semibold " +
-                (awardedTo === "A"
-                  ? "bg-neutral-900 border-neutral-900 text-white"
+                "h-14 rounded-md border text-sm font-semibold flex flex-col justify-center " +
+                (offender === "A"
+                  ? "bg-red-700 border-red-700 text-white"
                   : "bg-white border-neutral-300 text-neutral-900")
               }
             >
-              {teamAName}
-              {battingTeamSide === "A" && (
-                <span className="ml-1 text-[10px] opacity-70">(batting)</span>
-              )}
+              <span>{teamAName}</span>
+              <span
+                className={
+                  "text-[10px] " +
+                  (offender === "A" ? "text-red-100" : "text-neutral-500")
+                }
+              >
+                {battingTeamSide === "A" ? "batting" : "bowling"}
+              </span>
             </button>
             <button
-              onClick={() => setAwardedTo("B")}
+              onClick={() => setOffender("B")}
               className={
-                "h-12 rounded-md border text-sm font-semibold " +
-                (awardedTo === "B"
-                  ? "bg-neutral-900 border-neutral-900 text-white"
+                "h-14 rounded-md border text-sm font-semibold flex flex-col justify-center " +
+                (offender === "B"
+                  ? "bg-red-700 border-red-700 text-white"
                   : "bg-white border-neutral-300 text-neutral-900")
               }
             >
-              {teamBName}
-              {battingTeamSide === "B" && (
-                <span className="ml-1 text-[10px] opacity-70">(batting)</span>
-              )}
+              <span>{teamBName}</span>
+              <span
+                className={
+                  "text-[10px] " +
+                  (offender === "B" ? "text-red-100" : "text-neutral-500")
+                }
+              >
+                {battingTeamSide === "B" ? "batting" : "bowling"}
+              </span>
             </button>
           </div>
         </div>
@@ -1267,6 +1670,10 @@ function PenaltyModal({
           </div>
         </div>
 
+        <div className="text-[12px] font-medium text-neutral-700 bg-neutral-100 rounded px-3 py-2">
+          {previewLine}
+        </div>
+
         <div>
           <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
             Reason (optional)
@@ -1282,11 +1689,20 @@ function PenaltyModal({
 
         <button
           onClick={() =>
-            onPick({ awardedTo, runs, reason: reason.trim() || undefined })
+            onPick({
+              // Batting team's visible total always moves — sign is the choice.
+              awardedTo: battingTeamSide,
+              runs,
+              direction,
+              reason: reason.trim() || undefined,
+            })
           }
-          className="w-full h-12 bg-amber-600 text-white font-semibold"
+          className={
+            "w-full h-12 text-white font-semibold " +
+            (direction === "SUBTRACT" ? "bg-red-700" : "bg-amber-600")
+          }
         >
-          Award {runs} penalty {runs === 1 ? "run" : "runs"}
+          Confirm penalty
         </button>
       </div>
     </ModalShell>
@@ -1354,8 +1770,8 @@ function NoBallModal({
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        {[0, 1, 2, 3, 4, 6].map((n) => (
+      <div className="grid grid-cols-4 gap-2">
+        {[0, 1, 2, 3, 4, 5, 6].map((n) => (
           <button
             key={n}
             onClick={() => onPick(tab, n)}
@@ -1930,6 +2346,160 @@ function ErrorBanner({ message }: { message: string }) {
     <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-3 py-2">
       {message}
     </div>
+  );
+}
+
+function FreeHitBanner() {
+  return (
+    <div
+      className="flex items-center justify-center w-full h-9 -mx-3 px-3 text-white text-xs font-extrabold tracking-wider"
+      style={{ backgroundColor: "#14532D" }}
+    >
+      ⚡ FREE HIT — batter can only be run out
+    </div>
+  );
+}
+
+function ChaseStrip({ text }: { text: string }) {
+  return (
+    <div className="-mx-3 px-4 py-1.5 bg-neutral-900 text-white text-xs font-semibold tracking-wide tabular-nums">
+      {text}
+    </div>
+  );
+}
+
+function InningsSummaryPanel({
+  teamName,
+  runs,
+  wickets,
+  overs,
+  inningsNumber,
+  busy,
+  onEndMatch,
+  onContinue,
+}: {
+  teamName: string;
+  runs: number;
+  wickets: number;
+  overs: number;
+  inningsNumber: number;
+  busy: boolean;
+  onEndMatch: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-xl border border-neutral-200 p-5">
+        <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1">
+          Innings {inningsNumber} complete
+        </div>
+        <div className="text-lg font-extrabold text-neutral-900 truncate">
+          {teamName}
+        </div>
+        <div className="mt-2 flex items-baseline gap-3">
+          <div className="text-4xl font-extrabold text-neutral-900 tabular-nums">
+            {runs}
+            <span className="text-neutral-400">/</span>
+            {wickets}
+          </div>
+          <div className="text-sm text-neutral-600 tabular-nums">
+            ({overs} ov)
+          </div>
+        </div>
+      </div>
+      <button
+        disabled={busy}
+        onClick={onEndMatch}
+        className="w-full h-12 bg-neutral-900 text-white font-semibold disabled:opacity-50 rounded-lg"
+      >
+        End match
+      </button>
+      <button
+        disabled={busy}
+        onClick={onContinue}
+        className="w-full h-12 bg-white border border-neutral-300 text-neutral-900 font-semibold disabled:opacity-50 rounded-lg"
+      >
+        Continue scoring
+      </button>
+    </div>
+  );
+}
+
+function EndMatchModal({
+  teamAName,
+  teamBName,
+  onCancel,
+  onConfirm,
+}: {
+  teamAName: string;
+  teamBName: string;
+  onCancel: () => void;
+  onConfirm: (
+    winnerId: "A" | "B" | "TIE" | "ABANDONED",
+    winMargin?: string,
+  ) => void;
+}) {
+  const [winner, setWinner] = useState<"A" | "B" | "TIE" | "ABANDONED" | null>(
+    null,
+  );
+  const [margin, setMargin] = useState("");
+  const options: Array<{ key: "A" | "B" | "TIE" | "ABANDONED"; label: string }> = [
+    { key: "A", label: teamAName },
+    { key: "B", label: teamBName },
+    { key: "TIE", label: "Tie" },
+    { key: "ABANDONED", label: "Abandoned" },
+  ];
+  return (
+    <ModalShell
+      title="End match"
+      subtitle="Confirm the result"
+      onCancel={onCancel}
+    >
+      <div className="space-y-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
+            Winner
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {options.map((o) => (
+              <button
+                key={o.key}
+                onClick={() => setWinner(o.key)}
+                className={
+                  "h-12 rounded-md border text-sm font-semibold truncate px-2 " +
+                  (winner === o.key
+                    ? "bg-neutral-900 border-neutral-900 text-white"
+                    : "bg-white border-neutral-300 text-neutral-900")
+                }
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
+            Win margin (optional)
+          </div>
+          <input
+            value={margin}
+            onChange={(e) => setMargin(e.target.value)}
+            placeholder="e.g. by 7 runs / by 4 wickets"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            maxLength={80}
+          />
+        </div>
+
+        <button
+          disabled={!winner}
+          onClick={() => winner && onConfirm(winner, margin.trim() || undefined)}
+          className="w-full h-12 bg-neutral-900 text-white font-semibold disabled:opacity-50"
+        >
+          Confirm result
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
