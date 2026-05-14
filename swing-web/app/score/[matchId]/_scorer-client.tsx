@@ -1128,7 +1128,6 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         onBye={onBye}
         onLegBye={onLegBye}
         onWicket={onWicket}
-        onPenalty={() => setModal({ kind: "penalty" })}
         onUndo={undo}
       />
 
@@ -1628,7 +1627,6 @@ function PadRows({
   onBye,
   onLegBye,
   onWicket,
-  onPenalty,
   onUndo,
 }: {
   busy: boolean;
@@ -1641,7 +1639,9 @@ function PadRows({
   onBye: () => void;
   onLegBye: () => void;
   onWicket: () => void;
-  onPenalty: () => void;
+  // Penalty entry stays on the wagon-wheel run picker ("+ Umpire penalty"
+  // footer). Removed from the pad to free the slot for Undo, since the
+  // standalone Undo strip below was redundant.
   onUndo: () => void;
 }) {
   return (
@@ -1661,15 +1661,14 @@ function PadRows({
         <PadBtn label="Bye" busy={busy} onClick={onBye} />
         <PadBtn label="Leg Bye" busy={busy} onClick={onLegBye} />
         <PadBtn label="Wicket" danger busy={busy} onClick={onWicket} />
-        <PadBtn label="Penalty" busy={busy} onClick={onPenalty} />
+        <PadBtn
+          label="Undo"
+          muted
+          busy={busy}
+          disabled={!canUndo}
+          onClick={onUndo}
+        />
       </div>
-      <button
-        disabled={!canUndo || busy}
-        onClick={onUndo}
-        className="w-full h-10 text-xs font-medium text-neutral-600 border border-neutral-300 bg-white disabled:opacity-40"
-      >
-        Undo last ball
-      </button>
     </div>
   );
 }
