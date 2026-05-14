@@ -187,6 +187,7 @@ class ScoringInnings {
     this.legalCount = 0,
     this.totalRuns = 0,
     this.totalWickets = 0,
+    this.penaltyRuns = 0,
     this.isCompleted = false,
     this.isFreeHit = false,
     this.balls = const [],
@@ -203,9 +204,18 @@ class ScoringInnings {
   final int legalCount;
   final int totalRuns;
   final int totalWickets;
+  /// Umpire-awarded penalty runs credited to this innings' batting team.
+  /// Surfaced via `effectiveTotalRuns` on the score strip; the raw
+  /// `totalRuns` excludes these (they live on the match, not on a ball).
+  final int penaltyRuns;
   final bool isCompleted;
   final bool isFreeHit;
   final List<ScoringBall> balls;
+
+  /// Runs including umpire-awarded penalties. Use this for the displayed
+  /// score; use `totalRuns` for run-rate / projection math that should not
+  /// include penalties.
+  int get effectiveTotalRuns => totalRuns + penaltyRuns;
 
   factory ScoringInnings.fromJson(Map<String, dynamic> json) {
     final payload = _unwrapMap(json);
@@ -258,6 +268,7 @@ class ScoringInnings {
       legalCount: derivedLegalCount,
       totalRuns: _asInt(payload['totalRuns']),
       totalWickets: _asInt(payload['totalWickets']),
+      penaltyRuns: _asInt(payload['penaltyRuns']),
       isCompleted: payload['isCompleted'] == true,
       isFreeHit: payload['isFreeHit'] == true,
       balls: rawBalls

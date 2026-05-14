@@ -776,6 +776,56 @@ class HostScoringController extends StateNotifier<HostScoringState> {
     }
   }
 
+  /// Records umpire-awarded penalty runs against the bowling side (or the
+  /// batting side for a willful obstruction etc.). `awardedTo` is 'A'|'B' —
+  /// the team that receives the runs. `runs` is 1-5 per ICC rules. Refreshes
+  /// state on success so the score strip and innings totals reflect the new
+  /// `effectiveTotalRuns`.
+  Future<bool> awardPenalty({
+    required String awardedTo,
+    required int runs,
+    String direction = 'ADD',
+    String? reason,
+  }) async {
+    if (runs < 1 || runs > 5) {
+      state = state.copyWith(error: 'Penalty must be between 1 and 5 runs');
+      return false;
+    }
+    final innings = state.activeInnings;
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _service.awardPenalty(
+        _matchId,
+        awardedTo: awardedTo,
+        runs: runs,
+        direction: direction,
+        reason: reason,
+        inningsNumber: innings?.inningsNumber,
+      );
+      print('[awardPenalty] OK to=$awardedTo runs=$runs dir=$direction');
+      await _init();
+      return true;
+    } catch (e) {
+      _logError('awardPenalty', e);
+      state = state.copyWith(isSubmitting: false, error: _msg(e));
+      return false;
+    }
+  }
+
+  /// Reverses the most recently awarded penalty for this match.
+  Future<bool> undoLastPenalty() async {
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      await _service.undoLastPenalty(_matchId);
+      await _init();
+      return true;
+    } catch (e) {
+      _logError('undoLastPenalty', e);
+      state = state.copyWith(isSubmitting: false, error: _msg(e));
+      return false;
+    }
+  }
+
   Future<bool> completeMatch(String winnerId, String? winMargin) async {
     print('[completeMatch] winnerId="$winnerId" winMargin="$winMargin" matchStatus=${state.match?.isComplete}');
     state = state.copyWith(isSubmitting: true, clearError: true);

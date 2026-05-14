@@ -95,6 +95,9 @@ class HostPathConfig {
   String matchComplete(String matchId) => '$matchesBase/$matchId/complete';
   String matchContinueInnings(String matchId) =>
       '$matchesBase/$matchId/continue-innings';
+  String matchPenalty(String matchId) => '$matchesBase/$matchId/penalty';
+  String matchPenaltyLast(String matchId) =>
+      '$matchesBase/$matchId/penalty/last';
   String inningsBall(String matchId, int innings) =>
       '$matchesBase/$matchId/innings/$innings/ball';
   String inningsComplete(String matchId, int innings) =>

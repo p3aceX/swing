@@ -92,6 +92,36 @@ class HostMatchRepository {
     }
   }
 
+  /// Umpire-awarded penalty runs (1-5). `awardedTo` is the team whose
+  /// effective total moves. `direction` decides which way:
+  ///   ADD      → +runs (bowling-side infraction → batting side benefits)
+  ///   SUBTRACT → -runs (batting-side infraction → batting side loses runs)
+  /// `inningsNumber` defaults to the active innings on the server when omitted.
+  Future<void> awardPenalty(
+    String matchId, {
+    required String awardedTo,
+    required int runs,
+    String direction = 'ADD',
+    String? reason,
+    int? inningsNumber,
+  }) async {
+    await _dio.post(
+      _paths.matchPenalty(matchId),
+      data: {
+        'awardedTo': awardedTo,
+        'runs': runs,
+        'direction': direction,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        if (inningsNumber != null) 'inningsNumber': inningsNumber,
+      },
+    );
+  }
+
+  /// Reverses the most recently recorded penalty award for the match.
+  Future<void> undoLastPenalty(String matchId) async {
+    await _dio.delete(_paths.matchPenaltyLast(matchId));
+  }
+
   Future<({String liveCode, String livePin, String teamAName, String teamBName})>
       fetchLiveCreds(String matchId) async {
     final res = await _dio.get(_paths.match(matchId));

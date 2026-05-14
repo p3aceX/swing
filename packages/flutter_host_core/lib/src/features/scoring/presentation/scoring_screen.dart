@@ -675,8 +675,71 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
       builder: (_) => _ScoringPadSheet(
         matchId: widget.matchId,
         onRun: _recordRun,
+        onPenalty: () {
+          Navigator.pop(context);
+          _showPenaltySheet();
+        },
       ),
     );
+  }
+
+  void _showPenaltySheet() {
+    if (!mounted) return;
+    final state = ref.read(hostScoringControllerProvider(widget.matchId));
+    final match = state.match;
+    if (match == null) return;
+    final battingSide = state.activeInnings?.battingTeam ?? 'A';
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _PenaltySheet(
+        teamAName: match.teamAName,
+        teamBName: match.teamBName,
+        battingSide: battingSide,
+        onConfirm: ({
+          required String awardedTo,
+          required int runs,
+          required String direction,
+          String? reason,
+        }) async {
+          Navigator.pop(ctx);
+          final ok = await _ctrl.awardPenalty(
+            awardedTo: awardedTo,
+            runs: runs,
+            direction: direction,
+            reason: reason,
+          );
+          if (ok && mounted) await _afterBall();
+        },
+      ),
+    );
+  }
+
+  Future<void> _confirmUndoLastPenalty() async {
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Undo last penalty?'),
+        content: const Text(
+          'This removes the most recent umpire-awarded penalty for this match.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Undo'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _ctrl.undoLastPenalty();
+    }
   }
 
   // ─── Extra selector ────────────────────────────────────────────────────────
@@ -1406,6 +1469,8 @@ class _ScoringScreenState extends ConsumerState<ScoringScreen> {
                       if (ok && mounted) await _afterBall();
                     },
                   ),
+                  onPenalty: _showPenaltySheet,
+                  onUndoPenalty: _confirmUndoLastPenalty,
                 ),
     );
   }
@@ -1446,6 +1511,8 @@ class _ScoringBody extends StatelessWidget {
     required this.onNoBall,
     required this.onBye,
     required this.onLegBye,
+    required this.onPenalty,
+    required this.onUndoPenalty,
   });
 
   final String matchId;
@@ -1479,6 +1546,10 @@ class _ScoringBody extends StatelessWidget {
   final VoidCallback onNoBall;
   final VoidCallback onBye;
   final VoidCallback onLegBye;
+  final VoidCallback onPenalty;
+  /// Tap-handler on the penalty pill in the score strip. Null hides the
+  /// gesture (e.g., when there are no penalty awards to undo).
+  final VoidCallback onUndoPenalty;
 
   @override
   Widget build(BuildContext context) {
@@ -1490,7 +1561,11 @@ class _ScoringBody extends StatelessWidget {
         // ── Compact score strip (live innings) ───────────────────────────
         // Single-line: score | striker | non-striker | bowler | dots
         if (innings != null) ...[
-          _ScoreStrip(innings: innings, match: match),
+          _ScoreStrip(
+            innings: innings,
+            match: match,
+            onUndoPenalty: innings.penaltyRuns != 0 ? onUndoPenalty : null,
+          ),
           Divider(height: 1, color: context.stroke),
           _BattersStrip(
             state: state,
@@ -1703,7 +1778,7 @@ class _ScoringBody extends StatelessWidget {
             ),
           ),
 
-          // ── Row 2: Bye · Leg Bye · Wicket · Undo ──────────────────────────
+          // ── Row 2: Bye · Leg Bye · Wicket · Penalty ──────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             child: Row(
@@ -1731,12 +1806,34 @@ class _ScoringBody extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 _PadBtn(
+                  icon: Icons.gavel_rounded,
+                  label: 'Penalty',
+                  color: const Color(0xFFB45309),
+                  busy: state.isSubmitting,
+                  onTap: onPenalty,
+                ),
+              ],
+            ),
+          ),
+
+          // ── Row 3: Undo ───────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Row(
+              children: [
+                _PadBtn(
                   icon: Icons.undo_rounded,
                   label: 'Undo',
                   color: const Color(0xFF374151),
                   busy: state.isSubmitting,
                   onTap: () => onUndo(),
                 ),
+                const SizedBox(width: 6),
+                const Expanded(child: SizedBox()),
+                const SizedBox(width: 6),
+                const Expanded(child: SizedBox()),
+                const SizedBox(width: 6),
+                const Expanded(child: SizedBox()),
               ],
             ),
           ),
@@ -1898,10 +1995,12 @@ class _ScoringPadSheet extends ConsumerStatefulWidget {
   const _ScoringPadSheet({
     required this.matchId,
     required this.onRun,
+    required this.onPenalty,
   });
 
   final String matchId;
   final Future<void> Function(int runs) onRun;
+  final VoidCallback onPenalty;
 
   @override
   ConsumerState<_ScoringPadSheet> createState() => _ScoringPadSheetState();
@@ -1983,6 +2082,45 @@ class _ScoringPadSheetState extends ConsumerState<_ScoringPadSheet> {
               const SizedBox(width: 8),
               _ScorePadBtn(label: '6', busy: busy, onTap: () => record(6)),
             ]),
+            const SizedBox(height: 12),
+            // Umpire-awarded penalty runs (not tied to this delivery).
+            // Closes the run picker and opens the dedicated Penalty sheet.
+            InkWell(
+              onTap: busy ? null : widget.onPenalty,
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: const Color(0xFFB45309).withValues(alpha: 0.55),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.gavel_rounded,
+                      size: 15,
+                      color: const Color(0xFFB45309)
+                          .withValues(alpha: busy ? 0.4 : 1.0),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '+ Umpire Penalty',
+                      style: TextStyle(
+                        color: const Color(0xFFB45309)
+                            .withValues(alpha: busy ? 0.4 : 1.0),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -2650,6 +2788,359 @@ class _NoBallTypeChip extends StatelessWidget {
                   color: selected ? context.bg : context.fg,
                   fontWeight: FontWeight.w700,
                   fontSize: 12,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Umpire penalty sheet ─────────────────────────────────────────────────────
+
+class _PenaltySheet extends StatefulWidget {
+  const _PenaltySheet({
+    required this.teamAName,
+    required this.teamBName,
+    required this.battingSide,
+    required this.onConfirm,
+  });
+
+  final String teamAName;
+  final String teamBName;
+  /// 'A' or 'B' — the batting side at the time the sheet opens. The
+  /// offending team defaults to the batting side (commonest case for
+  /// quick scoring) but the user can flip.
+  final String battingSide;
+  final void Function({
+    required String awardedTo,
+    required int runs,
+    required String direction,
+    String? reason,
+  }) onConfirm;
+
+  @override
+  State<_PenaltySheet> createState() => _PenaltySheetState();
+}
+
+class _PenaltySheetState extends State<_PenaltySheet> {
+  // `_offender` is the team being penalised. The batting team's visible
+  // score always moves — minus if batting at fault, plus if bowling at
+  // fault. Matches the web scorer semantic.
+  late String _offender = widget.battingSide;
+  int _runs = 5;
+  final TextEditingController _reason = TextEditingController();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  String get _battingName =>
+      widget.battingSide == 'A' ? widget.teamAName : widget.teamBName;
+
+  String get _direction =>
+      _offender == widget.battingSide ? 'SUBTRACT' : 'ADD';
+
+  String get _preview {
+    final sign = _direction == 'SUBTRACT' ? '−' : '+';
+    return '$_battingName score: $sign$_runs';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFFB45309);
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        color: context.bg,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: context.stroke,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Umpire Penalty',
+                style: TextStyle(
+                  color: context.fg,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Penalise the offending team (e.g. slow over rate, '
+                'ball tampering, fake fielding).',
+                style: TextStyle(color: context.fgSub, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              // Offender toggle — the team being penalised. Sub-label
+              // shows whether each team is currently batting or bowling
+              // so the scorer knows which way the runs will move.
+              Text(
+                'PENALTY AGAINST',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  _PenaltyTeamChip(
+                    label: widget.teamAName,
+                    sublabel: widget.battingSide == 'A' ? 'batting' : 'bowling',
+                    selected: _offender == 'A',
+                    onTap: () => setState(() => _offender = 'A'),
+                  ),
+                  const SizedBox(width: 8),
+                  _PenaltyTeamChip(
+                    label: widget.teamBName,
+                    sublabel: widget.battingSide == 'B' ? 'batting' : 'bowling',
+                    selected: _offender == 'B',
+                    onTap: () => setState(() => _offender = 'B'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'RUNS',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  for (var i = 1; i <= 5; i++) ...[
+                    if (i > 1) const SizedBox(width: 6),
+                    _PenaltyRunChip(
+                      value: i,
+                      selected: _runs == i,
+                      onTap: () => setState(() => _runs = i),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'REASON (OPTIONAL)',
+                style: TextStyle(
+                  color: context.fgSub,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _reason,
+                maxLength: 200,
+                maxLines: 2,
+                style: TextStyle(color: context.fg, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'e.g. ball tampering, time-wasting',
+                  hintStyle: TextStyle(color: context.fgSub, fontSize: 12),
+                  counterText: '',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 10,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: context.stroke),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: accent),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: context.fg.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _preview,
+                  style: TextStyle(
+                    color: context.fg,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 48,
+                child: Material(
+                  color: _direction == 'SUBTRACT'
+                      ? const Color(0xFFB91C1C)
+                      : accent,
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    onTap: () => widget.onConfirm(
+                      // The batting team's visible total moves — sign is
+                      // captured in `direction`.
+                      awardedTo: widget.battingSide,
+                      runs: _runs,
+                      direction: _direction,
+                      reason: _reason.text.trim().isEmpty
+                          ? null
+                          : _reason.text.trim(),
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Center(
+                      child: Text(
+                        'Confirm penalty',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PenaltyTeamChip extends StatelessWidget {
+  const _PenaltyTeamChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.sublabel,
+  });
+
+  final String label;
+  final String? sublabel;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const danger = Color(0xFFB91C1C);
+    return Expanded(
+      child: Material(
+        color: selected ? danger : context.bg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: selected ? danger : context.stroke,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? Colors.white : context.fg,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                if (sublabel != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    sublabel!,
+                    style: TextStyle(
+                      color: selected
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : context.fgSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PenaltyRunChip extends StatelessWidget {
+  const _PenaltyRunChip({
+    required this.value,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final int value;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFFB45309);
+    return Expanded(
+      child: SizedBox(
+        height: 56,
+        child: Material(
+          color: selected ? accent : context.cardBg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: selected ? accent : context.stroke,
+            ),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Center(
+              child: Text(
+                '$value',
+                style: TextStyle(
+                  color: selected ? Colors.white : context.fg,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  height: 1.0,
                 ),
               ),
             ),
@@ -3985,10 +4476,16 @@ class _GoLivePill extends StatelessWidget {
 // buttons fit on one screen.
 
 class _ScoreStrip extends StatelessWidget {
-  const _ScoreStrip({required this.innings, required this.match});
+  const _ScoreStrip({
+    required this.innings,
+    required this.match,
+    this.onUndoPenalty,
+  });
 
   final ScoringInnings innings;
   final ScoringMatch match;
+  /// Called when the user taps the penalty pill. Null disables the gesture.
+  final VoidCallback? onUndoPenalty;
 
   String get _teamName =>
       innings.battingTeam == 'A' ? match.teamAName : match.teamBName;
@@ -4050,7 +4547,7 @@ class _ScoreStrip extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Text(
-                innings.scoreDisplay,
+                '${innings.effectiveTotalRuns}/${innings.totalWickets}',
                 style: TextStyle(
                   color: context.fg,
                   fontSize: 18,
@@ -4067,6 +4564,36 @@ class _ScoreStrip extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if (innings.penaltyRuns != 0) ...[
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: onUndoPenalty,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: innings.penaltyRuns > 0
+                          ? const Color(0xFFFEF3C7)
+                          : const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${innings.penaltyRuns > 0 ? '+' : ''}'
+                      '${innings.penaltyRuns} pen',
+                      style: TextStyle(
+                        color: innings.penaltyRuns > 0
+                            ? const Color(0xFF92400E)
+                            : const Color(0xFFB91C1C),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               const Spacer(),
               _StripStat(label: 'CRR', value: _crr),
               if (_projected != null) ...[

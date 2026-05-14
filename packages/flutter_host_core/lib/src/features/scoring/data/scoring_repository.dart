@@ -163,6 +163,24 @@ class HostScoringService {
         winnerId: winnerId,
         winMargin: winMargin,
       );
+  Future<void> awardPenalty(
+    String matchId, {
+    required String awardedTo,
+    required int runs,
+    String direction = 'ADD',
+    String? reason,
+    int? inningsNumber,
+  }) =>
+      _matchRepo.awardPenalty(
+        matchId,
+        awardedTo: awardedTo,
+        runs: runs,
+        direction: direction,
+        reason: reason,
+        inningsNumber: inningsNumber,
+      );
+  Future<void> undoLastPenalty(String matchId) =>
+      _matchRepo.undoLastPenalty(matchId);
   Future<Map<String, dynamic>> undoLastBall(
     String matchId,
     int inningsNumber,
