@@ -182,6 +182,30 @@ function batterStats(events: BallEvent[], profileId: string) {
   return { runs, balls, fours, sixes, sr };
 }
 
+// Runs charged to the bowler from a single ball. Mirrors
+// `bowlerRunsConcededFromBall` in `scoring-rules.ts` so the in-screen
+// bowler figures match the backend scorecard exactly.
+//   WIDE     → 1 (extras beyond the 1 wide penalty are byes off the wide).
+//   NO_BALL  → 1 + bat runs (bye/leg-bye tagged extras don't count).
+//   BYE      → 0
+//   LEG_BYE  → 0
+//   anything else → bat runs.
+function bowlerRunsForBall(b: BallEvent): number {
+  if (b.outcome === "WIDE") return 1;
+  if (b.outcome === "NO_BALL") {
+    const tags = b.tags ?? [];
+    const isByeLike = tags.some(
+      (t) =>
+        t.startsWith("no_ball_extra:bye") ||
+        t.startsWith("no_ball_extra:leg_bye"),
+    );
+    if (isByeLike) return 1;
+    return 1 + b.runs;
+  }
+  if (b.outcome === "BYE" || b.outcome === "LEG_BYE") return 0;
+  return b.runs;
+}
+
 function bowlerStats(events: BallEvent[], profileId: string) {
   let legalBalls = 0;
   let runs = 0;
@@ -189,11 +213,14 @@ function bowlerStats(events: BallEvent[], profileId: string) {
   for (const b of events) {
     if (b.bowlerId !== profileId) continue;
     if (isLegal(b.outcome)) legalBalls += 1;
-    // Runs conceded: bat runs + extras (incl. wides + no-balls)
-    runs += b.runs + b.extras;
+    runs += bowlerRunsForBall(b);
     if (b.isWicket && b.outcome === "WICKET") {
-      // Run-outs aren't credited to bowler — Flutter rule
-      if (b.dismissalType !== "RUN_OUT" && b.dismissalType !== "RETIRED_HURT" && b.dismissalType !== "RETIRED_OUT") {
+      // Run-outs / retirements aren't credited to the bowler.
+      if (
+        b.dismissalType !== "RUN_OUT" &&
+        b.dismissalType !== "RETIRED_HURT" &&
+        b.dismissalType !== "RETIRED_OUT"
+      ) {
         wickets += 1;
       }
     }
