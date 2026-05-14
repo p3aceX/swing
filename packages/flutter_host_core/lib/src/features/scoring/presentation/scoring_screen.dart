@@ -1778,7 +1778,9 @@ class _ScoringBody extends StatelessWidget {
             ),
           ),
 
-          // ── Row 2: Bye · Leg Bye · Wicket · Penalty ──────────────────────
+          // ── Row 2: Bye · Leg Bye · Wicket · Undo ─────────────────────────
+          // Penalty entry stays on the run-picker sheet ("+ Umpire Penalty")
+          // that opens after a wagon-wheel zone tap — same as the web scorer.
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             child: Row(
@@ -1805,22 +1807,6 @@ class _ScoringBody extends StatelessWidget {
                   onTap: onWicket,
                 ),
                 const SizedBox(width: 6),
-                _PadBtn(
-                  icon: Icons.gavel_rounded,
-                  label: 'Penalty',
-                  color: const Color(0xFFB45309),
-                  busy: state.isSubmitting,
-                  onTap: onPenalty,
-                ),
-              ],
-            ),
-          ),
-
-          // ── Row 3: Undo (full width) ──────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: Row(
-              children: [
                 _PadBtn(
                   icon: Icons.undo_rounded,
                   label: 'Undo',
