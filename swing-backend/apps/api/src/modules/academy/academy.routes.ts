@@ -200,6 +200,20 @@ export async function academyRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data: await svc.createFeeStructure(id, user.userId, body) })
   })
 
+  app.patch('/:id/fee-structures/:feeId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, feeId } = request.params as { id: string; feeId: string }
+    const body = z.object({ amountPaise: z.number().positive().optional(), dueDayOfMonth: z.number().min(1).max(28).optional(), name: z.string().optional() }).parse(request.body)
+    return reply.send({ success: true, data: await svc.updateFeeStructure(id, user.userId, feeId, body) })
+  })
+
+  app.delete('/:id/fee-structures/:feeId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, feeId } = request.params as { id: string; feeId: string }
+    await svc.deleteFeeStructure(id, user.userId, feeId)
+    return reply.send({ success: true })
+  })
+
   app.get('/:id/fee-payments', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }

@@ -697,6 +697,20 @@ export class AcademyService {
     })
   }
 
+  async updateFeeStructure(academyId: string, userId: string, feeId: string, data: any) {
+    await this.verifyOwnership(academyId, userId)
+    const update: any = {}
+    if (data.name !== undefined) update.name = data.name
+    if (data.amountPaise !== undefined) update.amountPaise = data.amountPaise
+    if (data.dueDayOfMonth !== undefined) update.dueDayOfMonth = data.dueDayOfMonth
+    return prisma.feeStructure.update({ where: { id: feeId, academyId }, data: update })
+  }
+
+  async deleteFeeStructure(academyId: string, userId: string, feeId: string) {
+    await this.verifyOwnership(academyId, userId)
+    await prisma.feeStructure.delete({ where: { id: feeId, academyId } })
+  }
+
   async getFeePayments(academyId: string, userId: string, page: number, limit: number) {
     await this.verifyOwnership(academyId, userId)
     const { skip } = getPaginationParams({ page, limit })
