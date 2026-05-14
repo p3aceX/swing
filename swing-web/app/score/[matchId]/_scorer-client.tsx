@@ -1227,13 +1227,13 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       )}
       {modal?.kind === "declare" && (
         <ConfirmModal
-          title="Declare innings"
+          title="End innings"
           body={
             activeInnings.inningsNumber === 1
-              ? "End the current innings now (declared). Team will move to the chase / next innings."
-              : "End the current innings now (declared)."
+              ? "End the current innings now. Team will move to the chase / next innings."
+              : "End the current innings now."
           }
-          confirmLabel="Declare"
+          confirmLabel="End innings"
           danger
           onCancel={() => setModal(null)}
           onConfirm={async () => {
@@ -1246,23 +1246,49 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         actions={[
-          { label: "Change striker", onClick: onMenuChangeStriker },
-          { label: "Change non-striker", onClick: onMenuChangeNonStriker },
-          { label: "Swap batters", onClick: onMenuSwapBatters },
-          { label: "Change bowler", onClick: onMenuChangeBowler },
+          {
+            label: "Change striker",
+            icon: "striker",
+            onClick: onMenuChangeStriker,
+          },
+          {
+            label: "Change non-striker",
+            icon: "nonStriker",
+            onClick: onMenuChangeNonStriker,
+          },
+          {
+            label: "Swap batters",
+            icon: "swap",
+            onClick: onMenuSwapBatters,
+          },
+          {
+            label: "Change bowler",
+            icon: "bowler",
+            onClick: onMenuChangeBowler,
+          },
           {
             label: "Change wicket-keeper",
+            icon: "keeper",
             onClick: onMenuChangeWicketKeeper,
           },
           { divider: true },
           {
-            label: "Declare innings",
+            label: "End innings",
+            icon: "endInnings",
             onClick: onMenuDeclareInnings,
             danger: true,
           },
-          { label: "Refresh", onClick: onMenuRefresh },
+          {
+            label: "Refresh",
+            icon: "refresh",
+            onClick: onMenuRefresh,
+          },
           { divider: true },
-          { label: "Sign out", onClick: onSignOut },
+          {
+            label: "Sign out",
+            icon: "signOut",
+            onClick: onSignOut,
+          },
         ]}
       />
     </Shell>
@@ -2749,9 +2775,111 @@ function ErrorState({
 }
 
 // ── Side drawer + pickers ──────────────────────────────────────────────────
+type DrawerIcon =
+  | "striker"
+  | "nonStriker"
+  | "swap"
+  | "bowler"
+  | "keeper"
+  | "endInnings"
+  | "refresh"
+  | "signOut";
+
 type DrawerAction =
   | { divider: true }
-  | { label: string; onClick: () => void; danger?: boolean };
+  | {
+      label: string;
+      onClick: () => void;
+      icon?: DrawerIcon;
+      danger?: boolean;
+    };
+
+function DrawerIconSvg({ name }: { name: DrawerIcon }) {
+  // Tight inline SVG set so we don't pull a runtime icon package for ~8
+  // glyphs. Everything is 18×18, stroke 1.8, currentColor — inherits
+  // text color from the parent menu row.
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none" as const,
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+  switch (name) {
+    case "striker":
+      // Filled-circle batter — striker emphasis.
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="7" r="3" fill="currentColor" stroke="none" />
+          <path d="M5 21c0-4 3-7 7-7s7 3 7 7" />
+          <path d="M16 4l4-1" />
+        </svg>
+      );
+    case "nonStriker":
+      // Open-circle batter — non-striker.
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="7" r="3" />
+          <path d="M5 21c0-4 3-7 7-7s7 3 7 7" />
+        </svg>
+      );
+    case "swap":
+      return (
+        <svg {...common}>
+          <path d="M7 7h11l-3-3" />
+          <path d="M17 17H6l3 3" />
+        </svg>
+      );
+    case "bowler":
+      // Bowler with ball.
+      return (
+        <svg {...common}>
+          <circle cx="10" cy="6" r="2.5" />
+          <path d="M10 9v6l-4 6" />
+          <path d="M10 13l5 3 4-2" />
+          <circle cx="18" cy="9" r="1.6" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "keeper":
+      // Glove silhouette.
+      return (
+        <svg {...common}>
+          <path d="M7 13V7a2 2 0 1 1 4 0v3" />
+          <path d="M11 10V5a2 2 0 1 1 4 0v5" />
+          <path d="M15 10V7a2 2 0 1 1 4 0v6c0 4-3 7-7 7s-7-3-7-7v-2a2 2 0 1 1 4 0" />
+        </svg>
+      );
+    case "endInnings":
+      // Stop / flag.
+      return (
+        <svg {...common}>
+          <path d="M5 21V4" />
+          <path d="M5 4h11l-2 3 2 3H5" />
+        </svg>
+      );
+    case "refresh":
+      return (
+        <svg {...common}>
+          <path d="M4 12a8 8 0 0 1 14-5.3" />
+          <path d="M20 12a8 8 0 0 1-14 5.3" />
+          <path d="M18 3v4h-4" />
+          <path d="M6 21v-4h4" />
+        </svg>
+      );
+    case "signOut":
+      return (
+        <svg {...common}>
+          <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
+          <path d="M10 17l-5-5 5-5" />
+          <path d="M5 12h12" />
+        </svg>
+      );
+  }
+}
 
 function MenuDrawer({
   open,
@@ -2805,13 +2933,25 @@ function MenuDrawer({
                 key={a.label}
                 onClick={a.onClick}
                 className={
-                  "block w-full text-left px-4 py-3 text-sm active:bg-neutral-100 " +
+                  "w-full flex items-center gap-3 px-4 py-3 text-sm active:bg-neutral-100 " +
                   (a.danger
                     ? "text-red-700 font-medium"
                     : "text-neutral-900")
                 }
               >
-                {a.label}
+                {a.icon ? (
+                  <span
+                    className={
+                      "shrink-0 " +
+                      (a.danger ? "text-red-600" : "text-neutral-500")
+                    }
+                  >
+                    <DrawerIconSvg name={a.icon} />
+                  </span>
+                ) : (
+                  <span className="w-[18px] shrink-0" />
+                )}
+                <span className="text-left">{a.label}</span>
               </button>
             ),
           )}
