@@ -289,28 +289,21 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     };
   }, [activeInnings]);
 
-  const endOfOver =
-    !!activeInnings &&
-    nextBall === 1 &&
-    (activeInnings.ballEvents?.length ?? 0) > 0 &&
-    !!activeInnings.currentStrikerId &&
-    !!activeInnings.currentNonStrikerId;
-
-  // After a wicket, the new-batter picker is mandatory before the next ball.
-  // Backend clears currentStrikerId when the dismissed batter was striker.
-  // Detect: previous ball was a wicket AND currentStrikerId/NonStrikerId is
-  // null while balls are not zero.
-  const needsNewBatter = useMemo(() => {
-    if (!activeInnings) return false;
-    if ((activeInnings.ballEvents ?? []).length === 0) return false;
-    if (
-      activeInnings.currentStrikerId === null ||
-      activeInnings.currentNonStrikerId === null
-    ) {
-      return true;
-    }
-    return false;
-  }, [activeInnings]);
+  // Three mutually-exclusive "needs input" states. Backend clears slots
+  // at specific moments (end of over → bowler null; after wicket →
+  // striker or non-striker null; brand-new innings → all three null).
+  // Order matters: pick new batter before the bowler if both are
+  // required, because the bowler will be facing them.
+  const hasEvents = (activeInnings?.ballEvents?.length ?? 0) > 0;
+  const sidMissing = !activeInnings?.currentStrikerId;
+  const nsidMissing = !activeInnings?.currentNonStrikerId;
+  const bidMissing = !activeInnings?.currentBowlerId;
+  const isOpeningSetup =
+    !!activeInnings && !hasEvents && (sidMissing || nsidMissing || bidMissing);
+  const needsNewBatter =
+    !!activeInnings && hasEvents && (sidMissing || nsidMissing);
+  const needsNewBowler =
+    !!activeInnings && hasEvents && !needsNewBatter && bidMissing;
 
   // ── Mutations ────────────────────────────────────────────────────────────
   async function call(
@@ -536,12 +529,10 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     );
   }
 
-  // Opening setup
-  if (
-    !activeInnings.currentStrikerId ||
-    !activeInnings.currentNonStrikerId ||
-    !activeInnings.currentBowlerId
-  ) {
+  // Opening setup — only when innings has no balls yet AND any slot is empty.
+  // Mid-innings "missing slot" is handled by the dedicated pickers below
+  // (so picking just the new bowler doesn't drop into the full setup view).
+  if (isOpeningSetup) {
     return (
       <Shell match={match} onSignOut={onSignOut}>
         <SetupPanel
@@ -599,7 +590,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
   }
 
   // End-of-over → pick next bowler
-  if (endOfOver) {
+  if (needsNewBowler) {
     return (
       <Shell
         match={match}
