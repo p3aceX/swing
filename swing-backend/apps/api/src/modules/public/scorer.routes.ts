@@ -198,6 +198,19 @@ export async function publicScorerRoutes(app: FastifyInstance) {
     })
   })
 
+  app.patch('/match/:id/wicketkeeper', guard, async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const actor = await resolveScorerActor(id)
+    const { team, wicketKeeperId } = z.object({
+      team: z.enum(['A', 'B']),
+      wicketKeeperId: z.string().min(1),
+    }).parse(request.body)
+    return reply.send({
+      success: true,
+      data: await svc.changeWicketKeeper(id, actor.userId, team, wicketKeeperId),
+    })
+  })
+
   app.patch('/match/:id/innings/:num/state', guard, async (request, reply) => {
     const { id, num } = request.params as { id: string; num: string }
     const actor = await resolveScorerActor(id)
