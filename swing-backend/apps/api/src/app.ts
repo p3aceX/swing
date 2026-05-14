@@ -30,6 +30,7 @@ import { adminRoutes } from './modules/admin/admin.routes'
 import { notificationRoutes } from './modules/notifications/notification.routes'
 import { adminSupportRoutes } from './modules/admin/admin.support.routes'
 import { publicRoutes } from './modules/public/public.routes'
+import { publicScorerRoutes } from './modules/public/scorer.routes'
 import { sessionLogRoutes } from './modules/session-logs/session-log.routes'
 import { curriculumRoutes } from './modules/curriculum/curriculum.routes'
 import { payrollRoutes } from './modules/payroll/payroll.routes'
@@ -137,6 +138,7 @@ export async function buildApp() {
   await app.register(mediaRoutes, { prefix: '/admin' })
   await app.register(adminSupportRoutes, { prefix: '/admin' })
   await app.register(publicRoutes, { prefix: '/public' })
+  await app.register(publicScorerRoutes, { prefix: '/public/scorer' })
   await app.register(sessionLogRoutes, { prefix: '/session-logs' })
   await app.register(curriculumRoutes, { prefix: '/curriculum' })
   await app.register(payrollRoutes, { prefix: '/payroll' })
