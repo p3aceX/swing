@@ -1816,7 +1816,7 @@ class _ScoringBody extends StatelessWidget {
             ),
           ),
 
-          // ── Row 3: Undo ───────────────────────────────────────────────────
+          // ── Row 3: Undo (full width) ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             child: Row(
@@ -1828,12 +1828,6 @@ class _ScoringBody extends StatelessWidget {
                   busy: state.isSubmitting,
                   onTap: () => onUndo(),
                 ),
-                const SizedBox(width: 6),
-                const Expanded(child: SizedBox()),
-                const SizedBox(width: 6),
-                const Expanded(child: SizedBox()),
-                const SizedBox(width: 6),
-                const Expanded(child: SizedBox()),
               ],
             ),
           ),
