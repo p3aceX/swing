@@ -52,10 +52,19 @@ type Innings = {
   totalOvers: number;
   isCompleted: boolean;
   isFreeHit?: boolean;
+  penaltyRuns?: number;
+  effectiveTotalRuns?: number;
   currentStrikerId: string | null;
   currentNonStrikerId: string | null;
   currentBowlerId: string | null;
   ballEvents: BallEvent[];
+};
+type PenaltyAward = {
+  id: string;
+  awardedTo: string;
+  runs: number;
+  reason?: string | null;
+  scoredAt: string;
 };
 type MatchPayload = {
   id: string;
@@ -65,6 +74,7 @@ type MatchPayload = {
   teamBName: string;
   customOvers?: number | null;
   innings: Innings[];
+  penaltyAwards?: PenaltyAward[];
   tossWonBy?: string | null;
   tossDecision?: string | null;
   teamAWicketKeeperId?: string | null;
@@ -172,6 +182,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
     | { kind: "overthrow"; batsmanRuns: number }
     | { kind: "wicket" }
     | { kind: "new-batter" }
+    | { kind: "penalty" }
     | null;
   const [modal, setModal] = useState<Modal>(null);
 
@@ -454,6 +465,23 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
       ...(tags.length ? { tags } : {}),
     });
   };
+  const onPenaltyPick = async (data: {
+    awardedTo: "A" | "B";
+    runs: number;
+    reason?: string;
+  }) => {
+    setModal(null);
+    await call(`/match/${matchId}/penalty`, {
+      method: "POST",
+      body: {
+        awardedTo: data.awardedTo,
+        runs: data.runs,
+        reason: data.reason || undefined,
+        inningsNumber: activeInnings?.inningsNumber,
+      },
+    });
+  };
+
   const onOverthrowPick = (n: number) => {
     setModal(null);
     // Append overthrow to the last ball isn't a separate endpoint — we
@@ -642,6 +670,7 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
         onBye={onBye}
         onLegBye={onLegBye}
         onWicket={onWicket}
+        onPenalty={() => setModal({ kind: "penalty" })}
         onUndo={undo}
       />
 
@@ -653,6 +682,16 @@ export default function ScorerClient({ matchId }: { matchId: string }) {
           zone={modal.zone}
           onCancel={() => setModal(null)}
           onPick={onRunPick}
+          onPenalty={() => setModal({ kind: "penalty" })}
+        />
+      )}
+      {modal?.kind === "penalty" && (
+        <PenaltyModal
+          teamAName={match.teamAName}
+          teamBName={match.teamBName}
+          battingTeamSide={activeInnings.battingTeam as "A" | "B"}
+          onCancel={() => setModal(null)}
+          onPick={onPenaltyPick}
         />
       )}
       {modal?.kind === "wide" && (
@@ -798,8 +837,10 @@ function ScoreStrip({
 }) {
   const teamName =
     innings.battingTeam === "A" ? match.teamAName : match.teamBName;
+  const effectiveRuns = innings.effectiveTotalRuns ?? innings.totalRuns;
+  const penaltyRuns = innings.penaltyRuns ?? 0;
   const oversFloat = nextOver + (nextBall - 1) / 6;
-  const crr = oversFloat > 0 ? innings.totalRuns / oversFloat : null;
+  const crr = oversFloat > 0 ? effectiveRuns / oversFloat : null;
   const proj =
     innings.inningsNumber === 1 && match.format !== "TEST" && crr !== null
       ? Math.round(crr * maxOvers)
@@ -816,10 +857,15 @@ function ScoreStrip({
           {teamName.toUpperCase()}
         </div>
         <div className="text-base font-extrabold text-neutral-900 tabular-nums">
-          {innings.totalRuns}
+          {effectiveRuns}
           <span className="text-neutral-400">/</span>
           {innings.totalWickets}
         </div>
+        {penaltyRuns > 0 && (
+          <div className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+            +{penaltyRuns} pen
+          </div>
+        )}
         <div className="text-xs font-bold text-neutral-500 tabular-nums">
           {nextOver}.{nextBall - 1}
         </div>
@@ -975,6 +1021,7 @@ function PadRows({
   onBye,
   onLegBye,
   onWicket,
+  onPenalty,
   onUndo,
 }: {
   busy: boolean;
@@ -987,30 +1034,35 @@ function PadRows({
   onBye: () => void;
   onLegBye: () => void;
   onWicket: () => void;
+  onPenalty: () => void;
   onUndo: () => void;
 }) {
   return (
-    <div className="grid grid-cols-4 gap-1.5">
-      <PadBtn label="Dot" filled busy={busy} onClick={onDot} />
-      <PadBtn label="Wide" busy={busy} onClick={onWide} />
-      <PadBtn label="No Ball" busy={busy} onClick={onNoBall} />
-      <PadBtn
-        label="Overthrow"
-        busy={busy}
-        disabled={!canOverthrow}
-        onClick={onOverthrow}
-      />
-
-      <PadBtn label="Bye" busy={busy} onClick={onBye} />
-      <PadBtn label="Leg Bye" busy={busy} onClick={onLegBye} />
-      <PadBtn label="Wicket" danger busy={busy} onClick={onWicket} />
-      <PadBtn
-        label="Undo"
-        muted
-        busy={busy}
-        disabled={!canUndo}
+    <div className="space-y-1.5">
+      <div className="grid grid-cols-4 gap-1.5">
+        <PadBtn label="Dot" filled busy={busy} onClick={onDot} />
+        <PadBtn label="Wide" busy={busy} onClick={onWide} />
+        <PadBtn label="No Ball" busy={busy} onClick={onNoBall} />
+        <PadBtn
+          label="Overthrow"
+          busy={busy}
+          disabled={!canOverthrow}
+          onClick={onOverthrow}
+        />
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <PadBtn label="Bye" busy={busy} onClick={onBye} />
+        <PadBtn label="Leg Bye" busy={busy} onClick={onLegBye} />
+        <PadBtn label="Wicket" danger busy={busy} onClick={onWicket} />
+        <PadBtn label="Penalty" busy={busy} onClick={onPenalty} />
+      </div>
+      <button
+        disabled={!canUndo || busy}
         onClick={onUndo}
-      />
+        className="w-full h-10 text-xs font-medium text-neutral-600 border border-neutral-300 bg-white disabled:opacity-40"
+      >
+        Undo last ball
+      </button>
     </div>
   );
 }
@@ -1103,10 +1155,12 @@ function RunPickerModal({
   zone,
   onCancel,
   onPick,
+  onPenalty,
 }: {
   zone: WagonZone | null;
   onCancel: () => void;
   onPick: (runs: number) => void;
+  onPenalty: () => void;
 }) {
   return (
     <ModalShell
@@ -1123,6 +1177,126 @@ function RunPickerModal({
             {n}
           </button>
         ))}
+      </div>
+      <button
+        onClick={onPenalty}
+        className="mt-3 w-full h-11 border border-amber-300 bg-amber-50 text-amber-800 text-xs font-semibold tracking-wide"
+      >
+        + Umpire penalty (separate from this ball)
+      </button>
+    </ModalShell>
+  );
+}
+
+function PenaltyModal({
+  teamAName,
+  teamBName,
+  battingTeamSide,
+  onCancel,
+  onPick,
+}: {
+  teamAName: string;
+  teamBName: string;
+  battingTeamSide: "A" | "B";
+  onCancel: () => void;
+  onPick: (data: {
+    awardedTo: "A" | "B";
+    runs: number;
+    reason?: string;
+  }) => void;
+}) {
+  // Default: penalty awarded to the BATTING team (commonest case — fielding
+  // side slow over rate, illegal field, etc.). Scorer can flip with the
+  // toggle if the umpire awards to the bowling team instead.
+  const [awardedTo, setAwardedTo] = useState<"A" | "B">(battingTeamSide);
+  const [runs, setRuns] = useState(5);
+  const [reason, setReason] = useState("");
+  return (
+    <ModalShell
+      title="Umpire penalty"
+      subtitle="Penalty runs awarded by the umpire"
+      onCancel={onCancel}
+    >
+      <div className="space-y-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
+            Award runs to
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setAwardedTo("A")}
+              className={
+                "h-12 rounded-md border text-sm font-semibold " +
+                (awardedTo === "A"
+                  ? "bg-neutral-900 border-neutral-900 text-white"
+                  : "bg-white border-neutral-300 text-neutral-900")
+              }
+            >
+              {teamAName}
+              {battingTeamSide === "A" && (
+                <span className="ml-1 text-[10px] opacity-70">(batting)</span>
+              )}
+            </button>
+            <button
+              onClick={() => setAwardedTo("B")}
+              className={
+                "h-12 rounded-md border text-sm font-semibold " +
+                (awardedTo === "B"
+                  ? "bg-neutral-900 border-neutral-900 text-white"
+                  : "bg-white border-neutral-300 text-neutral-900")
+              }
+            >
+              {teamBName}
+              {battingTeamSide === "B" && (
+                <span className="ml-1 text-[10px] opacity-70">(batting)</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
+            Runs
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                onClick={() => setRuns(n)}
+                className={
+                  "h-12 rounded-md border font-bold " +
+                  (runs === n
+                    ? "bg-amber-600 border-amber-700 text-white"
+                    : "bg-white border-neutral-300 text-neutral-900")
+                }
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-1.5">
+            Reason (optional)
+          </div>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. slow over rate"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            maxLength={200}
+          />
+        </div>
+
+        <button
+          onClick={() =>
+            onPick({ awardedTo, runs, reason: reason.trim() || undefined })
+          }
+          className="w-full h-12 bg-amber-600 text-white font-semibold"
+        >
+          Award {runs} penalty {runs === 1 ? "run" : "runs"}
+        </button>
       </div>
     </ModalShell>
   );
