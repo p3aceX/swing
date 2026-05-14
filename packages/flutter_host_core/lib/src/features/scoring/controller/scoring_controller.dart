@@ -136,6 +136,7 @@ class HostScoringState {
         outcome: ball.outcome,
         runs: ball.runs,
         extras: ball.extras,
+        tags: ball.tags,
       );
       if (scoringDismissalCountsAsInningsWicket(
             isWicket: ball.isWicket,

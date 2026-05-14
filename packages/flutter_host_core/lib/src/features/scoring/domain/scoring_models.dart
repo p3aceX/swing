@@ -295,6 +295,7 @@ class ScoringBall {
     this.dismissalType,
     this.dismissedPlayerId,
     this.nonBatterId,
+    this.tags = const [],
   });
 
   final String id;
@@ -309,9 +310,14 @@ class ScoringBall {
   final String? dismissalType;
   final String? dismissedPlayerId;
   final String? nonBatterId;
+  final List<String> tags;
 
   factory ScoringBall.fromJson(Map<String, dynamic> json) {
     final payload = _unwrapMap(json);
+    final rawTags = payload['tags'];
+    final tags = rawTags is List
+        ? rawTags.whereType<String>().toList(growable: false)
+        : const <String>[];
     return ScoringBall(
       id: _asString(payload['id']),
       batterId: _nullableString(payload['batterId']),
@@ -325,6 +331,7 @@ class ScoringBall {
       dismissalType: _nullableString(payload['dismissalType']),
       dismissedPlayerId: _nullableString(payload['dismissedPlayerId']),
       nonBatterId: _nullableString(payload['nonBatterId']),
+      tags: tags,
     );
   }
 }
