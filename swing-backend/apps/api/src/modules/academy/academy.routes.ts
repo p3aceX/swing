@@ -158,6 +158,12 @@ export async function academyRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.updateStudent(id, user.userId, enrollmentId, body) })
   })
 
+  app.get('/:id/students/:enrollmentId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, enrollmentId } = request.params as { id: string; enrollmentId: string }
+    return reply.send({ success: true, data: await svc.getStudent(id, user.userId, enrollmentId) })
+  })
+
   app.get('/:id/students', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
@@ -268,6 +274,8 @@ export async function academyRoutes(app: FastifyInstance) {
     date:        z.string().datetime(),
     payee:       z.string().optional(),
     receiptUrl:  z.string().url().optional(),
+    staffId:     z.string().optional(),
+    coachLinkId: z.string().optional(),
   })
 
   app.get('/:id/expenses', auth, async (request, reply) => {
@@ -296,6 +304,56 @@ export async function academyRoutes(app: FastifyInstance) {
     const { id, expenseId } = request.params as { id: string; expenseId: string }
     await svc.deleteExpense(id, user.userId, expenseId)
     return reply.send({ success: true, data: { message: 'Expense deleted' } })
+  })
+
+  // ── Staff (non-coach employees) ───────────────────────────────────────────
+
+  const staffBodySchema = z.object({
+    name:        z.string().min(1),
+    role:        z.string().min(1),
+    phone:       z.string().optional(),
+    salaryPaise: z.number().int().positive(),
+    paymentMode: z.enum(['CASH', 'UPI', 'BANK_TRANSFER']).optional(),
+  })
+
+  app.get('/:id/staff', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    return reply.send({ success: true, data: await svc.listStaff(id, user.userId) })
+  })
+
+  app.post('/:id/staff', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const body = staffBodySchema.parse(request.body)
+    return reply.code(201).send({ success: true, data: await svc.createStaff(id, user.userId, body) })
+  })
+
+  app.patch('/:id/staff/:staffId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, staffId } = request.params as { id: string; staffId: string }
+    const body = staffBodySchema.extend({ isActive: z.boolean().optional() }).partial().parse(request.body)
+    return reply.send({ success: true, data: await svc.updateStaff(id, user.userId, staffId, body) })
+  })
+
+  app.delete('/:id/staff/:staffId', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, staffId } = request.params as { id: string; staffId: string }
+    await svc.deleteStaff(id, user.userId, staffId)
+    return reply.send({ success: true, data: { message: 'Staff removed' } })
+  })
+
+  // ── Payroll ───────────────────────────────────────────────────────────────
+
+  app.get('/:id/payroll', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    const now = new Date()
+    const q = z.object({
+      year:  z.coerce.number().int().optional(),
+      month: z.coerce.number().int().min(1).max(12).optional(),
+    }).parse(request.query)
+    return reply.send({ success: true, data: await svc.getPayroll(id, user.userId, q.year ?? now.getFullYear(), q.month ?? now.getMonth() + 1) })
   })
 
   app.get('/:id/finance-summary', auth, async (request, reply) => {

@@ -480,6 +480,32 @@ export class AcademyService {
     })
   }
 
+  async getStudent(academyId: string, userId: string, enrollmentId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const enrollment = await prisma.academyEnrollment.findFirst({
+      where: { id: enrollmentId, academyId },
+      include: {
+        playerProfile: {
+          include: {
+            user: { select: { id: true, name: true, phone: true, avatarUrl: true } },
+          },
+        },
+        batch: { select: { id: true, name: true } },
+      },
+    })
+    if (!enrollment) throw Errors.notFound('Enrollment')
+    const { playerProfile, ...rest } = enrollment as any
+    return {
+      ...rest,
+      playerProfile: playerProfile ? {
+        ...playerProfile,
+        name: playerProfile.user?.name ?? null,
+        phone: playerProfile.user?.phone ?? null,
+        avatarUrl: playerProfile.user?.avatarUrl ?? null,
+      } : null,
+    }
+  }
+
   async listStudents(academyId: string, userId: string, page: number, limit: number) {
     await this.verifyOwnership(academyId, userId)
     const { skip } = getPaginationParams({ page, limit })
@@ -843,7 +869,7 @@ export class AcademyService {
     return { items }
   }
 
-  async createExpense(academyId: string, userId: string, data: { category: string; description: string; amountPaise: number; date: string; payee?: string; receiptUrl?: string }) {
+  async createExpense(academyId: string, userId: string, data: { category: string; description: string; amountPaise: number; date: string; payee?: string; receiptUrl?: string; staffId?: string; coachLinkId?: string }) {
     const ownerProfile = await prisma.academyOwnerProfile.findUnique({ where: { userId } })
     if (!ownerProfile) throw Errors.forbidden()
     const academy = await prisma.academy.findFirst({ where: { id: academyId, ownerId: ownerProfile.id } })
@@ -858,11 +884,13 @@ export class AcademyService {
         date: new Date(data.date),
         payee: data.payee || null,
         receiptUrl: data.receiptUrl || null,
+        staffId: data.staffId || null,
+        coachLinkId: data.coachLinkId || null,
       },
     })
   }
 
-  async updateExpense(academyId: string, userId: string, expenseId: string, data: { category?: string; description?: string; amountPaise?: number; date?: string; payee?: string; receiptUrl?: string }) {
+  async updateExpense(academyId: string, userId: string, expenseId: string, data: { category?: string; description?: string; amountPaise?: number; date?: string; payee?: string; receiptUrl?: string; staffId?: string; coachLinkId?: string }) {
     await this.verifyOwnership(academyId, userId)
     const expense = await prisma.academyExpense.findFirst({ where: { id: expenseId, academyId } })
     if (!expense) throw Errors.notFound('Expense')
@@ -875,6 +903,8 @@ export class AcademyService {
         ...(data.date        !== undefined ? { date: new Date(data.date) }      : {}),
         ...(data.payee       !== undefined ? { payee: data.payee }              : {}),
         ...(data.receiptUrl  !== undefined ? { receiptUrl: data.receiptUrl }    : {}),
+        ...(data.staffId     !== undefined ? { staffId: data.staffId }          : {}),
+        ...(data.coachLinkId !== undefined ? { coachLinkId: data.coachLinkId }  : {}),
       },
     })
   }
@@ -884,6 +914,83 @@ export class AcademyService {
     const expense = await prisma.academyExpense.findFirst({ where: { id: expenseId, academyId } })
     if (!expense) throw Errors.notFound('Expense')
     await prisma.academyExpense.delete({ where: { id: expenseId } })
+  }
+
+  // ── Staff (non-coach employees) ───────────────────────────────────────────
+
+  async listStaff(academyId: string, userId: string) {
+    await this.verifyOwnership(academyId, userId)
+    return prisma.academyStaff.findMany({
+      where: { academyId, isActive: true },
+      orderBy: { name: 'asc' },
+    })
+  }
+
+  async createStaff(academyId: string, userId: string, data: {
+    name: string; role: string; phone?: string; salaryPaise: number; paymentMode?: string
+  }) {
+    await this.verifyOwnership(academyId, userId)
+    return prisma.academyStaff.create({
+      data: { academyId, ...data, paymentMode: data.paymentMode ?? 'CASH' },
+    })
+  }
+
+  async updateStaff(academyId: string, userId: string, staffId: string, data: {
+    name?: string; role?: string; phone?: string; salaryPaise?: number; paymentMode?: string; isActive?: boolean
+  }) {
+    await this.verifyOwnership(academyId, userId)
+    const staff = await prisma.academyStaff.findFirst({ where: { id: staffId, academyId } })
+    if (!staff) throw Errors.notFound('Staff')
+    return prisma.academyStaff.update({ where: { id: staffId }, data })
+  }
+
+  async deleteStaff(academyId: string, userId: string, staffId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const staff = await prisma.academyStaff.findFirst({ where: { id: staffId, academyId } })
+    if (!staff) throw Errors.notFound('Staff')
+    await prisma.academyStaff.update({ where: { id: staffId }, data: { isActive: false } })
+  }
+
+  // ── Payroll view ──────────────────────────────────────────────────────────
+
+  async getPayroll(academyId: string, userId: string, year: number, month: number) {
+    await this.verifyOwnership(academyId, userId)
+    const from = new Date(year, month - 1, 1)
+    const to   = new Date(year, month, 1)
+
+    const [staff, coaches, salaryExpenses] = await Promise.all([
+      prisma.academyStaff.findMany({ where: { academyId, isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.academyCoach.findMany({
+        where: { academyId, isActive: true },
+        include: { coach: { include: { user: { select: { name: true, phone: true } } } } },
+        orderBy: { joinedAt: 'asc' },
+      }),
+      prisma.academyExpense.findMany({
+        where: { academyId, category: 'SALARY', date: { gte: from, lt: to } },
+      }),
+    ])
+
+    const paidStaffIds    = new Set(salaryExpenses.filter(e => e.staffId).map(e => e.staffId!))
+    const paidCoachLinkIds = new Set(salaryExpenses.filter(e => e.coachLinkId).map(e => e.coachLinkId!))
+
+    return {
+      year,
+      month,
+      staff: staff.map(s => ({
+        ...s,
+        type: 'STAFF' as const,
+        isPaid: paidStaffIds.has(s.id),
+        expense: salaryExpenses.find(e => e.staffId === s.id) ?? null,
+      })),
+      coaches: coaches.map(c => ({
+        ...c,
+        type: 'COACH' as const,
+        name: c.coach.user?.name ?? '—',
+        phone: c.coach.user?.phone ?? '',
+        isPaid: paidCoachLinkIds.has(c.id),
+        expense: salaryExpenses.find(e => e.coachLinkId === c.id) ?? null,
+      })),
+    }
   }
 
   async getFinanceSummary(academyId: string, userId: string, year: number, month: number) {

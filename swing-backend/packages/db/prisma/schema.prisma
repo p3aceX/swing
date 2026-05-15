@@ -1035,6 +1035,7 @@ model Academy {
   skillAreas           SkillArea[]
   watchFlags           WatchFlag[]
   expenses             AcademyExpense[]
+  staff                AcademyStaff[]
 
   @@index([businessAccountId])
   @@index([city, isVerified])
@@ -1050,8 +1051,9 @@ model AcademyCoach {
   joinedAt    DateTime @default(now())
   isActive    Boolean  @default(true)
 
-  academy Academy      @relation(fields: [academyId], references: [id])
-  coach   CoachProfile @relation(fields: [coachId], references: [id])
+  academy  Academy          @relation(fields: [academyId], references: [id])
+  coach    CoachProfile     @relation(fields: [coachId], references: [id])
+  expenses AcademyExpense[]
 
   @@unique([academyId, coachId])
 }
@@ -4592,6 +4594,25 @@ enum ExpenseCategory {
   OTHER
 }
 
+model AcademyStaff {
+  id          String   @id @default(cuid())
+  academyId   String
+  name        String
+  role        String
+  phone       String?
+  salaryPaise Int
+  paymentMode String   @default("CASH")
+  joinedAt    DateTime @default(now())
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  academy  Academy          @relation(fields: [academyId], references: [id])
+  expenses AcademyExpense[]
+
+  @@index([academyId])
+}
+
 model AcademyExpense {
   id          String          @id @default(cuid())
   academyId   String
@@ -4602,10 +4623,14 @@ model AcademyExpense {
   date        DateTime
   payee       String?
   receiptUrl  String?
+  staffId     String?
+  coachLinkId String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  academy Academy @relation(fields: [academyId], references: [id])
+  academy   Academy       @relation(fields: [academyId], references: [id])
+  staff     AcademyStaff? @relation(fields: [staffId], references: [id])
+  coachLink AcademyCoach? @relation(fields: [coachLinkId], references: [id])
 
   @@index([academyId])
   @@index([date])
