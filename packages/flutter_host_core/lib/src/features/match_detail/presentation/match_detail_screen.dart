@@ -12,6 +12,7 @@ import '../../../theme/host_colors.dart';
 import '../../scoring/presentation/scoring_widgets.dart';
 import '../controller/match_detail_controller.dart';
 import '../domain/match_models.dart';
+import 'scorecard_export.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
@@ -2398,6 +2399,8 @@ class _ScorecardTabState extends State<_ScorecardTab>
           Icons.sports_cricket_rounded);
     }
 
+    final isCompleted = widget.center.lifecycle == MatchLifecycle.past;
+
     return Column(
       children: [
         // ── Team tabs ───────────────────────────────────────────────
@@ -2425,6 +2428,28 @@ class _ScorecardTabState extends State<_ScorecardTab>
             ],
           ),
         ),
+        // ── Download scorecard (completed matches only) ─────────────
+        if (isCompleted)
+          Container(
+            color: context.cardBg,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      openScorecardPreview(context, widget.center),
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: context.accent,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  label: const Text('Download scorecard'),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
