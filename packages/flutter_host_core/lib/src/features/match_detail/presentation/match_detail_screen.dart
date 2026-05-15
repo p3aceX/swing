@@ -638,20 +638,7 @@ class _HeroHeader extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            leftScore.isEmpty ? 'Yet to bat' : leftScore,
-                            style: TextStyle(
-                              color: leftScore.isEmpty
-                                  ? context.fg.withValues(alpha: 0.3)
-                                  : context.fg,
-                              fontSize: leftScore.isEmpty ? 13 : 24,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures()
-                              ],
-                            ),
-                          ),
+                          _HeroScore(raw: leftScore, alignEnd: false),
                         ],
                       ),
                     ),
@@ -729,21 +716,7 @@ class _HeroHeader extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            rightScore.isEmpty ? 'Yet to bat' : rightScore,
-                            textAlign: TextAlign.end,
-                            style: TextStyle(
-                              color: rightScore.isEmpty
-                                  ? context.fg.withValues(alpha: 0.3)
-                                  : context.fg,
-                              fontSize: rightScore.isEmpty ? 13 : 24,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures()
-                              ],
-                            ),
-                          ),
+                          _HeroScore(raw: rightScore, alignEnd: true),
                         ],
                       ),
                     ),
@@ -894,6 +867,73 @@ class _InlineYoutubePlayerState extends State<_InlineYoutubePlayer> {
         color: context.bg,
         child: WebViewWidget(controller: _controller),
       ),
+    );
+  }
+}
+
+// ── Hero score ────────────────────────────────────────────────────────────────
+// Splits a raw score string ("182/6 (20.0 ov)") into the runs/wickets line
+// and a small overs subtitle. Keeps the score from running too wide and
+// disturbing the teams row.
+
+class _HeroScore extends StatelessWidget {
+  const _HeroScore({required this.raw, required this.alignEnd});
+
+  final String raw;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    if (raw.isEmpty) {
+      return Text(
+        'Yet to bat',
+        style: TextStyle(
+          color: context.fg.withValues(alpha: 0.3),
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+        ),
+      );
+    }
+    String main = raw;
+    String? sub;
+    final idx = raw.indexOf(' (');
+    if (idx > 0) {
+      main = raw.substring(0, idx).trim();
+      sub = raw.substring(idx + 2).replaceAll(')', '').trim();
+    }
+    return Column(
+      crossAxisAlignment:
+          alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          main,
+          textAlign: alignEnd ? TextAlign.end : TextAlign.start,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: context.fg,
+            fontSize: 21,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+            height: 1.0,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        if (sub != null && sub.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              sub,
+              style: TextStyle(
+                color: context.fg.withValues(alpha: 0.5),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
