@@ -1,500 +1,457 @@
-import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../domain/match_models.dart';
 
-// Shareable match scorecard — a fixed-width, non-scrolling card rendered
-// off the main scorecard tab. The card uses a fixed light palette (not
-// theme colors) so the exported PNG always looks the same regardless of
-// the viewer's dark/light mode. Capture works by wrapping the card in a
-// RepaintBoundary inside a SingleChildScrollView: SingleChildScrollView
-// lays the child out at full intrinsic height, so toImage() captures the
-// whole card even though only part of it is visible on screen.
+// Shareable match scorecard as a PDF. A full card (11+11 batsmen +
+// bowlers) is unavoidably long, so `pw.MultiPage` paginates it across
+// A4 pages automatically. `pw.Table` with explicit column widths keeps
+// the numeric columns aligned and roomy. `PdfPreview` (printing pkg)
+// renders the doc and exposes share / save / print actions for free.
 
-const double _kCardWidth = 380;
-const Color _ink = Color(0xFF0A0B0A);
-const Color _inkSub = Color(0xFF6B6B6B);
-const Color _paper = Color(0xFFFFFFFF);
-const Color _paper2 = Color(0xFFF4F2EB);
-const Color _line = Color(0x14000000);
-const Color _accent = Color(0xFF2BA84A);
+const PdfColor _ink = PdfColor.fromInt(0xFF0A0B0A);
+const PdfColor _inkSub = PdfColor.fromInt(0xFF6B6B6B);
+const PdfColor _accent = PdfColor.fromInt(0xFF2BA84A);
+const PdfColor _zebra = PdfColor.fromInt(0xFFF6F5F0);
+const PdfColor _line = PdfColor.fromInt(0xFFE2E0D8);
+const PdfColor _headerBg = PdfColor.fromInt(0xFF0A0B0A);
 
-/// Opens the scorecard preview page. Returns immediately.
+/// Opens the scorecard PDF preview page.
 void openScorecardPreview(BuildContext context, MatchCenter center) {
   Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute<void>(
-      builder: (_) => ScorecardPreviewPage(center: center),
+      builder: (_) => ScorecardPdfPage(center: center),
     ),
   );
 }
 
-class ScorecardPreviewPage extends StatefulWidget {
-  const ScorecardPreviewPage({super.key, required this.center});
+class ScorecardPdfPage extends StatelessWidget {
+  const ScorecardPdfPage({super.key, required this.center});
 
   final MatchCenter center;
 
-  @override
-  State<ScorecardPreviewPage> createState() => _ScorecardPreviewPageState();
-}
-
-class _ScorecardPreviewPageState extends State<ScorecardPreviewPage> {
-  final GlobalKey _cardKey = GlobalKey();
-  bool _busy = false;
-
-  Future<Uint8List?> _capture() async {
-    final boundary =
-        _cardKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-    if (boundary == null) return null;
-    final image = await boundary.toImage(pixelRatio: 3);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    return byteData?.buffer.asUint8List();
-  }
-
-  Future<File> _writeTemp(Uint8List bytes) async {
-    final safeTitle = widget.center.title
+  String get _fileName {
+    final safe = center.title
         .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
         .replaceAll(RegExp(r'_+'), '_');
-    // Directory.systemTemp resolves to the app's sandboxed temp dir on
-    // both iOS and Android — no path_provider dependency needed.
-    final file = File(
-      '${Directory.systemTemp.path}/scorecard_${safeTitle}_${DateTime.now().millisecondsSinceEpoch}.png',
-    );
-    await file.writeAsBytes(bytes);
-    return file;
-  }
-
-  Future<void> _share() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final bytes = await _capture();
-      if (bytes == null) throw Exception('Could not render scorecard');
-      final file = await _writeTemp(bytes);
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'image/png')],
-        text: widget.center.title,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not share scorecard: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _save() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final bytes = await _capture();
-      if (bytes == null) throw Exception('Could not render scorecard');
-      final file = await _writeTemp(bytes);
-      // share_plus is the cross-platform path that exposes Save Image /
-      // Save to Files in the OS sheet without pulling a gallery plugin
-      // into host_core (which every host app would then have to bump).
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'image/png')],
-        text: 'Scorecard — ${widget.center.title}',
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save scorecard: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    return 'scorecard_$safe.pdf';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A1A1A),
-      appBar: AppBar(
-        title: const Text('Scorecard'),
-        backgroundColor: const Color(0xFF1A1A1A),
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Center(
-          child: RepaintBoundary(
-            key: _cardKey,
-            child: ScorecardExportCard(center: widget.center),
-          ),
-        ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : _save,
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white24),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  label: const Text('Save'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _busy ? null : _share,
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.share_rounded, size: 18),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _accent,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  label: const Text('Share'),
-                ),
-              ),
-            ],
-          ),
-        ),
+      appBar: AppBar(title: const Text('Scorecard')),
+      body: PdfPreview(
+        build: (format) => _buildScorecardPdf(center, format),
+        canChangePageFormat: false,
+        canChangeOrientation: false,
+        canDebug: false,
+        pdfFileName: _fileName,
+        // Toolbar exposes Share + Save/Print across platforms — covers
+        // both "download" and "share to WhatsApp".
+        useActions: true,
       ),
     );
   }
 }
 
-class ScorecardExportCard extends StatelessWidget {
-  const ScorecardExportCard({super.key, required this.center});
+Future<Uint8List> _buildScorecardPdf(
+  MatchCenter center,
+  PdfPageFormat format,
+) async {
+  final doc = pw.Document();
+  final innings =
+      center.innings.where((i) => !i.isSuperOver).toList(growable: false);
+  final superOvers =
+      center.innings.where((i) => i.isSuperOver).toList(growable: false);
 
-  final MatchCenter center;
-
-  @override
-  Widget build(BuildContext context) {
-    final innings =
-        center.innings.where((i) => !i.isSuperOver).toList(growable: false);
-    final superOvers =
-        center.innings.where((i) => i.isSuperOver).toList(growable: false);
-    return Container(
-      width: _kCardWidth,
-      decoration: BoxDecoration(
-        color: _paper,
-        borderRadius: BorderRadius.circular(14),
+  doc.addPage(
+    pw.MultiPage(
+      pageFormat: format.copyWith(
+        marginTop: 0,
+        marginBottom: 24,
+        marginLeft: 0,
+        marginRight: 0,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _header(),
-          for (final inn in innings) _InningsBlock(innings: inn),
-          for (final so in superOvers)
-            _InningsBlock(innings: so, superOver: true),
-          _footer(),
+      build: (context) => [
+        _pdfHeader(center),
+        pw.SizedBox(height: 4),
+        for (final inn in innings) ...[
+          _pdfInnings(inn),
+          pw.SizedBox(height: 10),
         ],
-      ),
-    );
-  }
-
-  Widget _header() {
-    final result = center.resultSummary?.trim();
-    final meta = <String>[
-      if (center.formatLabel != null && center.formatLabel!.trim().isNotEmpty)
-        center.formatLabel!.trim(),
-      if (center.venueLabel != null && center.venueLabel!.trim().isNotEmpty)
-        center.venueLabel!.trim(),
-    ].join('  ·  ');
-    return Container(
-      color: _ink,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            center.competitionLabel?.trim().isNotEmpty == true
-                ? center.competitionLabel!.trim().toUpperCase()
-                : 'MATCH SCORECARD',
-            style: const TextStyle(
-              color: _accent,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${center.teamAName}  vs  ${center.teamBName}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          if (meta.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              meta,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-          if (result != null && result.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _accent,
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(
-                result,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
+        for (final so in superOvers) ...[
+          _pdfInnings(so, superOver: true),
+          pw.SizedBox(height: 10),
         ],
-      ),
-    );
-  }
+        _pdfFooter(),
+      ],
+    ),
+  );
 
-  Widget _footer() {
-    return Container(
-      color: _paper2,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Scored on ',
-            style: TextStyle(color: _inkSub, fontSize: 10.5),
-          ),
-          const Text(
-            'Swing',
-            style: TextStyle(
-              color: _accent,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.3,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  return doc.save();
 }
 
-class _InningsBlock extends StatelessWidget {
-  const _InningsBlock({required this.innings, this.superOver = false});
-
-  final MatchInnings innings;
-  final bool superOver;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+pw.Widget _pdfHeader(MatchCenter center) {
+  final meta = <String>[
+    if (center.formatLabel?.trim().isNotEmpty == true)
+      center.formatLabel!.trim(),
+    if (center.venueLabel?.trim().isNotEmpty == true) center.venueLabel!.trim(),
+  ].join('   ·   ');
+  final result = center.resultSummary?.trim();
+  return pw.Container(
+    width: double.infinity,
+    color: _headerBg,
+    padding: const pw.EdgeInsets.fromLTRB(24, 22, 24, 18),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Innings header
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Row(
+        pw.Text(
+          center.competitionLabel?.trim().isNotEmpty == true
+              ? center.competitionLabel!.trim().toUpperCase()
+              : 'MATCH SCORECARD',
+          style: pw.TextStyle(
+            color: _accent,
+            fontSize: 9,
+            fontWeight: pw.FontWeight.bold,
+            letterSpacing: 1.4,
+          ),
+        ),
+        pw.SizedBox(height: 7),
+        pw.Text(
+          '${center.teamAName}  vs  ${center.teamBName}',
+          style: pw.TextStyle(
+            color: PdfColors.white,
+            fontSize: 19,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        if (meta.isNotEmpty) ...[
+          pw.SizedBox(height: 5),
+          pw.Text(
+            meta,
+            style: const pw.TextStyle(
+              color: PdfColor.fromInt(0xFFBFBFBF),
+              fontSize: 10,
+            ),
+          ),
+        ],
+        if (result != null && result.isNotEmpty) ...[
+          pw.SizedBox(height: 10),
+          pw.Container(
+            padding:
+                const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            decoration: pw.BoxDecoration(
+              color: _accent,
+              borderRadius: pw.BorderRadius.circular(5),
+            ),
+            child: pw.Text(
+              result,
+              style: pw.TextStyle(
+                color: PdfColors.white,
+                fontSize: 10.5,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+pw.Widget _pdfInnings(MatchInnings innings, {bool superOver = false}) {
+  return pw.Container(
+    margin: const pw.EdgeInsets.symmetric(horizontal: 24),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        // Innings title bar
+        pw.Container(
+          padding: const pw.EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+          color: _zebra,
+          child: pw.Row(
             children: [
-              Expanded(
-                child: Text(
+              pw.Expanded(
+                child: pw.Text(
                   superOver
                       ? '${innings.battingTeamName} · Super Over'
                       : innings.battingTeamName,
-                  style: const TextStyle(
+                  style: pw.TextStyle(
                     color: _ink,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                    fontWeight: pw.FontWeight.bold,
                   ),
                 ),
               ),
-              Text(
+              pw.Text(
                 innings.score,
-                style: const TextStyle(
+                style: pw.TextStyle(
                   color: _ink,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.bold,
                 ),
               ),
             ],
           ),
         ),
-        // Batting table
-        _battingTable(),
-        _extrasLine(),
-        // Bowling table
-        if (innings.bowling.isNotEmpty) _bowlingTable(),
-        const Divider(height: 1, color: _line),
+        pw.SizedBox(height: 6),
+        _battingTable(innings),
+        pw.SizedBox(height: 4),
+        _extrasLine(innings),
+        if (innings.bowling.isNotEmpty) ...[
+          pw.SizedBox(height: 10),
+          _bowlingTable(innings),
+        ],
+        if (innings.fallOfWickets.isNotEmpty) ...[
+          pw.SizedBox(height: 8),
+          _fallOfWickets(innings),
+        ],
       ],
-    );
-  }
+    ),
+  );
+}
 
-  Widget _battingTable() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: [
-          _row(
-            cells: const ['BATTING', 'R', 'B', '4s', '6s', 'SR'],
-            isHeader: true,
-          ),
-          for (final b in innings.batting)
-            _row(
-              cells: [
-                b.name,
-                '${b.runs}',
-                '${b.balls}',
-                '${b.fours}',
-                '${b.sixes}',
-                b.strikeRate,
-              ],
-              subtitle: b.isOut ? (b.dismissal ?? 'out') : 'not out',
-              dim: !b.isOut,
-            ),
-        ],
-      ),
-    );
-  }
+pw.Widget _battingTable(MatchInnings innings) {
+  return pw.Table(
+    columnWidths: {
+      0: pw.FlexColumnWidth(),
+      1: pw.FixedColumnWidth(40),
+      2: pw.FixedColumnWidth(36),
+      3: pw.FixedColumnWidth(30),
+      4: pw.FixedColumnWidth(30),
+      5: pw.FixedColumnWidth(48),
+    },
+    children: [
+      _tableHeader(const ['BATTING', 'R', 'B', '4s', '6s', 'SR']),
+      for (var i = 0; i < innings.batting.length; i++)
+        _battingRow(innings.batting[i], zebra: i.isOdd),
+    ],
+  );
+}
 
-  Widget _bowlingTable() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Column(
-        children: [
-          _row(
-            cells: const ['BOWLING', 'O', 'R', 'W', 'Econ', ''],
-            isHeader: true,
-          ),
-          for (final w in innings.bowling)
-            _row(
-              cells: [
-                w.name,
-                w.overs,
-                '${w.runs}',
-                '${w.wickets}',
-                w.economy,
-                '',
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _extrasLine() {
-    final e = innings.extrasBreakdown;
-    final parts = <String>[
-      if (e.wides != 0) 'wd ${e.wides}',
-      if (e.noBalls != 0) 'nb ${e.noBalls}',
-      if (e.byes != 0) 'b ${e.byes}',
-      if (e.legByes != 0) 'lb ${e.legByes}',
-      if (e.penalty != 0) 'pen ${e.penalty}',
-    ];
-    final detail = parts.isEmpty ? '' : ' (${parts.join(', ')})';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              'Extras$detail',
-              style: TextStyle(
-                color: _inkSub,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+pw.TableRow _battingRow(MatchBatsmanRow b, {required bool zebra}) {
+  return pw.TableRow(
+    decoration: zebra ? const pw.BoxDecoration(color: _zebra) : null,
+    children: [
+      pw.Padding(
+        padding: const pw.EdgeInsets.fromLTRB(10, 6, 4, 6),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              b.name,
+              style: pw.TextStyle(
+                color: _ink,
+                fontSize: 10.5,
+                fontWeight: pw.FontWeight.bold,
               ),
             ),
-          ),
-          Text(
-            '${innings.extras}',
-            style: const TextStyle(
-              color: _ink,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // A 6-column row: first column flex (name), the rest fixed-width numerics.
-  Widget _row({
-    required List<String> cells,
-    bool isHeader = false,
-    String? subtitle,
-    bool dim = false,
-  }) {
-    final nameStyle = TextStyle(
-      color: isHeader ? _inkSub : _ink,
-      fontSize: isHeader ? 9.5 : 12,
-      fontWeight: isHeader ? FontWeight.w800 : FontWeight.w600,
-      letterSpacing: isHeader ? 0.6 : 0,
-    );
-    final numStyle = TextStyle(
-      color: isHeader ? _inkSub : _ink,
-      fontSize: isHeader ? 9.5 : 12,
-      fontWeight: isHeader ? FontWeight.w800 : FontWeight.w700,
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(cells[0], style: nameStyle),
-                if (subtitle != null)
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: dim ? _accent : _inkSub,
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          for (var i = 1; i < cells.length; i++)
-            SizedBox(
-              width: 34,
-              child: Text(
-                cells[i],
-                textAlign: TextAlign.right,
-                style: numStyle,
+            pw.SizedBox(height: 1),
+            pw.Text(
+              b.isOut ? (b.dismissal ?? 'out') : 'not out',
+              style: pw.TextStyle(
+                color: b.isOut ? _inkSub : _accent,
+                fontSize: 8.5,
               ),
             ),
+          ],
+        ),
+      ),
+      _numCell('${b.runs}', bold: true),
+      _numCell('${b.balls}'),
+      _numCell('${b.fours}'),
+      _numCell('${b.sixes}'),
+      _numCell(b.strikeRate),
+    ],
+  );
+}
+
+pw.Widget _bowlingTable(MatchInnings innings) {
+  return pw.Table(
+    columnWidths: {
+      0: pw.FlexColumnWidth(),
+      1: pw.FixedColumnWidth(44),
+      2: pw.FixedColumnWidth(40),
+      3: pw.FixedColumnWidth(34),
+      4: pw.FixedColumnWidth(52),
+    },
+    children: [
+      _tableHeader(const ['BOWLING', 'O', 'R', 'W', 'Econ']),
+      for (var i = 0; i < innings.bowling.length; i++)
+        _bowlingRow(innings.bowling[i], zebra: i.isOdd),
+    ],
+  );
+}
+
+pw.TableRow _bowlingRow(MatchBowlerRow w, {required bool zebra}) {
+  final extras = <String>[
+    if (w.wides > 0) 'wd ${w.wides}',
+    if (w.noBalls > 0) 'nb ${w.noBalls}',
+  ].join(', ');
+  return pw.TableRow(
+    decoration: zebra ? const pw.BoxDecoration(color: _zebra) : null,
+    children: [
+      pw.Padding(
+        padding: const pw.EdgeInsets.fromLTRB(10, 6, 4, 6),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              w.name,
+              style: pw.TextStyle(
+                color: _ink,
+                fontSize: 10.5,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            if (extras.isNotEmpty) ...[
+              pw.SizedBox(height: 1),
+              pw.Text(
+                extras,
+                style: const pw.TextStyle(color: _inkSub, fontSize: 8.5),
+              ),
+            ],
+          ],
+        ),
+      ),
+      _numCell(w.overs),
+      _numCell('${w.runs}'),
+      _numCell('${w.wickets}', bold: true),
+      _numCell(w.economy),
+    ],
+  );
+}
+
+pw.Widget _extrasLine(MatchInnings innings) {
+  final e = innings.extrasBreakdown;
+  final parts = <String>[
+    if (e.wides != 0) 'wd ${e.wides}',
+    if (e.noBalls != 0) 'nb ${e.noBalls}',
+    if (e.byes != 0) 'b ${e.byes}',
+    if (e.legByes != 0) 'lb ${e.legByes}',
+    if (e.penalty != 0) 'pen ${e.penalty}',
+  ];
+  final detail = parts.isEmpty ? '' : ' (${parts.join(', ')})';
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 10),
+    child: pw.Row(
+      children: [
+        pw.Expanded(
+          child: pw.Text(
+            'Extras$detail',
+            style: pw.TextStyle(
+              color: _inkSub,
+              fontSize: 9.5,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+        pw.Text(
+          '${innings.extras}',
+          style: pw.TextStyle(
+            color: _ink,
+            fontSize: 9.5,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+pw.Widget _fallOfWickets(MatchInnings innings) {
+  final text = innings.fallOfWickets
+      .map((f) => '${f.score} (${f.player}, ${f.over})')
+      .join('   ');
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 10),
+    child: pw.RichText(
+      text: pw.TextSpan(
+        children: [
+          pw.TextSpan(
+            text: 'Fall of wickets  ',
+            style: pw.TextStyle(
+              color: _inkSub,
+              fontSize: 8.5,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.TextSpan(
+            text: text,
+            style: const pw.TextStyle(color: _inkSub, fontSize: 8.5),
+          ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
+
+pw.TableRow _tableHeader(List<String> cells) {
+  pw.Widget head(String t, {bool first = false}) => pw.Padding(
+        padding: pw.EdgeInsets.fromLTRB(first ? 10 : 4, 5, 4, 5),
+        child: pw.Text(
+          t,
+          textAlign: first ? pw.TextAlign.left : pw.TextAlign.right,
+          style: pw.TextStyle(
+            color: _inkSub,
+            fontSize: 8,
+            fontWeight: pw.FontWeight.bold,
+            letterSpacing: 0.6,
+          ),
+        ),
+      );
+  return pw.TableRow(
+    decoration: const pw.BoxDecoration(
+      border: pw.Border(bottom: pw.BorderSide(color: _line, width: 1)),
+    ),
+    children: [
+      for (var i = 0; i < cells.length; i++) head(cells[i], first: i == 0),
+    ],
+  );
+}
+
+pw.Widget _numCell(String value, {bool bold = false}) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+    child: pw.Text(
+      value,
+      textAlign: pw.TextAlign.right,
+      style: pw.TextStyle(
+        color: _ink,
+        fontSize: 10.5,
+        fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+      ),
+    ),
+  );
+}
+
+pw.Widget _pdfFooter() {
+  return pw.Container(
+    margin: const pw.EdgeInsets.only(top: 6),
+    padding: const pw.EdgeInsets.symmetric(vertical: 8),
+    alignment: pw.Alignment.center,
+    child: pw.RichText(
+      text: pw.TextSpan(
+        children: [
+          pw.TextSpan(
+            text: 'Scored on ',
+            style: const pw.TextStyle(color: _inkSub, fontSize: 9),
+          ),
+          pw.TextSpan(
+            text: 'Swing',
+            style: pw.TextStyle(
+              color: _accent,
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
