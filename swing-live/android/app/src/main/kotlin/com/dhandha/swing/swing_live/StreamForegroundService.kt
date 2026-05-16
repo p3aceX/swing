@@ -7,9 +7,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 
 class StreamForegroundService : Service() {
     private val CHANNEL_ID = "swing_live_streaming"
@@ -38,7 +40,18 @@ class StreamForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        // Android 14+ requires the FGS type to be passed explicitly to
+        // startForeground; otherwise the service crashes with
+        // MissingForegroundServiceTypeException the moment we call
+        // startService while the app is anywhere near a background
+        // transition. ServiceCompat takes care of the version split.
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        } else {
+            0
+        }
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
         return START_STICKY
     }
 

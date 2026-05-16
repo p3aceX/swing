@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Broadcast overlay, rendered via AndroidViewFilterRender at exactly
+  1920×1080 px. All dimensions use raw `px` (not dp) because Pedro
+  blits the view 1:1 onto the encoded frame — dp would scale by device
+  density and break alignment.
+
+  Layout (split TV-feed style, per user direction):
+
+    ┌──[LOGO]────────────────────────────────────────[SPONSOR]──┐
+    │                                                            │
+    │                   (clean camera frame)                     │
+    │                                                            │
+    ├────────────────────────────────────────────────────────────┤
+    │ ▓ │TEAM│ 142-3       │ ★ROHIT 45*(28) │ BUMRAH       │NEED │
+    │ ▓ │CODE│ 18.2 CRR 7.78│   KOHLI 32(24) │ 3.2-22 ECO 6 │ 45  │
+    └────────────────────────────────────────────────────────────┘
+
+  Element widths are chosen to leave a comfortable players-block in
+  the middle (weight=1) — that absorbs longer names without pushing
+  the target chip off-screen.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="1920px"
+    android:layout_height="1080px"
+    android:background="@android:color/transparent">
+
+    <!-- ── TOP-LEFT LOGO ────────────────────────────────────────────────
+         No plate background, no mustard top hairline — bare image on the
+         camera feed so the brand reads cleanly. Doubled in height vs the
+         previous plate (140px) so the logo art has presence. -->
+    <ImageView
+        android:id="@+id/logo_image"
+        android:layout_width="wrap_content"
+        android:layout_height="140px"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="32px"
+        android:layout_marginTop="32px"
+        android:adjustViewBounds="true"
+        android:contentDescription="Logo" />
+
+    <!-- ── TOP-RIGHT SPONSOR ────────────────────────────────────────── -->
+    <ImageView
+        android:id="@+id/sponsor_image"
+        android:layout_width="wrap_content"
+        android:layout_height="140px"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="32px"
+        android:layout_marginTop="32px"
+        android:adjustViewBounds="true"
+        android:contentDescription="Sponsor" />
+
+    <!-- ── BOTTOM SCOREBAR ──────────────────────────────────────────── -->
+    <FrameLayout
+        android:id="@+id/scorebar_container"
+        android:layout_width="match_parent"
+        android:layout_height="140px"
+        android:layout_gravity="bottom"
+        android:background="@drawable/scorebar_bg">
+
+        <!-- Mustard top hairline — broadcast signature. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="2px"
+            android:layout_gravity="top"
+            android:background="@drawable/scorebar_topline" />
+
+        <!-- Single-row layout: accent bar | team | score | players | bowler | chip. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
+
+            <!-- Team accent strip (color from feed at runtime). -->
+            <View
+                android:id="@+id/team_accent"
+                android:layout_width="12px"
+                android:layout_height="match_parent"
+                android:background="#E6B544" />
+
+            <!-- TEAM CODE: vertical-centred slab. -->
+            <FrameLayout
+                android:layout_width="124px"
+                android:layout_height="match_parent">
+                <TextView
+                    android:id="@+id/team_code_batting"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="—"
+                    android:textColor="#ECE6D7"
+                    android:textSize="44px"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.10"
+                    android:fontFamily="sans-serif-black"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+            </FrameLayout>
+
+            <View
+                android:layout_width="1px"
+                android:layout_height="match_parent"
+                android:background="#33ECE6D7" />
+
+            <!-- SCORE / OVERS / CRR -->
+            <LinearLayout
+                android:layout_width="300px"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingStart="22px"
+                android:paddingEnd="22px"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/score_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0-0"
+                    android:textColor="#ECE6D7"
+                    android:textSize="64px"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:includeFontPadding="false" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6px"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView
+                        android:id="@+id/overs_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0.0 OV"
+                        android:textColor="#E6B544"
+                        android:textSize="22px"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.08"
+                        android:fontFamily="sans-serif-black" />
+                    <Space
+                        android:layout_width="14px"
+                        android:layout_height="match_parent" />
+                    <TextView
+                        android:id="@+id/crr_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="CRR 0.00"
+                        android:textColor="#ECE6D7"
+                        android:textSize="20px"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.08"
+                        android:alpha="0.7"
+                        android:fontFamily="sans-serif-black" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <View
+                android:layout_width="1px"
+                android:layout_height="match_parent"
+                android:background="#33ECE6D7" />
+
+            <!-- PLAYERS (striker + non-striker stacked) -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="22px"
+                android:paddingEnd="22px"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="★"
+                        android:textColor="#E6B544"
+                        android:textSize="26px"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:layout_marginEnd="8px" />
+                    <TextView
+                        android:id="@+id/striker_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="—"
+                        android:textColor="#ECE6D7"
+                        android:textSize="28px"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.04"
+                        android:fontFamily="sans-serif-black" />
+                    <Space
+                        android:layout_width="12px"
+                        android:layout_height="match_parent" />
+                    <TextView
+                        android:id="@+id/striker_stats"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0(0)"
+                        android:textColor="#E6B544"
+                        android:textSize="28px"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black" />
+                </LinearLayout>
+
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="8px" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:alpha="0.78">
+                    <TextView
+                        android:id="@+id/non_striker_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="34px"
+                        android:text="—"
+                        android:textColor="#ECE6D7"
+                        android:textSize="24px"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.04"
+                        android:fontFamily="sans-serif-black" />
+                    <Space
+                        android:layout_width="12px"
+                        android:layout_height="match_parent" />
+                    <TextView
+                        android:id="@+id/non_striker_stats"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0(0)"
+                        android:textColor="#ECE6D7"
+                        android:textSize="24px"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <View
+                android:layout_width="1px"
+                android:layout_height="match_parent"
+                android:background="#33ECE6D7" />
+
+            <!-- BOWLER (name on top, figures + eco below) -->
+            <LinearLayout
+                android:layout_width="370px"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingStart="22px"
+                android:paddingEnd="22px"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/bowler_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="—"
+                    android:textColor="#ECE6D7"
+                    android:textSize="28px"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.04"
+                    android:fontFamily="sans-serif-black" />
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="8px" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView
+                        android:id="@+id/bowler_figures"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0.0-0-0"
+                        android:textColor="#E6B544"
+                        android:textSize="24px"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black" />
+                    <Space
+                        android:layout_width="14px"
+                        android:layout_height="match_parent" />
+                    <TextView
+                        android:id="@+id/bowler_eco"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="ECO 0.00"
+                        android:textColor="#ECE6D7"
+                        android:textSize="20px"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.08"
+                        android:alpha="0.7"
+                        android:fontFamily="sans-serif-black" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- TARGET CHIP (conditional: visible during a chase) -->
+            <LinearLayout
+                android:id="@+id/target_chip_container"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingStart="22px"
+                android:paddingEnd="32px"
+                android:gravity="center"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="NEED"
+                    android:textColor="#0F1B2D"
+                    android:textSize="14px"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.20"
+                    android:fontFamily="sans-serif-black"
+                    android:background="#E6B544"
+                    android:paddingStart="8px"
+                    android:paddingEnd="8px"
+                    android:paddingTop="2px"
+                    android:paddingBottom="2px" />
+                <TextView
+                    android:id="@+id/target_chip_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="6px"
+                    android:text="—"
+                    android:textColor="#E6B544"
+                    android:textSize="40px"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:id="@+id/target_chip_rrr"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="RRR —"
+                    android:textColor="#ECE6D7"
+                    android:textSize="16px"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08"
+                    android:alpha="0.7"
+                    android:fontFamily="sans-serif-black" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <!--
+      ── FLASH OVERLAY (centred) ────────────────────────────────────────
+      Visible only during a FOUR / SIX / OUT / DUCK event. Driven by a
+      ValueAnimator in BroadcastOverlayView. Once a `.riv` asset lands,
+      replace this FrameLayout with a RiveAnimationView whose state
+      machine handles the FOUR/SIX/OUT triggers natively at 60fps GPU.
+    -->
+    <!--
+      Flash overlay stays VISIBLE permanently — we drive its visibility
+      via alpha (0 ↔ 1) so the off-screen view's layout never has to
+      change. Visibility=gone caused the layout cache to stick at 0×0
+      since off-screen views don't re-layout automatically when a child
+      flips visibility.
+    -->
+    <FrameLayout
+        android:id="@+id/flash_container"
+        android:layout_width="match_parent"
+        android:layout_height="540px"
+        android:layout_gravity="center_vertical"
+        android:alpha="0">
+
+        <TextView
+            android:id="@+id/flash_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textSize="220px"
+            android:textStyle="bold"
+            android:letterSpacing="0.06"
+            android:fontFamily="sans-serif-black"
+            android:shadowColor="#80000000"
+            android:shadowDx="0"
+            android:shadowDy="6"
+            android:shadowRadius="18"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/flash_sub"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="180px"
+            android:textColor="#ECE6D7"
+            android:textSize="42px"
+            android:textStyle="bold"
+            android:letterSpacing="0.18"
+            android:fontFamily="sans-serif-black"
+            android:alpha="0"
+            android:text="" />
+
+    </FrameLayout>
+
+</FrameLayout>

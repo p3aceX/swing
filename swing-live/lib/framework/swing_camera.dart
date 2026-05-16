@@ -1,29 +1,21 @@
-import 'package:flutter/services.dart';
-import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:flutter/services.dart';
 
+/// Thin bridge to the Android MainActivity MethodChannel. Only exposes the
+/// subset of methods MainActivity.kt actually implements — anything else
+/// would return notImplemented at runtime.
 class SwingCamera {
-  static const MethodChannel _channel = MethodChannel('com.dhandha.swing/camera');
-  static const EventChannel _eventChannel = EventChannel('com.dhandha.swing/camera/events');
+  static const MethodChannel _channel =
+      MethodChannel('com.dhandha.swing/camera');
+  static const EventChannel _eventChannel =
+      EventChannel('com.dhandha.swing/camera/events');
 
-  StreamSubscription? _eventSubscription;
-  final StreamController<Map<String, dynamic>> _eventController = StreamController<Map<String, dynamic>>.broadcast();
-  
-  Stream<Map<String, dynamic>> get onEvent => _eventController.stream;
+  StreamSubscription? _eventSub;
+  final _eventCtrl = StreamController<CameraEvent>.broadcast();
 
-  final VoidCallback onInitialized;
-  final Function(String) onError;
-  final VoidCallback onConnectionSuccess;
-  final VoidCallback onConnectionDisconnect;
-  final Function(String) onConnectionFailed;
+  Stream<CameraEvent> get events => _eventCtrl.stream;
 
-  SwingCamera({
-    required this.onInitialized,
-    required this.onError,
-    required this.onConnectionSuccess,
-    required this.onConnectionDisconnect,
-    required this.onConnectionFailed,
-  });
+  int? _instanceId;
 
   Future<void> initialize({
     required int width,
@@ -32,93 +24,81 @@ class SwingCamera {
     required int bitrate,
     required bool isVertical,
   }) async {
-    try {
-      final dynamic result = await _channel.invokeMethod('initialize', {
-        'width': width,
-        'height': height,
-        'fps': fps,
-        'bitrate': bitrate,
-        'isVertical': isVertical,
-      });
-
-      _eventSubscription = _eventChannel.receiveBroadcastStream().listen((event) {
-        final Map<String, dynamic> eventMap = Map<String, dynamic>.from(event);
-        _eventController.add(eventMap);
-        final String type = eventMap['type'];
-
-        switch (type) {
-          case 'connected':
-            onConnectionSuccess();
-            break;
-          case 'disconnected':
-            onConnectionDisconnect();
-            break;
-          case 'connectionFailed':
-            onConnectionFailed(eventMap['message'] ?? 'Connection failed');
-            break;
-          case 'error':
-            onError(eventMap['message'] ?? 'Unknown error');
-            break;
-        }
-      });
-
-      onInitialized();
-    } catch (e) {
-      onError('Failed to initialize camera: $e');
+    // CRITICAL: subscribe to the event channel BEFORE invokeMethod fires.
+    // Platform-channel messages are FIFO, so the native side processes our
+    // `listen` registration before the `initialize` handler — meaning any
+    // `previewReady` (or other) event emitted from inside `initialize` will
+    // have a registered eventSink to send to.
+    _eventSub ??= _eventChannel.receiveBroadcastStream().listen((raw) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      _eventCtrl.add(CameraEvent.fromMap(m));
+    });
+    final res = await _channel.invokeMethod('initialize', {
+      'width': width,
+      'height': height,
+      'fps': fps,
+      'bitrate': bitrate,
+      'isVertical': isVertical,
+    });
+    if (res is Map) {
+      _instanceId = res['instanceId'] as int?;
     }
   }
 
-  Future<void> startPreview() async {
-    await _channel.invokeMethod('startPreview');
+  Future<void> startPreview() => _channel.invokeMethod('startPreview');
+
+  Future<bool> isPreviewReady() async {
+    final v = await _channel.invokeMethod<bool>('isPreviewReady');
+    return v ?? false;
   }
 
-  Future<void> stopPreview() async {
-    await _channel.invokeMethod('stopPreview');
-  }
+  Future<void> startStreaming(String url) =>
+      _channel.invokeMethod('startStreaming', {'url': url});
 
-  Future<void> startStreaming(String url) async {
-    await _channel.invokeMethod('startStreaming', {'url': url});
-  }
+  Future<void> stopStreaming() => _channel.invokeMethod('stopStreaming');
 
-  Future<void> stopStreaming() async {
-    await _channel.invokeMethod('stopStreaming');
-  }
+  Future<void> switchCamera() => _channel.invokeMethod('switchCamera');
 
-  Future<void> pauseStream() async {
-    await _channel.invokeMethod('pauseStream');
-  }
+  Future<void> setBitrate(int bitrate) =>
+      _channel.invokeMethod('setBitrate', {'bitrate': bitrate});
 
-  Future<void> resumeStream() async {
-    await _channel.invokeMethod('resumeStream');
-  }
+  /// Toggle audio on the encoder. When muted, Pedro's `disableAudio` stops
+  /// pushing audio frames to RTMP — the YouTube stream goes silent until
+  /// `setMuted(false)` re-enables it. Video keeps flowing either way.
+  Future<void> setMuted(bool muted) =>
+      _channel.invokeMethod('setMuted', {'isMuted': muted});
 
-  Future<void> setZoomRatio(double ratio) async {
-    await _channel.invokeMethod('setZoomRatio', {'ratio': ratio});
-  }
+  /// Hard-resets Pedro's native RtmpCamera2 instance. The next platform-
+  /// view mount will create a fresh one — required for pause/resume to
+  /// behave like cold-start (which is the only path that works reliably).
+  Future<void> resetCamera() => _channel.invokeMethod('resetCamera');
 
-  Future<void> setOrientation(bool isVertical) async {
-    await _channel.invokeMethod('setOrientation', {'isVertical': isVertical});
-  }
-
-  Future<void> switchCamera() async {
-    await _channel.invokeMethod('switchCamera');
-  }
-
-  Future<void> setMuted(bool isMuted) async {
-    await _channel.invokeMethod('setMuted', {'isMuted': isMuted});
-  }
-
-  Future<void> setBatteryShield(bool enabled) async {
-    await _channel.invokeMethod('setBatteryShield', {'enabled': enabled});
-  }
-
-  Future<void> setBitrate(int bitrate) async {
-    await _channel.invokeMethod('setBitrate', {'bitrate': bitrate});
-  }
+  /// Ship a PNG-encoded overlay snapshot to native. Pedro composites it
+  /// on every encoded frame so YouTube viewers see the scorebar / event
+  /// flashes. Pass `null` to remove the overlay filter.
+  Future<void> setOverlayBitmap(Uint8List? bytes) =>
+      _channel.invokeMethod('setOverlayBitmap', {'bytes': bytes});
 
   Future<void> dispose() async {
-    await _eventSubscription?.cancel();
-    _eventController.close();
-    await _channel.invokeMethod('dispose');
+    await _eventSub?.cancel();
+    _eventSub = null;
+    await _eventCtrl.close();
+    await _channel.invokeMethod('dispose', {'instanceId': _instanceId});
   }
+}
+
+class CameraEvent {
+  final String type;
+  final String? message;
+  final int? bitrate;
+  final int? fps;
+
+  CameraEvent({required this.type, this.message, this.bitrate, this.fps});
+
+  factory CameraEvent.fromMap(Map<String, dynamic> m) => CameraEvent(
+        type: m['type'] as String,
+        message: m['message'] as String?,
+        bitrate: (m['bitrate'] as num?)?.toInt(),
+        fps: (m['fps'] as num?)?.toInt(),
+      );
 }

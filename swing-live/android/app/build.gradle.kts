@@ -35,6 +35,7 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }
@@ -45,4 +46,11 @@ flutter {
 
 dependencies {
     implementation("com.github.pedroSG94:RootEncoder:2.5.2")
+    // Rive runtime — vector-animation engine for the FOUR/SIX/WICKET
+    // flashes once .riv assets are produced. A RiveAnimationView drops
+    // straight into broadcast_overlay.xml's flash container, and Pedro
+    // picks up its surface via the existing AndroidViewFilterRender —
+    // no further wiring needed once the asset lands.
+    implementation("app.rive:rive-android:11.6.0")
+    implementation("androidx.startup:startup-runtime:1.1.1")
 }

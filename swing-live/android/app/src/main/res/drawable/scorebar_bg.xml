@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navy gradient scorebar background, mirrors PremiumATheme.bgDeep with
+     a slight darker bottom for weight. The 1px mustard top hairline is
+     added at draw time (Pedro filter View tree) via a separate strip view. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:startColor="#F20F1B2D"
+                android:endColor="#F80B1422" />
+        </shape>
+    </item>
+</layer-list>
