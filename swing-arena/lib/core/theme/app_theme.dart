@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_host_core/flutter_host_core.dart';
 
 class AppTheme {
   AppTheme._();
@@ -76,10 +77,31 @@ class AppTheme {
     required Color indicatorTint,
   }) {
     final isDark = scheme.brightness == Brightness.dark;
+    final hostPalette = HostPalette(
+      bg: scaffold,
+      surf: scheme.surfaceContainerHighest,
+      cardBg: scheme.surfaceContainerHighest,
+      stroke: outline,
+      panel: scheme.surfaceContainerHighest,
+      fg: onSurface,
+      fgSub: muted,
+      accent: scheme.primary,
+      accentBg: scheme.primary.withValues(alpha: isDark ? 0.18 : 0.10),
+      ctaBg: scheme.primary,
+      ctaFg: scheme.onPrimary,
+      // Use the app's theme accent for match-card live indicators so the
+      // play tab matches the arena's brand instead of the shared default green.
+      success: scheme.primary,
+      warn: const Color(0xFFD97706),
+      danger: scheme.error,
+      gold: const Color(0xFFEAB308),
+      sky: const Color(0xFF38BDF8),
+    );
     return ThemeData(
       useMaterial3: true,
       brightness: scheme.brightness,
       colorScheme: scheme,
+      extensions: [hostPalette],
       scaffoldBackgroundColor: scaffold,
       canvasColor: scaffold,
       fontFamily: 'SF Pro Display',

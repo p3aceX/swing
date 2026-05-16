@@ -1,8 +1,11 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/api/providers.dart';
 import 'record_payment_sheet.dart';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -118,8 +121,9 @@ class BookingDetailPage extends ConsumerWidget {
       ),
       floatingActionButton: async.valueOrNull != null &&
               async.valueOrNull!.status != 'CANCELLED'
-          ? _RecordPaymentFab(
+          ? _BottomActions(
               booking: async.valueOrNull!,
+              dio: ref.read(dioProvider),
               onRecorded: () => ref.invalidate(_bookingDetailProvider(bookingId)),
             )
           : null,
@@ -866,6 +870,108 @@ class _StatusChip extends StatelessWidget {
 }
 
 // ─── Record Payment FAB ───────────────────────────────────────────────────────
+
+// ─── Bottom actions (Record Payment + Send Link) ─────────────────────────────
+
+class _BottomActions extends StatefulWidget {
+  const _BottomActions({required this.booking, required this.dio, required this.onRecorded});
+  final ArenaReservation booking;
+  final Dio dio;
+  final VoidCallback onRecorded;
+
+  @override
+  State<_BottomActions> createState() => _BottomActionsState();
+}
+
+class _BottomActionsState extends State<_BottomActions> {
+  bool _linkLoading = false;
+
+  Future<void> _sendPaymentLink() async {
+    setState(() => _linkLoading = true);
+    try {
+      final res = await widget.dio.post('/bookings/${widget.booking.id}/payment-link');
+      final data = (res.data['data'] as Map).cast<String, dynamic>();
+      final url  = data['url'] as String? ?? '';
+      final phone = widget.booking.displayPhone.replaceAll(RegExp(r'\D'), '');
+
+      final amount = widget.booking.totalAmountPaise / 100;
+      final msg = 'Hi ${widget.booking.displayName}, your arena booking payment of '
+          '₹${amount.toStringAsFixed(0)} is pending.\nPay securely here: $url';
+
+      if (mounted && phone.isNotEmpty) {
+        final num = phone.length == 10 ? '91$phone' : phone;
+        await launchUrl(
+          Uri.parse('https://wa.me/$num?text=${Uri.encodeComponent(msg)}'),
+          mode: LaunchMode.externalApplication,
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Link: $url')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to generate payment link')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _linkLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    final balanceDue = widget.booking.balancePaise;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(children: [
+        if (balanceDue > 0) ...[
+          Expanded(
+            child: FloatingActionButton.extended(
+              heroTag: 'sendLink',
+              onPressed: _linkLoading ? null : _sendPaymentLink,
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
+              icon: _linkLoading
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.send_rounded, size: 18),
+              label: const Text('Send Link',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            ),
+          ),
+          const SizedBox(width: 10),
+        ],
+        Expanded(
+          child: FloatingActionButton.extended(
+            heroTag: 'recordPayment',
+            onPressed: () => _showSheet(context),
+            backgroundColor: _c.accent,
+            foregroundColor: _c.onAccent,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Record Payment',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  void _showSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => RecordPaymentSheet(
+        booking: widget.booking,
+        onRecorded: widget.onRecorded,
+      ),
+    );
+  }
+}
 
 class _RecordPaymentFab extends StatelessWidget {
   const _RecordPaymentFab({required this.booking, required this.onRecorded});

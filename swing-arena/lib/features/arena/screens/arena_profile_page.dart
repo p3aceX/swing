@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/router/app_router.dart';
@@ -342,8 +343,8 @@ class _ArenaDetailPageState extends ConsumerState<ArenaDetailPage>
           .showSnackBar(SnackBar(content: Text('Arena updated')));
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Update failed: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update failed: ${_friendlyError(error)}')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -417,8 +418,8 @@ class _ArenaDetailPageState extends ConsumerState<ArenaDetailPage>
           .showSnackBar(SnackBar(content: Text('Unit removed')));
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Remove failed: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Remove failed: ${_friendlyError(error)}')));
     }
   }
 
@@ -593,6 +594,7 @@ class _ArenaDetailPageState extends ConsumerState<ArenaDetailPage>
     String viewValue, {
     bool required = false,
     int maxLines = 1,
+    int? maxLength,
     TextInputType? keyboardType,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
@@ -603,6 +605,7 @@ class _ArenaDetailPageState extends ConsumerState<ArenaDetailPage>
       child: TextFormField(
         controller: controller,
         maxLines: maxLines,
+        maxLength: maxLength,
         keyboardType: keyboardType,
         inputFormatters: inputFormatters,
         validator: validator ??
@@ -613,6 +616,7 @@ class _ArenaDetailPageState extends ConsumerState<ArenaDetailPage>
           labelText: label,
           filled: true,
           fillColor: _c.surface,
+          counterStyle: TextStyle(color: _c.muted, fontSize: 11),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
           border: _inputBorder(_c.line),
@@ -1306,8 +1310,8 @@ class UnitEditorSheetState extends ConsumerState<UnitEditorSheet> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Save failed: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: ${_friendlyError(error)}')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -3889,7 +3893,7 @@ class _DetailsTab extends StatelessWidget {
       children: [
         p._field('Name', p._nameCtrl, p._nameCtrl.text, required: true),
         p._field('Description', p._descriptionCtrl, p._descriptionCtrl.text,
-            maxLines: 3),
+            maxLines: 3, maxLength: 500),
         p._field('Phone', p._phoneCtrl, p._phoneCtrl.text,
             keyboardType: TextInputType.phone),
         // Sports — fixed, not editable after creation
@@ -4532,7 +4536,14 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
       return;
     }
     final uri = Uri.parse('https://www.swingcricketapp.com/arena/$slug');
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _MicrositePreviewPage(
+          url: uri,
+          title: widget.arena.name,
+        ),
+      ),
+    );
   }
 
   Future<void> _pickLogo() async {
@@ -4569,7 +4580,7 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Logo upload failed: $e')),
+        SnackBar(content: Text('Logo upload failed: ${_friendlyError(e)}')),
       );
     } finally {
       if (mounted) setState(() => _logoUploading = false);
@@ -4711,19 +4722,33 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
           _links[i].copyWith(order: i).toJson(),
       ];
     }
+    debugPrint('[site/save] PUT /arenas/${widget.arena.id} payload=$payload');
     try {
       final updated = await ref
           .read(hostArenaBookingRepositoryProvider)
           .updateArena(widget.arena.id, payload);
+      debugPrint(
+          '[site/save] response brandColor=${updated.brandColor} logoUrl=${updated.logoUrl} '
+          'tagline=${updated.tagline} coverPhotoIndex=${updated.coverPhotoIndex} '
+          'links=${updated.micrositeLinks.length} customSlug=${updated.customSlug}');
       ref.invalidate(arenaDetailProvider);
       ref.invalidate(arenaDetailByIdProvider(widget.arena.id));
       ref.invalidate(ownedArenasProvider);
       if (!mounted) return;
       setState(() {
+        // Sync all fields from the server so any silently-dropped value
+        // becomes visible immediately instead of after the next page open.
         _customSlug = updated.customSlug;
         _citySlug = updated.citySlug;
         _arenaSlug = updated.arenaSlug;
         _slugCtrl.text = updated.customSlug ?? '';
+        _brandColor = updated.brandColor;
+        _brandColorCtrl.text = updated.brandColor ?? '';
+        _logoUrl = updated.logoUrl;
+        _taglineCtrl.text = updated.tagline ?? '';
+        _coverPhotoIndex = updated.coverPhotoIndex;
+        _links = List<MicrositeLink>.from(updated.micrositeLinks);
+        _linkIds = [for (final _ in _links) _nextLinkId()];
         _saving = false;
         _saved = true;
         _savingMicrosite = false;
@@ -4738,12 +4763,17 @@ class _ShareTabState extends ConsumerState<_ShareTab> {
       }
     } catch (e) {
       if (!mounted) return;
+      debugPrint('[site/save] error: $e');
+      if (e is DioException) {
+        debugPrint('[site/save] response.data=${e.response?.data}');
+        debugPrint('[site/save] response.statusCode=${e.response?.statusCode}');
+      }
       setState(() {
         _saving = false;
         _savingMicrosite = false;
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Save failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: ${_friendlyError(e)}')));
     }
   }
 
@@ -4781,9 +4811,9 @@ Row(
               ),
             ),
             IconButton(
-              tooltip: 'Open',
+              tooltip: 'Preview',
               onPressed: _openPublicPage,
-              icon: Icon(Icons.open_in_new_rounded, size: 18, color: _c.muted),
+              icon: Icon(Icons.visibility_outlined, size: 18, color: _c.muted),
               visualDensity: VisualDensity.compact,
             ),
             IconButton(
@@ -5341,6 +5371,116 @@ class _MicrositeLinkRow extends StatelessWidget {
   }
 }
 
+class _MicrositePreviewPage extends StatefulWidget {
+  const _MicrositePreviewPage({required this.url, required this.title});
+  final Uri url;
+  final String title;
+
+  @override
+  State<_MicrositePreviewPage> createState() => _MicrositePreviewPageState();
+}
+
+class _MicrositePreviewPageState extends State<_MicrositePreviewPage> {
+  late final WebViewController _controller;
+  int _progress = 0;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (p) {
+            if (mounted) setState(() => _progress = p);
+          },
+          onPageStarted: (_) {
+            if (mounted) setState(() => _isLoading = true);
+          },
+          onPageFinished: (_) {
+            if (mounted) setState(() => _isLoading = false);
+          },
+        ),
+      )
+      ..loadRequest(widget.url);
+  }
+
+  Future<void> _openExternally() async {
+    await launchUrl(widget.url, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _c = _C.of(context);
+    return Scaffold(
+      backgroundColor: _c.bg,
+      appBar: AppBar(
+        backgroundColor: _c.bg,
+        surfaceTintColor: _c.bg,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.close_rounded, color: _c.text),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _c.text,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            Text(
+              widget.url.host + widget.url.path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _c.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Reload',
+            icon: Icon(Icons.refresh_rounded, color: _c.text),
+            onPressed: () => _controller.reload(),
+          ),
+          IconButton(
+            tooltip: 'Open in browser',
+            icon: Icon(Icons.open_in_new_rounded, color: _c.text),
+            onPressed: _openExternally,
+          ),
+          const SizedBox(width: 4),
+        ],
+        bottom: _isLoading && _progress < 100
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(2),
+                child: LinearProgressIndicator(
+                  value: _progress / 100,
+                  minHeight: 2,
+                  backgroundColor: Colors.transparent,
+                  color: _c.accent,
+                ),
+              )
+            : null,
+      ),
+      body: WebViewWidget(controller: _controller),
+    );
+  }
+}
+
 String _sportLabel(String sport) {
   return switch (sport) {
     'CRICKET' => 'Cricket',
@@ -5359,6 +5499,30 @@ String _sportLabel(String sport) {
 String _fallback(String? value) {
   final safe = value?.trim() ?? '';
   return safe.isEmpty ? 'Not set' : safe;
+}
+
+String _friendlyError(Object error) {
+  if (error is DioException) {
+    final data = error.response?.data;
+    if (data is Map) {
+      final msg = data['message'] ?? data['error'];
+      if (msg is String && msg.trim().isNotEmpty) return msg;
+      if (msg is List && msg.isNotEmpty) return msg.join(', ');
+    }
+    if (data is String && data.trim().isNotEmpty) return data;
+    final code = error.response?.statusCode;
+    if (code != null) return 'Server returned $code. Please try again.';
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.sendTimeout) {
+      return 'Network is slow — check your connection and try again.';
+    }
+    if (error.type == DioExceptionType.connectionError) {
+      return 'No internet connection.';
+    }
+    return error.message ?? 'Request failed.';
+  }
+  return error.toString();
 }
 
 String? _emptyToNull(String value) {
