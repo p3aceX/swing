@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(git push *)",
+      "Bash(rm -f app/arena/\\\\[slug\\\\]/_link-cards.tsx)",
+      "Bash(npx tsc *)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(awk 'NR==662||NR==719||NR==792||NR==892||NR==1105||NR==1150||NR==1206{print NR\": \"$0; for\\(i=NR-4;i<=NR;i++\\) if\\(i!=NR\\) print i\": \\(\"substr\\($0,1,40\\)\"\\)\"; print \"---\"}' app/arena/\\\\[slug\\\\]/_microsite.tsx)",
+      "Bash(git ls-remote *)",
+      "Bash(gcloud builds *)",
+      "Bash(gcloud run *)",
+      "Bash(python3 -c \"import sys, json; d = json.load\\(sys.stdin\\).get\\('data', {}\\); print\\('brandColor:', d.get\\('brandColor'\\)\\); print\\('tagline:', d.get\\('tagline'\\)\\); print\\('logoUrl:', d.get\\('logoUrl'\\)\\); print\\('coverPhotoIndex:', d.get\\('coverPhotoIndex'\\)\\); print\\('micrositeLinks:', d.get\\('micrositeLinks'\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\).get\\('data',{}\\); print\\('brandColor:', d.get\\('brandColor'\\)\\); print\\('tagline:', d.get\\('tagline'\\)\\); print\\('logoUrl:', d.get\\('logoUrl'\\)\\); print\\('coverPhotoIndex:', d.get\\('coverPhotoIndex'\\)\\); links=d.get\\('micrositeLinks'\\); print\\('micrositeLinks count:', len\\(links\\) if links else 0\\)\")"
     ]
   }
 }
