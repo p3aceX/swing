@@ -212,8 +212,9 @@ export class AuthService {
     const url = `https://2factor.in/API/V1/${apiKey}/SMS/${rawPhone}/${otp}`
     const resp = await fetch(url)
     const data = await resp.json() as any
+    console.log(`[OTP] 2factor response:`, JSON.stringify(data))
     if (data.Status !== 'Success') {
-      throw new AppError('OTP_SEND_FAILED', 'Failed to send OTP', 500)
+      throw new AppError('OTP_SEND_FAILED', `Failed to send OTP: ${data.Details || data.Status}`, 500)
     }
 
     return { sessionId: data.Details as string }
