@@ -4,7 +4,7 @@ import { Errors, AppError } from '../../lib/errors'
 import { ArenaService } from '../arenas/arena.service'
 import { NotificationService } from '../notifications/notification.service'
 import { bumpDiscoverAllocation, getDiscoverAllocations } from '../../lib/redis'
-import Razorpay from 'razorpay'
+import { CashfreeService } from '../payments/cashfree.service'
 import { areAgeGroupsCompatible } from './matchmaking.utils'
 import {
   matchInterval,
@@ -26,10 +26,10 @@ const LOBBY_EXPIRY_HOURS = 24
 const MATCH_PAYMENT_HOURS = 4
 // TODO: set to 29900 (₹299) once we exit testing mode. While 0, the
 // lock-and-pay flow bypasses Razorpay and finalizes the match immediately —
-// see the zero-amount branch in acquireLockAndCreateOrder.
+// see the zero-amount branch in acquireLockAndCreateOrder (bypasses Cashfree).
 const CONFIRMATION_FEE_PAISE = 0
 // V2 first-to-pay lock window. The team that taps Pay first holds the slot
-// for this many seconds while their Razorpay order is alive.
+// for this many seconds while their Cashfree order is alive.
 const INTEREST_LOCK_SECONDS = 120
 
 // 'ANY' = team is open to any format (Discover-flow "All formats" option).
@@ -43,16 +43,8 @@ export type MatchmakingFormat =
   | 'Custom'
   | 'ANY'
 
-let _razorpay: Razorpay | null = null
-function getRazorpay() {
-  if (!_razorpay) {
-    _razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID || '',
-      key_secret: process.env.RAZORPAY_KEY_SECRET || '',
-    })
-  }
-  return _razorpay
-}
+const cashfree = new CashfreeService()
+const MM_NOTIFY_URL = process.env.CASHFREE_NOTIFY_URL || 'https://api.swingcricket.in/payments/webhook'
 
 export class MatchmakingService {
   static startLobbySchedulers() {
@@ -2191,11 +2183,10 @@ export class MatchmakingService {
     await prisma.$transaction(async (tx) => {
       // V2 — mark all live interests as lost so the players' UI reflects
       // the cancellation. We don't refund here: lockAndPay only creates the
-      // Razorpay order, no money has been captured unless the player
-      // completed the Razorpay flow. If a verify-payment lands after this
+      // Cashfree order, no money has been captured unless the player
+      // completed the Cashfree flow. If a verify-payment lands after this
       // cancel, it'll see lobby.status='cancelled' and refuse to create the
-      // match — Razorpay refund is then handled by the webhook (out of scope
-      // for this commit; webhook implementer should detect orphaned captures).
+      // match — Cashfree refund is then handled by the webhook.
       await tx.matchmakingInterest.updateMany({
         where: {
           lobbyId,
@@ -2267,10 +2258,11 @@ export class MatchmakingService {
             select: { id: true, gatewayPaymentId: true, amountPaise: true, userId: true },
           })
           if (payment?.gatewayPaymentId) {
-            await getRazorpay().payments.refund(payment.gatewayPaymentId, {
-              amount: payment.amountPaise,
-              notes: { reason: 'Match expired — opponent did not pay in time' },
-            })
+            await cashfree.makeRequest('POST', `/pg/orders/${encodeURIComponent(payment.id)}/refunds`, {
+              refund_amount: payment.amountPaise / 100,
+              refund_id: `refund_${payment.id}_${Date.now()}`,
+              refund_note: 'Match expired — opponent did not pay in time',
+            }).catch((err) => console.error('[Cashfree] refund failed (non-fatal):', err))
             await prisma.payment.update({
               where: { id: payment.id },
               data: { status: 'REFUND_PENDING', refundReason: 'Match expired' },
@@ -2517,7 +2509,7 @@ export class MatchmakingService {
       return {
         matchId: null,
         status: 'WAITING_FOR_OTHER_CAPTAIN',
-        razorpayOrderId: null,
+        cashfreeOrderId: null,
         amountPaise: request.costPerPlayerPaise ?? DEFAULT_MATCH_COST_PER_PLAYER_PAISE,
       }
     }
@@ -2583,17 +2575,21 @@ export class MatchmakingService {
 
     const amountPaise = (request.costPerPlayerPaise ?? DEFAULT_MATCH_COST_PER_PLAYER_PAISE) *
       (initiatorQueue.teamSize + opponentQueue.teamSize)
-    const razorpayOrder = await getRazorpay().orders.create({
-      amount: amountPaise,
-      currency: 'INR',
-      receipt: `swing_matchmaking_${request.id.slice(0, 12)}`,
-      notes: { matchId: match.id, matchmakingRequestId: request.id },
+
+    const cfOrder = await cashfree.createOrder({
+      orderId: `mm_req_${request.id.slice(0, 20)}_${Date.now()}`,
+      amountPaise,
+      customerId: userId,
+      customerPhone: (initiatorProfile?.user?.name ? '9000000000' : '9000000000'),
+      customerName: initiatorProfile?.user?.name || 'Player',
+      notifyUrl: MM_NOTIFY_URL,
     })
 
     return {
       matchId: match.id,
       status: 'BOTH_CONFIRMED',
-      razorpayOrderId: razorpayOrder.id,
+      cashfreeOrderId: cfOrder.order_id,
+      sessionId: cfOrder.payment_session_id,
       amountPaise,
     }
   }
@@ -3792,7 +3788,7 @@ export class MatchmakingService {
 
   // Player-side confirmation when the match's per-team confirmation fee is
   // 0 (test mode). Mirrors the lock-and-pay zero-amount bypass so the
-  // opponent's "Pay" button can finalize without going through Razorpay
+  // opponent's "Pay" button can finalize without going through Cashfree
   // (which can't process ₹0). Refuses if the match has a non-zero fee.
   async confirmMatchFree(userId: string, matchId: string, lobbyId: string) {
     const player = await this.getPlayerProfile(userId)
@@ -3802,7 +3798,7 @@ export class MatchmakingService {
     if (match.paymentAmountPerTeam > 0) {
       throw new AppError(
         'PAYMENT_REQUIRED',
-        'This match has a non-zero confirmation fee — pay via Razorpay',
+        'This match has a non-zero confirmation fee — pay via Cashfree',
         400,
       )
     }
@@ -4770,7 +4766,7 @@ export class MatchmakingService {
 
   /**
    * B2 — Player taps "Pay" on an interest. Acquire the lobby's payment lock
-   * atomically and mint a Razorpay order. If another team already holds an
+   * atomically and mint a Cashfree order. If another team already holds an
    * unexpired lock, return LOCK_TAKEN — the client surfaces "slot just taken".
    */
   async acquireLockAndCreateOrder(userId: string, interestId: string) {
@@ -4871,11 +4867,10 @@ export class MatchmakingService {
     const amountPaise = CONFIRMATION_FEE_PAISE
 
     // ── TEST-MODE BYPASS ────────────────────────────────────────────────
-    // When the confirmation fee is ₹0, Razorpay can't process the order
-    // (minimum charge is ₹1). Skip the gateway entirely and finalize the
-    // win in-line: promote the holder, create the match, mark losers.
+    // When the confirmation fee is ₹0, skip the gateway entirely and
+    // finalize the win in-line: promote the holder, create the match, mark losers.
     // This branch goes away the moment CONFIRMATION_FEE_PAISE returns to
-    // a non-zero value — the regular Razorpay path takes over.
+    // a non-zero value — the regular Cashfree path takes over.
     if (amountPaise === 0) {
       const bypassFee = await this.resolveFeeBreakdown(unit.arenaId, groundFeePaise)
       const finalize = await prisma.$transaction(async (tx) => {
@@ -5000,8 +4995,8 @@ export class MatchmakingService {
 
       return {
         interestId: result.interest.id,
-        razorpayOrderId: '',
-        razorpayKey: '',
+        cashfreeOrderId: '',
+        sessionId: '',
         amountPaise: 0,
         currency: 'INR',
         groundFeePaise,
@@ -5011,26 +5006,27 @@ export class MatchmakingService {
       }
     }
 
-    const order = await getRazorpay().orders.create({
-      amount: amountPaise,
-      currency: 'INR',
-      receipt: `mm_int_${result.interest.id.slice(0, 14)}`,
-      notes: {
-        interestId: result.interest.id,
-        lobbyId: result.lobby.id,
-        teamId: result.interest.teamId,
-      },
+    // Resolve user phone for Cashfree order
+    const userRow = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, phone: true, email: true } })
+    const cfOrder = await cashfree.createOrder({
+      orderId: `mm_int_${result.interest.id.slice(0, 20)}_${Date.now()}`,
+      amountPaise,
+      customerId: userId,
+      customerPhone: (userRow?.phone || '9000000000').replace(/\D/g, '').slice(-10),
+      customerEmail: userRow?.email ?? undefined,
+      customerName: userRow?.name || 'Player',
+      notifyUrl: MM_NOTIFY_URL,
     })
 
     await prisma.matchmakingInterest.update({
       where: { id: result.interest.id },
-      data: { razorpayOrderId: order.id },
+      data: { razorpayOrderId: cfOrder.order_id },
     })
 
     return {
       interestId: result.interest.id,
-      razorpayOrderId: order.id,
-      razorpayKey: process.env.RAZORPAY_KEY_ID ?? '',
+      cashfreeOrderId: cfOrder.order_id,
+      sessionId: cfOrder.payment_session_id,
       amountPaise,
       currency: 'INR',
       groundFeePaise,
@@ -5040,26 +5036,24 @@ export class MatchmakingService {
   }
 
   /**
-   * B3 — Player's payment came back from Razorpay. Verify signature, promote
+   * B3 — Player's payment came back from Cashfree. Verify payment, promote
    * the locked interest to "won" and create the Match. Mark every other
    * interest on this lobby as "lost" and notify their teams.
    */
   async verifyInterestPayment(
     userId: string,
     interestId: string,
-    razorpayOrderId: string,
-    razorpayPaymentId: string,
-    razorpaySignature: string,
+    cashfreeOrderId: string,
+    cashfreePaymentId: string,
+    _unused?: string,
   ) {
     const player = await this.getPlayerProfile(userId)
 
-    // 1. Validate Razorpay signature out-of-band (no DB locks needed yet).
-    const expected = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET ?? '')
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest('hex')
-    if (expected !== razorpaySignature) {
-      throw new AppError('INVALID_SIGNATURE', 'Payment signature verification failed', 400)
+    // 1. Validate payment via Cashfree API out-of-band (no DB locks needed yet).
+    const payments = await cashfree.verifyOrder(cashfreeOrderId)
+    const paid = Array.isArray(payments) && payments.some((p: any) => p.payment_status === 'SUCCESS')
+    if (!paid) {
+      throw new AppError('PAYMENT_NOT_COMPLETED', 'Payment has not been completed', 400)
     }
 
     // 2. Promote interest, create match, mark losers — all in one transaction.
@@ -5070,8 +5064,8 @@ export class MatchmakingService {
       })
       if (!interest) throw Errors.notFound('Interest')
       if (interest.playerId !== player.id) throw Errors.forbidden()
-      if (interest.razorpayOrderId !== razorpayOrderId) {
-        throw new AppError('ORDER_MISMATCH', 'Razorpay order does not match this interest', 400)
+      if (interest.razorpayOrderId !== cashfreeOrderId) {
+        throw new AppError('ORDER_MISMATCH', 'Cashfree order does not match this interest', 400)
       }
 
       // Idempotency: payment may be re-verified by client/webhook.
@@ -5083,7 +5077,7 @@ export class MatchmakingService {
       }
 
       if (interest.status !== 'locked') {
-        // Lock might have expired between Razorpay capture and verify-call.
+        // Lock might have expired between Cashfree capture and verify-call.
         // Try to reclaim if the lobby is still searching and unlocked.
         if (interest.status !== 'interested') {
           throw new AppError('LOCK_LOST', 'Lock expired before payment confirmed', 409)
@@ -5093,10 +5087,10 @@ export class MatchmakingService {
       const lobby = interest.lobby
       if (lobby.status === 'matched') {
         // Someone else won this slot meanwhile. Mark this interest lost
-        // and signal the client (caller will need to refund Razorpay capture).
+        // and signal the client (caller will need to refund Cashfree capture).
         await tx.matchmakingInterest.update({
           where: { id: interest.id },
-          data: { status: 'lost', razorpayPaymentId, paidAt: new Date() },
+          data: { status: 'lost', razorpayPaymentId: cashfreePaymentId, paidAt: new Date() },
         })
         throw new AppError('SLOT_TAKEN', 'Slot was taken by another team — payment will be refunded', 409)
       }
@@ -5169,7 +5163,7 @@ export class MatchmakingService {
         where: { id: interest.id },
         data: {
           status: 'won',
-          razorpayPaymentId,
+          razorpayPaymentId: cashfreePaymentId,
           paidAt: new Date(),
         },
       })

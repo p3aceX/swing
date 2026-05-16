@@ -572,6 +572,16 @@ export async function playerRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: await svc.getReportCards(user.userId) })
   })
 
+  app.get('/my-schedule', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    return reply.send({ success: true, data: await svc.getMySchedule(user.userId) })
+  })
+
+  app.get('/my-announcements', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    return reply.send({ success: true, data: await svc.getMyAnnouncements(user.userId) })
+  })
+
   app.post('/drills/:id/log', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }

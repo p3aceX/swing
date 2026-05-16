@@ -278,7 +278,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
   })
 
   // Player-side free-confirm. Used when the match's confirmation fee is 0
-  // (test mode) so the opponent can finalize without Razorpay.
+  // (test mode) so the opponent can finalize without Cashfree.
   app.post('/matches/:matchId/confirm-free', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { matchId } = request.params as { matchId: string }
@@ -349,7 +349,7 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data })
   })
 
-  // B2: Acquire 120s payment lock + create Razorpay order. LOCK_TAKEN if
+  // B2: Acquire 120s payment lock + create Cashfree order. LOCK_TAKEN if
   // another team already holds the slot.
   app.post('/interests/:interestId/lock-and-pay', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
@@ -358,21 +358,19 @@ export async function matchmakingRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data })
   })
 
-  // B3: Verify Razorpay payment → promote winner, create match, mark losers.
+  // B3: Verify Cashfree payment → promote winner, create match, mark losers.
   app.post('/interests/:interestId/verify-payment', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { interestId } = request.params as { interestId: string }
     const body = z.object({
-      razorpayOrderId: z.string().min(1),
-      razorpayPaymentId: z.string().min(1),
-      razorpaySignature: z.string().min(1),
+      cashfreeOrderId: z.string().min(1),
+      cashfreePaymentId: z.string().min(1),
     }).parse(request.body)
     const data = await svc.verifyInterestPayment(
       user.userId,
       interestId,
-      body.razorpayOrderId,
-      body.razorpayPaymentId,
-      body.razorpaySignature,
+      body.cashfreeOrderId,
+      body.cashfreePaymentId,
     )
     return reply.send({ success: true, data })
   })

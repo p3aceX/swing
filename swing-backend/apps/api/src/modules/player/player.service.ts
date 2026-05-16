@@ -3022,4 +3022,85 @@ export class PlayerService {
       profileUrl: `https://swing-cricket.com/player/${row.playerId}`,
     }));
   }
+
+  private static readonly dayLabelsShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+  async getMySchedule(userId: string) {
+    const profile = await prisma.playerProfile.findUnique({ where: { userId } })
+    if (!profile) return { batchName: null, schedules: [], upcomingSessions: [] }
+
+    const enrollment = await prisma.academyEnrollment.findFirst({
+      where: { playerProfileId: profile.id, isActive: true },
+      include: {
+        batch: {
+          include: {
+            schedules: { where: { isActive: true }, orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }] },
+          },
+        },
+      },
+    })
+
+    if (!enrollment?.batch || !enrollment.batchId) {
+      return { batchName: null, schedules: [], upcomingSessions: [] }
+    }
+
+    const now = new Date()
+    const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+
+    const sessions = await prisma.practiceSession.findMany({
+      where: { batchId: enrollment.batchId, scheduledAt: { gte: now, lte: in30Days } },
+      orderBy: { scheduledAt: 'asc' },
+      select: { id: true, scheduledAt: true, durationMins: true, status: true, isCancelled: true, cancelReason: true, locationName: true, sessionType: true },
+      take: 20,
+    })
+
+    return {
+      batchName: enrollment.batch.name,
+      schedules: enrollment.batch.schedules.map((s) => ({
+        id: s.id,
+        day: PlayerService.dayLabelsShort[s.dayOfWeek] ?? `Day ${s.dayOfWeek}`,
+        dayOfWeek: s.dayOfWeek,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        groundNote: s.groundNote ?? null,
+      })),
+      upcomingSessions: sessions.map((s) => ({
+        id: s.id,
+        scheduledAt: s.scheduledAt,
+        durationMins: s.durationMins ?? 90,
+        isCancelled: s.isCancelled,
+        cancelReason: s.cancelReason ?? null,
+        locationName: s.locationName ?? null,
+        sessionType: s.sessionType ?? 'PRACTICE',
+      })),
+    }
+  }
+
+  async getMyAnnouncements(userId: string) {
+    const profile = await prisma.playerProfile.findUnique({ where: { userId } })
+    if (!profile) return { announcements: [] }
+
+    const enrollment = await prisma.academyEnrollment.findFirst({
+      where: { playerProfileId: profile.id, isActive: true },
+      select: { academyId: true },
+    })
+
+    if (!enrollment) return { announcements: [] }
+
+    const items = await prisma.announcement.findMany({
+      where: { academyId: enrollment.academyId },
+      orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
+      take: 30,
+    })
+
+    return {
+      announcements: items.map((a) => ({
+        id: a.id,
+        title: a.title,
+        body: a.body,
+        isPinned: a.isPinned,
+        createdAt: a.createdAt,
+      })),
+    }
+  }
 }
