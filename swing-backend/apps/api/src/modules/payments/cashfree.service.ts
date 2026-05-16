@@ -101,11 +101,21 @@ export class CashfreeService {
     bankAccount: string
     ifsc: string
   }): Promise<{ account_status: 'VALID' | 'INVALID'; name_at_bank?: string }> {
-    return this.makeRequest('POST', '/verification/bank-account/sync', {
-      bank_account: opts.bankAccount,
-      ifsc: opts.ifsc,
-      name: opts.name,
-      phone: opts.phone,
+    // Verification Suite has no sandbox — always hits production
+    const res = await fetch('https://api.cashfree.com/verification/bank-account/sync', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        bank_account: opts.bankAccount,
+        ifsc: opts.ifsc,
+        name: opts.name,
+        phone: opts.phone,
+      }),
     })
+    const text = await res.text()
+    if (!res.ok) {
+      throw new AppError('CASHFREE_API_ERROR', `Cashfree bank verification failed: ${text}`, 502)
+    }
+    return JSON.parse(text)
   }
 }
