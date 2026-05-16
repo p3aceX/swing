@@ -37,11 +37,6 @@ export async function bookingRoutes(app: FastifyInstance) {
       totalAmountPaise: z.number().int().min(0).optional(),
       advancePaise: z.number().int().min(0).optional(),
       notes: z.string().optional(),
-      // PhonePe payment fields
-      holdId: z.string().optional(),
-      phonePeOrderId: z.string().optional(),
-      merchantOrderId: z.string().optional(),
-      paymentGateway: z.string().optional(),
     }).parse(request.body)
 
     const resolved = {
@@ -52,9 +47,6 @@ export async function bookingRoutes(app: FastifyInstance) {
       totalPricePaise: body.totalPricePaise ?? body.totalAmountPaise ?? 0,
       advancePaise: body.advancePaise,
       notes: body.notes,
-      holdId: body.holdId,
-      phonePeOrderId: body.phonePeOrderId ?? body.merchantOrderId,
-      paymentGateway: body.paymentGateway,
     }
 
     if (!resolved.arenaUnitId) {
@@ -67,30 +59,33 @@ export async function bookingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data: await svc.createBooking(user.userId, resolved) })
   })
 
-  // ─── Player: create Razorpay order for a booking ────────────────────────
+  // ─── Owner: send payment link for a booking ─────────────────────────────
+  app.post('/:id/payment-link', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id } = request.params as { id: string }
+    return reply.code(201).send({ success: true, data: await svc.createBookingPaymentLink(user.userId, id) })
+  })
+
+  // ─── Player: create Cashfree order for a booking ────────────────────────
   app.post('/:id/payment-order', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
     return reply.code(201).send({ success: true, data: await svc.createPaymentOrder(user.userId, id) })
   })
 
-  // ─── Player: verify Razorpay payment ────────────────────────────────────
+  // ─── Player: verify Cashfree payment ────────────────────────────────────
   app.post('/verify-payment', auth, async (request, reply) => {
     const body = z.object({
-      razorpayOrderId: z.string(),
-      razorpayPaymentId: z.string(),
-      razorpaySignature: z.string(),
+      orderId: z.string(),
+      paymentId: z.string(),
     }).parse(request.body)
     return reply.send({ success: true, data: await svc.verifyPayment(body) })
   })
 
-  // ─── Razorpay webhook (no auth — Razorpay signs it) ─────────────────────
-  app.post('/webhook/razorpay', async (request, reply) => {
-    const signature = request.headers['x-razorpay-signature'] as string
-    if (!signature) {
-      return reply.code(400).send({ success: false, error: { code: 'MISSING_SIGNATURE', message: 'Webhook signature missing' } })
-    }
-    return reply.send(await svc.handleWebhook(request.body, signature))
+  // ─── Cashfree webhook (no auth — Cashfree signs it) ─────────────────────
+  app.post('/webhook/cashfree', async (request, reply) => {
+    const signature = request.headers['x-webhook-signature'] as string
+    return reply.send(await svc.handleWebhook(request.body, signature ?? ''))
   })
 
   // ─── Player: list own bookings ───────────────────────────────────────────

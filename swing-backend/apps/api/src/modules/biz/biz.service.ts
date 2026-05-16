@@ -1,5 +1,6 @@
 import { prisma, UserRole } from '@swing/db'
 import { AppError, Errors } from '../../lib/errors'
+import { CashfreeService } from '../payments/cashfree.service'
 
 const BIZ_PROFILE_ROLES: UserRole[] = [UserRole.COACH, UserRole.ACADEMY_OWNER, UserRole.ARENA_OWNER]
 
@@ -84,11 +85,39 @@ export class BizService {
 
   async upsertBusinessDetails(userId: string, data: any) {
     await this.ensureBusinessOwnerRole(userId)
-    return prisma.businessAccount.upsert({
+    const ba = await prisma.businessAccount.upsert({
       where: { userId },
       update: { ...data, onboardingComplete: true },
       create: { userId, ...data, onboardingComplete: true },
     })
+
+    // Validate bank account via Cashfree whenever PAN + bank details are present
+    if (ba.panNumber && ba.accountNumber && ba.ifscCode) {
+      try {
+        const cfSvc = new CashfreeService()
+        const phone = (ba.phone || data.phone || '9000000000').replace(/\D/g, '').slice(-10)
+        const result = await cfSvc.validateBankAccount({
+          name: ba.beneficiaryName || ba.contactName || ba.businessName,
+          phone,
+          bankAccount: ba.accountNumber,
+          ifsc: ba.ifscCode,
+        })
+        if (result.account_status === 'VALID') {
+          const updateFields: Record<string, any> = { routeEnabled: true }
+          if (result.name_at_bank) updateFields.beneficiaryName = result.name_at_bank
+          await prisma.businessAccount.update({ where: { id: ba.id }, data: updateFields })
+          return { ...ba, routeEnabled: true, ...(result.name_at_bank ? { beneficiaryName: result.name_at_bank } : {}) }
+        } else {
+          await prisma.businessAccount.update({ where: { id: ba.id }, data: { routeEnabled: false } })
+          throw new AppError('BANK_VALIDATION_FAILED', 'Bank account could not be verified. Please check the details.', 400)
+        }
+      } catch (err) {
+        if (err instanceof AppError) throw err
+        console.error('[Cashfree] Bank validation failed (non-fatal):', err)
+      }
+    }
+
+    return ba
   }
 
   async createAcademyProfile(userId: string, data: any) {

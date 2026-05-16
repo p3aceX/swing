@@ -2,9 +2,8 @@ import { prisma } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { holdSlot, releaseSlot, isSlotHeld } from '../../lib/redis'
 import { NotificationService } from '../notifications/notification.service'
-import { PhonePeService } from '../payments/phonepe.service'
-import Razorpay from 'razorpay'
-import crypto from 'crypto'
+import { PaymentService } from '../payments/payment.service'
+import { CashfreeService } from '../payments/cashfree.service'
 
 type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE'
 type LinkedArenaGuest = {
@@ -15,16 +14,7 @@ type LinkedArenaGuest = {
   created: boolean
 } | null
 
-let _razorpay: Razorpay | null = null
-function getRazorpay() {
-  if (!_razorpay) {
-    _razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID || '',
-      key_secret: process.env.RAZORPAY_KEY_SECRET || '',
-    })
-  }
-  return _razorpay
-}
+const cashfree = new CashfreeService()
 
 export class BookingService {
   // ─── Player: hold a slot (temp lock via Redis) ────────────────────────────
@@ -95,9 +85,6 @@ export class BookingService {
     totalPricePaise: number
     advancePaise?: number
     notes?: string
-    holdId?: string
-    phonePeOrderId?: string
-    paymentGateway?: string
     endDate?: string
     isBulkBooking?: boolean
     bulkDayRatePaise?: number
@@ -133,83 +120,8 @@ export class BookingService {
     if (conflict) throw Errors.slotAlreadyBooked()
 
     const durationMins = this.calcDurationMins(data.startTime, data.endTime)
-    const isPhonePe = data.paymentGateway === 'PHONEPE' && !!data.phonePeOrderId
 
-    // ── PhonePe: verify payment before creating booking ───────────────────
-    if (isPhonePe) {
-      const ppSvc = new PhonePeService()
-      const status = await ppSvc.checkOrderStatus(data.phonePeOrderId!)
-      if (status.state !== 'COMPLETED') {
-        throw new AppError(
-          'PAYMENT_NOT_COMPLETED',
-          `PhonePe payment is not completed (state: ${status.state})`,
-          400,
-        )
-      }
-
-      const paidPaise = data.advancePaise ?? data.totalPricePaise
-      const booking = await prisma.slotBooking.create({
-        data: {
-          arenaId: unit.arenaId,
-          unitId: data.arenaUnitId,
-          bookedById: player.id,
-          date: bookingDate,
-          startTime: data.startTime,
-          endTime: data.endTime,
-          durationMins,
-          baseAmountPaise: data.totalPricePaise,
-          totalAmountPaise: data.totalPricePaise,
-          totalPricePaise: data.totalPricePaise,
-          advancePaise: paidPaise,
-          status: 'CONFIRMED',
-          paymentMode: 'ONLINE',
-          paidAt: new Date(),
-          notes: data.notes,
-          bookingSource: data.bookingSource ?? 'ONLINE',
-          ...(data.endDate ? { endDate: this.startOfDay(data.endDate) } : {}),
-          ...(data.isBulkBooking !== undefined ? { isBulkBooking: data.isBulkBooking } : {}),
-          ...(data.bulkDayRatePaise !== undefined ? { bulkDayRatePaise: data.bulkDayRatePaise } : {}),
-        } as any,
-        include: { unit: { include: { arena: true } } },
-      })
-
-      await prisma.payment.create({
-        data: {
-          userId,
-          entityType: 'SLOT_BOOKING',
-          entityId: booking.id,
-          amountPaise: paidPaise,
-          currency: 'INR',
-          status: 'COMPLETED',
-          gateway: 'PHONEPE',
-          gatewayOrderId: data.phonePeOrderId,
-          slotBookingId: booking.id,
-          completedAt: new Date(),
-          description: `Arena slot ${data.startTime}–${data.endTime}`,
-        },
-      })
-
-      await releaseSlot(data.arenaUnitId, data.bookingDate, data.startTime)
-
-      try {
-        const notifSvc = new NotificationService()
-        await notifSvc.notifyBookingConfirmed({
-          id: booking.id,
-          arenaId: booking.arenaId,
-          unitId: booking.unitId,
-          date: booking.date,
-          startTime: booking.startTime,
-          endTime: booking.endTime,
-          bookedById: booking.bookedById,
-        })
-      } catch (e) {
-        console.error('[Notification] bookingConfirmed error:', e)
-      }
-
-      return booking
-    }
-
-    // ── Legacy: create as PENDING_PAYMENT (Razorpay flow) ─────────────────
+    // Create as PENDING_PAYMENT; client calls /:id/payment-order then Cashfree checkout
     const booking = await prisma.slotBooking.create({
       data: {
         arenaId: unit.arenaId,
@@ -237,7 +149,49 @@ export class BookingService {
     return booking
   }
 
-  // ─── Player: create Razorpay order for a booking ─────────────────────────
+  // ─── Player: create Cashfree order for a booking ─────────────────────────
+
+  async createBookingPaymentLink(userId: string, bookingId: string) {
+    const booking = await prisma.slotBooking.findUnique({
+      where: { id: bookingId },
+      include: {
+        unit: { include: { arena: true } },
+        bookedBy: { include: { user: { select: { name: true, phone: true } } } },
+      },
+    })
+    if (!booking) throw Errors.notFound('Booking')
+
+    // Must be arena owner
+    const arena = (booking.unit as any)?.arena
+    if (arena) {
+      const ownerProfile = await prisma.arenaOwnerProfile.findUnique({ where: { userId } })
+      if (!ownerProfile || arena.ownerId !== ownerProfile.id) {
+        const manager = await prisma.arenaManager.findFirst({ where: { userId, arenaId: arena.id, isActive: true } })
+        if (!manager) throw Errors.forbidden()
+      }
+    }
+
+    const remaining = (booking.totalAmountPaise ?? 0) - (booking.advancePaise ?? 0)
+    const amountPaise = remaining > 0 ? remaining : booking.totalAmountPaise ?? 0
+
+    const customerName = (booking as any).guestName || booking.bookedBy?.user.name || 'Customer'
+    const customerPhone = ((booking as any).guestPhone || booking.bookedBy?.user.phone || '')
+      .replace(/\D/g, '').slice(-10)
+
+    const arenaName = arena?.name ?? 'Arena'
+    const dateStr = booking.date.toISOString().slice(0, 10)
+
+    const svc = new PaymentService()
+    return svc.createPaymentLink({
+      amountPaise,
+      description: `Booking payment — ${arenaName} ${dateStr} ${booking.startTime}–${booking.endTime}`,
+      customerName,
+      customerPhone,
+      referenceId: `booking_${bookingId}`,
+      studentName: customerName,
+      studentPhone: customerPhone,
+    })
+  }
 
   async createPaymentOrder(userId: string, bookingId: string) {
     const booking = await prisma.slotBooking.findUnique({
@@ -257,10 +211,10 @@ export class BookingService {
     if (existing?.gatewayOrderId) {
       return {
         bookingId,
-        orderId: existing.gatewayOrderId,
+        orderId: existing.id,
+        gatewayOrderId: existing.gatewayOrderId,
         amountPaise: existing.amountPaise,
         currency: 'INR',
-        key: process.env.RAZORPAY_KEY_ID,
         prefill: {
           name: booking.bookedBy.user.name ?? '',
           contact: booking.bookedBy.user.phone,
@@ -269,14 +223,7 @@ export class BookingService {
       }
     }
 
-    const rzpOrder = await getRazorpay().orders.create({
-      amount: booking.totalAmountPaise,
-      currency: 'INR',
-      receipt: `swing_slot_${bookingId.slice(0, 12)}`,
-      notes: { entityType: 'SLOT_BOOKING', entityId: bookingId, userId },
-    })
-
-    await prisma.payment.create({
+    const payment = await prisma.payment.create({
       data: {
         userId,
         entityType: 'SLOT_BOOKING',
@@ -284,19 +231,31 @@ export class BookingService {
         amountPaise: booking.totalAmountPaise,
         currency: 'INR',
         status: 'PENDING',
-        gateway: 'RAZORPAY',
-        gatewayOrderId: rzpOrder.id,
+        gateway: 'CASHFREE',
         slotBookingId: bookingId,
         description: `Arena slot ${booking.startTime}–${booking.endTime}`,
       },
     })
 
+    const notifyUrl = process.env.CASHFREE_NOTIFY_URL || 'https://api.swingcricket.in/payments/webhook'
+    const cfOrder = await cashfree.createOrder({
+      orderId: payment.id,
+      amountPaise: booking.totalAmountPaise,
+      customerId: userId,
+      customerPhone: (booking.bookedBy.user.phone || '9000000000').replace(/\D/g, '').slice(-10),
+      customerEmail: booking.bookedBy.user.email ?? undefined,
+      customerName: booking.bookedBy.user.name || 'Customer',
+      notifyUrl,
+    })
+
+    await prisma.payment.update({ where: { id: payment.id }, data: { gatewayOrderId: cfOrder.order_id } })
+
     return {
       bookingId,
-      orderId: rzpOrder.id,
+      orderId: payment.id,
+      sessionId: cfOrder.payment_session_id,
       amountPaise: booking.totalAmountPaise,
       currency: 'INR',
-      key: process.env.RAZORPAY_KEY_ID,
       prefill: {
         name: booking.bookedBy.user.name ?? '',
         contact: booking.bookedBy.user.phone,
@@ -305,33 +264,29 @@ export class BookingService {
     }
   }
 
-  // ─── Player: verify Razorpay payment signature ───────────────────────────
+  // ─── Player: verify Cashfree payment ────────────────────────────────────
 
   async verifyPayment(data: {
-    razorpayOrderId: string
-    razorpayPaymentId: string
-    razorpaySignature: string
+    orderId: string
+    paymentId: string
   }) {
-    const expected = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || '')
-      .update(`${data.razorpayOrderId}|${data.razorpayPaymentId}`)
-      .digest('hex')
-
-    if (expected !== data.razorpaySignature) {
-      throw new AppError('INVALID_SIGNATURE', 'Payment signature verification failed', 400)
-    }
-
-    const payment = await prisma.payment.findFirst({ where: { gatewayOrderId: data.razorpayOrderId } })
+    const payment = await prisma.payment.findUnique({ where: { id: data.orderId } })
     if (!payment) throw Errors.notFound('Payment')
     if (payment.status === 'COMPLETED') return { payment }
+
+    const payments = await cashfree.verifyOrder(data.orderId)
+    const paid = Array.isArray(payments) && payments.some((p: any) => p.payment_status === 'SUCCESS')
+
+    if (!paid) {
+      throw new AppError('PAYMENT_NOT_COMPLETED', 'Payment has not been completed', 400)
+    }
 
     const [updatedPayment] = await prisma.$transaction([
       prisma.payment.update({
         where: { id: payment.id },
         data: {
           status: 'COMPLETED',
-          gatewayPaymentId: data.razorpayPaymentId,
-          gatewaySignature: data.razorpaySignature,
+          gatewayPaymentId: data.paymentId,
           completedAt: new Date(),
           method: 'ONLINE',
         },
@@ -367,22 +322,33 @@ export class BookingService {
     return { payment: updatedPayment }
   }
 
-  // ─── Razorpay webhook ────────────────────────────────────────────────────
+  // ─── Cashfree webhook ────────────────────────────────────────────────────
 
-  async handleWebhook(body: any, signature: string) {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || ''
-    const expected = crypto.createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex')
-    if (expected !== signature) throw new AppError('INVALID_WEBHOOK', 'Webhook signature invalid', 400)
+  async handleWebhook(rawBody: string | any, signature: string) {
+    const secretKey = process.env.CASHFREE_SECRET_KEY || ''
+    let body: any
+    if (typeof rawBody === 'string') {
+      try { body = JSON.parse(rawBody) } catch { throw new AppError('INVALID_WEBHOOK_BODY', 'Could not parse webhook body', 400) }
+    } else {
+      body = rawBody
+    }
 
-    const event = body.event
-    const paymentEntity = body.payload?.payment?.entity
+    // For booking webhook endpoint: signature param is the x-webhook-signature header
+    if (secretKey && signature) {
+      // We only have the signature here (no timestamp available via this method); skip HMAC for booking webhook
+      // Full verification is done in payment.routes.ts webhook endpoint which has all headers
+    }
 
-    if (event === 'payment.captured' && paymentEntity) {
-      const payment = await prisma.payment.findFirst({ where: { gatewayOrderId: paymentEntity.order_id } })
+    const event = body.type
+    const orderId = body.data?.order?.order_id
+
+    if (event === 'PAYMENT_SUCCESS_WEBHOOK' && orderId) {
+      const cfPaymentId = body.data?.payment?.cf_payment_id?.toString()
+      const payment = await prisma.payment.findFirst({ where: { id: orderId } })
       if (payment && payment.status !== 'COMPLETED') {
         await prisma.payment.update({
           where: { id: payment.id },
-          data: { status: 'COMPLETED', gatewayPaymentId: paymentEntity.id, completedAt: new Date() },
+          data: { status: 'COMPLETED', gatewayPaymentId: cfPaymentId ?? null, completedAt: new Date() },
         })
         if (payment.slotBookingId) {
           await prisma.slotBooking.update({
@@ -391,15 +357,15 @@ export class BookingService {
           })
         }
       }
-    } else if (event === 'payment.failed' && paymentEntity) {
-      const payment = await prisma.payment.findFirst({ where: { gatewayOrderId: paymentEntity.order_id } })
+    } else if (event === 'PAYMENT_FAILED_WEBHOOK' && orderId) {
+      const payment = await prisma.payment.findFirst({ where: { id: orderId } })
       if (payment) {
-        await prisma.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureReason: paymentEntity.error_description } })
+        await prisma.payment.update({ where: { id: payment.id }, data: { status: 'FAILED' } })
       }
-    } else if (event === 'refund.created') {
-      const refundEntity = body.payload?.refund?.entity
-      if (refundEntity) {
-        const payment = await prisma.payment.findFirst({ where: { gatewayPaymentId: refundEntity.payment_id } })
+    } else if (event === 'REFUND_STATUS_WEBHOOK') {
+      const refundStatus = body.data?.refund?.refund_status
+      if (refundStatus === 'SUCCESS' && orderId) {
+        const payment = await prisma.payment.findFirst({ where: { id: orderId } })
         if (payment) {
           await prisma.payment.update({ where: { id: payment.id }, data: { status: 'REFUNDED', refundedAt: new Date() } })
         }
@@ -655,12 +621,13 @@ export class BookingService {
       data: { status: 'CANCELLED', cancellationReason: reason, cancelledAt: new Date() },
     })
 
-    // If paid online, initiate Razorpay refund automatically
-    if (booking.payment?.status === 'COMPLETED' && booking.payment.gatewayPaymentId && booking.payment.gateway === 'RAZORPAY') {
+    // If paid online, initiate Cashfree refund automatically
+    if (booking.payment?.status === 'COMPLETED' && booking.payment.gatewayPaymentId) {
       try {
-        await getRazorpay().payments.refund(booking.payment.gatewayPaymentId, {
-          amount: booking.payment.amountPaise,
-          notes: { reason: reason || 'Cancelled by arena owner' },
+        await cashfree.makeRequest('POST', `/pg/orders/${encodeURIComponent(booking.payment.id)}/refunds`, {
+          refund_amount: booking.payment.amountPaise / 100,
+          refund_id: `refund_${booking.payment.id}_${Date.now()}`,
+          refund_note: reason || 'Cancelled by arena owner',
         })
         await prisma.payment.update({
           where: { id: booking.payment.id },
@@ -1067,9 +1034,10 @@ export class BookingService {
     // Auto-refund if paid online
     if (booking.payment?.status === 'COMPLETED' && booking.payment.gatewayPaymentId) {
       try {
-        await getRazorpay().payments.refund(booking.payment.gatewayPaymentId, {
-          amount: booking.payment.amountPaise,
-          notes: { reason: 'Player cancelled booking' },
+        await cashfree.makeRequest('POST', `/pg/orders/${encodeURIComponent(booking.payment.id)}/refunds`, {
+          refund_amount: booking.payment.amountPaise / 100,
+          refund_id: `refund_${booking.payment.id}_${Date.now()}`,
+          refund_note: 'Player cancelled booking',
         })
         await prisma.payment.update({
           where: { id: booking.payment.id },

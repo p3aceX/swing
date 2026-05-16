@@ -1,6 +1,7 @@
 import { prisma, UserRole, PaymentStatus } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { getPaginationParams, buildPaginationMeta, normalizePhone } from '@swing/utils'
+import { PaymentService } from '../payments/payment.service'
 
 const PLAN_STUDENT_LIMITS: Record<string, number> = {
   FREE: 10,
@@ -386,8 +387,17 @@ export class AcademyService {
         feeAmountPaise: extra?.feeAmountPaise,
         feeFrequency: extra?.feeFrequency || 'MONTHLY',
         registrationNo: regNo,
+        parentName: extra?.parentName,
+        parentPhone: extra?.parentPhone,
       },
-      update: { isActive: true, batchId, isTrial: isTrial || false },
+      update: {
+        isActive: true, batchId, isTrial: isTrial || false,
+        enrollmentStatus: isTrial ? 'TRIAL' : 'ACTIVE',
+        ...(extra?.feeAmountPaise !== undefined ? { feeAmountPaise: extra.feeAmountPaise } : {}),
+        ...(extra?.feeFrequency !== undefined ? { feeFrequency: extra.feeFrequency } : {}),
+        ...(extra?.parentName !== undefined ? { parentName: extra.parentName } : {}),
+        ...(extra?.parentPhone !== undefined ? { parentPhone: extra.parentPhone } : {}),
+      },
     })
     await prisma.academy.update({ where: { id: academyId }, data: { totalStudents: { increment: 1 } } })
     // Record registration fee if provided
@@ -455,6 +465,8 @@ export class AcademyService {
     }
     if (data.isTrial !== undefined) enrollUpdate.isTrial = data.isTrial
     if (data.notes !== undefined) enrollUpdate.notes = data.notes
+    if (data.parentName !== undefined) enrollUpdate.parentName = data.parentName
+    if (data.parentPhone !== undefined) enrollUpdate.parentPhone = data.parentPhone
     if (Object.keys(enrollUpdate).length > 0) {
       await prisma.academyEnrollment.update({ where: { id: enrollmentId }, data: enrollUpdate })
     }
@@ -759,6 +771,8 @@ export class AcademyService {
       latestPaymentId: e.feePayments[0]?.id ?? null,
       studentName: e.playerProfile.user.name ?? 'Unknown',
       studentPhone: e.playerProfile.user.phone,
+      parentName: e.parentName,
+      parentPhone: e.parentPhone,
       batchName: e.batch?.name ?? 'No batch',
       status: e.feeStatus,
       amount: e.feeAmountPaise ?? 0,
@@ -774,6 +788,40 @@ export class AcademyService {
       })),
     }))
     return { data, meta: buildPaginationMeta(total, page, limit) }
+  }
+
+  async createEnrollmentPaymentLink(academyId: string, userId: string, enrollmentId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const enrollment = await prisma.academyEnrollment.findUnique({
+      where: { id: enrollmentId },
+      include: {
+        academy: true,
+        playerProfile: { include: { user: { select: { name: true, phone: true } } } },
+        batch: { select: { name: true } },
+      },
+    })
+    if (!enrollment) throw Errors.notFound('Enrollment')
+
+    const amountPaise = enrollment.feeAmountPaise ?? 0
+    if (amountPaise === 0) throw new AppError('NO_FEE', 'No fee amount set for this enrollment', 400)
+
+    const svc = new PaymentService()
+    const studentName = enrollment.playerProfile.user.name ?? 'Student'
+    const studentPhone = enrollment.playerProfile.user.phone ?? ''
+    const batchName = enrollment.batch?.name ?? ''
+    const academyName = enrollment.academy.name
+
+    return svc.createPaymentLink({
+      amountPaise,
+      description: `Fee payment — ${academyName}${batchName ? ` (${batchName})` : ''}`,
+      customerName: enrollment.parentName || studentName,
+      customerPhone: (enrollment.parentPhone || studentPhone).replace(/\D/g, '').slice(-10),
+      referenceId: `enroll_${enrollmentId}`,
+      studentName,
+      studentPhone: studentPhone.replace(/\D/g, '').slice(-10),
+      parentName: enrollment.parentName,
+      parentPhone: enrollment.parentPhone?.replace(/\D/g, '').slice(-10),
+    })
   }
 
   async recordFeePayment(academyId: string, userId: string, data: {

@@ -133,6 +133,9 @@ export async function academyRoutes(app: FastifyInstance) {
       emergencyContactPhone: z.string().optional(),
       dateOfBirth: z.string().optional(),
       city: z.string().optional(),
+      parentName: z.string().optional(),
+      parentPhone: z.string().optional(),
+      parentRelation: z.string().optional(),
     }).parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.enrollStudent(id, user.userId, body.phone, body.name, batchId, body.isTrial, body) })
   })
@@ -154,8 +157,17 @@ export async function academyRoutes(app: FastifyInstance) {
       emergencyContactPhone: z.string().nullish(),
       dateOfBirth: z.string().nullish(),
       city: z.string().nullish(),
+      parentName: z.string().nullish(),
+      parentPhone: z.string().nullish(),
+      parentRelation: z.string().nullish(),
     }).parse(request.body)
     return reply.send({ success: true, data: await svc.updateStudent(id, user.userId, enrollmentId, body) })
+  })
+
+  app.post('/:id/enrollments/:enrollmentId/payment-link', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, enrollmentId } = request.params as { id: string; enrollmentId: string }
+    return reply.code(201).send({ success: true, data: await svc.createEnrollmentPaymentLink(id, user.userId, enrollmentId) })
   })
 
   app.get('/:id/students/:enrollmentId', auth, async (request, reply) => {

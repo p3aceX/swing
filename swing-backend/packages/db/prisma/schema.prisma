@@ -515,6 +515,9 @@ model BusinessAccount {
   ifscCode           String?
   upiId              String?
   onboardingComplete Boolean  @default(false)
+  razorpayAccountId  String?
+  razorpayFundAccountId String?
+  routeEnabled       Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
