@@ -312,12 +312,33 @@ class HostMatchDetailRepository {
         scoreSummary = parts.join('\n');
       }
 
-      final winner = _orNull(_str(raw['winner']));
+      // `raw['winner']` is the server's winnerId — for matches completed
+      // via the new End-Match flow it's the enum letter ('A' / 'B' / 'TIE'
+      // / 'DRAW' / 'ABANDONED'), not the team name. Map letters back to
+      // the team name so the card reads "Mumbai Tigers won by 10 wickets"
+      // instead of "B won by 10 wickets". Older matches where the column
+      // was populated with the actual team name pass through unchanged.
+      final rawWinner = _orNull(_str(raw['winner']));
+      final teamAName = _str(_map(raw['teamA'])['name']);
+      final teamBName = _str(_map(raw['teamB'])['name']);
+      String? winner = rawWinner;
+      if (rawWinner == 'A' && teamAName.isNotEmpty) {
+        winner = teamAName;
+      } else if (rawWinner == 'B' && teamBName.isNotEmpty) {
+        winner = teamBName;
+      } else if (rawWinner == 'TIE' || rawWinner == 'DRAW') {
+        winner = 'Match'; // → "Match tied" / "Match drawn" below
+      } else if (rawWinner == 'ABANDONED') {
+        winner = null; // suppress the "won by" line entirely
+      }
+
       final margin = _orNull(_str(raw['winMargin']));
       MatchResult? result;
       if (match.lifecycle == MatchLifecycle.past) {
         if (winner == null) {
           result = MatchResult.unknown;
+        } else if (rawWinner == 'TIE' || rawWinner == 'DRAW') {
+          result = MatchResult.draw;
         } else {
           final w = winner.trim().toLowerCase();
           final p = match.playerTeamName.trim().toLowerCase();
@@ -326,8 +347,15 @@ class HostMatchDetailRepository {
       }
 
       if (winner != null && match.lifecycle == MatchLifecycle.past) {
-        final resultLine =
-            margin != null ? '$winner won by $margin' : '$winner won';
+        final String resultLine;
+        if (rawWinner == 'TIE') {
+          resultLine = 'Match tied';
+        } else if (rawWinner == 'DRAW') {
+          resultLine = 'Match drawn';
+        } else {
+          resultLine =
+              margin != null ? '$winner won by $margin' : '$winner won';
+        }
         scoreSummary = scoreSummary != null
             ? '$scoreSummary\n$resultLine'
             : resultLine;

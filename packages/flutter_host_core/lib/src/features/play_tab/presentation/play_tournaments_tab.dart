@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../theme/host_colors.dart';
 import '../controller/play_tab_controller.dart';
 import '../domain/play_tab_models.dart';
+import 'play_search_field.dart';
 import 'play_tab.dart';
 import 'tournament_card.dart';
 
@@ -120,38 +121,14 @@ class _PlayTournamentsTabState extends ConsumerState<PlayTournamentsTab>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Search ──────────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Container(
-            height: 44,
-            decoration: BoxDecoration(
-              color: context.cardBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: _onSearchChanged,
-              style: TextStyle(
-                  color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
-              decoration: InputDecoration(
-                hintText: _tabs.index == 1
-                    ? 'Search by name or city…'
-                    : 'Search tournaments…',
-                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
-                prefixIcon:
-                    Icon(Icons.search_rounded, color: context.fgSub, size: 18),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? GestureDetector(
-                        onTap: _closeSearch,
-                        child: Icon(Icons.close_rounded,
-                            color: context.fgSub, size: 18),
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
+        PlaySearchField(
+          controller: _searchCtrl,
+          value: _searchQuery,
+          hintText: _tabs.index == 1
+              ? 'Search by name or city'
+              : 'Search tournaments',
+          onChanged: _onSearchChanged,
+          onClear: _closeSearch,
         ),
 
         // ── Status filter chips ──────────────────────────────────────────────

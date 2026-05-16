@@ -31,6 +31,11 @@ class ArenaListing {
     this.arenaSlug,
     this.customSlug,
     this.isPublicPage = true,
+    this.brandColor,
+    this.logoUrl,
+    this.tagline,
+    this.coverPhotoIndex = 0,
+    this.micrositeLinks = const [],
   });
 
   final String id;
@@ -62,6 +67,11 @@ class ArenaListing {
   final String? arenaSlug;
   final String? customSlug;
   final bool isPublicPage;
+  final String? brandColor;
+  final String? logoUrl;
+  final String? tagline;
+  final int coverPhotoIndex;
+  final List<MicrositeLink> micrositeLinks;
 
   factory ArenaListing.fromJson(Map<String, dynamic> json) {
     final rawUnits = (json['units'] as List?) ?? const [];
@@ -123,8 +133,65 @@ class ArenaListing {
       arenaSlug: _stringOrNull(json['arenaSlug']),
       customSlug: _stringOrNull(json['customSlug']),
       isPublicPage: json['isPublicPage'] != false,
+      brandColor: _stringOrNull(json['brandColor']),
+      logoUrl: _stringOrNull(json['logoUrl']),
+      tagline: _stringOrNull(json['tagline']),
+      coverPhotoIndex: _intValue(json['coverPhotoIndex']),
+      micrositeLinks: ((json['micrositeLinks'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => MicrositeLink.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
     );
   }
+}
+
+class MicrositeLink {
+  const MicrositeLink({
+    required this.kind,
+    required this.label,
+    required this.url,
+    this.order = 0,
+    this.enabled = true,
+  });
+
+  final String kind;
+  final String label;
+  final String url;
+  final int order;
+  final bool enabled;
+
+  factory MicrositeLink.fromJson(Map<String, dynamic> json) {
+    return MicrositeLink(
+      kind: '${json['kind'] ?? 'custom'}',
+      label: '${json['label'] ?? ''}',
+      url: '${json['url'] ?? ''}',
+      order: _intValue(json['order']),
+      enabled: json['enabled'] != false,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'label': label,
+        'url': url,
+        'order': order,
+        'enabled': enabled,
+      };
+
+  MicrositeLink copyWith({
+    String? kind,
+    String? label,
+    String? url,
+    int? order,
+    bool? enabled,
+  }) =>
+      MicrositeLink(
+        kind: kind ?? this.kind,
+        label: label ?? this.label,
+        url: url ?? this.url,
+        order: order ?? this.order,
+        enabled: enabled ?? this.enabled,
+      );
 }
 
 class NetVariant {
@@ -803,25 +870,22 @@ class BookingPaymentOrder {
     required this.orderId,
     required this.amountPaise,
     required this.currency,
-    required this.key,
+    required this.sessionId,
   });
 
   final String paymentId;
   final String orderId;
   final int amountPaise;
   final String currency;
-  final String? key;
+  final String? sessionId;
 
   factory BookingPaymentOrder.fromJson(Map<String, dynamic> json) {
-    final payment = (json['payment'] as Map?)?.cast<String, dynamic>() ?? {};
-    final order =
-        (json['razorpayOrder'] as Map?)?.cast<String, dynamic>() ?? {};
     return BookingPaymentOrder(
-      paymentId: '${payment['id'] ?? json['paymentId'] ?? ''}',
-      orderId: '${order['id'] ?? json['orderId'] ?? ''}',
-      amountPaise: _intValue(order['amount'] ?? json['amountPaise']),
-      currency: '${order['currency'] ?? json['currency'] ?? 'INR'}'.trim(),
-      key: _stringOrNull(order['key']) ?? _stringOrNull(json['key']),
+      paymentId: '${json['paymentId'] ?? ''}',
+      orderId: '${json['orderId'] ?? ''}',
+      amountPaise: _intValue(json['amountPaise']),
+      currency: '${json['currency'] ?? 'INR'}'.trim(),
+      sessionId: json['sessionId'] as String?,
     );
   }
 }

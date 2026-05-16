@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud config *)",
+      "Bash(gcloud run *)",
+      "Bash(gcloud builds *)",
+      "Bash(awk '/^class _EditTournamentScreen/,0 {print NR\": \"$0}' lib/src/features/tournament_detail/presentation/tournament_viewer_screen.dart)",
+      "Bash(awk *)",
+      "Bash(awk 'NR>=5266 {print}' lib/src/features/tournament_detail/presentation/tournament_viewer_screen.dart)",
+      "Read(//tmp/**)",
+      "Bash(npx tsc *)",
+      "Read(//private/tmp/**)",
+      "Read(//private/var/folders/**)",
+      "Bash(curl -sS -o /tmp/scorer-probe.json -w \"HTTP %{http_code}\\\\n\" -X POST https://swing-backend-nbid5gga4q-el.a.run.app/public/scorer/auth -H \"content-type: application/json\" -d '{\"liveCode\":\"NOPE\",\"livePin\":\"000\"}')",
+      "Bash(curl -sS -o /dev/null -w \"auth=%{http_code} \" -X POST https://swing-backend-nbid5gga4q-el.a.run.app/public/scorer/auth -H \"content-type: application/json\" -d '{\"liveCode\":\"x\",\"livePin\":\"y\"}')",
+      "Bash(grep -n \"penaltyRuns > 0\\\\|+\\\\\\\\\\\\$.*pen\\\\|pen.*Container\" /Users/sangwanhq/dhandha/swing/packages/flutter_host_core/lib/src/features/scoring/presentation/scoring_screen.dart)",
+      "Bash(npx tsx *)",
+      "Bash(dart analyze *)"
+    ]
+  }
+}

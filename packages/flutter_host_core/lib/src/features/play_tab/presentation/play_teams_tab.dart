@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../theme/host_colors.dart';
 import '../../my_teams/controller/my_teams_controller.dart';
 import '../../my_teams/domain/my_teams_models.dart';
+import 'play_search_field.dart';
 import 'play_tab.dart';
 
 class PlayTeamsTab extends ConsumerStatefulWidget {
@@ -86,37 +87,15 @@ class _PlayTeamsTabState extends ConsumerState<PlayTeamsTab> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Search ────────────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Container(
-            height: 44,
-            decoration: BoxDecoration(
-              color: context.cardBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _searchQuery = v),
-              style: TextStyle(
-                  color: context.fg, fontSize: 14, fontWeight: FontWeight.w500),
-              decoration: InputDecoration(
-                hintText: 'Search teams…',
-                hintStyle: TextStyle(color: context.fgSub, fontSize: 14),
-                prefixIcon:
-                    Icon(Icons.search_rounded, color: context.fgSub, size: 18),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? GestureDetector(
-                        onTap: () => setState(
-                            () { _searchCtrl.clear(); _searchQuery = ''; }),
-                        child: Icon(Icons.close_rounded,
-                            color: context.fgSub, size: 18),
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
+        PlaySearchField(
+          controller: _searchCtrl,
+          value: _searchQuery,
+          hintText: 'Search teams',
+          onChanged: (v) => setState(() => _searchQuery = v),
+          onClear: () => setState(() {
+            _searchCtrl.clear();
+            _searchQuery = '';
+          }),
         ),
 
         // ── Role filter chips ──────────────────────────────────────────────────

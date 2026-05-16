@@ -644,7 +644,7 @@ class _HostedMatchItem extends ConsumerWidget {
     final hasToss = (match.tossWinner ?? '').isNotEmpty;
     // Scorer-only users always see the direct scoring CTA; managers see the full setup flow labels.
     final phaseColor = isLive
-        ? context.success
+        ? context.accent
         : canManage && !hasToss
             ? context.warn
             : context.sky;

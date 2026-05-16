@@ -26,13 +26,13 @@ class HostMatchCard extends StatelessWidget {
     final isPast = match.lifecycle == MatchLifecycle.past;
 
     final resultColor = switch (match.result) {
-      MatchResult.win => context.success,
+      MatchResult.win => context.accent,
       MatchResult.loss => context.danger,
       MatchResult.draw => context.warn,
       MatchResult.unknown => context.fgSub,
     };
 
-    final statusColor = isLive ? context.success : isPast ? resultColor : context.sky;
+    final statusColor = isLive ? context.accent : isPast ? resultColor : context.sky;
 
     final statusLabel = isUpcoming
         ? 'UPCOMING'
@@ -55,7 +55,7 @@ class HostMatchCard extends StatelessWidget {
 
     // Left-border accent color: pulsing green for live, sky for upcoming, faded for past
     final borderColor = isLive
-        ? context.success
+        ? context.accent
         : isUpcoming
             ? context.sky
             : context.stroke;
@@ -95,7 +95,7 @@ class HostMatchCard extends StatelessWidget {
                     width: 6,
                     height: 6,
                     decoration: BoxDecoration(
-                        color: context.success, shape: BoxShape.circle),
+                        color: context.accent, shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 5),
                 ],
@@ -299,7 +299,7 @@ class HostMatchCard extends StatelessWidget {
                 Text(
                   statusLine!,
                   style: TextStyle(
-                    color: isLive ? context.success : context.fgSub,
+                    color: isLive ? context.accent : context.fgSub,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
