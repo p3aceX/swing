@@ -91,8 +91,10 @@ export class BizService {
       create: { userId, ...data, onboardingComplete: true },
     })
 
-    // Validate bank account via Cashfree whenever PAN + bank details are present
-    if (ba.panNumber && ba.accountNumber && ba.ifscCode) {
+    // Validate bank account via Cashfree whenever bank details are present.
+    // Non-fatal: saves bank details regardless; routeEnabled only flips true on VALID.
+    // Requires live Cashfree keys — test keys will be skipped gracefully.
+    if (ba.accountNumber && ba.ifscCode) {
       try {
         const cfSvc = new CashfreeService()
         const phone = (ba.phone || data.phone || '9000000000').replace(/\D/g, '').slice(-10)
@@ -108,12 +110,10 @@ export class BizService {
           await prisma.businessAccount.update({ where: { id: ba.id }, data: updateFields })
           return { ...ba, routeEnabled: true, ...(result.name_at_bank ? { beneficiaryName: result.name_at_bank } : {}) }
         } else {
-          await prisma.businessAccount.update({ where: { id: ba.id }, data: { routeEnabled: false } })
-          throw new AppError('BANK_VALIDATION_FAILED', 'Bank account could not be verified. Please check the details.', 400)
+          console.warn('[Cashfree] Bank account INVALID:', result)
         }
       } catch (err) {
-        if (err instanceof AppError) throw err
-        console.error('[Cashfree] Bank validation failed (non-fatal):', err)
+        console.error('[Cashfree] Bank validation skipped (non-fatal):', (err as any)?.message ?? err)
       }
     }
 
