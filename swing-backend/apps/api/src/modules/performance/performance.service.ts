@@ -2124,11 +2124,6 @@ export class PerformanceService {
       mvpCount,
       lastRankedMatchAt: competitiveState.lastRankedMatchAt,
       currentSeasonId: activeSeason?.id ?? null,
-    }).catch((error) => {
-      console.error('[performance] failed to upsert ip_player_state', {
-        playerId,
-        error: error instanceof Error ? error.message : 'unknown',
-      })
     })
 
     if (activeSeason) {
@@ -2138,12 +2133,6 @@ export class PerformanceService {
         seasonPoints,
         mvpCount: seasonMvpCount,
         matchesPlayed: seasonFacts.length,
-      }).catch((error) => {
-        console.error('[performance] failed to upsert ip_season_state', {
-          playerId,
-          seasonId: activeSeason.id,
-          error: error instanceof Error ? error.message : 'unknown',
-        })
       })
     }
 

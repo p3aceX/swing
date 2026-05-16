@@ -908,6 +908,14 @@ export async function adminRoutes(app: FastifyInstance) {
     });
   });
 
+  app.post("/ip/rebuild-all", auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string };
+    return reply.send({
+      success: true,
+      data: await svc.rebuildAllPlayersIp(user.userId),
+    });
+  });
+
   app.patch("/arena-owners/:id", auth, async (request, reply) => {
     const user = (request as any).user as { userId: string };
     const { id } = request.params as { id: string };

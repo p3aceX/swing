@@ -2672,8 +2672,8 @@ startRealtime();
         _count: { matchId: true },
       }),
       prisma.$queryRaw<Array<{ playerId: string; totalIp: number }>>`
-        SELECT "playerId", COALESCE(SUM("ipDelta"), 0)::int AS "totalIp"
-        FROM public.ip_event
+        SELECT "playerId", COALESCE(SUM("impactPoints"), 0)::int AS "totalIp"
+        FROM public.match_player_index_scores
         WHERE "matchId" IN (${Prisma.join(matchIds)})
         GROUP BY "playerId"
       `,

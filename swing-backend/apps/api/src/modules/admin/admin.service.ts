@@ -2425,6 +2425,25 @@ export class AdminService {
     };
   }
 
+  async rebuildAllPlayersIp(adminId: string) {
+    await this.verifyAdmin(adminId);
+
+    const playerIds = await prisma.playerProfile.findMany({ select: { id: true } });
+    const ids = playerIds.map((p) => p.id);
+
+    // Fire-and-forget: respond immediately, rebuild runs in background
+    setImmediate(async () => {
+      try {
+        await performanceSvc.rebuildPlayersFromCurrentFacts(ids);
+        console.log(`[admin] rebuildAllPlayersIp completed for ${ids.length} players`);
+      } catch (err) {
+        console.error('[admin] rebuildAllPlayersIp failed', { error: err instanceof Error ? err.message : err });
+      }
+    });
+
+    return { queued: ids.length };
+  }
+
   // ── Tournaments ──────────────────────────────────────────────────────
   private async getTournamentColumnSupport() {
     if (!this.tournamentColumnSupportPromise) {
