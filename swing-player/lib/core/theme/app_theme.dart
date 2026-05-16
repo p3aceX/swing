@@ -27,7 +27,7 @@ class AppTheme {
     final panel$dark = Color.lerp(const Color(0xFF0F2E52), rankSeed, 0.05)!;
 
     // ── Light palette — ivory base ────────────────────────────────────────────
-    final bg$light   = const Color(0xFFF4F2EB); // Brand Ivory
+    final bg$light   = const Color(0xFFFFFFFF); // White
     final surf$light = const Color(0xFFFFFFFF); // White highlights
     final card$light = const Color(0xFFFFFFFF);
     final stroke$light = Color.lerp(const Color(0xFFE5E2D9), rankSeed, 0.12)!;

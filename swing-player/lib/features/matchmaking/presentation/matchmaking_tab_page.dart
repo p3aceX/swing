@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
+import '../../../core/payment/razorpay_stub.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_endpoints.dart';

@@ -113,6 +113,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.3.0"
+  barcode:
+    dependency: transitive
+    description:
+      name: barcode
+      sha256: "7b6729c37e3b7f34233e2318d866e8c48ddb46c1f7ad01ff7bb2a8de1da2b9f4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.9"
+  bidi:
+    dependency: transitive
+    description:
+      name: bidi
+      sha256: "77f475165e94b261745cf1032c751e2032b8ed92ccb2bf5716036db79320637d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.13"
   boolean_selector:
     dependency: transitive
     description:
@@ -417,14 +433,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.8"
-  eventify:
-    dependency: transitive
-    description:
-      name: eventify
-      sha256: b829429f08586cc2001c628e7499e3e3c2493a1d895fd73b00ecb23351aa5a66
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.1"
   fake_async:
     dependency: transitive
     description:
@@ -590,6 +598,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.4.1"
+  flutter_cashfree_pg_sdk:
+    dependency: "direct main"
+    description:
+      name: flutter_cashfree_pg_sdk
+      sha256: "2166ceeceac809f1483491aad3724965ac84d0ae7b1a4c506a2637f90a74245a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.3.4+51"
   flutter_dotenv:
     dependency: "direct main"
     description:
@@ -887,6 +903,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.1.2"
+  image:
+    dependency: transitive
+    description:
+      name: image
+      sha256: f9881ff4998044947ec38d098bc7c8316ae1186fa786eddffdb867b9bc94dfce
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.8.0"
   image_cropper:
     dependency: "direct main"
     description:
@@ -1199,6 +1223,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
+  pdf:
+    dependency: transitive
+    description:
+      name: pdf
+      sha256: e47a275b267873d5944ad5f5ff0dcc7ac2e36c02b3046a0ffac9b72fd362c44b
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.12.0"
+  pdf_widget_wrapper:
+    dependency: transitive
+    description:
+      name: pdf_widget_wrapper
+      sha256: c930860d987213a3d58c7ec3b7ecf8085c3897f773e8dc23da9cae60a5d6d0f5
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.4"
   permission_handler:
     dependency: "direct main"
     description:
@@ -1255,14 +1295,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.2"
-  phonepe_payment_sdk:
-    dependency: "direct main"
-    description:
-      name: phonepe_payment_sdk
-      sha256: "5381365fb5a4acac8ed6980201c6ff0d354352089f17d9cc521dadd85eee930f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.2"
   pinput:
     dependency: "direct main"
     description:
@@ -1303,6 +1335,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.5.0"
+  printing:
+    dependency: transitive
+    description:
+      name: printing
+      sha256: "689170c9ddb1bda85826466ba80378aa8993486d3c959a71cd7d2d80cb606692"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.14.3"
   pub_semver:
     dependency: transitive
     description:
@@ -1335,14 +1375,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.1.0"
-  razorpay_flutter:
-    dependency: "direct main"
-    description:
-      name: razorpay_flutter
-      sha256: a90e05bb571fd1df5b7846d2173cb9cf1e07ec6d57df48068a05c152be177311
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.4.1"
   riverpod:
     dependency: transitive
     description:

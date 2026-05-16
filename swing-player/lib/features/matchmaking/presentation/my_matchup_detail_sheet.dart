@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_host_core/flutter_host_core.dart' show HostArenaReviewSheet;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/app_colors.dart';
@@ -122,10 +121,8 @@ class MyMatchupDetailSheet extends ConsumerStatefulWidget {
 }
 
 class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
-  late final Razorpay _razorpay;
   bool _busy = false;
   String? _error;
-  String? _activeOrderId;
 
   bool get _isFree => widget.confirmationRupees == 0;
   bool get _isAwaitingOpponent => widget.myTeamPaid && !widget.opponentPaid;
@@ -164,15 +161,6 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
   @override
   void initState() {
     super.initState();
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
-  }
-
-  @override
-  void dispose() {
-    _razorpay.clear();
-    super.dispose();
   }
 
   Future<void> _onAction() async {
@@ -346,63 +334,12 @@ class _MyMatchupDetailSheetState extends ConsumerState<MyMatchupDetailSheet> {
   }
 
   Future<void> _payAdvance() async {
-    try {
-      final repo = ref.read(matchmakingRepositoryProvider);
-      final order = await repo.createMatchPaymentOrder(widget.matchId);
-      _activeOrderId = order.orderId;
-      _razorpay.open({
-        'key': order.key,
-        'amount': order.amountPaise,
-        'currency': order.currency,
-        'name': 'Swing',
-        'description': 'Match-Up advance — ${widget.opponentTeamName}',
-        'order_id': order.orderId,
-      });
-    } catch (e) {
-      debugPrint('[MyMatchupDetail] createOrder error: $e');
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = 'Could not start payment. Please try again.';
-        });
-      }
-    }
-  }
-
-  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
-    try {
-      final repo = ref.read(matchmakingRepositoryProvider);
-      await repo.verifyMatchPayment(
-        razorpayPaymentId: response.paymentId ?? '',
-        razorpayOrderId: response.orderId ?? _activeOrderId ?? '',
-        razorpaySignature: response.signature ?? '',
-      );
-      widget.onRefresh();
-      if (!mounted) return;
-      Navigator.of(context).pop();
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Advance paid — match confirmed.')),
+        const SnackBar(content: Text('Online payment coming soon.')),
       );
-    } catch (e) {
-      debugPrint('[MyMatchupDetail] verify error: $e');
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error =
-              "Payment captured but couldn't confirm. Pull-to-refresh; if it persists, contact support.";
-        });
-      }
+      setState(() => _busy = false);
     }
-  }
-
-  void _onPaymentError(PaymentFailureResponse response) {
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = response.message?.isNotEmpty == true
-          ? response.message
-          : 'Payment was not completed.';
-    });
   }
 
   @override

@@ -4,7 +4,11 @@ import 'package:flutter_host_core/flutter_host_core.dart'
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cferrorresponse/cferrorresponse.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cfpayment/cfwebcheckoutpayment.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cfpaymentgateway/cfpaymentgatewayservice.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cfsession/cfsession.dart';
+import 'package:flutter_cashfree_pg_sdk/utils/cfenums.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/player_booking_repository.dart';
 import '../domain/booking_models.dart';
@@ -28,7 +32,7 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
   BookingDuration _selectedDuration = BookingDuration.hr1;
   AvailabilitySlot? _selectedStartSlot;
   final Set<ArenaAddon> _selectedAddons = {};
-  late final Razorpay _razorpay;
+  String? _pendingOrderId;
 
   ArenaListing? _arena;
   PlayerSlotsData? _playerSlots;
@@ -41,10 +45,7 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+    CFPaymentGatewayService().setCallback(onPaymentVerify, onError);
     _loadAddons();
     _arena = widget.initialArena;
     if (_arena != null) {
@@ -56,7 +57,6 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
 
   @override
   void dispose() {
-    _razorpay.clear();
     super.dispose();
   }
 
@@ -579,17 +579,19 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
       );
       _pendingBookingId = booking.id;
       final order = await repo.createPaymentOrder(booking.id);
-      if (order.orderId.isEmpty || order.amountPaise <= 0) {
+      if (order.orderId.isEmpty || order.amountPaise <= 0 || order.sessionId == null) {
         throw Exception('Could not create payment order.');
       }
-      _razorpay.open({
-        'key': order.key,
-        'amount': order.amountPaise,
-        'currency': order.currency,
-        'name': 'Swing Arena Booking',
-        'description': '${_arena?.name ?? 'Arena'} - ${unit.name}',
-        'order_id': order.orderId,
-      });
+      _pendingOrderId = order.orderId;
+      final session = CFSessionBuilder()
+          .setEnvironment(CFEnvironment.SANDBOX)
+          .setOrderId(order.orderId)
+          .setPaymentSessionId(order.sessionId!)
+          .build();
+      final cfPayment = CFWebCheckoutPaymentBuilder()
+          .setSession(session)
+          .build();
+      CFPaymentGatewayService().doPayment(cfPayment);
     } catch (error) {
       if (!mounted) return;
       setState(() => _bookingInProgress = false);
@@ -630,41 +632,29 @@ class _ArenaDetailScreenState extends ConsumerState<ArenaDetailScreen> {
     );
   }
 
-  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
+  void onPaymentVerify(String orderId) {
     final bookingId = _pendingBookingId;
     if (bookingId == null) return;
-    try {
-      final booking =
-          await ref.read(playerBookingRepositoryProvider).verifyPayment(
-                bookingId: bookingId,
-                razorpayPaymentId: response.paymentId ?? '',
-                razorpayOrderId: response.orderId ?? '',
-                razorpaySignature: response.signature ?? '',
-              );
+    ref.read(playerBookingRepositoryProvider).verifyPayment(
+      bookingId: bookingId,
+      orderId: orderId,
+    ).then((booking) {
       if (!mounted) return;
       setState(() => _bookingInProgress = false);
       context.go('/booking/success', extra: booking);
-    } catch (error) {
+    }).catchError((error) {
       if (!mounted) return;
       setState(() => _bookingInProgress = false);
       _showSnack(ref.read(playerBookingRepositoryProvider).messageFor(
-            error,
-            fallback: 'Payment verification failed.',
-          ));
+        error, fallback: 'Payment verification failed.',
+      ));
       context.push('/bookings/$bookingId');
-    }
+    });
   }
 
-  void _onPaymentError(PaymentFailureResponse response) {
+  void onError(CFErrorResponse errorResponse, String orderId) {
     if (mounted) setState(() => _bookingInProgress = false);
-    final message = response.message?.trim().isNotEmpty == true
-        ? response.message!.trim()
-        : 'Payment was not completed.';
-    _showSnack(message);
-  }
-
-  void _onExternalWallet(ExternalWalletResponse response) {
-    _showSnack('${response.walletName ?? 'Wallet'} selected');
+    _showSnack(errorResponse.getMessage() ?? 'Payment was not completed.');
   }
 
   void _showSnack(String message) {

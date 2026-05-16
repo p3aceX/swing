@@ -70,6 +70,8 @@ class CacheInterceptor extends Interceptor {
   }
 
   String _generateCacheKey(RequestOptions options) {
-    return '${options.method}:${options.uri.toString()}';
+    final path = options.uri.path;
+    final query = options.uri.query;
+    return '${options.method}:$path${query.isNotEmpty ? '?$query' : ''}';
   }
 }

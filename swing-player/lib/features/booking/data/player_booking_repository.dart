@@ -61,17 +61,14 @@ class PlayerBookingRepository {
 
   Future<PlayerBooking> verifyPayment({
     required String bookingId,
-    required String razorpayPaymentId,
-    required String razorpayOrderId,
-    required String razorpaySignature,
+    required String orderId,
+    String paymentId = '',
   }) async {
     final response = await _dio.post(
       '/bookings/verify-payment',
       data: {
-        'bookingId': bookingId,
-        'razorpayPaymentId': razorpayPaymentId,
-        'razorpayOrderId': razorpayOrderId,
-        'razorpaySignature': razorpaySignature,
+        'orderId': orderId,
+        'paymentId': paymentId,
       },
     );
     return PlayerBooking.fromJson(_unwrapMap(response.data));

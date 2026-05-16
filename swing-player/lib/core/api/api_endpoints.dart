@@ -25,6 +25,8 @@ class ApiEndpoints {
   static const String playerReportCards = '/player/report-cards';
   static const String playerSessions = '/player/sessions';
   static const String playerEnrollments = '/player/enrollments';
+  static const String playerMySchedule = '/player/my-schedule';
+  static const String playerMyAnnouncements = '/player/my-announcements';
   static const String playerCard = '/player/card';
   static const String playerWeeklyReview = '/player/weekly-review';
   static const String playerLiveSession = '/player/sessions/live';

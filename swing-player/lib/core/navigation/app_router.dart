@@ -159,7 +159,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/academy',
-        builder: (_, __) => const AcademyScreen(),
+        builder: (_, state) => AcademyScreen(
+          academyIndex: state.extra is int ? state.extra as int : 0,
+        ),
       ),
       GoRoute(
         path: '/storefront',

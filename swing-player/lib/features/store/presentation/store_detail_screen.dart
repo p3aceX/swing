@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
+import '../../../core/payment/razorpay_stub.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../controller/store_cart_controller.dart';

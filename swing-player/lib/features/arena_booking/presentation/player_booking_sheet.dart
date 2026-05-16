@@ -14,7 +14,6 @@ import 'package:flutter_host_core/flutter_host_core.dart'
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:phonepe_payment_sdk/phonepe_payment_sdk.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -28,6 +27,12 @@ import 'widgets/slot_time_grid.dart';
 const _kMerchantId = 'SU2507111540338505172019';
 const _kAppSchema = 'swingplayer';
 const _kPhonePeFlowId = 'SWINGPLAYER_FLOW';
+
+// Stub — PhonePe removed; all bookings go through Cashfree.
+abstract class PhonePePaymentSdk {
+  static Future<void> init(String e, String m, String f, bool b) async {}
+  static Future<Map<String, dynamic>?> startTransaction(String p, String s) async => null;
+}
 
 Future<void> showPlayerBookingSheet(
   BuildContext context,

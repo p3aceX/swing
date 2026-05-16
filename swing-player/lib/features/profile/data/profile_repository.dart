@@ -40,16 +40,20 @@ class ProfileRepository extends BaseRepository {
     final isOwnProfile = profileId == null;
 
     try {
-      final bootstrapResponse = await _safeGet(
-        isOwnProfile
-            ? ApiEndpoints.playerProfile
-            : ApiEndpoints.publicPlayerProfile(profileId),
-      );
-      final bootstrapFullResponse = await _safeGet(
-        isOwnProfile
-            ? ApiEndpoints.playerProfileFull
-            : ApiEndpoints.publicPlayerProfileFull(profileId),
-      );
+      final bootstrapPair = await Future.wait<dynamic>([
+        _safeGet(
+          isOwnProfile
+              ? ApiEndpoints.playerProfile
+              : ApiEndpoints.publicPlayerProfile(profileId),
+        ),
+        _safeGet(
+          isOwnProfile
+              ? ApiEndpoints.playerProfileFull
+              : ApiEndpoints.publicPlayerProfileFull(profileId),
+        ),
+      ]);
+      final bootstrapResponse = bootstrapPair[0];
+      final bootstrapFullResponse = bootstrapPair[1];
       final bootstrapBaseProfile = _unwrapMap(bootstrapResponse);
       final bootstrapFullProfile = _unwrapMap(bootstrapFullResponse);
       final bootstrapProfile = <String, dynamic>{
@@ -83,6 +87,7 @@ class ProfileRepository extends BaseRepository {
             queryParameters: {'limit': 3}), // [3]
         _safeGet(ApiEndpoints.playerLiveSession), // [4]
         _safeLoadRecentMatches(), // [5]
+        _resolveFollowCounts(idToFetch), // [6] — parallel, avoids a sequential round-trip
       ]);
 
       final eliteRaw = _unwrapMap(results[0]);
@@ -94,6 +99,8 @@ class ProfileRepository extends BaseRepository {
       final recentMatches = results[5] is List<PlayerMatch>
           ? results[5] as List<PlayerMatch>
           : const <PlayerMatch>[];
+      final prefetchedFollowCounts =
+          results[6] as ({int followers, int following});
 
       final statsRaw = _map(eliteRaw['stats']);
       final battingRaw = _map(statsRaw['batting']);
@@ -138,11 +145,8 @@ class ProfileRepository extends BaseRepository {
               bootstrapSocial['following'],
             ]));
 
-      if (idToFetch.isNotEmpty && (fansCount == 0 || followingCount == 0)) {
-        final resolved = await _resolveFollowCounts(idToFetch);
-        if (fansCount == 0) fansCount = resolved.followers;
-        if (followingCount == 0) followingCount = resolved.following;
-      }
+      if (fansCount == 0) fansCount = prefetchedFollowCounts.followers;
+      if (followingCount == 0) followingCount = prefetchedFollowCounts.following;
 
       final resolvedName = pickString([
         eliteIdentityRaw['name'],
@@ -362,7 +366,7 @@ class ProfileRepository extends BaseRepository {
         skillMatrix: skillMatrix,
       );
 
-      final academy = _buildAcademy(
+      final academy = _buildAcademies(
         enrollments: enrollments,
         payments: payments,
         liveSession: liveSession,
@@ -491,8 +495,8 @@ class ProfileRepository extends BaseRepository {
           recentPerformances: recentPerformances,
         ),
         recentPerformances: recentPerformances,
-        academy: academy,
-        account: _buildAccountActions(isOwnProfile, academy.isLinked),
+        academies: academy,
+        account: _buildAccountActions(isOwnProfile, academy.isNotEmpty),
         editableProfile: editableProfile,
         isProfileComplete: _isProfileComplete(<String, dynamic>{
           ...mergedIdentity,
@@ -1075,7 +1079,7 @@ class ProfileRepository extends BaseRepository {
       ? value.toStringAsFixed(0)
       : value.toStringAsFixed(1);
 
-  AcademySummary _buildAcademy({
+  List<AcademySummary> _buildAcademies({
     required List<Map<String, dynamic>> enrollments,
     required List<Map<String, dynamic>> payments,
     required Map<String, dynamic> card,
@@ -1083,31 +1087,31 @@ class ProfileRepository extends BaseRepository {
     required Map<String, dynamic> reportCards,
     required Map<String, dynamic> liveSession,
   }) {
-    final enrollment =
-        enrollments.isNotEmpty ? enrollments.first : <String, dynamic>{};
-    final enrollmentAcademy = _map(enrollment['academy']);
-    final enrollmentId = _string(enrollment['enrollmentId'],
-        fallback: _string(enrollment['id']));
-    final linked = _string(enrollmentAcademy['name']).isNotEmpty;
-
-    return AcademySummary(
-      isLinked: linked,
-      enrollmentId: enrollmentId.isEmpty ? null : enrollmentId,
-      academyName: linked ? _string(enrollmentAcademy['name']) : null,
-      academyCity: _string(enrollmentAcademy['city']).ifEmptyToNull(),
-      coachName: null,
-      batchName: null,
-      batchSchedule: null,
-      feeAmountPaise: 0,
-      feePaidPaise: 0,
-      feeDuePaise: 0,
-      feeFrequency: null,
-      feeStatus: null,
-      transactions: const [],
-      nextSessionLabel: null,
-      latestReportSummary: null,
-      joinCtaLabel: linked ? 'Academy linked' : 'Join Academy',
-    );
+    if (enrollments.isEmpty) return [];
+    return enrollments.map((enrollment) {
+      final enrollmentAcademy = _map(enrollment['academy']);
+      final enrollmentId = _string(enrollment['enrollmentId'],
+          fallback: _string(enrollment['id']));
+      final linked = _string(enrollmentAcademy['name']).isNotEmpty;
+      return AcademySummary(
+        isLinked: linked,
+        enrollmentId: enrollmentId.isEmpty ? null : enrollmentId,
+        academyName: linked ? _string(enrollmentAcademy['name']) : null,
+        academyCity: _string(enrollmentAcademy['city']).ifEmptyToNull(),
+        coachName: null,
+        batchName: null,
+        batchSchedule: null,
+        feeAmountPaise: 0,
+        feePaidPaise: 0,
+        feeDuePaise: 0,
+        feeFrequency: null,
+        feeStatus: null,
+        transactions: const [],
+        nextSessionLabel: null,
+        latestReportSummary: null,
+        joinCtaLabel: linked ? 'Academy linked' : 'Join Academy',
+      );
+    }).where((a) => a.isLinked).toList();
   }
 
   PlayerProfileUpdateRequest _buildEditableProfile(

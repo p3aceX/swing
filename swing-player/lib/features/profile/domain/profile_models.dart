@@ -14,7 +14,7 @@ class PlayerProfilePageData {
     required this.insights,
     required this.trophies,
     required this.recentPerformances,
-    required this.academy,
+    required this.academies,
     required this.account,
     required this.editableProfile,
     required this.isProfileComplete,
@@ -37,7 +37,10 @@ class PlayerProfilePageData {
   final PlayerProfileInsights insights;
   final List<PlayerTrophy> trophies;
   final List<PlayerRecentPerformance> recentPerformances;
-  final AcademySummary academy;
+  final List<AcademySummary> academies;
+
+  // Backward-compat getter — used by academy_screen and edit_profile_screen
+  AcademySummary get academy => academies.isNotEmpty ? academies.first : AcademySummary(isLinked: false, enrollmentId: null, academyName: null, academyCity: null, coachName: null, batchName: null, batchSchedule: null, feeAmountPaise: 0, feePaidPaise: 0, feeDuePaise: 0, feeFrequency: null, feeStatus: null, transactions: const [], nextSessionLabel: null, latestReportSummary: null, joinCtaLabel: 'Join Academy');
   final List<AccountAction> account;
   final PlayerProfileUpdateRequest editableProfile;
   final bool isProfileComplete;
@@ -70,7 +73,7 @@ class PlayerProfilePageData {
       insights: insights,
       trophies: trophies,
       recentPerformances: recentPerformances,
-      academy: academy,
+      academies: academies,
       account: account,
       editableProfile: editableProfile ?? this.editableProfile,
       isProfileComplete: isProfileComplete ?? this.isProfileComplete,

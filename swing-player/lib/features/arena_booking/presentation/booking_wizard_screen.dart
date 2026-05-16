@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:phonepe_payment_sdk/phonepe_payment_sdk.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../data/arena_slots_repository.dart';
@@ -12,6 +11,13 @@ import '../domain/arena_slots_models.dart';
 import 'widgets/duration_picker.dart';
 import 'widgets/slot_time_grid.dart';
 import 'widgets/unit_group_card.dart';
+
+// PhonePe removed — stub keeps existing code compiling.
+// ignore: avoid_classes_with_only_static_members
+abstract class PhonePePaymentSdk {
+  static Future<void> init(String e, String m, String f, bool b) async {}
+  static Future<Map<String, dynamic>?> startTransaction(String p, String s) async => null;
+}
 
 const _kMerchantId = 'SU2507111540338505172019';
 const _kAppSchema = 'swingplayer';

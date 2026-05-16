@@ -22,6 +22,7 @@ import '../../booking/presentation/booking_module_tab.dart';
 import '../../../app.dart';
 import '../../profile/controller/profile_controller.dart';
 import '../../profile/data/profile_repository.dart';
+import '../../profile/domain/profile_models.dart';
 import '../../profile/presentation/profile_qr_sheet.dart';
 import '../../auth/controller/auth_controller.dart';
 import '../../store/domain/store_models.dart';
@@ -362,6 +363,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         currentLongitude: _currentLongitude,
         onLocationTap: _openLocationSheet,
         onSwitchToMatch: () => setState(() => _currentIndex = 2),
+        onBook: () => _onNavTap(3),
+        onStore: () => _onNavTap(4),
       ),
       bottomNavigationBar: _PremiumBottomNav(
         currentIndex: _currentIndex,
@@ -372,7 +375,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-// ── App Header (ERP Shell) ────────────────────────────────────────────────────
+// ── App Header ────────────────────────────────────────────────────────────────
 
 class _SexyHeader extends ConsumerWidget {
   const _SexyHeader({
@@ -393,51 +396,136 @@ class _SexyHeader extends ConsumerWidget {
   final VoidCallback onNotificationTap;
   final VoidCallback onLeaderboardTap;
 
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  String _firstName(String? name) {
+    if (name == null || name.trim().isEmpty) return 'Player';
+    return name.trim().split(' ').first;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unreadChat = ref.watch(chatUnreadCountProvider).valueOrNull ?? 0;
+    final unreadChat  = ref.watch(chatUnreadCountProvider).valueOrNull ?? 0;
     final unreadNotif = ref.watch(notificationSummaryProvider).valueOrNull ?? 0;
+    final isDark = context.isDark;
+    final ink    = isDark ? Colors.white : Colors.black;
 
     return Container(
       color: context.bg,
-      child: SafeArea(
-        bottom: false,
-        child: SizedBox(
-          height: 76,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                _GradientAvatar(url: avatarUrl, onTap: onProfileTap),
-                const Spacer(),
-                _SoftIconButton(
-                  icon: Icons.search_rounded,
-                  onTap: onSearchTap,
-                  tooltip: 'Search',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: SizedBox(
+              height: 72,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _GradientAvatar(url: avatarUrl, onTap: onProfileTap),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _greeting,
+                            style: TextStyle(
+                              color: ink.withValues(alpha: 0.38),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            _firstName(userName),
+                            style: TextStyle(
+                              color: ink,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.6,
+                              height: 1.1,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    _HeaderBtn(icon: Icons.search_rounded, onTap: onSearchTap),
+                    const SizedBox(width: 8),
+                    _HeaderBtn(
+                      icon: Icons.notifications_outlined,
+                      onTap: onNotificationTap,
+                      dotColor: unreadNotif > 0 ? const Color(0xFFFF2D55) : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _HeaderBtn(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      onTap: onChatTap,
+                      dotColor: unreadChat > 0 ? const Color(0xFF5E5CE6) : null,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                _SoftIconButton(
-                  icon: Icons.emoji_events_outlined,
-                  onTap: onLeaderboardTap,
-                  tooltip: 'Leaderboard',
-                ),
-                const SizedBox(width: 10),
-                _SoftIconButton(
-                  icon: Icons.notifications_none_rounded,
-                  onTap: onNotificationTap,
-                  tooltip: 'Notifications',
-                  hasDot: unreadNotif > 0,
-                ),
-                const SizedBox(width: 10),
-                _SoftIconButton(
-                  icon: Icons.chat_bubble_outline_rounded,
-                  onTap: onChatTap,
-                  tooltip: 'Messages',
-                  hasDot: unreadChat > 0,
-                ),
-              ],
+              ),
             ),
           ),
+          Container(height: 0.5, color: ink.withValues(alpha: isDark ? 0.1 : 0.08)),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderBtn extends StatelessWidget {
+  const _HeaderBtn({required this.icon, required this.onTap, this.dotColor});
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? dotColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    final ink    = isDark ? Colors.white : Colors.black;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: const BoxDecoration(),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, size: 20, color: ink.withValues(alpha: 0.75)),
+            if (dotColor != null)
+              Positioned(
+                top: 9,
+                right: 9,
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: dotColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: context.bg,
+                      width: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -449,15 +537,10 @@ class _GradientAvatar extends StatelessWidget {
   final String? url;
   final VoidCallback onTap;
 
-  // Soft pastel gradient — premium/playful (purple → pink → sky).
-  static const _ringGradient = LinearGradient(
+  static const _gradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [
-      Color(0xFFB39DDB), // soft lavender
-      Color(0xFFF8BBD0), // soft pink
-      Color(0xFF90CAF9), // soft sky
-    ],
+    colors: [Color(0xFF5E5CE6), Color(0xFFFF2D55), Color(0xFFFF9F0A)],
   );
 
   @override
@@ -466,20 +549,20 @@ class _GradientAvatar extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.all(3),
+        padding: const EdgeInsets.all(2.5),
         decoration: const BoxDecoration(
           shape: BoxShape.circle,
-          gradient: _ringGradient,
+          gradient: _gradient,
         ),
         child: Container(
           padding: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: context.surf,
+            color: context.bg,
           ),
           child: Container(
-            width: 44,
-            height: 44,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: context.panel,
@@ -489,16 +572,16 @@ class _GradientAvatar extends StatelessWidget {
                 ? CachedNetworkImage(
                     imageUrl: url!,
                     fit: BoxFit.cover,
-                    memCacheWidth: 132, // 44 * 3
-                    memCacheHeight: 132,
-                    placeholder: (context, url) =>
-                        Container(color: context.panel),
-                    errorWidget: (context, url, error) => Icon(
-                        Icons.person_rounded,
-                        color: context.fgSub,
-                        size: 22),
+                    memCacheWidth: 120,
+                    memCacheHeight: 120,
+                    placeholder: (_, __) => Container(color: context.panel),
+                    errorWidget: (_, __, ___) => Icon(
+                      Icons.person_rounded,
+                      color: context.fgSub,
+                      size: 20,
+                    ),
                   )
-                : Icon(Icons.person_rounded, color: context.fgSub, size: 22),
+                : Icon(Icons.person_rounded, color: context.fgSub, size: 20),
           ),
         ),
       ),
@@ -506,7 +589,8 @@ class _GradientAvatar extends StatelessWidget {
   }
 }
 
-class _SoftIconButton extends StatefulWidget {
+// _SoftIconButton kept for backward compatibility with any remaining references
+class _SoftIconButton extends StatelessWidget {
   const _SoftIconButton({
     required this.icon,
     required this.onTap,
@@ -514,7 +598,6 @@ class _SoftIconButton extends StatefulWidget {
     this.hasDot = false,
     this.active = false,
   });
-
   final IconData icon;
   final VoidCallback onTap;
   final String? tooltip;
@@ -522,58 +605,11 @@ class _SoftIconButton extends StatefulWidget {
   final bool active;
 
   @override
-  State<_SoftIconButton> createState() => _SoftIconButtonState();
-}
-
-class _SoftIconButtonState extends State<_SoftIconButton> {
-  bool _pressed = false;
-
-  @override
   Widget build(BuildContext context) {
-    final restBg = widget.active ? context.ctaBg : context.panel;
-    final pressBg = widget.active
-        ? context.ctaBg
-        : (context.isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB));
-    final fg = widget.active ? context.ctaFg : context.fg;
-
-    return Tooltip(
-      message: widget.tooltip ?? '',
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: _pressed ? pressBg : restBg,
-            shape: BoxShape.circle,
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(widget.icon, size: 22, color: fg),
-              if (widget.hasDot)
-                Positioned(
-                  top: 11,
-                  right: 11,
-                  child: Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: restBg, width: 1.6),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
+    return _HeaderBtn(
+      icon: icon,
+      onTap: onTap,
+      dotColor: hasDot ? const Color(0xFFFF2D55) : null,
     );
   }
 }
@@ -1295,7 +1331,7 @@ class _HeaderIconButton extends StatelessWidget {
   }
 }
 
-// ── Bottom Nav (ERP) ──────────────────────────────────────────────────────────
+// ── Bottom Nav ────────────────────────────────────────────────────────────────
 
 class _PremiumBottomNav extends StatelessWidget {
   const _PremiumBottomNav(
@@ -1304,35 +1340,108 @@ class _PremiumBottomNav extends StatelessWidget {
   final List<_NavItem> items;
   final ValueChanged<int> onTap;
 
+  // Vivid per-tab accent colours — same palette as home body
+  static const _tabColors = [
+    Color(0xFF5E5CE6), // Home   — indigo
+    Color(0xFF30D158), // Play   — neon green
+    Color(0xFFFF2D55), // Rivals — hot red (center bolt)
+    Color(0xFF00C7BE), // Book   — teal
+    Color(0xFFFF9F0A), // Store  — amber
+  ];
+
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).padding.bottom;
+    final isDark = context.isDark;
+
     return Container(
-      height: 60 + bottom,
-      padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + bottom),
-      decoration: BoxDecoration(
-        color: context.bg,
-        border: Border(
-            top: BorderSide(
-                color: context.stroke.withValues(alpha: 0.6), width: 0.5)),
-      ),
+      // Extra room for the raised center button
+      height: 76 + bottom,
+      color: Colors.transparent,
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 8 + bottom),
       child: Row(
-        children: List.generate(items.length, (index) {
-          if (index == 2) {
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: List.generate(items.length, (i) {
+          final isCenter   = i == 2;
+          final isSelected = currentIndex == i;
+          final color      = _tabColors[i];
+
+          if (isCenter) {
+            // ── Raised center bolt ──
             return Expanded(
               child: GestureDetector(
-                onTap: () => onTap(index),
+                onTap: () => onTap(i),
                 behavior: HitTestBehavior.opaque,
-                child: const _CenterMatchButton(),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Transform.translate(
+                    offset: const Offset(0, -10),
+                    child: Container(
+                      width: 54,
+                      height: 54,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Icon(
+                        Icons.bolt_rounded,
+                        size: 28,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
               ),
             );
           }
-          final isSelected = currentIndex == index;
+
+          // ── Regular tab ──
           return Expanded(
             child: GestureDetector(
-              onTap: () => onTap(index),
+              onTap: () => onTap(i),
               behavior: HitTestBehavior.opaque,
-              child: _NavButton(isSelected: isSelected, item: items[index]),
+              child: SizedBox(
+                height: 60,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      width: isSelected ? 48 : 40,
+                      height: isSelected ? 36 : 36,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? color.withValues(alpha: isDark ? 0.22 : 0.12)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        isSelected ? items[i].activeIcon : items[i].icon,
+                        size: 22,
+                        color: isSelected
+                            ? color
+                            : context.fgSub.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 200),
+                      style: TextStyle(
+                        color: isSelected
+                            ? color
+                            : context.fgSub.withValues(alpha: 0.45),
+                        fontSize: 10,
+                        fontWeight: isSelected
+                            ? FontWeight.w800
+                            : FontWeight.w500,
+                        letterSpacing: isSelected ? 0.1 : 0,
+                      ),
+                      child: Text(items[i].label),
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
         }),
@@ -1341,76 +1450,16 @@ class _PremiumBottomNav extends StatelessWidget {
   }
 }
 
-class _CenterMatchButton extends StatelessWidget {
-  const _CenterMatchButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: context.ctaBg,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: context.ctaBg.withValues(alpha: 0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Icon(
-          Icons.bolt_rounded,
-          size: 24,
-          color: context.ctaFg,
-        ),
-      ),
-    );
-  }
-}
-
-class _NavButton extends StatelessWidget {
-  const _NavButton({required this.isSelected, required this.item});
-  final bool isSelected;
-  final _NavItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final activeColor = context.accent;
-    final inactiveColor = context.fgSub.withValues(alpha: 0.55);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          isSelected ? item.activeIcon : item.icon,
-          size: 24,
-          color: isSelected ? activeColor : inactiveColor,
-        ),
-        const SizedBox(height: 3),
-        Text(
-          item.label,
-          style: TextStyle(
-            color: isSelected ? activeColor : inactiveColor,
-            fontSize: 10,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 // ── Body Switcher ─────────────────────────────────────────────────────────────
 
-class _HomeBody extends StatelessWidget {
+class _HomeBody extends StatefulWidget {
   const _HomeBody({
     required this.currentIndex,
     required this.currentCity,
     required this.onSwitchToMatch,
     this.onLocationTap,
+    this.onBook,
+    this.onStore,
     this.currentLatitude,
     this.currentLongitude,
   });
@@ -1418,41 +1467,68 @@ class _HomeBody extends StatelessWidget {
   final String currentCity;
   final VoidCallback onSwitchToMatch;
   final VoidCallback? onLocationTap;
+  final VoidCallback? onBook;
+  final VoidCallback? onStore;
   final double? currentLatitude;
   final double? currentLongitude;
 
   @override
+  State<_HomeBody> createState() => _HomeBodyState();
+}
+
+class _HomeBodyState extends State<_HomeBody> {
+  // Tracks which tabs have been visited so they're built lazily on first open.
+  // Tab 0 is always pre-built since it's the landing tab.
+  late final Set<int> _visited = {0};
+
+  @override
+  void didUpdateWidget(_HomeBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _visited.add(widget.currentIndex);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return IndexedStack(
-      index: currentIndex,
+      index: widget.currentIndex,
       children: [
-        // 0: Home — no SafeArea (appBar handles it)
-        PlayerHomeBody(onFindMatch: onSwitchToMatch),
+        // 0: Home — always built (initial tab)
+        PlayerHomeBody(
+          onFindMatch: widget.onSwitchToMatch,
+          onBook: widget.onBook,
+          onStore: widget.onStore,
+        ),
         // 1: Play
-        SafeArea(bottom: false, child: PlayTab(currentCity: currentCity)),
+        _visited.contains(1)
+            ? SafeArea(bottom: false, child: PlayTab(currentCity: widget.currentCity))
+            : const SizedBox(),
         // 2: Match — persistent lobby, no SafeArea (page handles it)
-        const MatchmakingTabPage(),
+        _visited.contains(2) ? const MatchmakingTabPage() : const SizedBox(),
         // 3: Book
-        SafeArea(
-          bottom: false,
-          child: BookingModuleTab(
-            currentCity: currentCity,
-            currentLatitude: currentLatitude,
-            currentLongitude: currentLongitude,
-            onLocationTap: onLocationTap,
-          ),
-        ),
+        _visited.contains(3)
+            ? SafeArea(
+                bottom: false,
+                child: BookingModuleTab(
+                  currentCity: widget.currentCity,
+                  currentLatitude: widget.currentLatitude,
+                  currentLongitude: widget.currentLongitude,
+                  onLocationTap: widget.onLocationTap,
+                ),
+              )
+            : const SizedBox(),
         // 4: Store
-        SafeArea(
-          bottom: false,
-          child: StorefrontScreen(
-            location: StorefrontLocation(
-              city: currentCity == 'Fetching...' ? null : currentCity,
-              latitude: currentLatitude,
-              longitude: currentLongitude,
-            ),
-          ),
-        ),
+        _visited.contains(4)
+            ? SafeArea(
+                bottom: false,
+                child: StorefrontScreen(
+                  location: StorefrontLocation(
+                    city: widget.currentCity == 'Fetching...' ? null : widget.currentCity,
+                    latitude: widget.currentLatitude,
+                    longitude: widget.currentLongitude,
+                  ),
+                ),
+              )
+            : const SizedBox(),
       ],
     );
   }
@@ -2507,6 +2583,33 @@ class _SideNavigationState extends ConsumerState<_SideNavigation> {
                       padding: EdgeInsets.zero,
                       child: Column(
                         children: [
+                          if (profileData != null && profileData.academies.isNotEmpty)
+                            _SideNavItem(
+                              label: 'My Academy',
+                              icon: Icons.school_outlined,
+                              onTap: () {
+                                if (profileData.academies.length == 1) {
+                                  Navigator.pop(context);
+                                  context.push('/academy', extra: 0);
+                                } else {
+                                  showModalBottomSheet(
+                                    context: context,
+                                    backgroundColor: context.bg,
+                                    shape: const RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                                    ),
+                                    builder: (_) => _AcademyPickerSheet(
+                                      academies: profileData.academies,
+                                      onPick: (index) {
+                                        Navigator.pop(context);
+                                        Navigator.pop(context);
+                                        context.push('/academy', extra: index);
+                                      },
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
                           _SideNavItem(
                             label: 'Bookings',
                             icon: Icons.calendar_month_outlined,
@@ -2625,11 +2728,13 @@ class _SideNavItem extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onTap,
+    this.subtitle,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback onTap;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -2643,15 +2748,114 @@ class _SideNavItem extends StatelessWidget {
           children: [
             Icon(icon, color: context.fg, size: 22),
             const SizedBox(width: 20),
-            Text(
-              label,
-              style: TextStyle(
-                color: context.fg,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                letterSpacing: -0.2,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: context.fg,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: TextStyle(
+                        color: context.fgSub,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AcademyPickerSheet extends StatelessWidget {
+  const _AcademyPickerSheet({
+    required this.academies,
+    required this.onPick,
+  });
+
+  final List<AcademySummary> academies;
+  final void Function(int index) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Select Academy',
+              style: TextStyle(
+                color: context.fg,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...List.generate(academies.length, (i) {
+              final a = academies[i];
+              return GestureDetector(
+                onTap: () => onPick(i),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: context.accentBg,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(Icons.school_rounded, color: context.accent, size: 22),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              a.academyName ?? 'Academy',
+                              style: TextStyle(
+                                color: context.fg,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if ((a.academyCity ?? '').isNotEmpty)
+                              Text(
+                                a.academyCity!,
+                                style: TextStyle(color: context.fgSub, fontSize: 12),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right, color: context.fgSub, size: 20),
+                    ],
+                  ),
+                ),
+              );
+            }),
           ],
         ),
       ),

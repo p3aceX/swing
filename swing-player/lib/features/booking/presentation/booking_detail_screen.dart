@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cferrorresponse/cferrorresponse.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cfpayment/cfwebcheckoutpayment.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cfpaymentgateway/cfpaymentgatewayservice.dart';
+import 'package:flutter_cashfree_pg_sdk/api/cfsession/cfsession.dart';
+import 'package:flutter_cashfree_pg_sdk/utils/cfenums.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../data/player_booking_repository.dart';
@@ -25,22 +29,13 @@ class BookingDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
-  late final Razorpay _razorpay;
   bool _busy = false;
+  String? _pendingOrderId;
 
   @override
   void initState() {
     super.initState();
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
-  }
-
-  @override
-  void dispose() {
-    _razorpay.clear();
-    super.dispose();
+    CFPaymentGatewayService().setCallback(onPaymentVerify, onError);
   }
 
   @override
@@ -111,14 +106,17 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       final order = await ref
           .read(playerBookingRepositoryProvider)
           .createPaymentOrder(booking.id);
-      _razorpay.open({
-        'key': order.key,
-        'amount': order.amountPaise,
-        'currency': order.currency,
-        'name': 'Swing Arena Booking',
-        'description': booking.arenaName ?? 'Arena booking',
-        'order_id': order.orderId,
-      });
+      if (order.sessionId == null) throw Exception('Could not create payment order.');
+      _pendingOrderId = order.orderId;
+      final session = CFSessionBuilder()
+          .setEnvironment(CFEnvironment.SANDBOX)
+          .setOrderId(order.orderId)
+          .setPaymentSessionId(order.sessionId!)
+          .build();
+      final cfPayment = CFWebCheckoutPaymentBuilder()
+          .setSession(session)
+          .build();
+      CFPaymentGatewayService().doPayment(cfPayment);
     } catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);
@@ -156,31 +154,25 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     }
   }
 
-  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
-    try {
-      final booking =
-          await ref.read(playerBookingRepositoryProvider).verifyPayment(
-                bookingId: widget.bookingId,
-                razorpayPaymentId: response.paymentId ?? '',
-                razorpayOrderId: response.orderId ?? '',
-                razorpaySignature: response.signature ?? '',
-              );
+  void onPaymentVerify(String orderId) {
+    ref.read(playerBookingRepositoryProvider).verifyPayment(
+      bookingId: widget.bookingId,
+      orderId: orderId,
+    ).then((booking) {
       if (!mounted) return;
+      setState(() => _busy = false);
       context.go('/booking/success', extra: booking);
-    } catch (error) {
-      _showSnack(ref.read(playerBookingRepositoryProvider).messageFor(error));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    }).catchError((error) {
+      if (mounted) {
+        setState(() => _busy = false);
+        _showSnack(ref.read(playerBookingRepositoryProvider).messageFor(error));
+      }
+    });
   }
 
-  void _onPaymentError(PaymentFailureResponse response) {
+  void onError(CFErrorResponse errorResponse, String orderId) {
     if (mounted) setState(() => _busy = false);
-    _showSnack(response.message ?? 'Payment was not completed.');
-  }
-
-  void _onExternalWallet(ExternalWalletResponse response) {
-    _showSnack('${response.walletName ?? 'Wallet'} selected');
+    _showSnack(errorResponse.getMessage() ?? 'Payment was not completed.');
   }
 
   void _showSnack(String message) {
