@@ -62,6 +62,10 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
   final _yearlyCtrl    = TextEditingController();
   final _trialDaysCtrl = TextEditingController();
   int _dueDay = 1;
+  // Existing fee structure IDs (for edit mode PATCH/DELETE)
+  String? _regFeeId;
+  String? _monthlyFeeId;
+  String? _yearlyFeeId;
 
   // Step 4 — Coaches
   final List<_CoachEntry> _coaches = [];
@@ -105,14 +109,18 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
     for (final raw in (b['feeStructures'] as List? ?? [])) {
       final f      = raw as Map<String, dynamic>;
       final freq   = f['frequency'] as String? ?? '';
+      final id     = f['id'] as String?;
       final amount = ((f['amountPaise'] as num? ?? 0) / 100).round();
       if (freq == 'MONTHLY') {
         _monthlyCtrl.text = '$amount';
         _dueDay = (f['dueDayOfMonth'] as num?)?.toInt() ?? 1;
+        _monthlyFeeId = id;
       } else if (freq == 'ANNUAL') {
         _yearlyCtrl.text = '$amount';
+        _yearlyFeeId = id;
       } else if (freq == 'REGISTRATION') {
         _regFeeCtrl.text = '$amount';
+        _regFeeId = id;
       }
     }
   }
@@ -169,14 +177,18 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
       setState(() {
         for (final f in fees) {
           final freq   = f['frequency'] as String? ?? '';
+          final id     = f['id'] as String?;
           final amount = ((f['amountPaise'] as num? ?? 0) / 100).round();
           if (freq == 'MONTHLY') {
             _monthlyCtrl.text = '$amount';
             _dueDay = (f['dueDayOfMonth'] as num?)?.toInt() ?? 1;
+            _monthlyFeeId = id;
           } else if (freq == 'ANNUAL') {
             _yearlyCtrl.text = '$amount';
+            _yearlyFeeId = id;
           } else if (freq == 'REGISTRATION') {
             _regFeeCtrl.text = '$amount';
+            _regFeeId = id;
           }
         }
       });
@@ -278,8 +290,9 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
 
   Future<void> _finishEdit() async {
     final batchId = widget.batchId!;
+    final notifier = ref.read(batchesProvider.notifier);
 
-    await ref.read(batchesProvider.notifier).updateBatch(batchId, {
+    await notifier.updateBatch(batchId, {
       'name':        _nameCtrl.text.trim(),
       'sport':       'CRICKET',
       if (_ageGroup != null) 'ageGroup': _ageGroup,
@@ -287,23 +300,66 @@ class _BatchCreateWizardState extends ConsumerState<BatchCreateWizard> {
       'description': _descCtrl.text.trim(),
     });
 
+    // ── Fee structures ─────────────────────────────────────────────────────
+    await _saveFeeEdit(batchId, notifier,
+        ctrl: _regFeeCtrl,   existingId: _regFeeId,
+        freq: 'REGISTRATION', name: 'Registration Fee', extra: {});
+    await _saveFeeEdit(batchId, notifier,
+        ctrl: _monthlyCtrl,  existingId: _monthlyFeeId,
+        freq: 'MONTHLY',      name: 'Monthly Fee',
+        extra: {'dueDayOfMonth': _dueDay});
+    await _saveFeeEdit(batchId, notifier,
+        ctrl: _yearlyCtrl,   existingId: _yearlyFeeId,
+        freq: 'ANNUAL',       name: 'Yearly Fee', extra: {});
+
+    // ── Schedules ──────────────────────────────────────────────────────────
     for (final id in _deletedSlotIds) {
       await ref.read(batchSchedulesProvider(batchId).notifier).remove(id);
     }
     for (final slot in _slots) {
       if (!slot.isExisting) {
-        await ref.read(batchesProvider.notifier).addSchedule(batchId, slot.toMap());
+        await notifier.addSchedule(batchId, slot.toMap());
       }
     }
 
+    // ── Coaches ────────────────────────────────────────────────────────────
     for (final id in _removedCoachProfileIds) {
-      await ref.read(batchesProvider.notifier).removeCoachFromBatch(batchId, id);
+      await notifier.removeCoachFromBatch(batchId, id);
     }
     await _saveNewCoaches(batchId);
 
     if (mounted) {
       ref.invalidate(batchDetailProvider(batchId));
       context.pop();
+    }
+  }
+
+  Future<void> _saveFeeEdit(
+    String batchId,
+    BatchesNotifier notifier, {
+    required TextEditingController ctrl,
+    required String? existingId,
+    required String freq,
+    required String name,
+    required Map<String, dynamic> extra,
+  }) async {
+    final amount = int.tryParse(ctrl.text.trim()) ?? 0;
+    if (existingId != null) {
+      if (amount > 0) {
+        await notifier.updateFeeStructure(existingId, {
+          'amountPaise': amount * 100,
+          ...extra,
+        });
+      } else {
+        await notifier.deleteFeeStructure(existingId);
+      }
+    } else if (amount > 0) {
+      await notifier.createFeeStructure(batchId, {
+        'name': name,
+        'amountPaise': amount * 100,
+        'frequency': freq,
+        ...extra,
+      });
     }
   }
 

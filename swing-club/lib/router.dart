@@ -23,6 +23,7 @@ import 'features/coaches/coach_detail_screen.dart';
 import 'features/announcements/announcement_list_screen.dart';
 import 'features/announcements/create_announcement_screen.dart';
 import 'features/inventory/inventory_list_screen.dart';
+import 'features/staff/staff_list_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/settings/academy_profile_screen.dart';
 import 'features/settings/profile_screen.dart';
@@ -210,6 +211,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
       GoRoute(path: '/inventory', builder: (_, _) => const InventoryListScreen()),
+      GoRoute(path: '/staff',     builder: (_, _) => const StaffListScreen()),
       GoRoute(
         path: '/settings',
         builder: (_, _) => const SettingsScreen(),

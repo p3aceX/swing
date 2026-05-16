@@ -52,6 +52,18 @@ class BatchesNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
         .post('/academy/${s.academyId}/fee-structures', data: body);
   }
 
+  Future<void> updateFeeStructure(String feeId, Map<String, dynamic> payload) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider)
+        .patch('/academy/${s.academyId}/fee-structures/$feeId', data: payload);
+  }
+
+  Future<void> deleteFeeStructure(String feeId) async {
+    final s = await ref.read(academyProvider.future);
+    await ref.read(apiClientProvider)
+        .delete('/academy/${s.academyId}/fee-structures/$feeId');
+  }
+
   Future<Map<String, dynamic>?> inviteAndAssignCoach({
     required String batchId,
     required String phone,

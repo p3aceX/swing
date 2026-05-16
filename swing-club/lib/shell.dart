@@ -69,12 +69,16 @@ class AppShell extends ConsumerWidget {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final navBg   = Color.alphaBlend(
+      isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+      bgColor,
+    );
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
         statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
-        systemNavigationBarColor: bgColor,
+        systemNavigationBarColor: navBg,
         systemNavigationBarDividerColor: Colors.transparent,
         systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       ),
@@ -86,10 +90,11 @@ class AppShell extends ConsumerWidget {
                 greeting: greeting,
                 academyName: academyName,
                 userInitial: userInitial,
-                onMenuTap: () => scaffoldKey.currentState?.openEndDrawer(),
+                background: navBg,
+                onMenuTap: () => scaffoldKey.currentState?.openDrawer(),
               )
             : null,
-        endDrawer: _SideDrawer(
+        drawer: _SideDrawer(
           userName: userName,
           userPhone: userPhone,
           userInitial: userInitial,
@@ -99,6 +104,7 @@ class AppShell extends ConsumerWidget {
         bottomNavigationBar: _BottomNav(
           currentIndex: idx,
           tabs: _tabs,
+          background: navBg,
           onTap: (i) => navigationShell.goBranch(i, initialLocation: i == idx),
         ),
       ),
@@ -112,84 +118,116 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
   final String greeting;
   final String academyName;
   final String userInitial;
+  final Color background;
   final VoidCallback onMenuTap;
 
   const _AppBar({
     required this.greeting,
     required this.academyName,
     required this.userInitial,
+    required this.background,
     required this.onMenuTap,
   });
 
   @override
-  Size get preferredSize => const Size.fromHeight(76);
-
-  Widget _trailingIcons(BuildContext context, ColorScheme cs) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(Icons.calendar_month_outlined,
-          color: cs.onSurface.withValues(alpha: 0.6), size: 22),
-      const SizedBox(width: 14),
-      Icon(Icons.notifications_none_rounded,
-          color: cs.onSurface.withValues(alpha: 0.6), size: 22),
-      const SizedBox(width: 12),
-      GestureDetector(
-        onTap: onMenuTap,
-        child: CircleAvatar(
-          radius: 18,
-          backgroundColor: cs.primary,
-          child: Text(userInitial,
-              style: TextStyle(color: cs.onPrimary, fontSize: 14, fontWeight: FontWeight.w800)),
-        ),
-      ),
-    ],
-  );
+  Size get preferredSize => const Size.fromHeight(64);
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final top = MediaQuery.of(context).padding.top;
+    final cs    = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final top   = MediaQuery.of(context).padding.top;
+    final dividerColor = cs.onSurface.withValues(alpha: isDark ? 0.10 : 0.08);
 
     return Container(
       height: preferredSize.height + top,
       padding: EdgeInsets.only(top: top),
-      color: Theme.of(context).scaffoldBackgroundColor,
+      decoration: BoxDecoration(
+        color: background,
+        border: Border(bottom: BorderSide(color: dividerColor, width: 0.5)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Profile avatar on the LEFT
+            GestureDetector(
+              onTap: onMenuTap,
+              child: CircleAvatar(
+                radius: 20,
+                backgroundColor: cs.primary,
+                child: Text(userInitial,
+                    style: TextStyle(color: cs.onPrimary, fontSize: 14, fontWeight: FontWeight.w800)),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // Greeting + academy name
             Expanded(
               child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          greeting,
-                          style: TextStyle(
-                            color: cs.onSurface.withValues(alpha: 0.55),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          academyName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: cs.onSurface,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                      ],
-                    ),
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(greeting,
+                      style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: 0.45),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      )),
+                  const SizedBox(height: 1),
+                  Text(academyName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: cs.onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                      )),
+                ],
+              ),
             ),
-            _trailingIcons(context, cs),
+
+            // Boxed icon buttons on the RIGHT
+            _BoxedIcon(
+              icon: Icons.calendar_month_outlined,
+              cs: cs,
+            ),
+            const SizedBox(width: 8),
+            _BoxedIcon(
+              icon: Icons.notifications_none_rounded,
+              cs: cs,
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BoxedIcon extends StatelessWidget {
+  final IconData icon;
+  final ColorScheme cs;
+  final VoidCallback? onTap;
+
+  const _BoxedIcon({required this.icon, required this.cs, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: cs.onSurface.withValues(alpha: 0.12),
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, size: 20, color: cs.onSurface.withValues(alpha: 0.65)),
       ),
     );
   }
@@ -268,6 +306,8 @@ class _SideDrawer extends ConsumerWidget {
                 onTap: () { Navigator.pop(context); context.push('/profile'); }),
             _DrawerItem(icon: Icons.sports_cricket_outlined, label: 'Coaches',
                 onTap: () { Navigator.pop(context); context.push('/coaches'); }),
+            _DrawerItem(icon: Icons.badge_outlined, label: 'Staff',
+                onTap: () { Navigator.pop(context); context.push('/staff'); }),
             _DrawerItem(icon: Icons.campaign_outlined, label: 'Announcements',
                 onTap: () { Navigator.pop(context); context.push('/announcements'); }),
             _DrawerItem(icon: Icons.inventory_2_outlined, label: 'Inventory',
@@ -357,52 +397,118 @@ class _Tab {
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final List<_Tab> tabs;
+  final Color background;
   final ValueChanged<int> onTap;
 
-  const _BottomNav({required this.currentIndex, required this.tabs, required this.onTap});
+  const _BottomNav({
+    required this.currentIndex,
+    required this.tabs,
+    required this.background,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = cs.onSurface.withValues(alpha: 0.55);
+    final divider = cs.onSurface.withValues(alpha: isDark ? 0.10 : 0.08);
+
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(top: BorderSide(color: cs.outlineVariant, width: 0.5)),
+        color: background,
+        border: Border(top: BorderSide(color: divider, width: 0.5)),
       ),
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).padding.bottom,
+      ),
       child: SizedBox(
-        height: 58,
+        height: 72,
         child: Row(
           children: List.generate(tabs.length, (i) {
             final tab = tabs[i];
             final selected = i == currentIndex;
             return Expanded(
-              child: GestureDetector(
+              child: _NavItem(
+                tab: tab,
+                selected: selected,
+                accent: cs.primary,
+                muted: muted,
                 onTap: () => onTap(i),
-                behavior: HitTestBehavior.opaque,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      selected ? tab.activeIcon : tab.icon,
-                      size: 22,
-                      color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.5),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      tab.label,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
               ),
             );
           }),
         ),
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.tab,
+    required this.selected,
+    required this.accent,
+    required this.muted,
+    required this.onTap,
+  });
+
+  final _Tab tab;
+  final bool selected;
+  final Color accent;
+  final Color muted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const duration = Duration(milliseconds: 220);
+    const curve = Curves.easeOutCubic;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedSwitcher(
+            duration: duration,
+            switchInCurve: curve,
+            switchOutCurve: curve,
+            transitionBuilder: (child, anim) => ScaleTransition(
+              scale: Tween<double>(begin: 0.85, end: 1).animate(anim),
+              child: FadeTransition(opacity: anim, child: child),
+            ),
+            child: Icon(
+              selected ? tab.activeIcon : tab.icon,
+              key: ValueKey(selected),
+              size: 22,
+              color: selected ? accent : muted,
+            ),
+          ),
+          const SizedBox(height: 3),
+          AnimatedDefaultTextStyle(
+            duration: duration,
+            curve: curve,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              letterSpacing: -0.1,
+              color: selected ? accent : muted,
+            ),
+            child: Text(tab.label),
+          ),
+          const SizedBox(height: 4),
+          AnimatedContainer(
+            duration: duration,
+            curve: curve,
+            width: selected ? 4 : 0,
+            height: selected ? 4 : 0,
+            decoration: BoxDecoration(
+              color: accent,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
       ),
     );
   }

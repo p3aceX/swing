@@ -28,6 +28,13 @@ class PaymentsNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     await ref.read(apiClientProvider)
         .post('/academy/${s.academyId}/fee-payments/$paymentId/remind');
   }
+
+  Future<Map<String, dynamic>> getPaymentLink(String enrollmentId) async {
+    final s = await ref.read(academyProvider.future);
+    final res = await ref.read(apiClientProvider)
+        .post('/academy/${s.academyId}/enrollments/$enrollmentId/payment-link');
+    return (res.data['data'] as Map).cast<String, dynamic>();
+  }
 }
 
 final paymentsProvider =

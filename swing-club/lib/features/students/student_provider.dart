@@ -53,10 +53,17 @@ final studentsProvider =
 
 final studentDetailProvider =
     FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, enrollmentId) async {
-  final list = await ref.watch(studentsProvider.future);
+  final s = await ref.watch(academyProvider.future);
   try {
-    return list.firstWhere((e) => e['id'] == enrollmentId);
-  } catch (_) {
-    throw Exception('Student not found');
+    final res = await ref.read(apiClientProvider)
+        .get('/academy/${s.academyId}/students/$enrollmentId');
+    return (res.data['data'] as Map).cast<String, dynamic>();
+  } on DioException catch (_) {
+    // Fallback: find from cached list until backend is deployed
+    final list = await ref.read(studentsProvider.future);
+    return list.firstWhere(
+      (e) => e['id'] == enrollmentId,
+      orElse: () => throw Exception('Student not found'),
+    );
   }
 });

@@ -5,12 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../shared/widgets.dart';
 import '../batches/batch_provider.dart';
+import '../fees/fee_provider.dart';
 import 'student_provider.dart';
-
-const _kNavy   = Color(0xFF071B3D);
-const _kBlue   = Color(0xFF0057C8);
-const _kBorder = Color(0xFFE0DED6);
-const _kBg     = Color(0xFFF4F2EB);
 
 const _bloodGroups = ['A+', 'B+', 'O+', 'AB+', 'A-', 'B-', 'O-', 'AB-'];
 
@@ -57,23 +53,22 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
   final _feeCtrl      = TextEditingController();
   String _frequency   = 'MONTHLY';
   bool   _feeSeeded   = false;
-  // Registration fee
   bool   _showRegFee  = false;
   final _regFeeCtrl   = TextEditingController();
   String _regFeeMode  = 'CASH';
-  // First month advance payment
   bool   _showInitPay = false;
   final _initPayCtrl  = TextEditingController();
   String _payMode     = 'CASH';
+  // Cached fetched amounts per frequency for smart swapping
+  int _fetchedMonthlyPaise = 0;
+  int _fetchedAnnualPaise  = 0;
 
   // 4 – extras
   String? _bloodGroup;
-  final _aadhaarCtrl    = TextEditingController();
-  // parent
+  final _aadhaarCtrl     = TextEditingController();
   final _parentNameCtrl  = TextEditingController();
   final _parentPhoneCtrl = TextEditingController();
   String? _parentRelation;
-  // emergency
   bool    _showEmergency = false;
   final _emergNameCtrl  = TextEditingController();
   final _emergPhoneCtrl = TextEditingController();
@@ -96,25 +91,19 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
     super.dispose();
   }
 
-  // ── Navigation ───────────────────────────────────────────────────────────────
-
   void _to(int step) {
-    if (step == 3 && !_feeSeeded && _batchId != null) {
-      _seedFeeFromBatch();
-    }
+    if (step == 3 && !_feeSeeded && _batchId != null) _seedFeeFromBatch();
     setState(() => _step = step);
     _pageCtrl.animateToPage(step,
-        duration: const Duration(milliseconds: 280), curve: Curves.easeInOut);
+        duration: const Duration(milliseconds: 260), curve: Curves.easeInOut);
   }
 
   void _seedFeeFromBatch() {
-    // Try batch detail cache first (available when sheet opened from batch detail screen)
     final batchDetailAsync = ref.read(batchDetailProvider(_batchId!));
     if (batchDetailAsync is AsyncData<Map<String, dynamic>>) {
       if (_tryApplyFees((batchDetailAsync.value['feeStructures'] as List?)
           ?.cast<Map<String, dynamic>>())) return;
     }
-    // Fall back to batches list (always loaded in the app)
     ref.read(batchesProvider).whenData((batches) {
       try {
         final batch = batches.firstWhere((b) => b['id'] == _batchId);
@@ -125,22 +114,40 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
 
   bool _tryApplyFees(List<Map<String, dynamic>>? fees) {
     if (fees == null || fees.isEmpty) return false;
-    final fee = fees.first;
-    final amountPaise = (fee['amountPaise'] as num?)?.toInt();
-    final frequency   = fee['frequency'] as String?;
-    bool applied = false;
-    if (amountPaise != null && amountPaise > 0) {
-      _feeCtrl.text = (amountPaise / 100).toStringAsFixed(0);
-      _feeSeeded = true;
-      applied = true;
-    }
-    if (frequency != null && kFeeFrequencies.contains(frequency)) {
-      setState(() => _frequency = frequency);
-    }
-    return applied;
-  }
 
-  // ── API calls ─────────────────────────────────────────────────────────────────
+    int regPaise      = 0;
+    int monthlyPaise  = 0;
+    int annualPaise   = 0;
+
+    for (final fee in fees) {
+      final paise = (fee['amountPaise'] as num?)?.toInt() ?? 0;
+      final freq  = fee['frequency'] as String? ?? '';
+      if (paise <= 0) continue;
+      if (freq == 'REGISTRATION') regPaise     = paise;
+      else if (freq == 'MONTHLY') monthlyPaise = paise;
+      else if (freq == 'ANNUAL')  annualPaise  = paise;
+    }
+
+    if (regPaise == 0 && monthlyPaise == 0 && annualPaise == 0) return false;
+
+    // Determine default recurring frequency
+    final defaultFreq = monthlyPaise > 0 ? 'MONTHLY' : 'ANNUAL';
+    final defaultPaise = defaultFreq == 'MONTHLY' ? monthlyPaise : annualPaise;
+
+    setState(() {
+      _fetchedMonthlyPaise = monthlyPaise;
+      _fetchedAnnualPaise  = annualPaise;
+      _frequency           = defaultFreq;
+      _feeSeeded           = true;
+      if (regPaise > 0) _showRegFee = true;
+    });
+
+    // Update controllers outside setState (they notify listeners themselves)
+    if (regPaise > 0) _regFeeCtrl.text = (regPaise / 100).toStringAsFixed(0);
+    if (defaultPaise > 0) _feeCtrl.text = (defaultPaise / 100).toStringAsFixed(0);
+
+    return true;
+  }
 
   Future<void> _lookup() async {
     final phone = _phoneCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
@@ -174,7 +181,6 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
     final regRupees  = _showRegFee ? (double.tryParse(_regFeeCtrl.text.trim()) ?? 0) : 0;
     final aadhaar    = _aadhaarCtrl.text.trim();
 
-    // Validate aadhaar only if entered
     if (aadhaar.isNotEmpty && aadhaar.length != 12) {
       showSnack(context, 'Aadhaar must be 12 digits (or leave blank)');
       return;
@@ -200,19 +206,16 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
         'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2,'0')}-${_dob!.day.toString().padLeft(2,'0')}',
       if (_cityCtrl.text.trim().isNotEmpty) 'city': _cityCtrl.text.trim(),
       if (_bloodGroup != null) 'bloodGroup': _bloodGroup,
-      // Send last 4 digits only (backend expects aadhaarLast4)
       if (aadhaar.length == 12) 'aadhaarLast4': aadhaar.substring(8),
       if (_parentNameCtrl.text.trim().isNotEmpty)
         'parentName': _parentNameCtrl.text.trim(),
       if (_parentPhoneCtrl.text.trim().isNotEmpty)
         'parentPhone': _parentPhoneCtrl.text.trim(),
       if (_parentRelation != null) 'parentRelation': _parentRelation,
-      // Registration / admission fee
       if (_showRegFee && regRupees > 0) ...<String, dynamic>{
-        'registrationFeePaise':   (regRupees * 100).toInt(),
+        'registrationFeePaise':    (regRupees * 100).toInt(),
         'registrationPaymentMode': _regFeeMode,
       },
-      // First month / advance payment
       if (_showInitPay && initRupees > 0) ...<String, dynamic>{
         'initialPaymentPaise': (initRupees * 100).toInt(),
         'initialPaymentMode':  _payMode,
@@ -226,9 +229,9 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
     setState(() => _loading = true);
     try {
       await ref.read(studentsProvider.notifier).enroll(_batchId!, payload);
-      // Refresh batch data so the new student appears everywhere immediately
       ref.invalidate(batchDetailProvider(_batchId!));
       ref.invalidate(batchesProvider);
+      ref.invalidate(paymentsProvider);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -244,7 +247,13 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final h = MediaQuery.of(context).size.height;
+    final cs = Theme.of(context).colorScheme;
+    final h  = MediaQuery.of(context).size.height;
+
+    final stepTitles = const [
+      'Find Student', 'Profile', 'Enrollment', 'Fee Setup', 'More Details',
+    ];
+
     return SizedBox(
       height: h * 0.92,
       child: Column(
@@ -252,58 +261,72 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
           // drag handle
           Container(
             width: 36, height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 10),
+            margin: const EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(
-              color: _kBorder, borderRadius: BorderRadius.circular(2)),
+              color: cs.onSurface.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
-          // header row
+
+          // header
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
             child: Row(children: [
               if (_step > 0)
                 GestureDetector(
                   onTap: () => _to(_step - 1),
-                  child: const Icon(Icons.arrow_back_ios_new_rounded,
-                      size: 18, color: _kNavy),
+                  child: Icon(Icons.arrow_back_ios_new_rounded,
+                      size: 18, color: cs.onSurface),
                 )
               else
                 const SizedBox(width: 18),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  const [
-                    'Find Student',
-                    'Profile',
-                    'Enrollment',
-                    'Fee Setup',
-                    'More Details',
-                  ][_step],
-                  style: const TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.w800, color: _kNavy),
+                  stepTitles[_step],
+                  style: TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w800,
+                      color: cs.onSurface, letterSpacing: -0.3),
                 ),
               ),
               GestureDetector(
                 onTap: () => Navigator.pop(context),
-                child: const Icon(Icons.close_rounded, color: Colors.grey, size: 22),
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: cs.onSurface.withValues(alpha: 0.12)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.close_rounded,
+                      color: cs.onSurface.withValues(alpha: 0.6), size: 18),
+                ),
               ),
             ]),
           ),
-          // 5-segment progress bar
+
+          const SizedBox(height: 14),
+
+          // step progress dots
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
             child: Row(
               children: List.generate(5, (i) => Expanded(
                 child: Container(
                   height: 3,
                   margin: const EdgeInsets.symmetric(horizontal: 2),
                   decoration: BoxDecoration(
-                    color: i <= _step ? _kNavy : _kBorder,
+                    color: i <= _step
+                        ? cs.onSurface
+                        : cs.onSurface.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               )),
             ),
           ),
+
+          const SizedBox(height: 4),
+
           // pages
           Expanded(
             child: PageView(
@@ -325,140 +348,115 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
 
   // ── Step 0 — Phone ────────────────────────────────────────────────────────────
 
-  Widget _buildStep0() => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
-    children: [
-      const Text(
-        "Student's phone number",
-        style: TextStyle(fontSize: 15, color: Colors.grey, fontWeight: FontWeight.w500),
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _phoneCtrl,
-        keyboardType: TextInputType.phone,
-        autofocus: true,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(10),
-        ],
-        style: const TextStyle(
-            fontSize: 24, fontWeight: FontWeight.w800,
-            color: _kNavy, letterSpacing: 3),
-        decoration: InputDecoration(
+  Widget _buildStep0() {
+    final cs = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+      children: [
+        Text("Student's phone number",
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                color: cs.onSurface.withValues(alpha: 0.5), letterSpacing: 0.3)),
+        const SizedBox(height: 12),
+        _OutlinedField(
+          controller: _phoneCtrl,
+          keyboardType: TextInputType.phone,
+          autofocus: true,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(10),
+          ],
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
+              color: cs.onSurface, letterSpacing: 3),
           prefixText: '+91  ',
-          prefixStyle: const TextStyle(
-              fontSize: 18, fontWeight: FontWeight.w600, color: Colors.grey),
           hintText: '0000000000',
-          hintStyle: const TextStyle(
-              fontSize: 24, color: Color(0xFFDDDDDD), letterSpacing: 3),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: _kBorder)),
-          enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: _kBorder)),
-          focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: _kNavy, width: 1.5)),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          hintStyle: TextStyle(fontSize: 24,
+              color: cs.onSurface.withValues(alpha: 0.2), letterSpacing: 3),
+          onSubmitted: (_) => _lookup(),
         ),
-        onSubmitted: (_) => _lookup(),
-      ),
-      const SizedBox(height: 28),
-      _PrimaryButton(
-          label: 'Find Student', loading: _loading, onTap: _lookup),
-    ],
-  );
+        const SizedBox(height: 28),
+        _PrimaryBtn(label: 'Find Student', loading: _loading, onTap: _lookup),
+      ],
+    );
+  }
 
   // ── Step 1 — Profile ──────────────────────────────────────────────────────────
 
   Widget _buildStep1() {
+    final cs = Theme.of(context).colorScheme;
+
     if (_userFound == true) {
       final u = _existingUser ?? {};
       return ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [
-          _Banner(
+          _StatusBanner(
             icon: Icons.check_circle_rounded,
             label: 'Student found',
-            color: const Color(0xFF2E7D32),
-            bg: const Color(0xFFE8F5E9),
+            color: const Color(0xFF16A34A),
           ),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              border: Border.all(color: cs.onSurface.withValues(alpha: 0.10)),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _kBorder),
             ),
             child: Column(children: [
-              _InfoTile(Icons.person_rounded, 'Name',
-                  u['name'] as String? ?? '—'),
-              const Divider(height: 1, indent: 48),
-              _InfoTile(Icons.phone_rounded, 'Phone',
-                  '+91 ${_phoneCtrl.text.trim()}'),
+              _InfoRow(Icons.person_rounded, 'Name', u['name'] as String? ?? '—'),
+              Divider(height: 1, thickness: 0.5,
+                  indent: 48, color: cs.onSurface.withValues(alpha: 0.08)),
+              _InfoRow(Icons.phone_rounded, 'Phone', '+91 ${_phoneCtrl.text.trim()}'),
               if ((u['dateOfBirth'] as String?) != null) ...[
-                const Divider(height: 1, indent: 48),
-                _InfoTile(Icons.cake_rounded, 'DOB',
-                    u['dateOfBirth'] as String),
+                Divider(height: 1, thickness: 0.5,
+                    indent: 48, color: cs.onSurface.withValues(alpha: 0.08)),
+                _InfoRow(Icons.cake_rounded, 'DOB', u['dateOfBirth'] as String),
               ],
               if ((u['city'] as String?) != null) ...[
-                const Divider(height: 1, indent: 48),
-                _InfoTile(Icons.location_city_rounded, 'City',
-                    u['city'] as String),
+                Divider(height: 1, thickness: 0.5,
+                    indent: 48, color: cs.onSurface.withValues(alpha: 0.08)),
+                _InfoRow(Icons.location_city_rounded, 'City', u['city'] as String),
               ],
             ]),
           ),
           const SizedBox(height: 24),
-          _PrimaryButton(label: 'Continue', onTap: () => _to(2)),
+          _PrimaryBtn(label: 'Continue', onTap: () => _to(2)),
         ],
       );
     }
 
-    // ── New user form ──────────────────────────────────────────────────────────
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
       children: [
-        _Banner(
+        _StatusBanner(
           icon: Icons.person_add_rounded,
           label: 'New student — enter details',
           color: const Color(0xFFE65100),
-          bg: const Color(0xFFFFF3E0),
         ),
         const SizedBox(height: 20),
-        _SectionLabel('FULL NAME *'),
+        _Label('FULL NAME *'),
         const SizedBox(height: 6),
-        TextField(
-          controller: _nameCtrl,
-          textCapitalization: TextCapitalization.words,
-          decoration: _inputDec('e.g. Rahul Sharma'),
-        ),
+        _OutlinedField(controller: _nameCtrl,
+            textCapitalization: TextCapitalization.words,
+            hintText: 'e.g. Rahul Sharma'),
         const SizedBox(height: 16),
-        _SectionLabel('DATE OF BIRTH (optional)'),
+        _Label('DATE OF BIRTH (optional)'),
         const SizedBox(height: 6),
         _DateRow(
           value: _dob,
           hint: 'Select date of birth',
           onTap: () async {
             final d = await showDatePicker(
-              context: context,
-              initialDate: DateTime(2005),
-              firstDate: DateTime(1960),
-              lastDate: DateTime.now(),
+              context: context, initialDate: DateTime(2005),
+              firstDate: DateTime(1960), lastDate: DateTime.now(),
             );
             if (d != null) setState(() => _dob = d);
           },
         ),
         const SizedBox(height: 16),
-        _SectionLabel('CITY (optional)'),
+        _Label('CITY (optional)'),
         const SizedBox(height: 6),
-        TextField(
-          controller: _cityCtrl,
-          decoration: _inputDec('e.g. Bhopal'),
-        ),
+        _OutlinedField(controller: _cityCtrl, hintText: 'e.g. Bhopal'),
         const SizedBox(height: 28),
-        _PrimaryButton(
+        _PrimaryBtn(
           label: 'Continue',
           onTap: () {
             if (_nameCtrl.text.trim().isEmpty) {
@@ -475,118 +473,147 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
   // ── Step 2 — Enrollment ───────────────────────────────────────────────────────
 
   Widget _buildStep2() {
+    final cs         = Theme.of(context).colorScheme;
     final batchState = ref.watch(batchesProvider);
+
+    final borderDec = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: cs.onSurface.withValues(alpha: 0.10)),
+    );
+    final focusDec = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: cs.onSurface, width: 1.5),
+    );
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
       children: [
-        _SectionLabel('BATCH'),
+
+        // ── Batch dropdown ─────────────────────────────────────────────────
+        _Label('BATCH'),
         const SizedBox(height: 8),
+
         if (widget.batchId != null)
-          // Pre-filled pill
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: _kBg,
+              border: Border.all(color: cs.onSurface.withValues(alpha: 0.10)),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _kBorder),
             ),
             child: Row(children: [
-              const Icon(Icons.groups_rounded, color: _kBlue, size: 18),
+              Icon(Icons.groups_2_rounded, size: 18,
+                  color: cs.onSurface.withValues(alpha: 0.45)),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  widget.batchName ?? widget.batchId!,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, color: _kNavy),
-                ),
+                child: Text(widget.batchName ?? widget.batchId!,
+                    style: TextStyle(fontWeight: FontWeight.w600, color: cs.onSurface)),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE3F2FD),
+                  color: cs.onSurface.withValues(alpha: 0.07),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text('Selected',
-                    style: TextStyle(
-                        fontSize: 10, color: _kBlue,
-                        fontWeight: FontWeight.w700)),
+                child: Text('Pre-selected',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                        color: cs.onSurface.withValues(alpha: 0.5))),
               ),
             ]),
           )
         else
-          // Batch selector
           batchState.when(
-            loading: loadingBody,
-            error: (_, __) => const Text('Failed to load batches',
-                style: TextStyle(color: Colors.red)),
+            loading: () => Container(
+              height: 52,
+              decoration: BoxDecoration(
+                border: Border.all(color: cs.onSurface.withValues(alpha: 0.10)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Center(child: SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))),
+            ),
+            error: (_, __) => Text('Failed to load batches',
+                style: TextStyle(color: cs.error, fontSize: 13)),
             data: (batches) {
-              // Auto-select when there's exactly one batch
               if (batches.length == 1 && _batchId == null) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) setState(() => _batchId = batches[0]['id'] as String);
+                  if (mounted) {
+                    _feeCtrl.clear();
+                    _regFeeCtrl.clear();
+                    setState(() {
+                      _batchId             = batches[0]['id'] as String;
+                      _feeSeeded           = false;
+                      _showRegFee          = false;
+                      _frequency           = 'MONTHLY';
+                      _fetchedMonthlyPaise = 0;
+                      _fetchedAnnualPaise  = 0;
+                    });
+                    _seedFeeFromBatch();
+                  }
                 });
               }
-              return Column(
-              children: batches.map((b) {
-                final id  = b['id'] as String;
-                final sel = _batchId == id;
-                return GestureDetector(
-                  onTap: () => setState(() => _batchId = id),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 13),
-                    decoration: BoxDecoration(
-                      color: sel ? _kNavy : Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: sel ? _kNavy : _kBorder,
-                          width: sel ? 0 : 1),
-                    ),
-                    child: Row(children: [
-                      Icon(Icons.groups_rounded,
-                          color: sel ? Colors.white : Colors.grey, size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              b['name'] as String? ?? '',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: sel ? Colors.white : _kNavy),
-                            ),
-                            if ((b['ageGroup'] as String?) != null)
-                              Text(b['ageGroup'] as String,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: sel
-                                          ? Colors.white70
-                                          : Colors.grey)),
-                          ],
-                        ),
-                      ),
-                      if (sel)
-                        const Icon(Icons.check_circle_rounded,
-                            color: Colors.white, size: 18),
-                    ]),
-                  ),
-                );
-              }).toList(),
-            );
-          },
+              return DropdownButtonFormField<String>(
+                value: _batchId,
+                isExpanded: true,
+                icon: Icon(Icons.keyboard_arrow_down_rounded,
+                    color: cs.onSurface.withValues(alpha: 0.45)),
+                dropdownColor: Theme.of(context).scaffoldBackgroundColor,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                    color: cs.onSurface),
+                decoration: InputDecoration(
+                  filled: false,
+                  hintText: 'Select a batch',
+                  hintStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w400,
+                      color: cs.onSurface.withValues(alpha: 0.35)),
+                  border: borderDec,
+                  enabledBorder: borderDec,
+                  focusedBorder: focusDec,
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 14),
+                ),
+                items: batches.map((b) {
+                  final name = b['name'] as String? ?? '';
+                  final age  = b['ageGroup'] as String?;
+                  final label = age != null ? '$name  ·  $age' : name;
+                  return DropdownMenuItem<String>(
+                    value: b['id'] as String,
+                    child: Text(label,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontWeight: FontWeight.w600,
+                            color: cs.onSurface, fontSize: 14)),
+                  );
+                }).toList(),
+                onChanged: (v) {
+                  _feeCtrl.clear();
+                  _regFeeCtrl.clear();
+                  setState(() {
+                    _batchId              = v;
+                    _feeSeeded            = false;
+                    _showRegFee           = false;
+                    _frequency            = 'MONTHLY';
+                    _fetchedMonthlyPaise  = 0;
+                    _fetchedAnnualPaise   = 0;
+                  });
+                  if (v != null) _seedFeeFromBatch();
+                },
+              );
+            },
           ),
 
+        const SizedBox(height: 28),
+        Divider(height: 1, thickness: 0.5,
+            color: cs.onSurface.withValues(alpha: 0.08)),
         const SizedBox(height: 24),
-        _SectionLabel('ENROLLMENT TYPE'),
-        const SizedBox(height: 8),
+
+        // ── Enrollment type ────────────────────────────────────────────────
+        _Label('ENROLLMENT TYPE'),
+        const SizedBox(height: 12),
+
         Row(children: [
           Expanded(
             child: _TypeCard(
-              icon: Icons.star_rounded,
+              icon: Icons.verified_rounded,
               label: 'Full',
-              subtitle: 'Regular',
+              subtitle: 'Regular enrollment',
               selected: !_isTrial,
               onTap: () => setState(() => _isTrial = false),
             ),
@@ -594,7 +621,7 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
           const SizedBox(width: 12),
           Expanded(
             child: _TypeCard(
-              icon: Icons.timer_outlined,
+              icon: Icons.timelapse_rounded,
               label: 'Trial',
               subtitle: 'Limited period',
               selected: _isTrial,
@@ -604,34 +631,29 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
         ]),
 
         if (_isTrial) ...[
-          const SizedBox(height: 16),
-          _SectionLabel('TRIAL END DATE (optional)'),
-          const SizedBox(height: 6),
+          const SizedBox(height: 20),
+          _Label('TRIAL END DATE (optional)'),
+          const SizedBox(height: 8),
           _DateRow(
             value: _trialEndsAt,
             hint: 'Pick trial end date',
             onTap: () async {
               final d = await showDatePicker(
                 context: context,
-                initialDate:
-                    DateTime.now().add(const Duration(days: 30)),
+                initialDate: DateTime.now().add(const Duration(days: 30)),
                 firstDate: DateTime.now(),
-                lastDate: DateTime.now()
-                    .add(const Duration(days: 365)),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
               );
               if (d != null) setState(() => _trialEndsAt = d);
             },
           ),
         ],
 
-        const SizedBox(height: 28),
-        _PrimaryButton(
+        const SizedBox(height: 32),
+        _PrimaryBtn(
           label: 'Continue',
           onTap: () {
-            if (_batchId == null) {
-              showSnack(context, 'Select a batch');
-              return;
-            }
+            if (_batchId == null) { showSnack(context, 'Select a batch'); return; }
             _to(3);
           },
         ),
@@ -641,306 +663,335 @@ class _EnrollStudentSheetState extends ConsumerState<EnrollStudentSheet> {
 
   // ── Step 3 — Fee Setup ────────────────────────────────────────────────────────
 
-  Widget _buildStep3() => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-    children: [
+  Widget _buildStep3() {
+    final cs = Theme.of(context).colorScheme;
 
-      // ── Registration Fee ──────────────────────────────────────────────────
-      _SectionLabel('REGISTRATION / ADMISSION FEE'),
-      const SizedBox(height: 4),
-      const Text('One-time fee charged on admission',
-          style: TextStyle(fontSize: 12, color: Colors.grey)),
-      const SizedBox(height: 10),
-      GestureDetector(
-        onTap: () => setState(() => _showRegFee = !_showRegFee),
-        child: Row(children: [
-          _Checkbox(checked: _showRegFee),
-          const SizedBox(width: 10),
-          const Text('Collect registration fee now',
-              style: TextStyle(fontWeight: FontWeight.w600, color: _kNavy, fontSize: 14)),
-        ]),
-      ),
-      if (_showRegFee) ...[
-        const SizedBox(height: 12),
-        TextField(
-          controller: _regFeeCtrl,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _kNavy),
-          decoration: _inputDec('0').copyWith(
-            prefixText: '₹  ',
-            prefixStyle: const TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w600),
-          ),
-        ),
-        const SizedBox(height: 12),
-        _SectionLabel('PAYMENT MODE'),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8, runSpacing: 8,
-          children: kPaymentModes.map((m) {
-            final sel = _regFeeMode == m;
-            return GestureDetector(
-              onTap: () => setState(() => _regFeeMode = m),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                decoration: BoxDecoration(
-                  color: sel ? _kBlue : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: sel ? _kBlue : _kBorder),
-                ),
-                child: Text(m,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                        color: sel ? Colors.white : Colors.grey)),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+      children: [
 
-      const SizedBox(height: 20),
-      const Divider(color: Color(0xFFE0DED6)),
-      const SizedBox(height: 20),
-
-      // ── Monthly / recurring fee ───────────────────────────────────────────
-      _SectionLabel('RECURRING FEE AMOUNT'),
-      const SizedBox(height: 6),
-      TextField(
-        controller: _feeCtrl,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _kNavy),
-        decoration: _inputDec('0').copyWith(
-          prefixText: '₹  ',
-          prefixStyle: const TextStyle(
-              fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w600),
-        ),
-      ),
-
-      const SizedBox(height: 20),
-      _SectionLabel('FREQUENCY'),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8, runSpacing: 8,
-        children: kFeeFrequencies.map((f) {
-          final sel   = _frequency == f;
-          final label = _freqLabels[f] ?? f;
-          return GestureDetector(
-            onTap: () => setState(() => _frequency = f),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: sel ? _kNavy : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: sel ? _kNavy : _kBorder),
-              ),
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700,
-                      color: sel ? Colors.white : Colors.grey)),
+        if (_feeSeeded) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: cs.onSurface.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: cs.onSurface.withValues(alpha: 0.08)),
             ),
-          );
-        }).toList(),
-      ),
+            child: Row(children: [
+              Icon(Icons.auto_awesome_rounded, size: 14,
+                  color: cs.onSurface.withValues(alpha: 0.45)),
+              const SizedBox(width: 8),
+              Text('Fee pre-filled from batch — edit if needed',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                      color: cs.onSurface.withValues(alpha: 0.5))),
+            ]),
+          ),
+          const SizedBox(height: 20),
+        ],
 
-      const SizedBox(height: 20),
-      // First month payment checkbox
-      GestureDetector(
-        onTap: () => setState(() => _showInitPay = !_showInitPay),
-        child: Row(children: [
-          _Checkbox(checked: _showInitPay),
-          const SizedBox(width: 10),
-          const Text('Collect first month fee now',
-              style: TextStyle(fontWeight: FontWeight.w600, color: _kNavy, fontSize: 14)),
-        ]),
-      ),
+        _Label('REGISTRATION / ADMISSION FEE'),
+        const SizedBox(height: 4),
+        Text('One-time fee charged on admission',
+            style: TextStyle(fontSize: 12,
+                color: cs.onSurface.withValues(alpha: 0.45))),
+        const SizedBox(height: 10),
+        _CheckRow(
+          checked: _showRegFee,
+          label: 'Collect registration fee now',
+          onTap: () => setState(() => _showRegFee = !_showRegFee),
+        ),
+        if (_showRegFee) ...[
+          const SizedBox(height: 12),
+          _OutlinedField(
+            controller: _regFeeCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface),
+            prefixText: '₹  ',
+            hintText: '0',
+          ),
+          const SizedBox(height: 12),
+          _Label('PAYMENT MODE'),
+          const SizedBox(height: 8),
+          _ModeChips(
+            modes: kPaymentModes,
+            selected: _regFeeMode,
+            onSelect: (m) => setState(() => _regFeeMode = m),
+          ),
+        ],
 
-      if (_showInitPay) ...[
-        const SizedBox(height: 14),
-        TextField(
-          controller: _initPayCtrl,
+        const SizedBox(height: 20),
+        Divider(height: 1, thickness: 0.5,
+            color: cs.onSurface.withValues(alpha: 0.08)),
+        const SizedBox(height: 20),
+
+        _Label('RECURRING FEE AMOUNT'),
+        const SizedBox(height: 6),
+        _OutlinedField(
+          controller: _feeCtrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-          decoration: _inputDec('Amount paid').copyWith(
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface),
+          prefixText: '₹  ',
+          hintText: '0',
+        ),
+
+        const SizedBox(height: 20),
+        _Label('FREQUENCY'),
+        const SizedBox(height: 8),
+        Row(children: [
+          _FreqChip(
+            label: 'Monthly',
+            sublabel: _fetchedMonthlyPaise > 0
+                ? '₹${(_fetchedMonthlyPaise / 100).toStringAsFixed(0)}'
+                : null,
+            selected: _frequency == 'MONTHLY',
+            onTap: () => setState(() {
+              _frequency = 'MONTHLY';
+              if (_fetchedMonthlyPaise > 0) {
+                _feeCtrl.text = (_fetchedMonthlyPaise / 100).toStringAsFixed(0);
+              }
+            }),
+          ),
+          const SizedBox(width: 10),
+          _FreqChip(
+            label: 'Yearly',
+            sublabel: _fetchedAnnualPaise > 0
+                ? '₹${(_fetchedAnnualPaise / 100).toStringAsFixed(0)}'
+                : null,
+            selected: _frequency == 'ANNUAL',
+            onTap: () => setState(() {
+              _frequency = 'ANNUAL';
+              if (_fetchedAnnualPaise > 0) {
+                _feeCtrl.text = (_fetchedAnnualPaise / 100).toStringAsFixed(0);
+              }
+            }),
+          ),
+        ]),
+
+        const SizedBox(height: 20),
+        _CheckRow(
+          checked: _showInitPay,
+          label: 'Collect first month fee now',
+          onTap: () {
+            final nowShowing = !_showInitPay;
+            setState(() => _showInitPay = nowShowing);
+            if (nowShowing && _initPayCtrl.text.trim().isEmpty) {
+              // Auto-fill: recurring fee + registration fee
+              final recurringRupees = double.tryParse(_feeCtrl.text.trim()) ?? 0;
+              final regRupees       = double.tryParse(_regFeeCtrl.text.trim()) ?? 0;
+              final total           = recurringRupees + regRupees;
+              if (total > 0) {
+                _initPayCtrl.text = total.toStringAsFixed(0);
+              }
+            }
+          },
+        ),
+        if (_showInitPay) ...[
+          const SizedBox(height: 14),
+          _OutlinedField(
+            controller: _initPayCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
             prefixText: '₹  ',
-            prefixStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600),
+            hintText: 'Amount paid',
+          ),
+          const SizedBox(height: 12),
+          _Label('PAYMENT MODE'),
+          const SizedBox(height: 8),
+          _ModeChips(
+            modes: kPaymentModes,
+            selected: _payMode,
+            onSelect: (m) => setState(() => _payMode = m),
+          ),
+        ],
+
+        const SizedBox(height: 28),
+        _PrimaryBtn(label: 'Continue', onTap: () => _to(4)),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton(
+            onPressed: () => _to(4),
+            child: Text('Skip fees for now',
+                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.4),
+                    fontSize: 13)),
           ),
         ),
-        const SizedBox(height: 12),
-        _SectionLabel('PAYMENT MODE'),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8, runSpacing: 8,
-          children: kPaymentModes.map((m) {
-            final sel = _payMode == m;
-            return GestureDetector(
-              onTap: () => setState(() => _payMode = m),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                decoration: BoxDecoration(
-                  color: sel ? _kBlue : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: sel ? _kBlue : _kBorder),
-                ),
-                child: Text(m,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                        color: sel ? Colors.white : Colors.grey)),
-              ),
-            );
-          }).toList(),
-        ),
       ],
-
-      const SizedBox(height: 28),
-      _PrimaryButton(label: 'Continue', onTap: () => _to(4)),
-      const SizedBox(height: 8),
-      Center(
-        child: TextButton(
-          onPressed: () => _to(4),
-          child: const Text('Skip fees for now',
-              style: TextStyle(color: Colors.grey, fontSize: 13)),
-        ),
-      ),
-    ],
-  );
+    );
+  }
 
   // ── Step 4 — Extra Details ────────────────────────────────────────────────────
 
-  Widget _buildStep4() => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-    children: [
-      // ── Parent / Guardian ──────────────────────────────────────────────────
-      _SectionLabel('PARENT / GUARDIAN'),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8, runSpacing: 8,
-        children: ['Father', 'Mother', 'Guardian'].map((r) {
-          final sel = _parentRelation == r;
-          return GestureDetector(
-            onTap: () => setState(
-                () => _parentRelation = _parentRelation == r ? null : r),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-              decoration: BoxDecoration(
-                color: sel ? _kNavy : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: sel ? _kNavy : _kBorder),
+  Widget _buildStep4() {
+    final cs = Theme.of(context).colorScheme;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+      children: [
+        _Label('PARENT / GUARDIAN'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8, runSpacing: 8,
+          children: ['Father', 'Mother', 'Guardian'].map((r) {
+            final sel = _parentRelation == r;
+            return GestureDetector(
+              onTap: () => setState(
+                  () => _parentRelation = _parentRelation == r ? null : r),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                decoration: BoxDecoration(
+                  color: sel ? cs.onSurface : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: sel
+                          ? cs.onSurface
+                          : cs.onSurface.withValues(alpha: 0.12)),
+                ),
+                child: Text(r,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                        color: sel ? cs.surface : cs.onSurface)),
               ),
-              child: Text(r,
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: sel ? Colors.white : Colors.grey)),
-            ),
-          );
-        }).toList(),
-      ),
-      const SizedBox(height: 10),
-      TextField(
-        controller: _parentNameCtrl,
-        textCapitalization: TextCapitalization.words,
-        decoration: _inputDec('Parent / Guardian name'),
-      ),
-      const SizedBox(height: 10),
-      TextField(
-        controller: _parentPhoneCtrl,
-        keyboardType: TextInputType.phone,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(10),
-        ],
-        decoration: _inputDec('Parent phone number'),
-      ),
-
-      const SizedBox(height: 20),
-      // ── Aadhaar ────────────────────────────────────────────────────────────
-      _SectionLabel('AADHAAR NUMBER (optional)'),
-      const SizedBox(height: 6),
-      TextField(
-        controller: _aadhaarCtrl,
-        keyboardType: TextInputType.number,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(12),
-        ],
-        decoration: _inputDec('12-digit Aadhaar (optional)'),
-      ),
-
-      const SizedBox(height: 20),
-      _SectionLabel('BLOOD GROUP (optional)'),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8, runSpacing: 8,
-        children: _bloodGroups.map((g) {
-          final sel = _bloodGroup == g;
-          return GestureDetector(
-            onTap: () => setState(
-                () => _bloodGroup = _bloodGroup == g ? null : g),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: sel ? const Color(0xFFC62828) : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                    color: sel
-                        ? const Color(0xFFC62828)
-                        : _kBorder),
-              ),
-              child: Text(g,
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: sel ? Colors.white : Colors.grey)),
-            ),
-          );
-        }).toList(),
-      ),
-
-      const SizedBox(height: 20),
-      GestureDetector(
-        onTap: () =>
-            setState(() => _showEmergency = !_showEmergency),
-        child: Row(children: [
-          _Checkbox(checked: _showEmergency),
-          const SizedBox(width: 10),
-          const Text('Add emergency contact',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, color: _kNavy, fontSize: 14)),
-        ]),
-      ),
-
-      if (_showEmergency) ...[
-        const SizedBox(height: 14),
-        TextField(
-          controller: _emergNameCtrl,
-          textCapitalization: TextCapitalization.words,
-          decoration: _inputDec('Contact name'),
+            );
+          }).toList(),
         ),
         const SizedBox(height: 10),
-        TextField(
-          controller: _emergPhoneCtrl,
+        _OutlinedField(controller: _parentNameCtrl,
+            textCapitalization: TextCapitalization.words,
+            hintText: 'Parent / Guardian name'),
+        const SizedBox(height: 10),
+        _OutlinedField(
+          controller: _parentPhoneCtrl,
           keyboardType: TextInputType.phone,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: _inputDec('Contact phone'),
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(10),
+          ],
+          hintText: 'Parent phone number',
+        ),
+
+        const SizedBox(height: 20),
+        _Label('AADHAAR NUMBER (optional)'),
+        const SizedBox(height: 6),
+        _OutlinedField(
+          controller: _aadhaarCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(12),
+          ],
+          hintText: '12-digit Aadhaar (optional)',
+        ),
+
+        const SizedBox(height: 20),
+        _Label('BLOOD GROUP (optional)'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8, runSpacing: 8,
+          children: _bloodGroups.map((g) {
+            final sel = _bloodGroup == g;
+            return GestureDetector(
+              onTap: () => setState(
+                  () => _bloodGroup = _bloodGroup == g ? null : g),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: sel ? const Color(0xFFC62828) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: sel
+                          ? const Color(0xFFC62828)
+                          : cs.onSurface.withValues(alpha: 0.12)),
+                ),
+                child: Text(g,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
+                        color: sel ? Colors.white : cs.onSurface)),
+              ),
+            );
+          }).toList(),
+        ),
+
+        const SizedBox(height: 20),
+        _CheckRow(
+          checked: _showEmergency,
+          label: 'Add emergency contact',
+          onTap: () => setState(() => _showEmergency = !_showEmergency),
+        ),
+        if (_showEmergency) ...[
+          const SizedBox(height: 14),
+          _OutlinedField(controller: _emergNameCtrl,
+              textCapitalization: TextCapitalization.words,
+              hintText: 'Contact name'),
+          const SizedBox(height: 10),
+          _OutlinedField(
+            controller: _emergPhoneCtrl,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            hintText: 'Contact phone',
+          ),
+        ],
+
+        const SizedBox(height: 32),
+        _PrimaryBtn(label: 'Enroll Student', loading: _loading, onTap: _submit),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton(
+            onPressed: _loading ? null : _submit,
+            child: Text('Skip & Enroll',
+                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.4),
+                    fontSize: 13)),
+          ),
         ),
       ],
-
-      const SizedBox(height: 32),
-      _PrimaryButton(
-          label: 'Enroll Student', loading: _loading, onTap: _submit),
-      const SizedBox(height: 8),
-      Center(
-        child: TextButton(
-          onPressed: _loading ? null : _submit,
-          child: const Text('Skip & Enroll',
-              style: TextStyle(color: Colors.grey, fontSize: 13)),
-        ),
-      ),
-    ],
-  );
+    );
+  }
 }
 
-// ── Shared helpers ─────────────────────────────────────────────────────────────
+// ── Sub-widgets ────────────────────────────────────────────────────────────────
+
+class _FreqChip extends StatelessWidget {
+  final String label;
+  final String? sublabel;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FreqChip({required this.label, required this.sublabel,
+      required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? cs.onSurface : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.12)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(label,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                    color: selected ? cs.surface : cs.onSurface)),
+            if (sublabel != null) ...[
+              const SizedBox(height: 2),
+              Text(sublabel!,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      color: selected
+                          ? cs.surface.withValues(alpha: 0.6)
+                          : cs.onSurface.withValues(alpha: 0.45))),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+}
 
 class _TypeCard extends StatelessWidget {
   final IconData icon;
@@ -954,58 +1005,70 @@ class _TypeCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      decoration: BoxDecoration(
-        color: selected ? _kNavy : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: selected ? _kNavy : _kBorder,
-            width: selected ? 0 : 1.5),
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: selected ? cs.onSurface : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: selected
+                  ? cs.onSurface
+                  : cs.onSurface.withValues(alpha: 0.12),
+              width: 1),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon,
+              color: selected
+                  ? cs.surface
+                  : cs.onSurface.withValues(alpha: 0.45),
+              size: 26),
+          const SizedBox(height: 6),
+          Text(label,
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15,
+                  color: selected ? cs.surface : cs.onSurface)),
+          Text(subtitle,
+              style: TextStyle(fontSize: 11,
+                  color: selected
+                      ? cs.surface.withValues(alpha: 0.6)
+                      : cs.onSurface.withValues(alpha: 0.45))),
+        ]),
       ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, color: selected ? Colors.white : Colors.grey, size: 26),
-        const SizedBox(height: 6),
-        Text(label,
-            style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-                color: selected ? Colors.white : _kNavy)),
-        Text(subtitle,
-            style: TextStyle(
-                fontSize: 11,
-                color: selected ? Colors.white70 : Colors.grey)),
-      ]),
-    ),
-  );
+    );
+  }
 }
 
-class _InfoTile extends StatelessWidget {
+class _InfoRow extends StatelessWidget {
   final IconData icon;
   final String label, value;
 
-  const _InfoTile(this.icon, this.label, this.value);
+  const _InfoRow(this.icon, this.label, this.value);
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    child: Row(children: [
-      Icon(icon, size: 16, color: Colors.grey),
-      const SizedBox(width: 12),
-      SizedBox(
-        width: 56,
-        child: Text(label,
-            style: const TextStyle(fontSize: 13, color: Colors.grey)),
-      ),
-      Expanded(
-        child: Text(value,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: _kNavy)),
-      ),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(children: [
+        Icon(icon, size: 16, color: cs.onSurface.withValues(alpha: 0.4)),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 56,
+          child: Text(label,
+              style: TextStyle(fontSize: 13,
+                  color: cs.onSurface.withValues(alpha: 0.45))),
+        ),
+        Expanded(
+          child: Text(value,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                  color: cs.onSurface)),
+        ),
+      ]),
+    );
+  }
 }
 
 class _DateRow extends StatelessWidget {
@@ -1019,59 +1082,70 @@ class _DateRow extends StatelessWidget {
       '${d.day.toString().padLeft(2,'0')} / ${d.month.toString().padLeft(2,'0')} / ${d.year}';
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kBorder),
-      ),
-      child: Row(children: [
-        const Icon(Icons.calendar_today_rounded, size: 16, color: Colors.grey),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            value == null ? hint : _fmt(value!),
-            style: TextStyle(
-              fontSize: 14,
-              color: value == null ? Colors.grey : _kNavy,
-              fontWeight: value == null ? FontWeight.normal : FontWeight.w600,
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.onSurface.withValues(alpha: 0.10)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(children: [
+          Icon(Icons.calendar_today_rounded, size: 16,
+              color: cs.onSurface.withValues(alpha: 0.4)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value == null ? hint : _fmt(value!),
+              style: TextStyle(
+                fontSize: 14,
+                color: value == null
+                    ? cs.onSurface.withValues(alpha: 0.35)
+                    : cs.onSurface,
+                fontWeight: value == null ? FontWeight.normal : FontWeight.w600,
+              ),
             ),
           ),
-        ),
-        const Icon(Icons.chevron_right_rounded, size: 18, color: Colors.grey),
-      ]),
-    ),
-  );
+          Icon(Icons.chevron_right_rounded, size: 18,
+              color: cs.onSurface.withValues(alpha: 0.3)),
+        ]),
+      ),
+    );
+  }
 }
 
-class _Banner extends StatelessWidget {
+class _StatusBanner extends StatelessWidget {
   final IconData icon;
   final String label;
-  final Color color, bg;
+  final Color color;
 
-  const _Banner({required this.icon, required this.label, required this.color, required this.bg});
+  const _StatusBanner({required this.icon, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: color.withValues(alpha: 0.20)),
+    ),
     child: Row(children: [
-      Icon(icon, color: color, size: 18),
+      Icon(icon, color: color, size: 16),
       const SizedBox(width: 8),
-      Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+      Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700,
+          fontSize: 13)),
     ]),
   );
 }
 
-class _PrimaryButton extends StatelessWidget {
+class _PrimaryBtn extends StatelessWidget {
   final String label;
   final bool loading;
   final VoidCallback? onTap;
 
-  const _PrimaryButton({required this.label, this.loading = false, this.onTap});
+  const _PrimaryBtn({required this.label, this.loading = false, this.onTap});
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -1079,8 +1153,7 @@ class _PrimaryButton extends StatelessWidget {
     child: ElevatedButton(
       onPressed: loading ? null : onTap,
       child: loading
-          ? const SizedBox(
-              width: 20, height: 20,
+          ? const SizedBox(width: 20, height: 20,
               child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
           : Text(label,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
@@ -1088,42 +1161,147 @@ class _PrimaryButton extends StatelessWidget {
   );
 }
 
-class _Checkbox extends StatelessWidget {
+class _CheckRow extends StatelessWidget {
   final bool checked;
-  const _Checkbox({required this.checked});
+  final String label;
+  final VoidCallback onTap;
+
+  const _CheckRow({required this.checked, required this.label, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 22, height: 22,
-    decoration: BoxDecoration(
-      color: checked ? _kBlue : Colors.white,
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: checked ? _kBlue : _kBorder),
-    ),
-    child: checked
-        ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
-        : null,
-  );
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Row(children: [
+        Container(
+          width: 22, height: 22,
+          decoration: BoxDecoration(
+            color: checked ? cs.onSurface : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+                color: checked
+                    ? cs.onSurface
+                    : cs.onSurface.withValues(alpha: 0.20)),
+          ),
+          child: checked
+              ? Icon(Icons.check_rounded, color: cs.surface, size: 14)
+              : null,
+        ),
+        const SizedBox(width: 10),
+        Text(label,
+            style: TextStyle(fontWeight: FontWeight.w600,
+                color: cs.onSurface, fontSize: 14)),
+      ]),
+    );
+  }
 }
 
-Widget _SectionLabel(String text) => Text(
-  text,
-  style: const TextStyle(
-      fontSize: 11, fontWeight: FontWeight.w700,
-      color: Colors.grey, letterSpacing: 0.8),
-);
+class _ModeChips extends StatelessWidget {
+  final List<String> modes;
+  final String selected;
+  final ValueChanged<String> onSelect;
 
-InputDecoration _inputDec(String hint) => InputDecoration(
-  hintText: hint,
-  hintStyle: const TextStyle(color: Color(0xFFBBBBBB)),
-  border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: _kBorder)),
-  enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: _kBorder)),
-  focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: _kNavy, width: 1.5)),
-  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-);
+  const _ModeChips({required this.modes, required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: 8, runSpacing: 8,
+      children: modes.map((m) {
+        final sel = selected == m;
+        return GestureDetector(
+          onTap: () => onSelect(m),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: sel ? cs.onSurface : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: sel
+                      ? cs.onSurface
+                      : cs.onSurface.withValues(alpha: 0.12)),
+            ),
+            child: Text(m,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                    color: sel ? cs.surface : cs.onSurface)),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+// ── Outlined text field (no fill, themed border) ───────────────────────────────
+
+class _OutlinedField extends StatelessWidget {
+  final TextEditingController controller;
+  final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextCapitalization textCapitalization;
+  final TextStyle? style;
+  final String? prefixText;
+  final String? hintText;
+  final TextStyle? hintStyle;
+  final bool autofocus;
+  final ValueChanged<String>? onSubmitted;
+
+  const _OutlinedField({
+    required this.controller,
+    this.keyboardType,
+    this.inputFormatters,
+    this.textCapitalization = TextCapitalization.none,
+    this.style,
+    this.prefixText,
+    this.hintText,
+    this.hintStyle,
+    this.autofocus = false,
+    this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      textCapitalization: textCapitalization,
+      autofocus: autofocus,
+      style: style ?? TextStyle(fontSize: 15, color: cs.onSurface),
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(
+        prefixText: prefixText,
+        prefixStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.w600,
+            color: cs.onSurface.withValues(alpha: 0.45)),
+        hintText: hintText,
+        hintStyle: hintStyle ??
+            TextStyle(color: cs.onSurface.withValues(alpha: 0.3)),
+        filled: false,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+                color: cs.onSurface.withValues(alpha: 0.10))),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+                color: cs.onSurface.withValues(alpha: 0.10))),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: cs.onSurface, width: 1.5)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+    );
+  }
+}
+
+Widget _Label(String text) {
+  return Builder(builder: (context) {
+    final cs = Theme.of(context).colorScheme;
+    return Text(text,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+            color: cs.onSurface.withValues(alpha: 0.45), letterSpacing: 0.8));
+  });
+}

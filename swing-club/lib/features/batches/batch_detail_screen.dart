@@ -170,6 +170,103 @@ class _InfoTab extends ConsumerWidget {
           const Divider(),
           _InfoRow('Description', batch['description'] as String),
         ],
+
+        // ── Fee Structures ─────────────────────────────────────────────────
+        Builder(builder: (context) {
+          final cs   = Theme.of(context).colorScheme;
+          // Deduplicate by frequency — keep last entry per type
+          final rawFees = (batch['feeStructures'] as List? ?? [])
+              .cast<Map<String, dynamic>>();
+          final feeMap = <String, Map<String, dynamic>>{};
+          for (final f in rawFees) {
+            feeMap[f['frequency'] as String? ?? ''] = f;
+          }
+          final fees = feeMap.values.toList();
+          if (fees.isEmpty) return const SizedBox.shrink();
+
+          const freqLabel = {
+            'MONTHLY':      'Monthly',
+            'QUARTERLY':    'Quarterly',
+            'ANNUAL':       'Yearly',
+            'ONE_TIME':     'One Time',
+            'REGISTRATION': 'Registration',
+          };
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 24),
+              Text('Fee Structure',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                      color: cs.onSurface.withValues(alpha: 0.45),
+                      letterSpacing: 0.8)),
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: cs.onSurface.withValues(alpha: 0.10)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  children: fees.asMap().entries.map((entry) {
+                    final i   = entry.key;
+                    final fee = entry.value;
+                    final freq  = fee['frequency'] as String? ?? '';
+                    final label = freqLabel[freq] ?? freq;
+                    final paise = (fee['amountPaise'] as num? ?? 0).toInt();
+                    final due   = (fee['dueDayOfMonth'] as num?)?.toInt();
+
+                    return Column(children: [
+                      if (i > 0) Divider(height: 1, thickness: 0.5,
+                          color: cs.onSurface.withValues(alpha: 0.08)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        child: Row(children: [
+                          Container(
+                            width: 34, height: 34,
+                            decoration: BoxDecoration(
+                              color: cs.onSurface.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              freq == 'REGISTRATION'
+                                  ? Icons.app_registration_rounded
+                                  : Icons.currency_rupee_rounded,
+                              size: 16,
+                              color: cs.onSurface.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(label,
+                                    style: TextStyle(fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: cs.onSurface)),
+                                if (freq == 'MONTHLY' && due != null)
+                                  Text('Due on day $due',
+                                      style: TextStyle(fontSize: 11,
+                                          color: cs.onSurface.withValues(alpha: 0.45))),
+                              ],
+                            ),
+                          ),
+                          Text(rupeesFromPaise(paise),
+                              style: TextStyle(fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: cs.onSurface)),
+                        ]),
+                      ),
+                    ]);
+                  }).toList(),
+                ),
+              ),
+            ],
+          );
+        }),
+
+        const SizedBox(height: 40),
       ],
     );
   }
@@ -625,8 +722,11 @@ class _StudentsTabState extends ConsumerState<_StudentsTab> {
         onPressed: () => showModalBottomSheet(
           context: context,
           isScrollControlled: true,
+          useRootNavigator: true,
+          useSafeArea: true,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
           builder: (_) => EnrollStudentSheet(
               batchId: widget.batchId,
               batchName: widget.batch['name'] as String?),

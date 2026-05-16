@@ -6,26 +6,33 @@ import '../../shared/widgets.dart';
 import 'student_provider.dart';
 import 'enroll_student_sheet.dart';
 
-const _kNavy = Color(0xFF071B3D);
-const _filters = ['All', 'Active', 'Trial', 'Overdue Fees'];
+// ── Palette (same pastels as home/finance) ────────────────────────────────────
 
-Future<bool> _confirmRemove(BuildContext context, String name) async {
-  return await showDialog<bool>(
-    context: context,
-    useRootNavigator: true,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Remove Student'),
-      content: Text('Remove $name from your academy?\nThey will be marked inactive.'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Remove', style: TextStyle(color: Colors.red)),
-        ),
-      ],
-    ),
-  ) ?? false;
+class _C {
+  static const green = Color(0xFF16A34A);
+  static const blue  = Color(0xFF2563EB);
 }
+
+// ── Confirm dialog ────────────────────────────────────────────────────────────
+
+Future<bool> _confirmRemove(BuildContext context, String name) async =>
+    await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Student'),
+        content: Text('Remove $name from your academy?\nThey will be marked inactive.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    ) ?? false;
+
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 class StudentListScreen extends ConsumerStatefulWidget {
   const StudentListScreen({super.key});
@@ -34,181 +41,204 @@ class StudentListScreen extends ConsumerStatefulWidget {
   ConsumerState<StudentListScreen> createState() => _StudentListScreenState();
 }
 
-class _StudentListScreenState extends ConsumerState<StudentListScreen> {
+class _StudentListScreenState extends ConsumerState<StudentListScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 4, vsync: this);
   final _searchCtrl = TextEditingController();
   String _search = '';
-  String _filter = 'All';
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs.addListener(() { if (mounted) setState(() {}); });
+  }
 
   @override
   void dispose() {
+    _tabs.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  List<Map<String, dynamic>> _apply(List<Map<String, dynamic>> students) {
-    var result = students;
+  void _openAddSheet() {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: bg,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => const EnrollStudentSheet(),
+    ).then((v) { if (v == true) ref.invalidate(studentsProvider); });
+  }
+
+  List<Map<String, dynamic>> _filterByTab(List<Map<String, dynamic>> all) {
+    var result = all;
     if (_search.isNotEmpty) {
       final q = _search.toLowerCase();
       result = result.where((s) {
-        final name  = _studentName(s).toLowerCase();
-        final phone = _studentPhone(s).toLowerCase();
-        return name.contains(q) || phone.contains(q);
+        return _studentName(s).toLowerCase().contains(q) ||
+               _studentPhone(s).toLowerCase().contains(q);
       }).toList();
     }
-    switch (_filter) {
-      case 'Active':
-        result = result.where((s) => s['enrollmentStatus'] == 'ACTIVE').toList();
-      case 'Trial':
-        result = result.where((s) => s['isTrial'] == true).toList();
-      case 'Overdue Fees':
-        result = result.where((s) => s['feeStatus'] == 'OVERDUE').toList();
+    switch (_tabs.index) {
+      case 1: return result.where((s) => s['enrollmentStatus'] == 'ACTIVE').toList();
+      case 2: return result.where((s) => s['isTrial'] == true).toList();
+      case 3: return result.where((s) => s['feeStatus'] == 'OVERDUE').toList();
+      default: return result;
     }
-    return result;
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(studentsProvider);
+    final cs        = Theme.of(context).colorScheme;
+    final state     = ref.watch(studentsProvider);
+    final divColor  = cs.onSurface.withValues(alpha: 0.08);
 
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Search ────────────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
               child: Row(children: [
                 Expanded(
-                  child: TextField(
-                    controller: _searchCtrl,
-                    onChanged: (v) => setState(() => _search = v),
-                    style: const TextStyle(fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Search students…',
-                      hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 20, color: Colors.grey),
-                      suffixIcon: _search.isNotEmpty
-                          ? GestureDetector(
-                              onTap: () => setState(() { _searchCtrl.clear(); _search = ''; }),
-                              child: const Icon(Icons.close_rounded, size: 18, color: Colors.grey),
-                            )
-                          : null,
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: Color(0xFFE0DED6))),
-                      enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: Color(0xFFE0DED6))),
-                      focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: _kNavy)),
-                      filled: true,
-                      fillColor: Colors.white,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Students',
+                          style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900,
+                              color: cs.onSurface, letterSpacing: -0.5)),
+                      const SizedBox(height: 2),
+                      state.maybeWhen(
+                        data: (all) => Text('${all.length} total',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                                color: cs.onSurface.withValues(alpha: 0.45))),
+                        orElse: () => const SizedBox.shrink(),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                state.maybeWhen(
-                  data: (all) {
-                    final filtered = _apply(all);
-                    final count = _search.isEmpty && _filter == 'All'
-                        ? '${all.length}'
-                        : '${filtered.length}/${all.length}';
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: _kNavy, borderRadius: BorderRadius.circular(10)),
-                      child: Text(count,
-                          style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
-                    );
-                  },
-                  orElse: () => const SizedBox.shrink(),
+                _OutlineBtn(
+                  icon: Icons.person_add_alt_1_rounded,
+                  label: 'Add',
+                  onTap: _openAddSheet,
                 ),
               ]),
             ),
 
-            // ── Filter chips ───────────────────────────────────────────────
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Row(
-                children: _filters.map((f) {
-                  final active = _filter == f;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: GestureDetector(
-                      onTap: () => setState(() => _filter = f),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: active ? _kNavy : Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: active ? _kNavy : const Color(0xFFE0DED6)),
-                        ),
-                        child: Text(f,
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: active ? Colors.white : Colors.grey)),
-                      ),
-                    ),
-                  );
-                }).toList(),
+            // ── Search ────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: cs.onSurface.withValues(alpha: 0.10), width: 1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (v) => setState(() => _search = v),
+                  style: TextStyle(fontSize: 14, color: cs.onSurface),
+                  decoration: InputDecoration(
+                    hintText: 'Search students…',
+                    hintStyle: TextStyle(fontSize: 14,
+                        color: cs.onSurface.withValues(alpha: 0.35),
+                        fontWeight: FontWeight.w400),
+                    prefixIcon: Icon(Icons.search_rounded, size: 20,
+                        color: cs.onSurface.withValues(alpha: 0.35)),
+                    suffixIcon: _search.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () => setState(() { _searchCtrl.clear(); _search = ''; }),
+                            child: Icon(Icons.close_rounded, size: 18,
+                                color: cs.onSurface.withValues(alpha: 0.35)),
+                          )
+                        : null,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                  ),
+                ),
               ),
             ),
 
-            // ── List ───────────────────────────────────────────────────────
+            // ── Divider ───────────────────────────────────────────────────
+            Divider(height: 1, thickness: 0.5, color: divColor),
+
+            // ── Tab bar ───────────────────────────────────────────────────
+            TabBar(
+              controller: _tabs,
+              tabs: const [
+                Tab(text: 'All'),
+                Tab(text: 'Active'),
+                Tab(text: 'Trial'),
+                Tab(text: 'Overdue'),
+              ],
+            ),
+
+            // ── Tab content ───────────────────────────────────────────────
             Expanded(
               child: state.when(
                 loading: loadingBody,
                 error: (e, _) => errorBody(e, () => ref.invalidate(studentsProvider)),
-                data: (all) {
-                  final students = _apply(all);
-                  if (students.isEmpty) {
-                    return emptyBody(_search.isEmpty && _filter == 'All'
-                        ? 'No students yet'
-                        : 'No results');
-                  }
-                  return RefreshIndicator(
-                    onRefresh: () async => ref.invalidate(studentsProvider),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 100),
-                      itemCount: students.length,
-                      itemBuilder: (_, i) => _StudentCard(student: students[i]),
-                    ),
-                  );
-                },
+                data: (all) => TabBarView(
+                  controller: _tabs,
+                  children: List.generate(4, (i) {
+                    final filtered = _filterByTabIndex(all, i);
+                    if (filtered.isEmpty) {
+                      return all.isEmpty
+                          ? _EmptyStudents(onAdd: _openAddSheet)
+                          : emptyBody(_search.isNotEmpty
+                              ? 'No match for "$_search"'
+                              : 'No students in this category');
+                    }
+                    return RefreshIndicator(
+                      onRefresh: () async => ref.invalidate(studentsProvider),
+                      color: _C.blue,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) => _StudentCard(student: filtered[i]),
+                      ),
+                    );
+                  }),
+                ),
               ),
             ),
           ],
         ),
       ),
-      floatingActionButton: state.maybeWhen(
-        data: (_) => FloatingActionButton.extended(
-          heroTag: null,
-          onPressed: () => showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-            builder: (_) => const EnrollStudentSheet(),
-          ).then((v) { if (v == true) ref.invalidate(studentsProvider); }),
-          icon: const Icon(Icons.person_add_outlined),
-          label: const Text('Add Student', style: TextStyle(fontWeight: FontWeight.w700)),
-        ),
-        orElse: () => const SizedBox.shrink(),
-      ),
     );
+  }
+
+  List<Map<String, dynamic>> _filterByTabIndex(
+      List<Map<String, dynamic>> all, int index) {
+    var result = all;
+    if (_search.isNotEmpty) {
+      final q = _search.toLowerCase();
+      result = result.where((s) {
+        return _studentName(s).toLowerCase().contains(q) ||
+               _studentPhone(s).toLowerCase().contains(q);
+      }).toList();
+    }
+    switch (index) {
+      case 1: return result.where((s) => s['enrollmentStatus'] == 'ACTIVE').toList();
+      case 2: return result.where((s) => s['isTrial'] == true).toList();
+      case 3: return result.where((s) => s['feeStatus'] == 'OVERDUE').toList();
+      default: return result;
+    }
   }
 }
 
-// ── Student card ───────────────────────────────────────────────────────────────
+// ── Student Card ──────────────────────────────────────────────────────────────
 
 class _StudentCard extends ConsumerWidget {
   final Map<String, dynamic> student;
@@ -216,160 +246,261 @@ class _StudentCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final name        = _studentName(student);
-    final phone       = _studentPhone(student);
-    final batch       = (student['batch'] as Map?)?.cast<String, dynamic>() ?? {};
-    final batchName   = batch['name'] as String? ?? '';
-    final enrollStatus = student['enrollmentStatus'] as String? ?? '';
-    final feeStatus   = student['feeStatus'] as String? ?? '';
-    final isTrial     = student['isTrial'] == true;
-    final id          = student['id'] as String;
+    final cs        = Theme.of(context).colorScheme;
+    final name      = _studentName(student);
+    final phone     = _studentPhone(student);
+    final batch     = (student['batch'] as Map?)?.cast<String, dynamic>() ?? {};
+    final batchName = batch['name'] as String? ?? '';
+    final feeStatus = student['feeStatus'] as String? ?? '';
+    final isTrial   = student['isTrial'] == true;
+    final id        = student['id'] as String;
+    final initial   = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final color     = _avatarColor(name);
 
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-    final color   = _avatarColor(name);
-    final displayStatus = isTrial ? 'TRIAL' : enrollStatus;
-
-    return Row(
-      children: [
-        // Tappable area — navigates to detail
-        Expanded(
-          child: InkWell(
-            onTap: () => context.push('/students/$id'),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-              child: Row(
-                children: [
-                  // Avatar
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: color.withValues(alpha: 0.15),
-                    child: Text(initial,
-                        style: TextStyle(
-                            color: color, fontWeight: FontWeight.w800, fontSize: 16)),
-                  ),
-                  const SizedBox(width: 12),
-
-                  // Name + batch
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Expanded(
-                            child: Text(name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700, fontSize: 14, color: _kNavy)),
-                          ),
-                          if (isTrial) ...[
-                            const SizedBox(width: 6),
-                            _Tag('Trial', const Color(0xFFE65100), const Color(0xFFFFF3E0)),
-                          ],
-                        ]),
-                        if (batchName.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(batchName,
-                              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-
-                  // Status badges — centered
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (displayStatus.isNotEmpty) statusBadge(displayStatus),
-                      if (feeStatus.isNotEmpty && feeStatus != displayStatus) ...[
-                        const SizedBox(width: 4),
-                        statusBadge(feeStatus),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(16),
         ),
-
-        // Action buttons — outside InkWell so taps aren't intercepted
-        Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (phone.isNotEmpty) ...[
-                _IconAction(
-                  icon: Icons.call_rounded,
-                  color: const Color(0xFF2E7D32),
-                  onTap: () => launchUrl(
-                      Uri.parse('tel:$phone'),
-                      mode: LaunchMode.externalApplication),
+        child: InkWell(
+          onTap: () => context.push('/students/$id'),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+            child: Row(children: [
+              // Avatar
+              Container(
+                width: 52, height: 52,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                const SizedBox(width: 6),
-              ],
-              _IconAction(
-                icon: Icons.person_remove_outlined,
-                color: Colors.red.shade400,
-                onTap: () async {
-                  final confirmed = await _confirmRemove(context, name);
-                  if (confirmed && context.mounted) {
-                    try {
-                      await ref.read(studentsProvider.notifier).remove(id);
-                      if (context.mounted) showSnack(context, '$name removed');
-                    } catch (e) {
-                      if (context.mounted) showSnack(context, 'Error: $e');
-                    }
-                  }
-                },
+                child: Center(
+                  child: Text(initial,
+                      style: TextStyle(color: color,
+                          fontWeight: FontWeight.w900, fontSize: 20)),
+                ),
               ),
-            ],
+              const SizedBox(width: 13),
+
+              // Info
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name + fee badge
+                  Row(children: [
+                    Expanded(
+                      child: Text(name,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: FontWeight.w700,
+                              fontSize: 15, color: cs.onSurface)),
+                    ),
+                    if (feeStatus.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      _FeeBadge(feeStatus),
+                    ],
+                  ]),
+                  const SizedBox(height: 7),
+                  // Batch + trial + actions
+                  Row(children: [
+                    if (batchName.isNotEmpty) ...[
+                      Icon(Icons.sports_cricket_rounded, size: 12,
+                          color: cs.onSurface.withValues(alpha: 0.35)),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(batchName,
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12,
+                                color: cs.onSurface.withValues(alpha: 0.45),
+                                fontWeight: FontWeight.w500)),
+                      ),
+                    ],
+                    if (isTrial) ...[
+                      const SizedBox(width: 6),
+                      _Pill(label: 'Trial', color: const Color(0xFFE65100)),
+                    ],
+                    const Spacer(),
+                    if (phone.isNotEmpty) ...[
+                      GestureDetector(
+                        onTap: () => launchUrl(Uri.parse('tel:$phone'),
+                            mode: LaunchMode.externalApplication),
+                        child: Container(
+                          width: 30, height: 30,
+                          decoration: BoxDecoration(
+                            color: _C.green.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.phone_rounded, size: 15,
+                              color: _C.green),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    GestureDetector(
+                      onTap: () async {
+                        final confirmed = await _confirmRemove(context, name);
+                        if (confirmed && context.mounted) {
+                          try {
+                            await ref.read(studentsProvider.notifier).remove(id);
+                            if (context.mounted) showSnack(context, '$name removed');
+                          } catch (e) {
+                            if (context.mounted) showSnack(context, 'Error: $e');
+                          }
+                        }
+                      },
+                      child: Container(
+                        width: 30, height: 30,
+                        decoration: BoxDecoration(
+                          color: cs.onSurface.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.person_off_rounded, size: 15,
+                            color: cs.onSurface.withValues(alpha: 0.35)),
+                      ),
+                    ),
+                  ]),
+                ],
+              )),
+            ]),
           ),
         ),
-      ],
+      ),
     );
   }
 }
 
-class _Tag extends StatelessWidget {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+class _Pill extends StatelessWidget {
   final String label;
-  final Color fg;
-  final Color bg;
-  const _Tag(this.label, this.fg, this.bg);
+  final Color color;
+  const _Pill({required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
-    child: Text(label,
-        style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w700)),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(6)),
+        child: Text(label,
+            style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w700)),
+      );
 }
 
-class _IconAction extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-  const _IconAction({required this.icon, required this.color, required this.onTap});
+class _FeeBadge extends StatelessWidget {
+  final String status;
+  const _FeeBadge(this.status);
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: color.withValues(alpha: 0.1),
-    borderRadius: BorderRadius.circular(8),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Icon(icon, size: 18, color: color),
+  Widget build(BuildContext context) {
+    final Color color;
+    final String label;
+    switch (status.toUpperCase()) {
+      case 'PAID':    color = const Color(0xFF16A34A); label = 'Paid';
+      case 'OVERDUE': color = const Color(0xFFDC2626); label = 'Overdue';
+      case 'PENDING': color = const Color(0xFFF59E0B); label = 'Pending';
+      default:
+        color = const Color(0xFF9E9E9E);
+        label = status.isNotEmpty
+            ? status[0].toUpperCase() + status.substring(1).toLowerCase()
+            : '';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color.withValues(alpha: 0.30), width: 1),
+        borderRadius: BorderRadius.circular(5),
       ),
-    ),
-  );
+      child: Text(label,
+          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+    );
+  }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+
+class _OutlineBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _OutlineBtn({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.onSurface.withValues(alpha: 0.12), width: 1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: cs.onSurface),
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                  color: cs.onSurface)),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+class _EmptyStudents extends StatelessWidget {
+  final VoidCallback onAdd;
+  const _EmptyStudents({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+      child: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(
+              border: Border.all(color: cs.onSurface.withValues(alpha: 0.12), width: 1),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.people_outline_rounded, size: 24,
+                color: cs.onSurface.withValues(alpha: 0.5)),
+          ),
+          const SizedBox(height: 20),
+          Text('No students yet',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900,
+                  color: cs.onSurface, letterSpacing: -0.5)),
+          const SizedBox(height: 8),
+          Text('Enrol your first student to start tracking progress and fees.',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500,
+                  color: cs.onSurface.withValues(alpha: 0.5), height: 1.5)),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: onAdd,
+              style: FilledButton.styleFrom(
+                backgroundColor: cs.onSurface,
+                foregroundColor: cs.surface,
+                minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Text('Enrol Student',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+            ),
+          ),
+        ]),
+    );
+  }
+}
+
+// ── Name / phone / color helpers ──────────────────────────────────────────────
 
 String _studentName(Map<String, dynamic> student) {
   final profile = student['playerProfile'] as Map<String, dynamic>?;
@@ -377,7 +508,6 @@ String _studentName(Map<String, dynamic> student) {
     final u = profile['user'] as Map<String, dynamic>?;
     final name = u?['name'] as String?;
     if (name != null && name.isNotEmpty) return name;
-    // fallback: playerProfile.username
     final username = profile['username'] as String?;
     if (username != null && username.isNotEmpty) return username;
   }
@@ -394,9 +524,9 @@ String _studentPhone(Map<String, dynamic> student) {
 
 Color _avatarColor(String name) {
   const colors = [
-    Color(0xFF1565C0), Color(0xFF6A1B9A), Color(0xFF00695C),
-    Color(0xFFE65100), Color(0xFF4527A0), Color(0xFF283593),
-    Color(0xFF558B2F), Color(0xFFC62828),
+    Color(0xFF2563EB), Color(0xFF7C3AED), Color(0xFF059669),
+    Color(0xFFEA580C), Color(0xFF0891B2), Color(0xFFDC2626),
+    Color(0xFF1565C0), Color(0xFF558B2F),
   ];
   return colors[name.codeUnits.fold(0, (a, b) => a + b) % colors.length];
 }

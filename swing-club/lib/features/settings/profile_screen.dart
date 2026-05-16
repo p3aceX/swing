@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/academy_provider.dart';
-import '../../core/theme_mode_provider.dart';
 import '../../shared/onboarding_widgets.dart';
 import '../../shared/widgets.dart';
 import 'settings_provider.dart';
@@ -35,8 +34,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
   @override
   Widget build(BuildContext context) {
     final bizState = ref.watch(settingsProvider);
-    final themeMode = ref.watch(themeModeProvider);
-    final isDark = themeMode == ThemeMode.dark;
 
     return Scaffold(
       appBar: AppBar(
@@ -76,22 +73,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _UserHeader(user: user, biz: biz),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: SwitchListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-                    title: const Text('Dark Mode'),
-                    subtitle: const Text('Apply dark theme across the app'),
-                    value: isDark,
-                    onChanged: (value) => ref.read(themeModeProvider.notifier).setDarkMode(value),
-                  ),
-                ),
-              ),
               TabBar(
                 controller: _tabs,
                 tabs: const [Tab(text: 'Business'), Tab(text: 'Academy')],
@@ -203,10 +184,9 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
   // Banking
   late TextEditingController _gst;
   late TextEditingController _pan;
-  late TextEditingController _beneName;
   late TextEditingController _accNum;
+  late TextEditingController _accNumConfirm;
   late TextEditingController _ifsc;
-  late TextEditingController _upi;
 
   bool _saving = false;
 
@@ -223,17 +203,16 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
     _contactName = TextEditingController(text: _b('contactName').isNotEmpty ? _b('contactName') : _u('name'));
     _phone       = TextEditingController(text: _b('phone').isNotEmpty       ? _b('phone')       : _u('phone'));
     _email       = TextEditingController(text: _b('email').isNotEmpty       ? _b('email')       : _u('email'));
-    _gst         = TextEditingController(text: _b('gstNumber'));
-    _pan         = TextEditingController(text: _b('panNumber'));
-    _beneName    = TextEditingController(text: _b('beneficiaryName'));
-    _accNum      = TextEditingController(text: _b('accountNumber'));
-    _ifsc        = TextEditingController(text: _b('ifscCode'));
-    _upi         = TextEditingController(text: _b('upiId'));
+    _gst           = TextEditingController(text: _b('gstNumber'));
+    _pan           = TextEditingController(text: _b('panNumber'));
+    _accNum        = TextEditingController(text: _b('accountNumber'));
+    _accNumConfirm = TextEditingController(text: _b('accountNumber'));
+    _ifsc          = TextEditingController(text: _b('ifscCode'));
   }
 
   void _disposeControllers() {
     for (final c in [_bizName, _pincode, _city, _state, _address,
-        _contactName, _phone, _email, _gst, _pan, _beneName, _accNum, _ifsc, _upi]) {
+        _contactName, _phone, _email, _gst, _pan, _accNum, _accNumConfirm, _ifsc]) {
       c.dispose();
     }
   }
@@ -260,75 +239,73 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
   }
 
   Future<void> _save() async {
-    final name = _bizName.text.trim();
-    if (name.length < 2) { showSnack(context, 'Business name required'); return; }
-    if (_city.text.trim().length < 2 || _state.text.trim().length < 2) {
-      showSnack(context, 'City and state are required');
+    if (_subTab == 2) {
+      // Banking tab: only validate account number match
+      if (_accNum.text.trim().isNotEmpty &&
+          _accNum.text.trim() != _accNumConfirm.text.trim()) {
+        showSnack(context, 'Account numbers do not match');
+        return;
+      }
+    } else {
+      final name = _bizName.text.trim();
+      if (name.length < 2) { showSnack(context, 'Business name required'); return; }
+      if (_city.text.trim().length < 2 || _state.text.trim().length < 2) {
+        showSnack(context, 'City and state are required');
+        return;
+      }
+    }
+
+    // Backend requires businessName + city + state — fall back to saved values when on Banking tab.
+    final bizName = _bizName.text.trim().isNotEmpty
+        ? _bizName.text.trim()
+        : (widget.biz['businessName'] as String? ?? '');
+    final city  = _city.text.trim().isNotEmpty  ? _city.text.trim()  : (widget.biz['city']  as String? ?? '');
+    final state = _state.text.trim().isNotEmpty ? _state.text.trim() : (widget.biz['state'] as String? ?? '');
+
+    if (bizName.length < 2 || city.length < 2 || state.length < 2) {
+      showSnack(context, 'Complete business details first (Details tab)');
       return;
     }
+
     setState(() => _saving = true);
     try {
       await ref.read(settingsProvider.notifier).updateBusinessDetails({
-        'businessName': name,
-        'city':  _city.text.trim(),
-        'state': _state.text.trim(),
+        'businessName': bizName,
+        'city':  city,
+        'state': state,
         if (_pincode.text.trim().isNotEmpty)      'pincode':     _pincode.text.trim(),
         if (_address.text.trim().isNotEmpty)      'address':     _address.text.trim(),
         if (_contactName.text.trim().isNotEmpty)  'contactName': _contactName.text.trim(),
         if (_phone.text.trim().isNotEmpty)        'phone':       _phone.text.trim(),
         if (_email.text.trim().isNotEmpty)        'email':       _email.text.trim(),
-        if (_gst.text.trim().isNotEmpty)          'gstNumber':   _gst.text.trim(),
-        if (_pan.text.trim().isNotEmpty)          'panNumber':   _pan.text.trim(),
-        if (_beneName.text.trim().isNotEmpty)     'beneficiaryName': _beneName.text.trim(),
-        if (_accNum.text.trim().isNotEmpty)       'accountNumber':   _accNum.text.trim(),
-        if (_ifsc.text.trim().isNotEmpty)         'ifscCode':        _ifsc.text.trim(),
-        if (_upi.text.trim().isNotEmpty)          'upiId':           _upi.text.trim(),
+        if (_gst.text.trim().isNotEmpty)    'gstNumber':     _gst.text.trim(),
+        if (_pan.text.trim().isNotEmpty)    'panNumber':     _pan.text.trim(),
+        if (_accNum.text.trim().isNotEmpty) 'accountNumber': _accNum.text.trim(),
+        if (_ifsc.text.trim().isNotEmpty)   'ifscCode':      _ifsc.text.trim(),
       });
       if (mounted) showSnack(context, 'Saved');
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('=== profile save error ===');
+      debugPrint(e.toString());
+      if (e is DioException) {
+        debugPrint('status: ${e.response?.statusCode}');
+        debugPrint('body: ${e.response?.data}');
+      }
+      debugPrint(st.toString());
       if (mounted) showSnack(context, 'Failed to save. Try again.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Widget _chip(int index, String label) {
-    final active = _subTab == index;
-    return GestureDetector(
-      onTap: () => setState(() => _subTab = index),
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? const Color(0xFF071B3D) : const Color(0xFFF0EFE9),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? Colors.white : const Color(0xFF071B3D),
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Sub-tab chips
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              _chip(0, 'Details'),
-              _chip(1, 'Contact'),
-              _chip(2, 'Banking'),
-            ],
-          ),
+        _subTabs(
+          active: _subTab,
+          labels: const ['Details', 'Contact', 'Banking'],
+          onTap: (i) => setState(() => _subTab = i),
         ),
 
         // Content
@@ -406,17 +383,110 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
     _field(_email,       'Contact Email',   type: TextInputType.emailAddress),
   ];
 
-  List<Widget> _bankingFields() => [
-    _label('Tax'),
-    _field(_gst, 'GST Number', uppercase: true),
-    _field(_pan, 'PAN Number', uppercase: true),
-    _label('Bank Account'),
-    _field(_beneName, 'Account Holder Name'),
-    _field(_accNum,   'Account Number', type: TextInputType.number,
-           formatters: [FilteringTextInputFormatter.digitsOnly]),
-    _field(_ifsc, 'IFSC Code', uppercase: true),
-    _field(_upi,  'UPI ID'),
-  ];
+  List<Widget> _bankingFields() {
+    final isVerified    = widget.biz['routeEnabled'] == true;
+    final verifiedName  = widget.biz['beneficiaryName'] as String? ?? '';
+    final savedAccount  = widget.biz['accountNumber']   as String? ?? '';
+    final savedIfsc     = widget.biz['ifscCode']        as String? ?? '';
+    final hasSaved      = savedAccount.isNotEmpty;
+    final masked        = hasSaved && savedAccount.length >= 4
+        ? '•••• •••• ${savedAccount.substring(savedAccount.length - 4)}'
+        : savedAccount;
+
+    return [
+      // ── Bank card ─────────────────────────────────────────
+      if (hasSaved)
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 24),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071B3D),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.account_balance_rounded, color: Colors.white38, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                savedIfsc.isNotEmpty ? savedIfsc : 'Bank Account',
+                style: const TextStyle(color: Colors.white38, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isVerified
+                      ? const Color(0xFF16A34A).withValues(alpha: 0.18)
+                      : const Color(0xFFF59E0B).withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                    isVerified ? Icons.verified_rounded : Icons.schedule_rounded,
+                    size: 11,
+                    color: isVerified ? const Color(0xFF4ADE80) : const Color(0xFFFBBF24),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    isVerified ? 'Verified' : 'Pending',
+                    style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w700,
+                      color: isVerified ? const Color(0xFF4ADE80) : const Color(0xFFFBBF24),
+                    ),
+                  ),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            Text(
+              masked,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 3,
+              ),
+            ),
+            if (verifiedName.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                verifiedName,
+                style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ]),
+        )
+      else
+        Container(
+          margin: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Row(children: [
+            Icon(Icons.account_balance_outlined, size: 18, color: Color(0xFFF59E0B)),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Add your bank account to start receiving payments.',
+                style: TextStyle(fontSize: 12, color: Color(0xFFF59E0B), fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+        ),
+
+      _label('Bank Account'),
+      _field(_accNum,        'Account Number',         type: TextInputType.number, formatters: [FilteringTextInputFormatter.digitsOnly]),
+      _field(_accNumConfirm, 'Confirm Account Number', type: TextInputType.number, formatters: [FilteringTextInputFormatter.digitsOnly]),
+      _field(_ifsc, 'IFSC Code', uppercase: true),
+
+      _label('Tax'),
+      _field(_gst, 'GST Number', uppercase: true),
+      _field(_pan, 'PAN Number', uppercase: true),
+    ];
+  }
 }
 
 // ── Academy tab ───────────────────────────────────────────────────────────────
@@ -429,6 +499,8 @@ class _AcademyTab extends ConsumerStatefulWidget {
 }
 
 class _AcademyTabState extends ConsumerState<_AcademyTab> {
+  int _subTab = 0;
+
   TextEditingController? _name;
   TextEditingController? _tagline;
   TextEditingController? _desc;
@@ -492,6 +564,8 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
     super.dispose();
   }
 
+
+
   Future<void> _save(String academyId) async {
     final name = _name?.text.trim() ?? '';
     if (name.length < 2) { showSnack(context, 'Academy name required'); return; }
@@ -518,6 +592,32 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  List<Widget> _infoFields() => [
+    _label('Academy'),
+    _field(_name!,    'Academy Name', required: true),
+    _field(_tagline!, 'Tagline'),
+    _field(_desc!,    'About Academy', maxLines: 3),
+  ];
+
+  List<Widget> _contactFields() => [
+    _field(_phone!,   'Phone',   type: TextInputType.phone),
+    _field(_email!,   'Email',   type: TextInputType.emailAddress),
+    _field(_website!, 'Website', type: TextInputType.url),
+  ];
+
+  List<Widget> _locationFields() => [
+    PlacesSearchField(onPlaceSelected: _onPlaceSelected),
+    _field(_address!, 'Address', maxLines: 2),
+    Row(children: [
+      Expanded(child: _field(_city!,  'City')),
+      const SizedBox(width: 12),
+      Expanded(child: _field(_state!, 'State')),
+    ]),
+    _field(_pincode!, 'Pincode',
+           type: TextInputType.number,
+           formatters: [FilteringTextInputFormatter.digitsOnly]),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -563,34 +663,37 @@ class _AcademyTabState extends ConsumerState<_AcademyTab> {
       },
       data: (academy) {
         _initControllers(academy);
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+        return Column(
           children: [
-            _label('Academy Info'),
-            _field(_name!,    'Academy Name', required: true),
-            _field(_tagline!, 'Tagline'),
-            _field(_desc!,    'About Academy', maxLines: 3),
-            _label('Contact'),
-            _field(_phone!,   'Phone',   type: TextInputType.phone),
-            _field(_email!,   'Email',   type: TextInputType.emailAddress),
-            _field(_website!, 'Website', type: TextInputType.url),
-            _label('Location'),
-            PlacesSearchField(onPlaceSelected: _onPlaceSelected),
-            _field(_address!, 'Address', maxLines: 2),
-            Row(children: [
-              Expanded(child: _field(_city!,  'City')),
-              const SizedBox(width: 12),
-              Expanded(child: _field(_state!, 'State')),
-            ]),
-            _field(_pincode!, 'Pincode',
-                   type: TextInputType.number,
-                   formatters: [FilteringTextInputFormatter.digitsOnly]),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: _saving ? null : () => _save(academy.academyId),
-              child: _saving
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Save Academy'),
+            _subTabs(
+              active: _subTab,
+              labels: const ['Info', 'Contact', 'Location'],
+              onTap: (i) => setState(() => _subTab = i),
+            ),
+            // Content
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                children: [
+                  if (_subTab == 0) ..._infoFields(),
+                  if (_subTab == 1) ..._contactFields(),
+                  if (_subTab == 2) ..._locationFields(),
+                ],
+              ),
+            ),
+            // Save button
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : () => _save(academy.academyId),
+                  child: _saving
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+              ),
             ),
           ],
         );
@@ -629,6 +732,48 @@ Widget _field(
           if (uppercase) _UpperCaseFormatter(),
         ],
         decoration: InputDecoration(labelText: required ? '$label *' : label),
+      ),
+    );
+
+Widget _subTabs({
+  required int active,
+  required List<String> labels,
+  required ValueChanged<int> onTap,
+}) =>
+    Container(
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0EFE9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: List.generate(labels.length, (i) {
+          final isActive = i == active;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onTap(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeInOut,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isActive ? const Color(0xFF071B3D) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  labels[i],
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: isActive ? Colors.white : const Color(0xFF8A8A8A),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
 

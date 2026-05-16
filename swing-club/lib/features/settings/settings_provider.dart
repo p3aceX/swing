@@ -18,8 +18,15 @@ class SettingsNotifier extends AsyncNotifier<Map<String, dynamic>> {
   }
 
   Future<void> updateBusinessDetails(Map<String, dynamic> payload) async {
-    await ref.read(apiClientProvider).put('/biz/business-details', data: payload);
-    ref.invalidateSelf();
+    final res = await ref.read(apiClientProvider).put('/biz/business-details', data: payload);
+    // Update in-place so the UI doesn't flicker through loading (which dismisses snacks).
+    final current = state.valueOrNull;
+    final updated = (res.data['data'] as Map?)?.cast<String, dynamic>();
+    if (current != null && updated != null) {
+      state = AsyncData({...current, 'businessAccount': updated});
+    } else {
+      ref.invalidateSelf();
+    }
   }
 
   Future<void> logout() async {
