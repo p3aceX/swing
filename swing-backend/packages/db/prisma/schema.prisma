@@ -697,6 +697,7 @@ model PlayerProfile {
   weeklyPlanTemplates      WeeklyPlanTemplate[]
   performancePlan          PerformancePlan?
   matchRoles               MatchRole[]
+  announcementReads        AnnouncementRead[]
 
   @@index([city, level])
 }
@@ -3251,17 +3252,33 @@ model InventoryItem {
 // ============================================================
 
 model Announcement {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   academyId   String
   authorId    String
   title       String
   body        String
-  targetGroup String   @default("ALL")
-  isPinned    Boolean  @default(false)
-  sentVia     String[] @default(["PUSH"])
-  createdAt   DateTime @default(now())
+  targetGroup String    @default("ALL")
+  isPinned    Boolean   @default(false)
+  sentVia     String[]  @default(["PUSH"])
+  createdAt   DateTime  @default(now())
+  imageUrl    String?
+  expiresAt   DateTime?
+  batchId     String?
 
-  academy Academy @relation(fields: [academyId], references: [id])
+  academy Academy            @relation(fields: [academyId], references: [id])
+  reads   AnnouncementRead[]
+}
+
+model AnnouncementRead {
+  id              String   @id @default(cuid())
+  announcementId  String
+  playerProfileId String
+  readAt          DateTime @default(now())
+
+  announcement  Announcement  @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  playerProfile PlayerProfile @relation(fields: [playerProfileId], references: [id])
+
+  @@unique([announcementId, playerProfileId])
 }
 
 // ============================================================

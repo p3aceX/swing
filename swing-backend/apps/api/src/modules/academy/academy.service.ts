@@ -2,6 +2,7 @@ import { prisma, UserRole, PaymentStatus } from '@swing/db'
 import { Errors, AppError } from '../../lib/errors'
 import { getPaginationParams, buildPaginationMeta, normalizePhone } from '@swing/utils'
 import { PaymentService } from '../payments/payment.service'
+import { NotificationService } from '../notifications/notification.service'
 
 const PLAN_STUDENT_LIMITS: Record<string, number> = {
   FREE: 10,
@@ -874,15 +875,55 @@ export class AcademyService {
   async createAnnouncement(academyId: string, userId: string, data: any) {
     const ownerProfile = await prisma.academyOwnerProfile.findUnique({ where: { userId } })
     await this.verifyOwnership(academyId, userId)
-    return prisma.announcement.create({
+    const announcement = await prisma.announcement.create({
       data: {
-        academyId, authorId: ownerProfile!.id,
-        title: data.title, body: data.body,
+        academyId,
+        authorId: ownerProfile!.id,
+        title: data.title,
+        body: data.body,
         targetGroup: data.targetGroup || 'ALL',
         isPinned: data.isPinned || false,
         sentVia: data.sentVia || ['PUSH'],
+        imageUrl: data.imageUrl ?? null,
+        expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
+        batchId: data.batchId ?? null,
       },
     })
+
+    // Fire push notifications async (don't await — don't block response)
+    this.sendAnnouncementPush(academyId, announcement.id, data.title, data.body, data.targetGroup, data.batchId).catch(console.error)
+
+    return announcement
+  }
+
+  private async sendAnnouncementPush(
+    academyId: string,
+    announcementId: string,
+    title: string,
+    body: string,
+    targetGroup: string,
+    batchId?: string,
+  ) {
+    const notifSvc = new NotificationService()
+    const where: any = { academyId, isActive: true }
+    if (targetGroup === 'BATCH' && batchId) where.batchId = batchId
+
+    const enrollments = await prisma.academyEnrollment.findMany({
+      where,
+      select: { playerProfile: { select: { userId: true } } },
+    })
+
+    await Promise.allSettled(
+      enrollments.map(e =>
+        notifSvc.sendPush(
+          e.playerProfile.userId,
+          title,
+          body.length > 100 ? body.slice(0, 97) + '…' : body,
+          { type: 'ANNOUNCEMENT', announcementId },
+          'PLAYER',
+        )
+      )
+    )
   }
 
   async getInventory(academyId: string, userId: string) {
@@ -1110,13 +1151,17 @@ export class AcademyService {
         orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
+        include: { _count: { select: { reads: true } } },
       }),
       prisma.announcement.count({ where: { academyId } }),
     ])
-    return { items, meta: buildPaginationMeta(total, page, limit) }
+    return {
+      items: items.map(a => ({ ...a, readCount: a._count.reads })),
+      meta: buildPaginationMeta(total, page, limit),
+    }
   }
 
-  async updateAnnouncement(academyId: string, userId: string, announcementId: string, data: { title?: string; body?: string; isPinned?: boolean; targetGroup?: string }) {
+  async updateAnnouncement(academyId: string, userId: string, announcementId: string, data: { title?: string; body?: string; isPinned?: boolean; targetGroup?: string; imageUrl?: string | null; expiresAt?: string | null; batchId?: string | null }) {
     await this.verifyOwnership(academyId, userId)
     const announcement = await prisma.announcement.findFirst({ where: { id: announcementId, academyId } })
     if (!announcement) throw Errors.notFound('Announcement')
@@ -1127,6 +1172,9 @@ export class AcademyService {
         ...(data.body        !== undefined ? { body: data.body }               : {}),
         ...(data.isPinned    !== undefined ? { isPinned: data.isPinned }       : {}),
         ...(data.targetGroup !== undefined ? { targetGroup: data.targetGroup } : {}),
+        ...(data.imageUrl    !== undefined ? { imageUrl: data.imageUrl }       : {}),
+        ...(data.expiresAt   !== undefined ? { expiresAt: data.expiresAt ? new Date(data.expiresAt) : null } : {}),
+        ...(data.batchId     !== undefined ? { batchId: data.batchId }         : {}),
       },
     })
   }
@@ -1136,6 +1184,18 @@ export class AcademyService {
     const announcement = await prisma.announcement.findFirst({ where: { id: announcementId, academyId } })
     if (!announcement) throw Errors.notFound('Announcement')
     await prisma.announcement.delete({ where: { id: announcementId } })
+  }
+
+  async getAnnouncementReaders(academyId: string, userId: string, announcementId: string) {
+    await this.verifyOwnership(academyId, userId)
+    const reads = await prisma.announcementRead.findMany({
+      where: { announcementId },
+      include: {
+        playerProfile: { select: { id: true, displayName: true, avatarUrl: true } },
+      },
+      orderBy: { readAt: 'desc' },
+    })
+    return { readers: reads.map(r => ({ ...r.playerProfile, readAt: r.readAt })) }
   }
 
   private async verifyOwnership(academyId: string, userId: string) {

@@ -5,6 +5,7 @@ import { prisma } from '@swing/db'
 import { PlayerService } from './player.service'
 import { DevelopmentService } from '../development/development.service'
 import { PerformanceService } from '../performance/performance.service'
+import { EliteAnalyticsService } from '../performance/elite-analytics.service'
 import { EventService } from '../events/event.service'
 import { TournamentService } from '../tournaments/tournament.service'
 import { FollowService } from './follow.service'
@@ -95,6 +96,7 @@ export async function playerRoutes(app: FastifyInstance) {
   const tournamentSvc = new TournamentService()
   const developmentSvc = new DevelopmentService()
   const performanceSvc = new PerformanceService()
+  const analyticsSvc = new EliteAnalyticsService()
   const viewTrackingSvc = new ViewTrackingService()
   const auth = { onRequest: [(app as any).authenticate] }
 
@@ -262,7 +264,32 @@ export async function playerRoutes(app: FastifyInstance) {
 
   app.get('/stats', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
-    return reply.send({ success: true, data: await svc.getStats(user.userId) })
+    const profile = await prisma.playerProfile.findUnique({
+      where: { userId: user.userId },
+      select: { id: true },
+    })
+    if (!profile) return reply.code(404).send({ success: false, error: 'Player not found' })
+
+    const [leather, other] = await Promise.all([
+      analyticsSvc.getExtendedStats120(profile.id, 'LEATHER'),
+      analyticsSvc.getExtendedStats120(profile.id, 'TENNIS'),
+    ])
+
+    return reply.send({
+      success: true,
+      data: {
+        playerId: profile.id,
+        isApex: leather?.isApex ?? false,
+        leather: {
+          metrics: leather?.metrics ?? {},
+          metricCount: leather?.metricCount ?? 0,
+        },
+        other: {
+          metrics: other?.metrics ?? {},
+          metricCount: other?.metricCount ?? 0,
+        },
+      },
+    })
   })
 
   app.get('/stats/trend', auth, async (request, reply) => {
@@ -580,6 +607,13 @@ export async function playerRoutes(app: FastifyInstance) {
   app.get('/my-announcements', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     return reply.send({ success: true, data: await svc.getMyAnnouncements(user.userId) })
+  })
+
+  app.post('/my-announcements/:announcementId/read', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { announcementId } = request.params as { announcementId: string }
+    await svc.markAnnouncementRead(user.userId, announcementId)
+    return reply.send({ success: true, data: { marked: true } })
   })
 
   app.post('/drills/:id/log', auth, async (request, reply) => {

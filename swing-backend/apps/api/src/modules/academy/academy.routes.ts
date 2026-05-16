@@ -261,7 +261,16 @@ export async function academyRoutes(app: FastifyInstance) {
   app.post('/:id/announcements', auth, async (request, reply) => {
     const user = (request as any).user as { userId: string }
     const { id } = request.params as { id: string }
-    const body = z.object({ title: z.string(), body: z.string(), targetGroup: z.string().default('ALL'), isPinned: z.boolean().default(false), sentVia: z.array(z.string()).default(['PUSH']) }).parse(request.body)
+    const body = z.object({
+      title: z.string(),
+      body: z.string(),
+      targetGroup: z.string().default('ALL'),
+      isPinned: z.boolean().default(false),
+      sentVia: z.array(z.string()).default(['PUSH']),
+      imageUrl: z.string().url().optional().nullable(),
+      expiresAt: z.string().datetime().optional().nullable(),
+      batchId: z.string().optional().nullable(),
+    }).parse(request.body)
     return reply.code(201).send({ success: true, data: await svc.createAnnouncement(id, user.userId, body) })
   })
 
@@ -420,6 +429,9 @@ export async function academyRoutes(app: FastifyInstance) {
       body:        z.string().optional(),
       isPinned:    z.boolean().optional(),
       targetGroup: z.string().optional(),
+      imageUrl:    z.string().url().optional().nullable(),
+      expiresAt:   z.string().datetime().optional().nullable(),
+      batchId:     z.string().optional().nullable(),
     }).parse(request.body)
     return reply.send({ success: true, data: await svc.updateAnnouncement(id, user.userId, announcementId, body) })
   })
@@ -429,6 +441,12 @@ export async function academyRoutes(app: FastifyInstance) {
     const { id, announcementId } = request.params as { id: string; announcementId: string }
     await svc.deleteAnnouncement(id, user.userId, announcementId)
     return reply.send({ success: true, data: { message: 'Announcement deleted' } })
+  })
+
+  app.get('/:id/announcements/:announcementId/readers', auth, async (request, reply) => {
+    const user = (request as any).user as { userId: string }
+    const { id, announcementId } = request.params as { id: string; announcementId: string }
+    return reply.send({ success: true, data: await svc.getAnnouncementReaders(id, user.userId, announcementId) })
   })
 
   app.delete('/:id/batches/:batchId', auth, async (request, reply) => {

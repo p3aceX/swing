@@ -3082,25 +3082,54 @@ export class PlayerService {
 
     const enrollment = await prisma.academyEnrollment.findFirst({
       where: { playerProfileId: profile.id, isActive: true },
-      select: { academyId: true },
+      select: { academyId: true, batchId: true },
     })
-
     if (!enrollment) return { announcements: [] }
 
+    const now = new Date()
     const items = await prisma.announcement.findMany({
-      where: { academyId: enrollment.academyId },
+      where: {
+        academyId: enrollment.academyId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        AND: [
+          {
+            OR: [
+              { targetGroup: 'ALL' },
+              { targetGroup: 'BATCH', batchId: enrollment.batchId ?? '__none__' },
+            ],
+          },
+        ],
+      },
       orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
       take: 30,
+      include: {
+        reads: { where: { playerProfileId: profile.id }, select: { readAt: true } },
+      },
     })
 
     return {
-      announcements: items.map((a) => ({
+      announcements: items.map(a => ({
         id: a.id,
         title: a.title,
         body: a.body,
         isPinned: a.isPinned,
+        imageUrl: a.imageUrl,
+        expiresAt: a.expiresAt,
         createdAt: a.createdAt,
+        isRead: a.reads.length > 0,
+        readAt: a.reads[0]?.readAt ?? null,
       })),
     }
+  }
+
+  async markAnnouncementRead(userId: string, announcementId: string) {
+    const profile = await prisma.playerProfile.findUnique({ where: { userId } })
+    if (!profile) return
+
+    await prisma.announcementRead.upsert({
+      where: { announcementId_playerProfileId: { announcementId, playerProfileId: profile.id } },
+      create: { announcementId, playerProfileId: profile.id },
+      update: {},
+    })
   }
 }
