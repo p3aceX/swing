@@ -1,5 +1,5 @@
 import { prisma } from '@swing/db'
-import type { EliteStatsExtendedService } from './elite-stats-extended.service'
+import type { EliteAnalyticsService } from './elite-analytics.service'
 
 type UpsertIpPlayerStateInput = {
   playerId: string
@@ -80,7 +80,7 @@ async function getPlayerStatOverallColumns() {
 
 function buildPlayerStatOverallPayload(
   playerId: string,
-  stats: NonNullable<Awaited<ReturnType<EliteStatsExtendedService['getStats120']>>>,
+  stats: NonNullable<Awaited<ReturnType<EliteAnalyticsService['getExtendedStats120']>>>,
 ) {
   return {
     playerId,
@@ -327,7 +327,7 @@ export async function replaceMatchEngineIpEvents(playerId: string, events: Match
 
 export async function upsertPlayerStatOverallFromStats120(
   playerId: string,
-  stats120: NonNullable<Awaited<ReturnType<EliteStatsExtendedService['getStats120']>>>,
+  stats120: NonNullable<Awaited<ReturnType<EliteAnalyticsService['getExtendedStats120']>>>,
 ) {
   const tableColumns = await getPlayerStatOverallColumns()
   if (!tableColumns.has('playerId')) {

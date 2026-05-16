@@ -3,7 +3,6 @@ import { z } from 'zod'
 import { prisma } from '@swing/db'
 import { EliteAnalyticsService } from './elite-analytics.service'
 import { ChallengeDetectorService } from './challenge-detector.service'
-import { EliteStatsExtendedService } from './elite-stats-extended.service'
 import { PerformanceService } from './performance.service'
 import { HealthPerformanceService } from './health-performance.service'
 import { EliteJournalService } from './elite-journal.service'
@@ -14,7 +13,6 @@ import { ApexStateService } from './apex-state.service'
 export async function eliteRoutes(app: FastifyInstance) {
   const analyticsSvc = new EliteAnalyticsService()
   const challengesSvc = new ChallengeDetectorService()
-  const extendedStatsSvc = new EliteStatsExtendedService()
   const performanceSvc = new PerformanceService()
   const healthSvc = new HealthPerformanceService()
   const journalSvc = new EliteJournalService()

@@ -6,7 +6,6 @@ import {
 import { recalculateTeamPowerScore } from "./ip-engine";
 import { formatRankLabel } from "./performance.calculations";
 import { HealthPerformanceService } from "./health-performance.service";
-import { EliteStatsExtendedService } from "./elite-stats-extended.service";
 import { EliteJournalService } from "./elite-journal.service";
 import { ElitePlanService } from "./elite-plan.service";
 import {
@@ -635,6 +634,7 @@ export class EliteAnalyticsService {
       select: {
         id: true,
         userId: true,
+        playerRole: true,
       },
     });
     if (!profile) return null;
@@ -1356,6 +1356,7 @@ export class EliteAnalyticsService {
         battingEvents: battingEvents.length,
         bowlingEvents: bowlingEvents.length,
         completedMatches: playerMatches.length,
+        playerRole: profile.playerRole,
       },
     };
   }

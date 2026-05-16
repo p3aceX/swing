@@ -32,7 +32,6 @@ import {
 } from './performance.calculations'
 import { ChallengeDetectorService } from './challenge-detector.service'
 import { EliteAnalyticsService } from './elite-analytics.service'
-import { EliteStatsExtendedService } from './elite-stats-extended.service'
 import { JournalStreakService } from './journal-streak.service'
 import {
   getAxisNumber,
@@ -123,7 +122,6 @@ const DEFAULT_SNAPSHOT_ROLE_WEIGHTS: SwingRoleWeights = {
 export class PerformanceService {
   private challengeDetector = new ChallengeDetectorService()
   public eliteAnalytics = new EliteAnalyticsService()
-  private eliteStatsExtended = new EliteStatsExtendedService()
   private journalStreak = new JournalStreakService()
 
   private getValidatedPassMultiplier() {
@@ -1869,7 +1867,7 @@ export class PerformanceService {
   }
 
   private async computeSwingIndexV2Artifacts(playerId: string) {
-    const stats120 = await this.eliteStatsExtended.getStats120(playerId)
+    const stats120 = await this.eliteAnalytics.getExtendedStats120(playerId)
     if (!stats120) return null
 
     const normalizedMetrics = this.normalizeSwingMetrics(stats120.metrics as Record<string, unknown>)
